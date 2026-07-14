@@ -38,6 +38,21 @@ changes (documentation policy, sister scripts, etc.), see the root
   `pull_request_target`/`workflow_run` fork checkouts only). The remaining
   pin (setup-python v6) is already current.
 
+### Fixed
+
+- Docs only (`README.md` / `README.ja.md`; no `psa.py` change, no version
+  bump): the "Within this repository" consumer table and the CI example
+  still pointed at the pre-migration `scripts/powershell/...` layout —
+  `scripts/` no longer exists (consumers live under `projects/`), so the
+  relative links were dead. Both languages now converge on the two live
+  consumer scripts at their `projects/` paths
+  (`Download-SpeakerDeck.ps1`, `Update-WindowsServerIso.ps1`). This also
+  repairs a bilingual lock-step drift: the English table carried a
+  `Test-PdfMetadata.ps1` row (a PoC deleted from the repository long ago —
+  "remove PDF PoC") while the Japanese table was missing the
+  `Update-WindowsServerIso.ps1` row; the dead row is dropped and the
+  missing row added, restoring EN/JA row parity.
+
 ## [4.3.0] - 2026-06-01
 
 ### Added - `psa2013_known_script_vars` configuration key

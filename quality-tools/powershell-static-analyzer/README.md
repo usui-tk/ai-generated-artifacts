@@ -516,7 +516,7 @@ For a minimal text-only run that fails the build on errors only:
         run: |
           python3 quality-tools/powershell-static-analyzer/psa.py \
                   --severity error \
-                  scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
+                  projects/powershell-download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
 ```
 
 ---
@@ -586,9 +586,8 @@ The following repositories and PowerShell scripts are verified with
 
 | Script | Path |
 |:---|:---|
-| `Download-SpeakerDeck.ps1` | [`scripts/powershell/download-speakerdeck-oracle4engineer/`](../../scripts/powershell/download-speakerdeck-oracle4engineer/) |
-| `Test-PdfMetadata.ps1` | [`scripts/powershell/download-speakerdeck-oracle4engineer/`](../../scripts/powershell/download-speakerdeck-oracle4engineer/) |
-| `Update-WindowsServerIso.ps1` | [`scripts/powershell/update-windows-server-iso/`](../../scripts/powershell/update-windows-server-iso/) |
+| `Download-SpeakerDeck.ps1` | [`projects/powershell-download-speakerdeck-oracle4engineer/`](../../projects/powershell-download-speakerdeck-oracle4engineer/) |
+| `Update-WindowsServerIso.ps1` | [`projects/powershell-update-windows-server-iso/`](../../projects/powershell-update-windows-server-iso/) |
 
 ### External repositories
 

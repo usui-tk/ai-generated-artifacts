@@ -512,7 +512,7 @@ error のみで CI を落とす最小構成:
         run: |
           python3 quality-tools/powershell-static-analyzer/psa.py \
                   --severity error \
-                  scripts/powershell/download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
+                  projects/powershell-download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1
 ```
 
 ---
@@ -579,8 +579,8 @@ python3 psa.py --config-check .psa.config.json.template
 
 | スクリプト | パス |
 |:---|:---|
-| `Download-SpeakerDeck.ps1` | [`scripts/powershell/download-speakerdeck-oracle4engineer/`](../../scripts/powershell/download-speakerdeck-oracle4engineer/) |
-| `Test-PdfMetadata.ps1` | [`scripts/powershell/download-speakerdeck-oracle4engineer/`](../../scripts/powershell/download-speakerdeck-oracle4engineer/) |
+| `Download-SpeakerDeck.ps1` | [`projects/powershell-download-speakerdeck-oracle4engineer/`](../../projects/powershell-download-speakerdeck-oracle4engineer/) |
+| `Update-WindowsServerIso.ps1` | [`projects/powershell-update-windows-server-iso/`](../../projects/powershell-update-windows-server-iso/) |
 
 ### 外部リポジトリ
 
