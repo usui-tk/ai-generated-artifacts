@@ -642,10 +642,10 @@ documents the most recent successful real-run
 
 For details on the `psa.py` static analyzer (latest mainline; with
 `PSA1001..PSA9002` plus `PSAP0001..PSAP0005` opt-in rules), see
-[`../../python/powershell-static-analyzer/README.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/README.md)
+[`../../quality-tools/powershell-static-analyzer/README.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/README.md)
 and the full [`SPEC.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/SPEC.md).
 The canonical analyzer version is recorded in
-[`../../python/powershell-static-analyzer/VERSION`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/VERSION).
+[`../../quality-tools/powershell-static-analyzer/VERSION`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/VERSION).
 
 The **single most important rule** for new development: do not re-derive
 phase headers, log markers, or psa.py — copy them from the existing
@@ -687,10 +687,10 @@ see the analyzer's own
 | File format         | `PSA7001`..`PSA7002` | PowerShell script lacks UTF-8 BOM, mixed / wrong line endings |
 | Cross-file consistency | `PSA8001`         | function-body hash drift across files in the same scan |
 | Complexity metrics  | `PSA9001`..`PSA9002` | function body length threshold (opt-in), external process invocation without `$LASTEXITCODE` check (opt-in) |
-| Project / pipeline conventions | `PSAP0001`..`PSAP0005` | phase function naming, required script-identifier variables, inline revision-tag comments (`PSAP0003`), end-of-file `REVISION HISTORY` blocks (`PSAP0004`), **revision reference in comment body** (`PSAP0005`, new in psa.py 4.0.0). **All PSAPxxxx rules are off by default**; this project opts in to `PSAP0003`, `PSAP0004`, and `PSAP0005` (strict mode — `psap0005_relaxed_mode` is not set, so any `rNN` reference in a comment body is reported). The total rule count is **46**. |
+| Project / pipeline conventions | `PSAP0001`..`PSAP0005` | phase function naming, required script-identifier variables, inline revision-tag comments (`PSAP0003`), end-of-file `REVISION HISTORY` blocks (`PSAP0004`), **revision reference in comment body** (`PSAP0005`, new in psa.py 4.0.0). **All PSAPxxxx rules are off by default**; this project opts in to `PSAP0003`, `PSAP0004`, and `PSAP0005` (strict mode — `psap0005_relaxed_mode` is not set, so any `rNN` reference in a comment body is reported). The total rule count is **50**. |
 
 For the full specification of each rule, see
-[`../../python/powershell-static-analyzer/SPEC.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/SPEC.md) §4.
+[`../../quality-tools/powershell-static-analyzer/SPEC.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/SPEC.md) §4.
 
 ### Project-local configuration
 
@@ -716,14 +716,15 @@ rationale for each suppression decision is documented in `SPEC.md`
 ```
 ==== psa.py: PowerShell Static Analyzer ====
 File   : Download-SpeakerDeck.ps1
-Lines  : 5205
+Lines  : 5730
 Issues : 0 errors, 0 warnings, 0 info
 
   (no issues found)
 ```
 
-Verified at the r27 / `psa-py-v4-llm-governance-baseline` release
-with `psa.py` 4.0.1. Run the analyzer above before committing any
+Re-verified on 2026-07-14 with `psa.py` 4.3.0 (originally baselined at
+the r27 / `psa-py-v4-llm-governance-baseline` release with `psa.py`
+4.0.1). Run the analyzer above before committing any
 change to the script. This is also enforced as a quality gate in
 SPEC.md Part C.
 

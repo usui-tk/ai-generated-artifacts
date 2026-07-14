@@ -42,9 +42,9 @@ This document consolidates everything needed to verify and evaluate
 
 | Item | Status | Last verified |
 |---|---|---|
-| `psa.py` (latest mainline; with project `.psa.config.json`) on `Download-SpeakerDeck.ps1` | **0 errors / 0 warnings / 0 info** ✓ | r27 build (`psa.py 4.0.1`) |
+| `psa.py` (latest mainline; with project `.psa.config.json`) on `Download-SpeakerDeck.ps1` | **0 errors / 0 warnings / 0 info** ✓ | 2026-07-14 (`psa.py 4.3.0`; originally r27 build, `psa.py 4.0.1`) |
 | File encoding (UTF-8 BOM, ASCII-only outside BOM) | ✓ for the script | r27 build |
-| `PSAP0005` strict-mode baseline (no `rNN` references in comment bodies) | **0 findings** ✓ | r27 build (`psa.py 4.0.1`) |
+| `PSAP0005` strict-mode baseline (no `rNN` references in comment bodies) | **0 findings** ✓ | 2026-07-14 (`psa.py 4.3.0`; originally r27 build, `psa.py 4.0.1`) |
 | Phase 1 (EnvCheck) — Windows 11 / PS 5.1.26100.8328 | ✓ pass | 2026-05-11 |
 | Phase 2–5 (Scan / Plan) — DryRun mode | ✓ 804 decks evaluated | 2026-05-11 |
 | Phase 6 (Download) — real run | ✓ **804/804 success** (zero failures) | 2026-05-11 (r17) |
@@ -91,15 +91,15 @@ Expected output:
 ```
 ==== psa.py: PowerShell Static Analyzer ====
 File   : Download-SpeakerDeck.ps1
-Lines  : 5205
+Lines  : 5730
 Issues : 0 errors, 0 warnings, 0 info
 
   (no issues found)
 ```
 
 Any deviation from `0 / 0 / 0` blocks the commit. See
-[`../../python/powershell-static-analyzer/SPEC.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/SPEC.md)
-§4 for the full specification of the 46 rules
+[`../../quality-tools/powershell-static-analyzer/SPEC.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/SPEC.md)
+§4 for the full specification of the 50 rules
 (`PSA1xxx` syntax / `PSA2xxx` semantics / `PSA3xxx` style / `PSA4xxx`
 hygiene / `PSA5xxx` security / `PSA6xxx` best practice / `PSA7xxx`
 file format / `PSA8xxx` cross-file consistency / `PSA9xxx` complexity

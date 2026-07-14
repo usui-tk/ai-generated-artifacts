@@ -622,11 +622,11 @@ Phase が例外を投げたとき、 トップレベルの catch ハンドラが
 
 `psa.py` 静的解析ツール(latest mainline; `PSA1001`〜`PSA9002` + opt-in
 規約ルール `PSAP0001`〜`PSAP0005`)の詳細は
-[`../../python/powershell-static-analyzer/README.ja.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/README.ja.md)
+[`../../quality-tools/powershell-static-analyzer/README.ja.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/README.ja.md)
 (英語版は [README.md](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/README.md))、
 または完全な仕様書 [`SPEC.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/SPEC.md)
 を参照してください。 正典の analyzer バージョンは
-[`../../python/powershell-static-analyzer/VERSION`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/VERSION)
+[`../../quality-tools/powershell-static-analyzer/VERSION`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/VERSION)
 ファイルに記録されています。 consumer 側のワークフロー詳細はリポジトリ
 ルート [`README.ja.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.ja.md) の「psa.py のバージョニング
 ポリシー」を参照してください。
@@ -673,10 +673,10 @@ python3 ../../quality-tools/powershell-static-analyzer/psa.py Download-SpeakerDe
 | ファイル形式  | `PSA7001`〜`PSA7002` | PowerShell スクリプトに UTF-8 BOM がない、 mixed / 誤った改行コード |
 | ファイル間整合性 | `PSA8001`         | 同一スキャン対象ファイル群における function body のハッシュ drift |
 | 複雑度メトリクス | `PSA9001`〜`PSA9002` | function 本体の長さ閾値 (opt-in)、 外部プロセス呼び出し後の `$LASTEXITCODE` チェック漏れ (opt-in) |
-| プロジェクト規約 | `PSAP0001`〜`PSAP0005` | phase 関数命名規約、 必須のスクリプト識別子変数、 インラインリビジョンタグコメント (`PSAP0003`)、 EOF の `REVISION HISTORY` ブロック (`PSAP0004`)、 **コメント本体内のリビジョン参照** (`PSAP0005`、 psa.py 4.0.0 で新規追加)。 **PSAPxxxx は全て default OFF**。 本プロジェクトは `PSAP0003` / `PSAP0004` / `PSAP0005` に opt-in しています (PSAP0005 は strict mode — `psap0005_relaxed_mode` は設定しないため、 コメント本体内の任意の `rNN` 参照が報告される)。 総ルール数は **46** です。 |
+| プロジェクト規約 | `PSAP0001`〜`PSAP0005` | phase 関数命名規約、 必須のスクリプト識別子変数、 インラインリビジョンタグコメント (`PSAP0003`)、 EOF の `REVISION HISTORY` ブロック (`PSAP0004`)、 **コメント本体内のリビジョン参照** (`PSAP0005`、 psa.py 4.0.0 で新規追加)。 **PSAPxxxx は全て default OFF**。 本プロジェクトは `PSAP0003` / `PSAP0004` / `PSAP0005` に opt-in しています (PSAP0005 は strict mode — `psap0005_relaxed_mode` は設定しないため、 コメント本体内の任意の `rNN` 参照が報告される)。 総ルール数は **50** です。 |
 
 各ルールの完全仕様は
-[`../../python/powershell-static-analyzer/SPEC.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/SPEC.md) §4 を参照。
+[`../../quality-tools/powershell-static-analyzer/SPEC.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/quality-tools/powershell-static-analyzer/SPEC.md) §4 を参照。
 
 ### プロジェクト固有設定
 
@@ -689,9 +689,12 @@ python3 ../../quality-tools/powershell-static-analyzer/psa.py Download-SpeakerDe
    内の任意の `rNN` 参照が報告されます。 r21 のクリーンアップコミット
    で全 `rNN` 参照を script body から除去済みのため、 strict baseline
    は検証済の end-state です。
-2. **disable**: `PSA6003`(関数名詞の複数形)を無効化。
-   `Download-SpeakerDeck.ps1` 内の 3 つの関数が意図的に複数形名詞を
-   使用しているため。 根拠は config ファイル内にコメントで記録済み。
+2. **disable**: `PSA6003`(関数名詞の複数形)と `PSA7003`(非 ASCII の
+   script body — `psa.py` 4.2.0 から default ON。 本スクリプトは意図
+   的な日本語ログ文字列と em-dash を埋め込んでいるため opt-out)を
+   無効化。 `PSA6003` については、 `Download-SpeakerDeck.ps1` 内の
+   3 つの関数が意図的に複数形名詞を使用しているため。 根拠は config
+   ファイル内にコメントで記録済み。
 
 意図的な空 `catch` ブロック(`PSA3004`)には
 `# psa-disable-line PSA3004 -- <理由>` を付与しています。 各抑制判断
@@ -703,13 +706,13 @@ python3 ../../quality-tools/powershell-static-analyzer/psa.py Download-SpeakerDe
 ```
 ==== psa.py: PowerShell Static Analyzer ====
 File   : Download-SpeakerDeck.ps1
-Lines  : 5205
+Lines  : 5730
 Issues : 0 errors, 0 warnings, 0 info
 
   (no issues found)
 ```
 
-r27 / `psa-py-v4-llm-governance-baseline` リリースで `psa.py` 4.0.1 を使用して検証済み。 スクリプトに変更を加える際は、 コミット前に上記コマンドで検証することを推奨します。 これは SPEC.md の Part C「品質ゲート」でも必須項目として定義されています。
+2026-07-14 に `psa.py` 4.3.0 で再検証済み(初回ベースラインは r27 / `psa-py-v4-llm-governance-baseline` リリース、 `psa.py` 4.0.1)。 スクリプトに変更を加える際は、 コミット前に上記コマンドで検証することを推奨します。 これは SPEC.md の Part C「品質ゲート」でも必須項目として定義されています。
 
 ## コンソール出力フォーマット
 

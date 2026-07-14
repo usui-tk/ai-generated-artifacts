@@ -21,6 +21,31 @@ This CHANGELOG is **English only** per the
 
 ## [Unreleased]
 
+### Fixed (2026-07-14 — documentation freshness / bilingual lock-step reconciliation; docs only)
+- **Re-verified `Download-SpeakerDeck.ps1` with `psa.py` 4.3.0** (the live
+  analyzer version; the docs still recorded the r27-era `psa.py` 4.0.1
+  verification): `0 errors / 0 warnings / 0 info` on the current 5730-line
+  script. README.md / README.ja.md "Current verification result" blocks and
+  the TESTING.md §0 status rows now carry the 2026-07-14 / 4.3.0 result
+  (original r27 / 4.0.1 baseline retained as provenance); the expected-output
+  line count (5205 → 5730) was corrected in all three documents.
+- **Rule-count claim corrected 46 → 50** (README.md, README.ja.md,
+  TESTING.md): the analyzer's rule catalog grew between 4.0.1 and 4.3.0
+  (e.g. `PSA2013`, `PSA7003`); 50 = 45 `PSA` + 5 `PSAP` rows measured
+  against the psa.py 4.3.0 README rule tables.
+- **README.ja.md was missing the `PSA7003` half of the disable rationale**
+  (bilingual lock-step drift): the English README documents that the project
+  config disables both `PSA6003` and `PSA7003` (non-ASCII script body,
+  default-on since `psa.py` 4.2.0; opted out for the intentional Japanese
+  log strings and em-dashes) — the Japanese README only mentioned `PSA6003`.
+  The missing clause was added.
+- **Stale link text `../../python/powershell-static-analyzer/...`
+  corrected to `../../quality-tools/powershell-static-analyzer/...`**
+  (7 occurrences: README.md ×3, README.ja.md ×3, TESTING.md ×1). The
+  hyperlink targets were already correct GitHub URLs under
+  `quality-tools/`; only the visible text still pointed at the
+  pre-migration `python/` layout.
+
 ## [r30] — 2026-07-12 — `ci-inline-pssa-and-pin-refresh`
 
 This is a **CI / documentation maintenance release**. Every entry below
