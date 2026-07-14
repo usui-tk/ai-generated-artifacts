@@ -122,7 +122,7 @@ opt-in `PSAP0001` – `PSAP0005`) must pass before every commit
 From the project directory:
 
 ```bash
-python3 ../../python/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1
+python3 ../../quality-tools/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1
 ```
 
 ### Required gate

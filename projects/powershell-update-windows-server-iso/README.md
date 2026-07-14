@@ -511,7 +511,7 @@ Full decision matrix: SPEC.md §B.14.
 Run from the project directory:
 
 ```bash
-python3 ../../python/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1
+python3 ../../quality-tools/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1
 ```
 
 The required gate before any commit is **0 errors / 0 warnings / 0

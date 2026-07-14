@@ -497,7 +497,7 @@ P07+  Build / Verify / Report
 プロジェクトディレクトリから次のように実行します。
 
 ```bash
-python3 ../../python/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1
+python3 ../../quality-tools/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1
 ```
 
 コミット前の必須ゲートは **0 errors / 0 warnings / 0 info** です。現行ビルドは

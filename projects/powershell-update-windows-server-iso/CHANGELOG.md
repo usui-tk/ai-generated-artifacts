@@ -22,6 +22,19 @@ the script and follows the
 
 ## [Unreleased]
 
+### Fixed (2026-07-14 — docs only; no script change)
+
+- Repaired the pre-migration analyzer path `../../python/powershell-static-analyzer/psa.py`
+  in five documents — the analyzer's canonical home is
+  `quality-tools/powershell-static-analyzer/`, so the documented commands /
+  links were dead: README.md, README.ja.md, SPEC.md, TESTING.md (command
+  examples: `../../python/...` → `../../quality-tools/...`) and
+  tests/README.md (relative markdown link: `../../python/...` →
+  `../../../quality-tools/...`, three levels up from `tests/`). The corrected
+  command was validated by actually running it from the project directory
+  against the live analyzer (psa.py 4.3.0):
+  `0 errors / 0 warnings / 0 info` on the current 14586-line script.
+
 ## [update-wsi-2026.07.11-r11.68] - 2026-07-11
 
 Tag: `setup-binaries-sync`. Root cause closed [measured 2026-07-11]:

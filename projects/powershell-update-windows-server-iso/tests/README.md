@@ -153,7 +153,7 @@ historical record.
 These tools use **only the Python standard library**. No
 `pip install` is required - they run on every system that has
 Python 3.10 or newer. This matches the dependency policy of
-[`../../python/powershell-static-analyzer/psa.py`](../../python/powershell-static-analyzer/psa.py),
+[`../../../quality-tools/powershell-static-analyzer/psa.py`](../../../quality-tools/powershell-static-analyzer/psa.py),
 which sets the precedent for "standard-library-only Python tooling
 in this repository".
 

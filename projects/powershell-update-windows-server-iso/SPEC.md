@@ -2394,7 +2394,7 @@ Two static analysers MUST report zero findings before commit:
 
 ```bash
 cd projects/powershell-update-windows-server-iso
-python3 ../../python/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1
+python3 ../../quality-tools/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1
 ```
 
 Expected output:
