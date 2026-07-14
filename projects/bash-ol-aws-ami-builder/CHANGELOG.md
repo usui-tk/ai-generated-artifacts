@@ -20,6 +20,19 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (2026-07-14 — TESTING.md §0 fixed-count reconciliation)
+- **TESTING.md fixed pass count re-grounded on a full-toolchain measurement**:
+  the documented `389 passed / 20 tiers` (with its per-tier breakdown)
+  pre-dated several suite expansions and drifted from reality. Re-measured on
+  a fresh clone with the FULL toolchain (ShellCheck 0.11.0 — pin 0.10.0 also
+  green, `ksvalidator`, `modinfo`/kmod, `python3`): **512 passed, 0 skipped,
+  0 failed across 21 tiers**; the per-tier breakdown and the optional-tool
+  degradation arithmetic (511/1 without `ksvalidator`, 509/1 without
+  `modinfo`) were rewritten from that run, and kmod/`modinfo` was added to
+  the environment dependency list (it silently gated three ena-uek-detect
+  inbox-report assertions). Docs-only; no script or test changes, suite
+  count unchanged at 512.
+
 ### Verified (2026-07-13 real-boot E2E — B-T7/B-T8 executed on all five majors) / Changed (firmware narrative re-grounded on booted-image observations)
 - **B-T7/B-T8 executed for real**: the 2026-07-13 generation completed real
   7 GB builds + registrations on ALL five majors (OL6 `ami-01724bfd463dede0e`,

@@ -83,14 +83,18 @@ subprocess, aggregates pass / fail / skip, prints one summary, and exits
 non-zero if any tier fails. It records the resolved tool versions at run time.
 **Wire `tests/run-all.sh` into the project gate battery.**
 
-Current fixed pass count (full toolchain present — pinned ShellCheck 0.10.0,
-`ksvalidator`, and `python3`): **389 passed, 0 skipped, 0 failed** across **20
-tiers** (B-T1 parse = 49, B-T2 ShellCheck = 44, B-T3 unit = 35, command-mock = 9,
-B-T4 kickstart = 1, env-parity = 31, idempotency = 10, hook-timing = 8,
-log-format = 12, ena-uek-detect = 9, ena-reporting = 15, build-visibility = 17,
-ena-ledger-guard = 5, ena-check-2 = 6, ena-verify = 12, ena-verify-results = 15,
-ena-bundle = 13, ssm-verdict = 32, awscli-verdict = 43, register-validation = 23). Optional-tool degradations are the only way
-to see a skip: without `ksvalidator` B-T4 contributes a skip (-> 388/1); without
+Current fixed pass count (full toolchain present — ShellCheck (pin 0.10.0;
+re-measured green on 0.11.0 at the 2026-07-14 restamp), `ksvalidator`,
+`modinfo` (kmod), and `python3`): **512 passed, 0 skipped, 0 failed** across
+**21 tiers** (B-T1 parse = 50, B-T2 ShellCheck = 45, B-T3 unit = 59,
+command-mock = 9, B-T4 kickstart = 1, env-parity = 55, idempotency = 12,
+hook-timing = 19, log-format = 12, ena-uek-detect = 16, ena-reporting = 31,
+build-visibility = 17, ena-ledger-guard = 5, ena-check-2 = 6, ena-verify = 12,
+ena-verify-results = 19, ena-bundle = 13, ssm-verdict = 32,
+awscli-verdict = 43, register-validation = 23, ena-express = 33).
+Optional-tool degradations are the only way to see a skip: without
+`ksvalidator` B-T4 contributes a skip (-> 511/1); without `modinfo` the
+ena-uek-detect inbox-report assertions fold into one skip (-> 509/1); without
 ShellCheck B-T2 skips; the B-T (ena-bundle) initramfs fixture builds via cpio
 **or** a self-contained `python3` newc fallback, so it no longer skips. The
 B-T1 / B-T2 counts include the six `tests/cleancore/` clean-core builders (see
@@ -122,6 +126,8 @@ them so a run is reproducible:
   `. /etc/os-release` in `install-ena-driver.sh`. Every other code stays active
   everywhere. B-T2 SKIPs if shellcheck is absent (the CI gate requires it).
 - **pykickstart / `ksvalidator`** (B-T4): optional; B-T4 SKIPs if absent.
+- **kmod / `modinfo`** (ena-uek-detect inbox-report assertions): optional;
+  those assertions fold into a single SKIP if absent.
 - **awk / sed / grep / find** (coreutils + gawk): present in the container.
 - **python3** (stdlib only): used by the pure-logic tiers that drive matrix /
   verifier python (B-T ena-ledger-guard) and, in `tests/t017_enabundle.sh` +
