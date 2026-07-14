@@ -13,6 +13,33 @@ in `ai-generated-artifacts`.
 
 ## [Unreleased]
 
+## [r90] - 2026-07-14 - fix: ShellCheck 0.10+ lint hygiene (SC2329 stubs, SC2319 `$?`-after-condition)
+
+### Fixed
+- **`t002` breaks under ShellCheck >= 0.10 (7 findings, 3 files) while the
+  recorded 0.9.0 baseline stays green** - a time-bomb for any CI/host
+  ShellCheck upgrade, found on a 0.11.0 host (`SUITE: 825/0/3`).
+  Two new-detector classes, both test-file-only (no production `.sh` code
+  or behavior change; assertion identities and the 828 suite count are
+  unchanged):
+  (1) **SC2329** ("function never invoked") now fires on the
+  indirectly-invoked test stubs that already carried `SC2317` suppressions -
+  `epel_head_ok()` x2 in `t007_epelresolve.sh` and `os_major()` in
+  `t015_installpins.sh`. The existing directives were extended to
+  `disable=SC2317,SC2329` (the t015 directive also moved onto its own line
+  per the repo directive convention).
+  (2) **SC2319** ("`$?` refers to a condition") fires on the four
+  `[ ... ]` / `assert_eq 0 "$?"` pairs in `t025_awsrhuicollect.sh`;
+  same-line `; rc=$?` still trips the detector, so `$?` was eliminated
+  outright: `rc=0; [ ... ] || rc=1` for the three single conditions and an
+  explicit `if ... then rc=0; else rc=1; fi` for the compound one (avoids
+  the SC2015 `A && B || C` trap).
+- TESTING.md environment table: the `shellcheck` row now records the
+  verified 0-finding posture on both 0.9.0 (recorded baseline) and 0.11.0.
+
+Gate: `bash tests/run-all.sh` = **828 passed, 0 skipped, 0 failed (26
+tiers)** on ShellCheck 0.11.0 (was 825/0/3 before this fix).
+
 ## [r89] - 2026-07-12 - fix: pipefail-safe ko_module_version (false-success guard input could silently die)
 
 ### Fixed

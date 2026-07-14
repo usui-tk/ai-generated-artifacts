@@ -43,7 +43,8 @@ resolve_pin() {
     # shellcheck disable=SC1090
     . "${script}"
     eval "${vervar}=\"\${explicit}\""
-    # shellcheck disable=SC2317  # called indirectly by resolve_version
+    # called indirectly by resolve_version
+    # shellcheck disable=SC2317,SC2329
     os_major() { printf '%s' "${major}"; }
     resolve_version
     eval "printf '%s' \"\${${vervar}}\""

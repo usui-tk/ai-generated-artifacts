@@ -617,7 +617,7 @@ Raise both on slow-mirror links (e.g. `PKG_TIMEOUT=360 RUN_TIMEOUT=900`).
 | Component | Role | Notes |
 |:--|:--|:--|
 | `bash` | harness + tiers | 4.4+ (developed against 5.2). |
-| `shellcheck` | L0 lint gate | pin in CI; `t002` SKIPs if absent. CI severity is `style`. |
+| `shellcheck` | L0 lint gate | pin in CI; `t002` SKIPs if absent. CI severity is `style`. Verified 0-finding on both 0.9.0 (recorded baseline) and 0.11.0 (r90 hygiene pass: SC2329 stubs suppressed, SC2319 `$?`-after-condition eliminated). |
 | `podman` | L3 acquisition engine (preferred) | not exercised by L0-L2; the curl-only OCI v2 path is the fallback. |
 | `curl` + `tar` | L3 acquisition fallback | anonymous OCI v2 pull (no token step). |
 | `INSECURE_TLS` | sandbox switch | `1` in a TLS-intercepting sandbox (`--setopt=sslverify=0`); `0` on a trusted host. |

@@ -74,9 +74,10 @@ assert_eq "" "$(epel_detect_minor "${WORK}/missing")" "detect_minor: missing fil
 out="$(
   # shellcheck source=/dev/null
   . "${PROJ}/lib/epel.sh"
-  # epel_head_ok is invoked indirectly by epel_resolve_baseurl; SC2317's
-  # reachability heuristic can't see that, so suppress it for this test stub.
-  # shellcheck disable=SC2317
+  # epel_head_ok is invoked indirectly by epel_resolve_baseurl; the
+  # SC2317/SC2329 reachability heuristics can't see that, so suppress both
+  # for this test stub.
+  # shellcheck disable=SC2317,SC2329
   epel_head_ok() { return 0; }   # pretend the minor repomd.xml exists
   epel_resolve_baseurl 10 2
 )"
@@ -86,8 +87,8 @@ assert_eq "${H}/pub/epel/10.2/Everything/x86_64/" "${out}" "resolve: 10.2 presen
 out="$(
   # shellcheck source=/dev/null
   . "${PROJ}/lib/epel.sh"
-  # indirectly invoked (see note above); suppress SC2317 for the stub.
-  # shellcheck disable=SC2317
+  # indirectly invoked (see note above); suppress SC2317/SC2329 for the stub.
+  # shellcheck disable=SC2317,SC2329
   epel_head_ok() { return 1; }   # minor repomd.xml absent
   epel_resolve_baseurl 10 2
 )"

@@ -214,12 +214,12 @@ if grep -q '<name>filler</name>' "${slm}/curl-rhel8-appstream-fx-primary-slices.
 else
   t_pass "r81 slim: non-interest packages excluded from slices"
 fi
-[ -s "${slm}/curl-rhel8-appstream-fx-primary-primary.sha256" ]
-assert_eq 0 "$?" "r81 slim: origin blob sha256 recorded"
+rc=0; [ -s "${slm}/curl-rhel8-appstream-fx-primary-primary.sha256" ] || rc=1
+assert_eq 0 "${rc}" "r81 slim: origin blob sha256 recorded"
 printf 'x\n' | gzip > "${slm}/keep-primary.xml.gz"
 RC_KEEP_METADATA=1 rc_slim_primary "${slm}" "gcc" "${slm}/keep-primary.xml.gz"
-[ -e "${slm}/keep-primary.xml.gz" ]
-assert_eq 0 "$?" "r81 slim: RC_KEEP_METADATA=1 keeps the raw blob (--keep-metadata)"
+rc=0; [ -e "${slm}/keep-primary.xml.gz" ] || rc=1
+assert_eq 0 "${rc}" "r81 slim: RC_KEEP_METADATA=1 keeps the raw blob (--keep-metadata)"
 rm -rf "${slm}"
 
 # --- r81: materials fetch reuses the on-disk primary (no re-download) ----------
@@ -409,8 +409,8 @@ printf 'mirrorlist=https://rhui.ap-northeast-1.aws.ce.redhat.com/pulp/mirror/con
 printf -- '-H "X-RHUI-ID: D" -H "X-RHUI-SIGNATURE: S"' > "${d85}/headers.curl"
 : > "${d85}/o9.txt"
 rc_hvc_el8_diag fake/img "${d85}/o9.txt" 9 "${d85}/headers.curl"
-[ ! -s "${d85}/o9.txt" ]
-assert_eq 0 "$?" "r85 el8diag: no-op for non-8 majors"
+rc=0; [ ! -s "${d85}/o9.txt" ] || rc=1
+assert_eq 0 "${rc}" "r85 el8diag: no-op for non-8 majors"
 
 # el8 diag builds a baseurl-direct repo whose URL EXACTLY matches the content
 # URL the mirrorlist returns (the r84 403 target) - not a triple-content typo.
@@ -424,8 +424,8 @@ assert_eq 0 "$?" "r85 el8diag: baseurl-direct matches the real content URL (no t
 grep -q 'appstream' "${d85}/captured.repo"
 assert_eq 0 "$?" "r85 el8diag: baseurl-direct includes the appstream section"
 # temp files cleaned after the run.
-[ ! -e "${d85}/rhui-e0b-rhel8.repo" ] && [ ! -e "${d85}/e0inject.py" ]
-assert_eq 0 "$?" "r85 el8diag: diagnostic temp files cleaned up"
+if [ ! -e "${d85}/rhui-e0b-rhel8.repo" ] && [ ! -e "${d85}/e0inject.py" ]; then rc=0; else rc=1; fi
+assert_eq 0 "${rc}" "r85 el8diag: diagnostic temp files cleaned up"
 rm -rf "${d85}"; unset RC_HVC_BUNDLE
 
 # the native .so is staged from pkgs/ payload into the bundle.
