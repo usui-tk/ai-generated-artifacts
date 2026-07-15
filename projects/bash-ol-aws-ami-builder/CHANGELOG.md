@@ -20,6 +20,67 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Changed (2026-07-16 — OL10 template moved to Oracle Linux 10.2)
+- **OL10 template moved to Oracle Linux 10.2**
+  (`OracleLinux-R10-U2-x86_64-dvd.iso`, released 2026-07): by design a
+  one-line `ISO_URL` diff in `env.properties.aws-ol10` (the SINGLE-TOUCH
+  MAINTENANCE POINT). Pre-verified: the route-#3 checksum URL
+  (`.../OracleLinux-R10-U2-Server-x86_64.checksum`) is live (HTTP 200) and
+  carries the dvd-ISO hash, so the automatic checksum resolution holds
+  unchanged.
+- **SPEC's OL11 porting recipe de-versioned** (docs-only): the `sed` example
+  carried the then-current `R10-U1` pin literal and silently went stale on
+  every OL10 update release; it now uses the `R10-U<N>`/`R11-U<M>`
+  placeholder form with a note that the literal is whatever the OL10
+  template pins at copy time. This closes the last living release-bound
+  literal outside the designed single-touch point (full-inventory sweep,
+  2026-07-16: everything else is historical record, frozen-major permanent
+  fact, or shape-example/fixture text that needs no per-release
+  maintenance).
+
+### Fixed (2026-07-16 — OL10 developer-EPEL: live-verified discovery replaces the fixed section name)
+- **OL10's DKMS-from-EPEL wiring no longer hard-codes
+  `ol10_u1_developer_EPEL`** — the section name churns on every OL10 update
+  release (measured from the `oracle-epel-release-el10` package history:
+  1.0-2 shipped `u0` → `.../OL10/0/`, 1.0-5..1.0-6 ship `u1` →
+  `.../OL10/1/`; with OL10.2 released, `.../OL10/2/developer/EPEL/` was
+  still HTTP 404, so a 10.2 system runs on the 10.1 EPEL today and a `u2`
+  rename is the expected next step), and any fixed name breaks SILENTLY at
+  the rename — the exact "No match for argument: dkms" failure mode of the
+  original unversioned-name guess. `install-ena-driver.sh` now runs a
+  discover → verify → finalize pass on OL10 only (user adjudications
+  D1/D2/D3): candidates from BOTH the shipped `oracle-epel-ol10.repo`
+  sections AND a constructed URL for the running minor
+  (`/etc/oracle-release` → new `osminor` detection); each candidate is
+  verified against the LIVE yum server through core dnf
+  (`--repofrompath`, `skip_if_unavailable=0`) requiring reachability AND an
+  actually-available `dkms` package (D1 — repomd reachability alone is not
+  enough); selection prefers the running minor's own repo, else the highest
+  verified `u<N>`; a live shipped section is enabled in place with dead
+  shipped sections explicitly disabled (D2), while a constructed-only winner
+  is materialized as a DISPOSABLE gpg-checked repo file removed right after
+  the dkms provisioning step (D2). Every candidate verdict is logged — no
+  silent no-match failures. The `setup_epel` enabled-only early return is
+  bypassed on OL10 (an enabled shipped section can still be dead there);
+  the ENA_BUILDTEST container path routes through the same mechanism and
+  dies loudly on a verification miss; production keeps the existing
+  plain-make degradation. OL6–OL9 paths are untouched (OS isolation;
+  unversioned EPEL paths do not churn — the OL9 case split out of the old
+  shared `9|10` branch verbatim). FT 2026-07-16 in an OL10 chroot against
+  the live server (dnf 4.20 measured): four scenarios green, including a
+  real `dkms 3.4.1-1.el10_1` install through a materialized disposable and
+  its cleanup. EPEL usage inventory: `install-ena-driver.sh` is the only
+  script with EPEL processing (the one mention elsewhere is a "no EPEL
+  needed" comment), so the hardening scope closes there.
+- Tests: new `tests/t022_ol10epel.sh` (37 asserts — structural pins incl.
+  never-regrow regression pins on the fixed-u1 wiring, plus behavioural
+  fixtures copied from the real repo-file shapes and a stubbed-probe
+  orchestrator run over the shipped-enable / dead-disable /
+  disposable-lifecycle / all-dead paths; one real bug caught pre-commit:
+  the sole-survivor unversioned selection needed a `best_n=-2` sentinel).
+  Suite: 512 -> 551 measured full-toolchain (t022 +37, B-T1/B-T2 +1 each
+  for the new file), 22 tiers.
+
 ### Fixed (2026-07-14 — TESTING.md §0 fixed-count reconciliation)
 - **TESTING.md fixed pass count re-grounded on a full-toolchain measurement**:
   the documented `389 passed / 20 tiers` (with its per-tier breakdown)

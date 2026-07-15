@@ -85,16 +85,17 @@ non-zero if any tier fails. It records the resolved tool versions at run time.
 
 Current fixed pass count (full toolchain present — ShellCheck (pin 0.10.0;
 re-measured green on 0.11.0 at the 2026-07-14 restamp), `ksvalidator`,
-`modinfo` (kmod), and `python3`): **512 passed, 0 skipped, 0 failed** across
-**21 tiers** (B-T1 parse = 50, B-T2 ShellCheck = 45, B-T3 unit = 59,
+`modinfo` (kmod), and `python3`): **551 passed, 0 skipped, 0 failed** across
+**22 tiers** (B-T1 parse = 51, B-T2 ShellCheck = 46, B-T3 unit = 59,
 command-mock = 9, B-T4 kickstart = 1, env-parity = 55, idempotency = 12,
 hook-timing = 19, log-format = 12, ena-uek-detect = 16, ena-reporting = 31,
 build-visibility = 17, ena-ledger-guard = 5, ena-check-2 = 6, ena-verify = 12,
 ena-verify-results = 19, ena-bundle = 13, ssm-verdict = 32,
-awscli-verdict = 43, register-validation = 23, ena-express = 33).
+awscli-verdict = 43, register-validation = 23, ena-express = 33,
+ol10-epel = 37).
 Optional-tool degradations are the only way to see a skip: without
-`ksvalidator` B-T4 contributes a skip (-> 511/1); without `modinfo` the
-ena-uek-detect inbox-report assertions fold into one skip (-> 509/1); without
+`ksvalidator` B-T4 contributes a skip (-> 550/1); without `modinfo` the
+ena-uek-detect inbox-report assertions fold into one skip (-> 548/1); without
 ShellCheck B-T2 skips; the B-T (ena-bundle) initramfs fixture builds via cpio
 **or** a self-contained `python3` newc fallback, so it no longer skips. The
 B-T1 / B-T2 counts include the six `tests/cleancore/` clean-core builders (see
@@ -220,6 +221,7 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 | B-T (awscli verdict) | L0/L1 | implemented | `tests/t019_awscliverdict.sh`: loads the five pure helpers of `tests/awscli/run-awscli-installtest-matrix.sh` — `awscli_ge` (dotted compare, versions + glibc), `awscli_min_glibc` (documented manylinux floor 2.17/2.5), `awscli_in_scope` (v2-major filter), `awscli_verdict` (`runs`/`glibc-too-old`/`unexpected-fail`), `python_eol` (bundled CPython minor → documented EOL date) — and verifies the reuse-by-copy consistency of `awscli_min_glibc` with `tests/awscli/list-awscli-releases.sh`; no container/network/clean-core; 43 asserts |
 | B-T (register validation) | L1 | implemented | `tests/t020_register.sh`: sources the wrapper (guarded `main`) and exercises the two pure validators that guard `aws ec2 register-image` — `validate_ami_name` (`--name`: length 3-128 + allowed set alphanumerics and `()[]` space `. / - ' @ _`) and `validate_ami_description` (`--description`: length 0-255) — across length boundaries (2/3/128/129/0), realistic auto names (ENA/SSM markers), the full allowed special set, and a battery of disallowed characters (`# * , : + = % !`, braces, tab, multibyte); argument-only, no network; 23 asserts. The Phase-9 `--dry-run` pre-flight that also gates the real call is a live AWS interaction, proved by B-T8 (E2E) |
 | B-T (ena express) | L0/L1 | implemented | `tests/t021_enaexpress.sh`: the ENA Express readiness classification `ena_express_verdict` (`< 2.2.9` not-ready, `>= 2.2.9` bandwidth-only, `>= 2.8.0` express-ready; AWS ena-express.html floors) is a reuse-by-copy family of three — `install-ena-driver.sh` (the source of truth), `tests/ena/list-ena-releases.sh`, and the matrix's ledger-merge Python duplicate — kept in behavioural agreement across a boundary-version set (both floor edges, mid-range members, the stock 1.1.2, a far-future major proving numeric compare); also asserts the release-list 1.2 schema invariants (`min_version` + per-entry `ge_min`/`express_verdict`, mutually consistent) and the matrix's default-scope plumbing (`--full`, `min_version` floor, `--report-only`); python3-only, no container/network/build; 33 asserts |
+| B-T (ol10 epel) | L0/L1 | implemented | `tests/t022_ol10epel.sh`: the OL10 developer-EPEL discover → verify → finalize mechanism (`setup_epel_ol10` — OL10's EPEL section name churns per update release, measured u0 → u1 with u2 pending on the Oracle side, 2026-07-16). Structural: the mechanism exists, probes for `dkms` availability (not repomd reachability alone) via core-dnf `--repofrompath` + `skip_if_unavailable=0`, the hard-coded `ol10_u1_developer_EPEL` wiring can never regrow (regression pins), the enabled-only early return is bypassed on OL10 only, the ENA_BUILDTEST path routes through the same mechanism and dies on a miss, and the disposable repo is gpg-checked/marker-headed with cleanup wired after dkms provisioning. Behavioural: the pure pieces (URL expansion, repo-file candidate parsing, D1 selection order incl. the sole-survivor `best_n=-2` sentinel pin) run against fixtures copied from the REAL `oracle-epel-release-el10` repo-file shapes, and the full orchestrator runs with a stubbed probe across the shipped-enable / dead-disable / disposable-lifecycle / all-dead paths (mirroring the 2026-07-16 OL10-chroot live FT); no container/network/build; 37 asserts |
 | B-T7 offline image inspection | L3 | deferred | builder host |
 | B-T8 E2E build + boot | L4 | deferred | builder host + AWS |
 | clean-core builders | (test base) | implemented | `tests/cleancore/build-cleancore-ol{5,6,7,8,9,10}.sh` — general-purpose container test-base builders (see "Container clean-core test base" below), plus `tests/cleancore/build-cleancore.sh` (the `--all`/`--ol` orchestrator wrapping them). **Not** run by `run-all.sh` (heavy: needs root + network + a multi-hundred-MB build); covered by B-T1 (parse) + B-T2 (lint) like every `.sh`; each builder self-tests a fresh unpack of its own `.tar.gz` |

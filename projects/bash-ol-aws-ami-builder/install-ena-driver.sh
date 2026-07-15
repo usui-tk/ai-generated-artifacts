@@ -311,6 +311,20 @@ fi
 [[ -n "${osmajor}" ]] || die "cannot determine Oracle Linux major version"
 log "Oracle Linux major version: ${osmajor}"
 
+# ---- detect Oracle Linux minor (update) version -----------------------------
+# Consumed only by the OL10 developer-EPEL discovery below (the self-minor
+# candidate). Best-effort: empty when undeterminable, in which case only the
+# shipped-repo-file candidates are considered.
+osminor=""
+if [[ -r /etc/oracle-release ]]; then
+  osminor="$(grep -oE 'release [0-9]+\.[0-9]+' /etc/oracle-release 2>/dev/null | grep -oE '[0-9]+$' | head -1 || true)"
+fi
+if [[ -z "${osminor}" && -r /etc/os-release ]]; then
+  # shellcheck source=/dev/null
+  osminor="$(. /etc/os-release 2>/dev/null; v="${VERSION_ID#*.}"; [[ "${v}" != "${VERSION_ID}" ]] && echo "${v%%.*}" || true)"
+fi
+[[ -n "${osminor}" ]] && log "Oracle Linux minor (update) version: ${osminor}"
+
 case "${osmajor}" in
   6)  ena_version="${ENA_DRIVER_VERSION:-${ENA_VERSION_OL6}}" ;;
   7)  ena_version="${ENA_DRIVER_VERSION:-${ENA_VERSION_OL7}}" ;;
@@ -338,6 +352,223 @@ case "${osmajor}" in
   *) log "OL${osmajor} ships a current in-distro ENA driver; no rebuild needed. Skipping."; exit 0 ;;
 esac
 log "Target ENA driver version: ${ena_version}"
+
+# ---- OL10 developer-EPEL: discover -> verify (live repo + dkms) -> finalize -
+# OL10's developer/EPEL repo is versioned per update release (baseurl
+# .../OL10/<N>/developer/EPEL/..., section [ol10_u<N>_developer_EPEL]) and the
+# shipped oracle-epel-ol10.repo can LAG the running minor -- measured
+# 2026-07-16: oracle-epel-release-el10 1.0-2 shipped [ol10_u0_...] -> /OL10/0/,
+# 1.0-5..1.0-6 (latest) ship [ol10_u1_...] -> /OL10/1/, and a 10.2 system still
+# carries the u1 section because /OL10/2/developer/EPEL/ was not yet published
+# (HTTP 404) -- or LEAD it once Oracle publishes u2 and ships the rename. A
+# hard-coded section name therefore breaks SILENTLY on every OL10 update (the
+# exact failure mode that produced "No match for argument: dkms" at the
+# u0 -> u1 rename). OL10 ONLY: OL6-9 keep their proven fixed-name paths
+# (unversioned EPEL paths; no churn) per the OS-isolation principle.
+#
+# Mechanism (user adjudications D1/D2/D3, 2026-07-16):
+#   1. Candidates from BOTH sources: every [ol10(_u<N>)?_developer_EPEL]
+#      section of the shipped repo file (best-effort installing
+#      oracle-epel-release-el10 first when the file is absent), PLUS a
+#      CONSTRUCTED .../OL10/<osminor>/... URL for the running minor even when
+#      no shipped section mentions it (follows a lagging repo file forward).
+#   2. Verify each candidate against the LIVE yum server through the same dnf
+#      stack the install itself uses (core-dnf --repofrompath; no plugins):
+#      the repo must be reachable AND must actually offer the dkms package --
+#      repomd reachability alone is not sufficient (D1).
+#   3. Select: the self-minor candidate first, else the highest verified u<N>
+#      (an unversioned section ranks lowest).
+#   4. Finalize: a live shipped section is enabled in place, and DEAD shipped
+#      developer-EPEL sections are explicitly disabled so later transactions
+#      cannot trip on an unreachable repo (D2); a constructed-only winner is
+#      materialized as a DISPOSABLE repo file (marker header; gpgcheck=1 with
+#      the Oracle key) which is removed right after the dkms provisioning
+#      step (D2).
+# Every candidate and its verdict is logged -- no silent no-match failures.
+#
+# AWS-scope assumption (documented in SPEC): the Oracle repo-file variables
+# expand as $ociregion="" / $ocidomain="oracle.com" (the public yum server);
+# OCI-internal mirror regions are out of scope for this AWS AMI pipeline.
+
+OL10_EPEL_REPO_FILE="${OL10_EPEL_REPO_FILE:-/etc/yum.repos.d/oracle-epel-ol10.repo}"
+OL10_EPEL_DISPOSABLE=""   # set when a disposable repo file is materialized
+
+_ol10_epel_expand_url() {
+  # Expand the Oracle repo-file baseurl variables for live probing.
+  local url="$1"
+  url="${url//\$ociregion/}"
+  url="${url//\$ocidomain/oracle.com}"
+  url="${url//\$basearch/$(uname -m)}"
+  printf '%s' "${url}"
+}
+
+_ol10_epel_file_candidates() {
+  # Emit "section<TAB>expanded-baseurl" for every developer-EPEL section in
+  # the shipped repo file; emits nothing when the file is absent/unreadable.
+  # Pure bash line parsing (no pipefail-exposed pipes).
+  [[ -r "${OL10_EPEL_REPO_FILE}" ]] || return 0
+  local sec="" line
+  while IFS= read -r line; do
+    if [[ "${line}" =~ ^\[(ol10(_u[0-9]+)?_developer_EPEL)\]$ ]]; then
+      sec="${BASH_REMATCH[1]}"
+      continue
+    fi
+    [[ "${line}" =~ ^\[ ]] && sec=""
+    if [[ -n "${sec}" && "${line}" =~ ^baseurl= ]]; then
+      printf '%s\t%s\n' "${sec}" "$(_ol10_epel_expand_url "${line#baseurl=}")"
+      sec=""
+    fi
+  done < "${OL10_EPEL_REPO_FILE}"
+  return 0
+}
+
+_ol10_epel_probe() {
+  # $1 = expanded baseurl. rc 0 iff the LIVE repo is reachable AND offers the
+  # dkms package. Core-dnf only (`list`, --repofrompath -- no plugin commands)
+  # so it rides the exact network stack (proxy/TLS) of the eventual install.
+  # skip_if_unavailable=0 forces an error (not a silent skip) on a dead repo.
+  local url="$1" out rc=0
+  command -v dnf >/dev/null 2>&1 || return 1
+  local -a df=(-q --disablerepo='*' "--repofrompath=olawsprobe,${url}"
+               --enablerepo=olawsprobe --setopt=olawsprobe.gpgcheck=0
+               --setopt=olawsprobe.skip_if_unavailable=0)
+  if [[ "${ENA_BUILDTEST}" == "1" && "${INSECURE_TLS}" == "1" ]]; then
+    df+=(--setopt=sslverify=false)
+  fi
+  out="$(dnf "${df[@]}" list available dkms 2>/dev/null)" || rc=1
+  [[ ${rc} -eq 0 ]] || return 1
+  grep -q '^dkms\.' <<<"${out}"
+}
+
+_ol10_epel_select() {
+  # stdin:  "<section-name>\t<1|0>" per candidate (1 = verified live + dkms).
+  # stdout: the selected section name. Selection order: the running minor's
+  # own section first (D1), else the highest verified u<N> (an unversioned
+  # ol10_developer_EPEL ranks below any versioned one). rc 1 when nothing
+  # verified.
+  # best_n starts at -2 so an unversioned section (rank -1) can still win as
+  # the sole survivor (caught by the fixture FT, 2026-07-16).
+  local name ok best="" best_n=-2 n
+  while IFS=$'\t' read -r name ok; do
+    [[ "${ok}" == "1" ]] || continue
+    n=-1
+    [[ "${name}" =~ ^ol10_u([0-9]+)_developer_EPEL$ ]] && n="${BASH_REMATCH[1]}"
+    if [[ -n "${osminor:-}" && "${n}" == "${osminor}" ]]; then
+      printf '%s' "${name}"
+      return 0
+    fi
+    if (( n > best_n )); then best_n="${n}"; best="${name}"; fi
+  done
+  printf '%s' "${best}"
+  [[ -n "${best}" ]]
+}
+
+_ol10_epel_set_enabled() {
+  # $1 = section name, $2 = 0|1. Exact-span sed on the shipped repo file
+  # (plugin-free; deterministic -- the section name came from this same file).
+  local sec="$1" en="$2"
+  [[ -w "${OL10_EPEL_REPO_FILE}" ]] || return 0
+  if [[ "${en}" == "1" ]]; then
+    sed -i "/^\[${sec}\]/,/^\[/ s/^enabled=0/enabled=1/" "${OL10_EPEL_REPO_FILE}"
+  else
+    sed -i "/^\[${sec}\]/,/^\[/ s/^enabled=1/enabled=0/" "${OL10_EPEL_REPO_FILE}"
+  fi
+}
+
+setup_epel_ol10() {
+  # Orchestrator: discover -> verify -> finalize. rc 0 leaves exactly one
+  # verified, dkms-carrying developer-EPEL repo enabled (shipped section or
+  # disposable file); rc 1 = no candidate verified (callers decide: production
+  # degrades to the plain-make fallback, ENA_BUILDTEST dies).
+  local pm="yum"
+  command -v dnf >/dev/null 2>&1 && pm="dnf"
+  if [[ ! -r "${OL10_EPEL_REPO_FILE}" ]]; then
+    log "OL10 EPEL: ${OL10_EPEL_REPO_FILE} absent; best-effort installing oracle-epel-release-el10"
+    "${pm}" install -y oracle-epel-release-el10 >/dev/null 2>&1 || true
+  fi
+  local -a cand_names=() cand_urls=() cand_origin=() cand_ok=()
+  local sec url i
+  while IFS=$'\t' read -r sec url; do
+    [[ -n "${sec}" ]] || continue
+    cand_names+=("${sec}"); cand_urls+=("${url}"); cand_origin+=("file")
+  done < <(_ol10_epel_file_candidates)
+  if [[ -n "${osminor:-}" ]]; then
+    url="https://yum.oracle.com/repo/OracleLinux/OL10/${osminor}/developer/EPEL/$(uname -m)/"
+    local have=0
+    for i in "${!cand_urls[@]}"; do
+      [[ "${cand_urls[$i]}" == "${url}" ]] && have=1
+    done
+    if [[ ${have} -eq 0 ]]; then
+      cand_names+=("ol10_u${osminor}_developer_EPEL")
+      cand_urls+=("${url}")
+      cand_origin+=("constructed")
+    fi
+  fi
+  if [[ ${#cand_names[@]} -eq 0 ]]; then
+    log "OL10 EPEL: no candidates (repo file absent/empty AND minor undetectable) -- cannot locate a developer-EPEL repo"
+    return 1
+  fi
+  local verdicts=""
+  for i in "${!cand_names[@]}"; do
+    if _ol10_epel_probe "${cand_urls[$i]}"; then
+      cand_ok+=("1")
+      log "OL10 EPEL: candidate ${cand_names[$i]} (${cand_origin[$i]}) ${cand_urls[$i]} -- LIVE, dkms available"
+    else
+      cand_ok+=("0")
+      log "OL10 EPEL: candidate ${cand_names[$i]} (${cand_origin[$i]}) ${cand_urls[$i]} -- dead or no dkms"
+    fi
+    verdicts+="${cand_names[$i]}"$'\t'"${cand_ok[$i]}"$'\n'
+  done
+  local selected
+  selected="$(_ol10_epel_select <<<"${verdicts}")" || {
+    log "OL10 EPEL: NO candidate verified (all dead or missing dkms) -- diagnostics above"
+    return 1
+  }
+  # D2: dead shipped sections are explicitly disabled either way.
+  local sel_origin="" sel_url=""
+  for i in "${!cand_names[@]}"; do
+    if [[ "${cand_names[$i]}" == "${selected}" ]]; then
+      sel_origin="${cand_origin[$i]}"; sel_url="${cand_urls[$i]}"
+    fi
+    if [[ "${cand_origin[$i]}" == "file" && "${cand_ok[$i]}" == "0" ]]; then
+      _ol10_epel_set_enabled "${cand_names[$i]}" 0
+      log "OL10 EPEL: disabled dead shipped section ${cand_names[$i]}"
+    fi
+  done
+  if [[ "${sel_origin}" == "file" ]]; then
+    _ol10_epel_set_enabled "${selected}" 1
+    log "OL10 EPEL: selected shipped section ${selected} (enabled in ${OL10_EPEL_REPO_FILE})"
+  else
+    # Constructed-only winner: materialize a DISPOSABLE repo file (D2).
+    # assert-all-then-write: the full content is composed before the single
+    # write; the caller removes the file right after dkms provisioning.
+    OL10_EPEL_DISPOSABLE="$(dirname "${OL10_EPEL_REPO_FILE}")/olaws-ol10-epel-disposable.repo"
+    local content
+    content="# DISPOSABLE -- generated by install-ena-driver.sh (OL10 developer-EPEL
+# discovery: the shipped ${OL10_EPEL_REPO_FILE} carries no live developer-EPEL
+# section for this system, so the verified self-minor repo is materialized
+# here). Removed automatically right after the dkms provisioning step; safe
+# to delete if ever found lingering.
+[${selected}]
+name=Oracle Linux 10 EPEL Packages for Development (olaws disposable)
+baseurl=${sel_url}
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-oracle
+gpgcheck=1
+enabled=1
+"
+    printf '%s' "${content}" > "${OL10_EPEL_DISPOSABLE}" \
+      || { log "OL10 EPEL: failed to write ${OL10_EPEL_DISPOSABLE}"; OL10_EPEL_DISPOSABLE=""; return 1; }
+    log "OL10 EPEL: selected constructed ${selected} -- materialized disposable ${OL10_EPEL_DISPOSABLE}"
+  fi
+  return 0
+}
+
+cleanup_ol10_epel_disposable() {
+  [[ -n "${OL10_EPEL_DISPOSABLE}" && -e "${OL10_EPEL_DISPOSABLE}" ]] || return 0
+  rm -f "${OL10_EPEL_DISPOSABLE}"
+  log "OL10 EPEL: removed disposable repo file ${OL10_EPEL_DISPOSABLE}"
+  OL10_EPEL_DISPOSABLE=""
+}
 
 # ---- ENA_BUILDTEST: provision a kernel into the disposable container -------
 # A container is kernel-less (no running kernel, no /lib/modules tree), so the
@@ -395,19 +626,19 @@ if [[ "${ENA_BUILDTEST}" == "1" ]]; then
       # is ever needed.
       bt_uek_repo="${BT_UEK_REPO_OVERRIDE:-ol9_UEKR8}" ;;
     10)
-      # Section name confirmed from a real clean-core OL10 image's
-      # /etc/yum.repos.d/oracle-epel-ol10.repo: [ol10_u1_developer_EPEL] --
-      # OL10's developer/EPEL path is versioned per OL10 update (.../OL10/1/...
-      # for the 10.1 point release), unlike OL8/OL9's unversioned path, so the
-      # section is "ol10_u1_..." not "ol10_...". (Corrected after a real
-      # buildtest-matrix run showed "No match for argument: dkms" -- the
-      # earlier "ol10_developer_EPEL" guess silently matched nothing.)
-      sed -i '/^\[ol10_u1_developer_EPEL\]/,/^\[/ s/^enabled=0/enabled=1/' /etc/yum.repos.d/oracle-epel-ol10.repo
+      # OL10's developer-EPEL section name is update-versioned and churns on
+      # every OL10 point release (u0 -> u1 measured; u2 next) -- see the
+      # discover/verify/finalize block above. The old hard-coded
+      # [ol10_u1_developer_EPEL] sed matched nothing after any rename
+      # (the silent "No match for argument: dkms" failure mode), so the
+      # container path now runs the same live-verified discovery as
+      # production. yum is bootstrapped first (clean-core ships dnf only).
       if [[ "${INSECURE_TLS}" == "1" ]]; then
         dnf -y --setopt=sslverify=false install yum >/dev/null || die "ENA_BUILDTEST: failed to bootstrap yum on OL10"
       else
         dnf -y install yum >/dev/null || die "ENA_BUILDTEST: failed to bootstrap yum on OL10"
       fi
+      setup_epel_ol10 || die "ENA_BUILDTEST: no live OL10 developer-EPEL repo verified (all candidates dead or missing dkms; per-candidate verdicts logged above)"
       # OL10 only ships a UEKR8 (6.12) track today.
       bt_uek_repo="ol10_UEKR8" ;;
     *) die "ENA_BUILDTEST: OS major ${osmajor} not wired for the container test" ;;
@@ -464,7 +695,12 @@ fi
 
 # ---- enable EPEL so dkms is installable ------------------------------------
 setup_epel() {
-  if yum repolist enabled 2>/dev/null | grep -qiE 'epel'; then
+  # The enabled-only early return is NOT taken on OL10: an enabled repo can
+  # still be DEAD there (the shipped section ships enabled=1 but its
+  # update-versioned URL can lag/lead what Oracle actually publishes), so
+  # OL10 always runs the live discover/verify path (idempotent; a re-run
+  # rides the dnf metadata cache).
+  if [[ "${osmajor}" != "10" ]] && yum repolist enabled 2>/dev/null | grep -qiE 'epel'; then
     log "EPEL already enabled"
     return 0
   fi
@@ -486,24 +722,29 @@ setup_epel() {
         yum-config-manager --enable ol8_developer_EPEL >/dev/null 2>&1 || true
       fi
       ;;
-    9|10)
-      # Section names confirmed from real clean-core images' repo files:
-      # OL9  -> /etc/yum.repos.d/oracle-epel-ol9.repo  [ol9_developer_EPEL]
-      # OL10 -> /etc/yum.repos.d/oracle-epel-ol10.repo [ol10_u1_developer_EPEL]
-      # (OL10's developer/EPEL path is versioned per OL10 update point release
-      # -- .../OL10/1/... -- unlike OL8/OL9's unversioned path, hence "u1".)
-      # The repo file ships pre-configured (disabled) in the base image, so
-      # enabling it directly is the primary path; the oracle-epel-release
-      # package install is a best-effort fallback for images that lack the
-      # file (never the cause of a new failure -- `|| true`).
-      local _epel_section="ol${osmajor}_developer_EPEL"
-      [[ "${osmajor}" == "10" ]] && _epel_section="ol10_u1_developer_EPEL"
+    9)
+      # Section name confirmed from a real clean-core image's repo file:
+      # OL9 -> /etc/yum.repos.d/oracle-epel-ol9.repo [ol9_developer_EPEL]
+      # (unversioned path -- .../OL9/developer/EPEL/... -- no per-update
+      # churn, unlike OL10). The repo file ships pre-configured (disabled) in
+      # the base image, so enabling it directly is the primary path; the
+      # oracle-epel-release package install is a best-effort fallback for
+      # images that lack the file (never the cause of a new failure).
       if command -v dnf >/dev/null 2>&1; then
-        dnf config-manager --set-enabled "${_epel_section}" >/dev/null 2>&1 || true
+        dnf config-manager --set-enabled ol9_developer_EPEL >/dev/null 2>&1 || true
       elif command -v yum-config-manager >/dev/null 2>&1; then
-        yum-config-manager --enable "${_epel_section}" >/dev/null 2>&1 || true
+        yum-config-manager --enable ol9_developer_EPEL >/dev/null 2>&1 || true
       fi
-      yum install -y "oracle-epel-release-el${osmajor}" 2>/dev/null || true
+      yum install -y oracle-epel-release-el9 2>/dev/null || true
+      ;;
+    10)
+      # OL10's developer-EPEL section is update-versioned and churns per
+      # point release; route through the live-verified discovery (see the
+      # discover/verify/finalize block above). A verification miss is loud
+      # but non-fatal here: the caller's `yum install -y dkms` then fails
+      # and the existing plain-make degradation takes over.
+      setup_epel_ol10 \
+        || log "OL10 EPEL: proceeding without a verified developer-EPEL repo; dkms install will likely fail and fall back to a plain make build"
       ;;
     6)
       # Oracle does NOT provide EPEL 6; point at the Fedora archive directly.
@@ -614,6 +855,11 @@ if ! yum install -y dkms; then
   log "DKMS not installable; falling back to a plain make build (no auto-rebuild on kernel upgrade)"
   use_dkms=0
 fi
+# The OL10 disposable EPEL repo (when materialized) has served its purpose
+# once the dkms provisioning step above completes -- remove it now regardless
+# of the install outcome (D2: the repo configuration is throwaway). DKMS
+# kernel-upgrade rebuilds need the already-installed toolchain, not the repo.
+cleanup_ol10_epel_disposable
 
 # ---- fetch the pinned amzn-drivers source tarball --------------------------
 src_tgz="/usr/src/ena_linux_${ena_version}.tar.gz"

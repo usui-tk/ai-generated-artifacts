@@ -755,8 +755,36 @@ ENA `1.1.2`, below the ENAv3 floor — see the assurance report above). It:
   UEK kernel there).
 - **Builds via DKMS** (`REMAKE_INITRD`/`AUTOINSTALL`), so the module is rebuilt
   automatically across in-instance kernel upgrades. DKMS comes from EPEL —
-  Oracle-provided `ol7_developer_EPEL` on OL7, and the Fedora **EPEL 6 archive**
-  on OL6 (Oracle does not provide EPEL 6). If DKMS is unavailable it falls back
+  Oracle-provided `ol7_developer_EPEL` on OL7, `ol8_developer_EPEL` /
+  `ol9_developer_EPEL` on OL8/OL9 (unversioned repo paths; fixed section
+  names), and the Fedora **EPEL 6 archive** on OL6 (Oracle does not provide
+  EPEL 6). **OL10 is different**: its developer-EPEL repo is versioned per
+  update release (baseurl `…/OL10/<N>/developer/EPEL/…`, section
+  `[ol10_u<N>_developer_EPEL]`) and the section name churns on every OL10
+  point release, so a fixed name breaks silently. The installer therefore
+  runs a live discover → verify → finalize pass on OL10 only
+  (`setup_epel_ol10`): it collects candidates from BOTH the shipped
+  `oracle-epel-ol10.repo` sections AND a constructed URL for the running
+  minor (from `/etc/oracle-release` / `os-release`), verifies each against
+  the live yum server through core dnf (`--repofrompath`,
+  `skip_if_unavailable=0`) requiring that the repo is reachable **and
+  actually offers `dkms`**, then selects the running minor's own repo first,
+  else the highest verified `u<N>`. A live shipped section is enabled in
+  place and dead shipped sections are explicitly disabled; a
+  constructed-only winner is materialized as a **disposable** repo file
+  (provenance marker header, `gpgcheck=1` with the Oracle key) that is
+  removed right after the dkms provisioning step. Every candidate verdict is
+  logged. The enabled-only early return in `setup_epel` is bypassed on OL10
+  (an enabled shipped section can still be dead there). Scope assumption:
+  the Oracle repo-file variables expand as `$ociregion=""` /
+  `$ocidomain="oracle.com"` (the public yum server) — OCI-internal mirror
+  regions are outside this AWS pipeline's scope. Known residual limitation:
+  if Oracle publishes an OL10 image whose shipped section leads (or lags)
+  the published repo paths on their side, the discovery follows whatever is
+  actually live; a window in which **no** OL10 developer-EPEL path is
+  published at all is an Oracle-side outage the client cannot bridge — the
+  installer then logs the per-candidate diagnostics and falls back to a
+  plain `make` build. If DKMS is unavailable it falls back
   to a plain `make` build plus `depmod`.
 - **Regenerates the initramfs** for the target kernel (`dracut -f`) so the new
   driver is present at boot, and removes any stale
@@ -812,9 +840,19 @@ all inert.
   + `ol6_UEKR4`; OL7 enables `ol7_developer_EPEL` + `ol7_UEKR6`; OL8 (whose slim
   base ships `dnf` only) bootstraps the `yum` compat via `dnf`, then enables
   `ol8_developer_EPEL` + `ol8_UEKR7` (default; `BT_UEK_REPO_OVERRIDE=ol8_UEKR6`
-  runs a UEKR6-specific regression check instead). The shipped (disabled) EPEL is enabled
+  runs a UEKR6-specific regression check instead); OL9 bootstraps `yum` the
+  same way, then enables `ol9_developer_EPEL` + `ol9_UEKR8`
+  (`BT_UEK_REPO_OVERRIDE=ol9_UEKR7` for a UEKR7-specific check); OL10
+  bootstraps `yum`, then routes through the same live-verified
+  `setup_epel_ol10` discovery as production (see the DKMS bullet above —
+  OL10's developer-EPEL section name churns per update release, so there is
+  no fixed name to enable) and **dies** on a verification miss (the
+  container tier must be strict where production degrades), then
+  `ol10_UEKR8`. The shipped (disabled) EPEL is enabled
   persistently so the production `setup_epel` finds it already enabled and does
-  not create a second repo.
+  not create a second repo (on OL10 the production pass re-runs the
+  idempotent discovery instead — an enabled section is not proof of a live
+  one there).
 - **`INSECURE_TLS`.** `INSECURE_TLS=1` (default `0`) drops TLS peer verification
   for the test-mode network commands only — `yum --setopt=sslverify=false` and
   `curl -k` — for environments where the container cannot verify the peer chain
@@ -2146,13 +2184,26 @@ follow-up work for the maintainer's environment):
   above). With both fixes, `2.17.2` builds and DKMS-installs as `2.17.2g`
   against `5.15.0-322.203.3.3.el8uek` (container FT, 2026-07-12; the
   harness-recorded proof lands with the post-fix E2E re-run).
-- **OL10's EPEL section is `ol10_u1_developer_EPEL`, not
-  `ol10_developer_EPEL`** (confirmed from a real `oracle-epel-ol10.repo`
-  shipped in the clean-core image): OL10's developer/EPEL path is versioned
-  per OL10 update point release (`.../OL10/1/developer/EPEL/...`), unlike
-  OL8/OL9's unversioned path. An earlier guess at the unversioned section name
-  silently matched nothing and left `dkms` unresolvable ("No match for
-  argument: dkms").
+- **OL10's developer-EPEL section name CHURNS per update release** (superseding
+  the earlier finding that it "is `ol10_u1_developer_EPEL`" — true for 10.1 but
+  not stable): measured 2026-07-16 from the `oracle-epel-release-el10` package
+  history and the live yum server, revision 1.0-2 shipped
+  `[ol10_u0_developer_EPEL]` → `.../OL10/0/...`, revisions 1.0-5..1.0-6
+  (latest) ship `[ol10_u1_developer_EPEL]` → `.../OL10/1/...`, and — with
+  OL10.2 released — `.../OL10/2/developer/EPEL/` was still HTTP 404 (a 10.2
+  system runs on the 10.1 EPEL; old-minor paths like `/OL10/0/` stay
+  published). Any fixed section name therefore breaks SILENTLY at the next
+  rename — the exact failure mode of the original unversioned-name guess
+  ("No match for argument: dkms"). The fixed-u1 wiring is replaced by the
+  live discover → verify → finalize mechanism (`setup_epel_ol10`; see the
+  ENA self-build DKMS bullet for the full contract), FT-validated 2026-07-16
+  in an OL10 chroot against the live server across four scenarios: shipped-u1
+  alive/constructed-u2 dead (today's lag), dead shipped file → constructed
+  self-minor → disposable repo → real `dkms 3.4.1-1.el10_1` install →
+  cleanup, forced-dead shipped section explicitly disabled, and all-dead →
+  loud rc 1. OL10's platform dnf is 4.20 (dnf4; measured from repo metadata
+  and the bootstrapped chroot), so the probe's core-dnf4 syntax is stable
+  for this OS-gated path.
 
 These findings are now **wired into the production pipeline**:
 `build-ol-aws-ami.sh` injects the self-build hook on OL6–OL10 by default
@@ -3824,7 +3875,9 @@ When Oracle ships OL11:
 1. **Add the env template**:
    ```bash
    cp env.properties.aws-ol10 env.properties.aws-ol11
-   sed -i 's/ol10/ol11/g; s/OL10/OL11/g; s/R10-U1/R11-U1/g; ...' env.properties.aws-ol11
+   # (R10-U<N> below stands for whatever update release the OL10 template's
+   #  ISO_URL pins at copy time — the only release-bound text in the template.)
+   sed -i 's/ol10/ol11/g; s/OL10/OL11/g; s/R10-U<N>/R11-U<M>/g; ...' env.properties.aws-ol11
    ```
 2. **Update tables in README** (English and Japanese): add row to
    "Repository Layout", "Folder layout", and the env-template comparison.
