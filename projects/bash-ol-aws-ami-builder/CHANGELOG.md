@@ -20,6 +20,34 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Changed (2026-07-16 — ENA buildtest ledger: full re-sweep on refreshed UEK kernels)
+- **ENA buildtest ledger + RESULTS-ol6..10 replaced with the 2026-07-16 full
+  sweep** (user-host matrix run, single-sweep replacement per the pre-release
+  ledger operation; 150 combos = 30 in-scope releases ≥ the 2.8.0 express
+  floor × OL6–10). Trigger: a UEK point update on OL9/OL10
+  (`6.12.0-204.92.4.2` → `…4.3.el9uek/el10uek`); OL6/7/8 kernels unchanged.
+  **Verdicts are fully deterministic against the previous sweep: 0 of 150
+  status changes, 0 ko_version changes on the same-kernel majors** —
+  OL6 6/30, OL7 13/30, OL8 17/30, OL9 9/30, OL10 9/30 ok, with the OL9/OL10
+  buildable floor unchanged at 2.13.2 across the kernel refresh. 27 fail rows
+  differ only in the `[make.log first error: …]` annotation (22 on OL9/10
+  from the header changes of the new kernel; 5 on OL6/OL8 at identical
+  kernels — the first-error capture is ordering-sensitive under parallel
+  make; note-level nondeterminism only, verdicts stable).
+- Verifier run against the sweep's load-readiness bundle
+  (`verify-ena-buildresults.sh`, kmod present): ledger ↔ bundle fully
+  consistent — 54 ok rows ↔ 54 captured `ena.ko` modules, vermagic (L4a)
+  54/54 pass; L4b fails only with "no Module.symvers in bundle" on
+  el7/8/9/10 (the KNOWN open producer-side capture gap — OL6, which does
+  capture Module.symvers, passes 6/6), no new findings.
+- This sweep is also the first real-host E2E of the OL10 developer-EPEL
+  discover→verify→finalize path through the ENA_BUILDTEST route (QA
+  preflight + 30-version matrix on OL10 all resolved dkms via the discovery;
+  the shipped `ol10_u1_developer_EPEL` was the expected live winner —
+  Oracle's u2 EPEL is still unpublished).
+- `ena-driver-releases.json` unchanged (byte-identical to the tree); reports
+  verified byte-identical to a `--report-only` regeneration from the ledger.
+
 ### Changed (2026-07-16 — OL10 template moved to Oracle Linux 10.2)
 - **OL10 template moved to Oracle Linux 10.2**
   (`OracleLinux-R10-U2-x86_64-dvd.iso`, released 2026-07): by design a

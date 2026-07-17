@@ -14,36 +14,36 @@ _Full per-kernel history below, newest first._
 
 | ENA version | status | ko_version | dkms | tested (UTC) | notes |
 |:--|:--|:--|:--|:--|:--|
-| 2.17.2 | ok | 2.17.2g | yes | 2026-07-12T17:28:43Z |  |
-| 2.17.0 | ok | 2.17.0g | yes | 2026-07-12T17:28:43Z |  |
-| 2.16.1 | ok | 2.16.1g | yes | 2026-07-12T17:28:43Z |  |
-| 2.16.0 | ok | 2.16.0g | yes | 2026-07-12T17:28:43Z |  |
-| 2.15.0 | ok | 2.15.0g | yes | 2026-07-12T17:28:43Z |  |
-| 2.14.1 | ok | 2.14.1g | yes | 2026-07-12T17:28:43Z |  |
-| 2.14.0 | ok | 2.14.0g | yes | 2026-07-12T17:28:43Z |  |
-| 2.13.3 | ok | 2.13.3g | yes | 2026-07-12T17:28:43Z |  |
-| 2.13.2 | ok | 2.13.2g | yes | 2026-07-12T17:28:43Z |  |
-| 2.13.1 | ok | 2.13.1g | yes | 2026-07-12T17:28:43Z |  |
-| 2.13.0 | ok | 2.13.0g | yes | 2026-07-12T17:28:43Z |  |
-| 2.12.3 | ok | 2.12.3g | yes | 2026-07-12T17:28:43Z |  |
-| 2.12.2 | ok | 2.12.2g | yes | 2026-07-12T17:28:43Z |  |
-| 2.12.1 | ok | 2.12.1g | yes | 2026-07-12T17:28:43Z |  |
-| 2.12.0 | ok | 2.12.0g | yes | 2026-07-12T17:28:43Z |  |
-| 2.11.1 | ok | 2.11.1g | yes | 2026-07-12T17:28:43Z |  |
-| 2.11.0 | ok | 2.11.0g | yes | 2026-07-12T17:28:43Z |  |
-| 2.10.0 | fail | - | - | 2026-07-12T17:28:43Z | no ena.ko found under the module tree after install -- the dkms build produced no module [make.log first error: passing argument 1 of 'bpf_warn_invalid_xdp_action' makes pointer from integer without a cast [-Werror=int-conversion]] |
-| 2.9.1 | fail | - | - | 2026-07-12T17:28:43Z | no ena.ko found under the module tree after install -- the dkms build produced no module [make.log first error: passing argument 1 of 'bpf_warn_invalid_xdp_action' makes pointer from integer without a cast [-Werror=int-conversion]] |
-| 2.9.0 | fail | - | - | 2026-07-12T17:28:43Z | no ena.ko found under the module tree after install -- the dkms build produced no module [make.log first error: invalid use of undefined type 'struct devlink'] |
-| 2.8.9 | fail | - | - | 2026-07-12T17:28:43Z | no ena.ko found under the module tree after install -- the dkms build produced no module [make.log first error: passing argument 1 of 'bpf_warn_invalid_xdp_action' makes pointer from integer without a cast [-Werror=int-conversion]] |
-| 2.8.8 | fail | - | - | 2026-07-12T17:28:43Z | no ena.ko found under the module tree after install -- the dkms build produced no module [make.log first error: passing argument 1 of 'bpf_warn_invalid_xdp_action' makes pointer from integer without a cast [-Werror=int-conversion]] |
-| 2.8.7 | fail | - | - | 2026-07-12T17:28:43Z | no ena.ko found under the module tree after install -- the dkms build produced no module [make.log first error: passing argument 1 of 'bpf_warn_invalid_xdp_action' makes pointer from integer without a cast [-Werror=int-conversion]] |
-| 2.8.6 | fail | - | - | 2026-07-12T17:28:43Z | no ena.ko found under the module tree after install -- the dkms build produced no module [make.log first error: passing argument 1 of 'bpf_warn_invalid_xdp_action' makes pointer from integer without a cast [-Werror=int-conversion]] |
-| 2.8.5 | fail | - | - | 2026-07-12T17:28:43Z | [ena-uek-detect] Makefile UEK-detection patch did not apply (upstream layout changed?) |
-| 2.8.4 | fail | - | - | 2026-07-12T17:28:43Z | [ena-uek-detect] Makefile UEK-detection patch did not apply (upstream layout changed?) |
-| 2.8.3 | fail | - | - | 2026-07-12T17:28:43Z | [ena-uek-detect] Makefile UEK-detection patch did not apply (upstream layout changed?) |
-| 2.8.2 | fail | - | - | 2026-07-12T17:28:43Z | [ena-uek-detect] Makefile UEK-detection patch did not apply (upstream layout changed?) |
-| 2.8.1 | fail | - | - | 2026-07-12T17:28:43Z | [ena-uek-detect] Makefile UEK-detection patch did not apply (upstream layout changed?) |
-| 2.8.0 | fail | - | - | 2026-07-12T17:28:43Z | [ena-uek-detect] Makefile UEK-detection patch did not apply (upstream layout changed?) |
+| 2.17.2 | ok | 2.17.2g | yes | 2026-07-16T08:53:07Z |  |
+| 2.17.0 | ok | 2.17.0g | yes | 2026-07-16T08:53:07Z |  |
+| 2.16.1 | ok | 2.16.1g | yes | 2026-07-16T08:53:07Z |  |
+| 2.16.0 | ok | 2.16.0g | yes | 2026-07-16T08:53:07Z |  |
+| 2.15.0 | ok | 2.15.0g | yes | 2026-07-16T08:53:07Z |  |
+| 2.14.1 | ok | 2.14.1g | yes | 2026-07-16T08:53:07Z |  |
+| 2.14.0 | ok | 2.14.0g | yes | 2026-07-16T08:53:07Z |  |
+| 2.13.3 | ok | 2.13.3g | yes | 2026-07-16T08:53:07Z |  |
+| 2.13.2 | ok | 2.13.2g | yes | 2026-07-16T08:53:07Z |  |
+| 2.13.1 | ok | 2.13.1g | yes | 2026-07-16T08:53:07Z |  |
+| 2.13.0 | ok | 2.13.0g | yes | 2026-07-16T08:53:07Z |  |
+| 2.12.3 | ok | 2.12.3g | yes | 2026-07-16T08:53:07Z |  |
+| 2.12.2 | ok | 2.12.2g | yes | 2026-07-16T08:53:07Z |  |
+| 2.12.1 | ok | 2.12.1g | yes | 2026-07-16T08:53:07Z |  |
+| 2.12.0 | ok | 2.12.0g | yes | 2026-07-16T08:53:07Z |  |
+| 2.11.1 | ok | 2.11.1g | yes | 2026-07-16T08:53:07Z |  |
+| 2.11.0 | ok | 2.11.0g | yes | 2026-07-16T08:53:07Z |  |
+| 2.10.0 | fail | - | - | 2026-07-16T08:53:07Z | no ena.ko found under the module tree after install -- the dkms build produced no module [make.log first error: passing argument 1 of 'bpf_warn_invalid_xdp_action' makes pointer from integer without a cast [-Werror=int-conversion]] |
+| 2.9.1 | fail | - | - | 2026-07-16T08:53:07Z | no ena.ko found under the module tree after install -- the dkms build produced no module [make.log first error: invalid use of undefined type 'struct devlink'] |
+| 2.9.0 | fail | - | - | 2026-07-16T08:53:07Z | no ena.ko found under the module tree after install -- the dkms build produced no module [make.log first error: invalid use of undefined type 'struct devlink'] |
+| 2.8.9 | fail | - | - | 2026-07-16T08:53:07Z | no ena.ko found under the module tree after install -- the dkms build produced no module [make.log first error: passing argument 1 of 'bpf_warn_invalid_xdp_action' makes pointer from integer without a cast [-Werror=int-conversion]] |
+| 2.8.8 | fail | - | - | 2026-07-16T08:53:07Z | no ena.ko found under the module tree after install -- the dkms build produced no module [make.log first error: passing argument 1 of 'bpf_warn_invalid_xdp_action' makes pointer from integer without a cast [-Werror=int-conversion]] |
+| 2.8.7 | fail | - | - | 2026-07-16T08:53:07Z | no ena.ko found under the module tree after install -- the dkms build produced no module [make.log first error: passing argument 1 of 'bpf_warn_invalid_xdp_action' makes pointer from integer without a cast [-Werror=int-conversion]] |
+| 2.8.6 | fail | - | - | 2026-07-16T08:53:07Z | no ena.ko found under the module tree after install -- the dkms build produced no module [make.log first error: passing argument 1 of 'bpf_warn_invalid_xdp_action' makes pointer from integer without a cast [-Werror=int-conversion]] |
+| 2.8.5 | fail | - | - | 2026-07-16T08:53:07Z | [ena-uek-detect] Makefile UEK-detection patch did not apply (upstream layout changed?) |
+| 2.8.4 | fail | - | - | 2026-07-16T08:53:07Z | [ena-uek-detect] Makefile UEK-detection patch did not apply (upstream layout changed?) |
+| 2.8.3 | fail | - | - | 2026-07-16T08:53:07Z | [ena-uek-detect] Makefile UEK-detection patch did not apply (upstream layout changed?) |
+| 2.8.2 | fail | - | - | 2026-07-16T08:53:07Z | [ena-uek-detect] Makefile UEK-detection patch did not apply (upstream layout changed?) |
+| 2.8.1 | fail | - | - | 2026-07-16T08:53:07Z | [ena-uek-detect] Makefile UEK-detection patch did not apply (upstream layout changed?) |
+| 2.8.0 | fail | - | - | 2026-07-16T08:53:07Z | [ena-uek-detect] Makefile UEK-detection patch did not apply (upstream layout changed?) |
 
 ### Fail pattern analysis
 
@@ -51,7 +51,7 @@ The kernel's headers determine which ENA releases can compile: older ENA release
 
 | ENA versions | root cause |
 |:--|:--|
-| 2.10.0 -- 2.9.1 (2 versions) | no ena.ko found under the module tree after install -- the dkms build produced no module [make.log first error: passing argument 1 of 'bpf_warn_invalid_xdp_action' makes pointer from integer without a cast [-Werror=int-conversion]] |
-| 2.9.0 | no ena.ko found under the module tree after install -- the dkms build produced no module [make.log first error: invalid use of undefined type 'struct devlink'] |
+| 2.10.0 | no ena.ko found under the module tree after install -- the dkms build produced no module [make.log first error: passing argument 1 of 'bpf_warn_invalid_xdp_action' makes pointer from integer without a cast [-Werror=int-conversion]] |
+| 2.9.1 -- 2.9.0 (2 versions) | no ena.ko found under the module tree after install -- the dkms build produced no module [make.log first error: invalid use of undefined type 'struct devlink'] |
 | 2.8.9 -- 2.8.6 (4 versions) | no ena.ko found under the module tree after install -- the dkms build produced no module [make.log first error: passing argument 1 of 'bpf_warn_invalid_xdp_action' makes pointer from integer without a cast [-Werror=int-conversion]] |
 | 2.8.5 -- 2.8.0 (6 versions) | [ena-uek-detect] Makefile UEK-detection patch did not apply (upstream layout changed?) |
