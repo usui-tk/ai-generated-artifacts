@@ -84,6 +84,17 @@
 set -euo pipefail
 
 # ---- pinned versions (overridable) -----------------------------------------
+# OL5 (legacy PoC target; UEK R2 2.6.39-400/el5uek only): pinned to 2.9.1,
+# mirroring the OL6/UEK4 pin. A 20/20 build sweep (1.1.2, 1.5.0-1.5.3,
+# 2.2.9-2.2.11, 2.8.0-2.9.1; 2026-07-18, kernel-uek-devel
+# 2.6.39-400.297.3.el5uek, gcc 4.1.2) established that every sampled release
+# builds WITH the el5uek shim set below (apply_el5uek_shims); vanilla source
+# builds 0/20. OL5 support is build-test / PoC scoped: DKMS is not used, the
+# toolchain + kernel headers + driver source must be pre-provisioned from the
+# host (EL5's openssl 0.9.8e tops out at TLS 1.0 and cannot reach the
+# TLS-1.2-only yum.oracle.com / github.com in-OS), and a compile success does
+# NOT prove Nitro load/traffic.
+ENA_VERSION_OL5="${ENA_VERSION_OL5:-2.9.1}"
 ENA_VERSION_OL6="${ENA_VERSION_OL6:-2.9.1}"
 ENA_VERSION_OL7="${ENA_VERSION_OL7:-2.17.2}"
 # OL8/OL9/OL10 resolve to the amzn-drivers LATEST tag at runtime (see
@@ -109,6 +120,9 @@ EPEL6_ARCHIVE_BASEURL="${EPEL6_ARCHIVE_BASEURL:-https://archives.fedoraproject.o
 # provisioning, or a standalone live OL instance), unchanged. The test-mode
 # branches are added incrementally; see SPEC A.7 / handoff B.1.9 Part 3.
 ENA_BUILDTEST="${ENA_BUILDTEST:-0}"
+# el5uek shim record: the exact-string transforms apply_el5uek_shims applied
+# (OL5 only; empty on every other OS). Carried in the buildtest result JSON.
+EL5UEK_SHIMS=""
 # INSECURE_TLS=1 drops TLS peer verification for the test-mode network commands
 # only (MITM dev proxy / EL6 NSS trust gaps). Default 0 = verification on.
 # Production never reads this beyond the default; it is consulted only inside the
@@ -135,9 +149,10 @@ die() {
   if [[ "${ENA_BUILDTEST}" == "1" ]]; then
     # structured fail result for the test harness (reason JSON-escaped). The exit
     # code (non-zero, below) agrees with status=fail. Test mode only.
-    printf '[ena-driver][buildtest][result] {"status":"fail","osmajor":"%s","ena_version":"%s","kver":"%s","ena_express":"%s","reason":"%s"}\n' \
+    printf '[ena-driver][buildtest][result] {"status":"fail","osmajor":"%s","ena_version":"%s","kver":"%s","ena_express":"%s","shims":"%s","reason":"%s"}\n' \
       "${osmajor:-}" "${ena_version:-}" "${kver:-}" \
       "$(ena_express_verdict "${ena_version:-}" 2>/dev/null || printf 'unknown')" \
+      "${EL5UEK_SHIMS:-}" \
       "$(printf '%s' "$*" | sed 's/\\/\\\\/g; s/"/\\"/g')"
   fi
   exit 1
@@ -178,7 +193,22 @@ _ena_resolve_latest() {
 # ena_express_verdict below; the matrix/lister carry their own copies
 # (reuse-by-copy, ADR 0003) -- tests/t021_enaexpress.sh guards against drift.
 _ena_ver_ge() {
-  [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n1)" = "$1" ]
+  # Pure-bash dotted-numeric compare: EL5's coreutils 5.97 has no `sort -V`
+  # (silently mis-ordered every verdict on the OL5 guest -- caught by the
+  # first OL5 container FT), and every caller passes plain x.y.z versions,
+  # for which a per-field numeric compare is exact. Behaviour-identical to
+  # the old sort -V form for all such inputs (t021 boundary set).
+  local a b i x y
+  IFS=. read -r -a a <<< "$1"
+  IFS=. read -r -a b <<< "$2"
+  for i in 0 1 2 3; do
+    x="${a[i]:-0}"; y="${b[i]:-0}"
+    [[ "${x}" =~ ^[0-9]+$ ]] || x=0
+    [[ "${y}" =~ ^[0-9]+$ ]] || y=0
+    if (( x > y )); then return 0; fi
+    if (( x < y )); then return 1; fi
+  done
+  return 0
 }
 
 # ena_express_verdict <version> : AWS ENA Express driver-version floor
@@ -326,6 +356,7 @@ fi
 [[ -n "${osminor}" ]] && log "Oracle Linux minor (update) version: ${osminor}"
 
 case "${osmajor}" in
+  5)  ena_version="${ENA_DRIVER_VERSION:-${ENA_VERSION_OL5}}" ;;
   6)  ena_version="${ENA_DRIVER_VERSION:-${ENA_VERSION_OL6}}" ;;
   7)  ena_version="${ENA_DRIVER_VERSION:-${ENA_VERSION_OL7}}" ;;
   8|9|10)
@@ -578,12 +609,42 @@ cleanup_ol10_epel_disposable() {
 # (kver detection, header check, dkms build/install, verify) runs unchanged.
 # Plain test commands; sslverify is dropped only at INSECURE_TLS=1 (e.g. a MITM
 # dev proxy). Production never enters this block.
+# OL5: no in-OS provisioning path EXISTS -- EL5's openssl 0.9.8e speaks TLS 1.0
+# at most, and yum.oracle.com is TLS-1.2-only, so the handshake itself fails
+# (sslverify=false cannot help: it is a protocol-level, not a certificate-level,
+# incompatibility -- live-measured 2026-06/2026-07). The build toolchain
+# (gcc/make/tar/findutils) and the el5uek kernel-uek-devel tree must therefore
+# be pre-provisioned from the HOST (rpm -Uvh of host-fetched RPMs -- the matrix
+# does this in its OL5 branch; a standalone operator must do the same). This
+# helper only VERIFIES that contract and wires /lib/modules/<kver>/build (a
+# devel-only provision has no kernel package to create the symlink).
+ol5_verify_preprovisioned() {
+  local t d kv
+  for t in gcc make tar find depmod modinfo; do
+    command -v "${t}" >/dev/null 2>&1 \
+      || die "OL5: '${t}' not found -- the build toolchain must be pre-provisioned from the host (no in-OS TLS 1.2 path exists on EL5); see the matrix's OL5 host-side provisioning"
+  done
+  # EL5-safe: coreutils 5.97 has no `sort -V`. UEK R2 is the terminal el5uek
+  # kernel line (frozen repos), so a single devel tree is the practical case
+  # and a plain lexicographic pick is sufficient.
+  d="$(find /usr/src/kernels -maxdepth 1 -mindepth 1 -type d -name '*el5uek*' 2>/dev/null | sort | tail -1 || true)"
+  [[ -n "${d}" ]] \
+    || die "OL5: no el5uek kernel-uek-devel tree under /usr/src/kernels -- pre-provision kernel-uek-devel (UEK R2) from the host"
+  kv="$(basename "${d}")"
+  mkdir -p "/lib/modules/${kv}"
+  [[ -e "/lib/modules/${kv}/build" ]] || ln -sfn "${d}" "/lib/modules/${kv}/build"
+  log "OL5: pre-provisioned toolchain verified (kernel-uek-devel ${kv})"
+}
+
 if [[ "${ENA_BUILDTEST}" == "1" ]]; then
   log "provisioning kernel-uek + build deps into the container (disposable)"
   # Per-OS: enable the shipped (disabled) EPEL persistently so the production
   # setup_epel below finds it already enabled and early-returns (no second repo),
   # and select the UEK repo for kernel-uek. Plain test commands.
   case "${osmajor}" in
+    5)
+      # OL5: verify-only (host pre-provisioned; see ol5_verify_preprovisioned).
+      bt_uek_repo="" ;;
     6)
       sed -i '/^\[epel\]/,/^\[/ s/^enabled=0/enabled=1/' /etc/yum.repos.d/epel.repo
       bt_uek_repo="ol6_UEKR4" ;;
@@ -643,7 +704,9 @@ if [[ "${ENA_BUILDTEST}" == "1" ]]; then
       bt_uek_repo="ol10_UEKR8" ;;
     *) die "ENA_BUILDTEST: OS major ${osmajor} not wired for the container test" ;;
   esac
-  if [[ "${INSECURE_TLS}" == "1" ]]; then
+  if [[ "${osmajor}" == "5" ]]; then
+    ol5_verify_preprovisioned
+  elif [[ "${INSECURE_TLS}" == "1" ]]; then
     yum -y --setopt=sslverify=false --enablerepo="${bt_uek_repo}" \
       install kernel-uek kernel-uek-devel gcc make tar findutils dkms \
       || die "ENA_BUILDTEST: failed to provision kernel-uek + build deps"
@@ -798,14 +861,22 @@ ensure_kernel_devel() {
 }
 
 stage "installing build prerequisites (gcc, make, kernel headers)"
-log "Installing build prerequisites (gcc, make, kernel headers)"
-yum install -y gcc make tar findutils || die "failed to install gcc/make/tar"
-if [[ "${kver}" == *uek* ]]; then
-  stage "resolving kernel-uek-devel headers for ${kver}"
-  ensure_kernel_devel || die "could not obtain kernel-uek-devel headers for ${kver} (enable the UEK repo / update the kernel and retry)"
+if [[ "${osmajor}" == "5" ]]; then
+  # OL5: verify-only -- the toolchain and headers were pre-provisioned from the
+  # host (no in-OS TLS 1.2 path exists on EL5; see ol5_verify_preprovisioned).
+  log "OL5: verifying pre-provisioned build prerequisites (host-side provisioning contract)"
+  ol5_verify_preprovisioned
+  [[ -e "/lib/modules/${kver}/build" ]] || die "OL5: kernel headers for ${kver} not present (pre-provision kernel-uek-devel from the host)"
 else
-  yum install -y "${develpkg}" || die "failed to install ${develpkg}"
-  [[ -e "/lib/modules/${kver}/build" ]] || die "kernel headers for ${kver} not present after install"
+  log "Installing build prerequisites (gcc, make, kernel headers)"
+  yum install -y gcc make tar findutils || die "failed to install gcc/make/tar"
+  if [[ "${kver}" == *uek* ]]; then
+    stage "resolving kernel-uek-devel headers for ${kver}"
+    ensure_kernel_devel || die "could not obtain kernel-uek-devel headers for ${kver} (enable the UEK repo / update the kernel and retry)"
+  else
+    yum install -y "${develpkg}" || die "failed to install ${develpkg}"
+    [[ -e "/lib/modules/${kver}/build" ]] || die "kernel headers for ${kver} not present after install"
+  fi
 fi
 
 # ---- OL9/UEKR8: match the kernel's build-time gcc -------------------------
@@ -849,26 +920,43 @@ if [[ "${osmajor}" == "8" && "${kver}" == 5.15.*uek* && -x /opt/rh/gcc-toolset-1
 fi
 
 use_dkms=1
-stage "enabling EPEL + installing dkms"
-setup_epel
-if ! yum install -y dkms; then
-  log "DKMS not installable; falling back to a plain make build (no auto-rebuild on kernel upgrade)"
+if [[ "${osmajor}" == "5" ]]; then
+  # OL5: DKMS is out of scope by design (no EPEL-5 dkms provisioning path
+  # in-OS, and the OL5 target is build-test / PoC only) -- always plain make.
   use_dkms=0
+  log "OL5: DKMS is not used on EL5 by design; building via plain make"
+else
+  stage "enabling EPEL + installing dkms"
+  setup_epel
+  if ! yum install -y dkms; then
+    log "DKMS not installable; falling back to a plain make build (no auto-rebuild on kernel upgrade)"
+    use_dkms=0
+  fi
+  # The OL10 disposable EPEL repo (when materialized) has served its purpose
+  # once the dkms provisioning step above completes -- remove it now regardless
+  # of the install outcome (D2: the repo configuration is throwaway). DKMS
+  # kernel-upgrade rebuilds need the already-installed toolchain, not the repo.
+  cleanup_ol10_epel_disposable
 fi
-# The OL10 disposable EPEL repo (when materialized) has served its purpose
-# once the dkms provisioning step above completes -- remove it now regardless
-# of the install outcome (D2: the repo configuration is throwaway). DKMS
-# kernel-upgrade rebuilds need the already-installed toolchain, not the repo.
-cleanup_ol10_epel_disposable
 
 # ---- fetch the pinned amzn-drivers source tarball --------------------------
 src_tgz="/usr/src/ena_linux_${ena_version}.tar.gz"
 src_dir="/usr/src/amzn-drivers-${ena_version}"
 url="https://github.com/amzn/amzn-drivers/archive/refs/tags/ena_linux_${ena_version}.tar.gz"
 stage "downloading amzn-drivers ${ena_version} source"
-log "Downloading ${url}"
 rm -rf "${src_dir}"
-if command -v curl >/dev/null 2>&1; then
+if [[ "${osmajor}" == "5" ]]; then
+  # OL5: the source tarball must be PRE-STAGED from the host -- EL5's curl/
+  # openssl (TLS 1.0 max) cannot reach the TLS-1.2-only github.com in-OS
+  # (same protocol-level limit as the yum path; the matrix stages it into
+  # /usr/src before invoking this script).
+  if [[ -f "${src_tgz}" ]]; then
+    log "OL5: using pre-staged source ${src_tgz} (host-side staging contract)"
+  else
+    die "OL5: source tarball not pre-staged at ${src_tgz} -- EL5 cannot fetch from github.com in-OS (TLS 1.0 max); stage it from the host (the matrix's OL5 branch does this automatically)"
+  fi
+elif command -v curl >/dev/null 2>&1; then
+  log "Downloading ${url}"
   if [[ "${ENA_BUILDTEST}" == "1" && "${INSECURE_TLS}" == "1" ]]; then
     curl -fsSL -k "${url}" -o "${src_tgz}" || die "download failed: ${url}"
   else
@@ -930,6 +1018,174 @@ patch_ena_uek_detection() {
 }
 if [[ "${osmajor}" == "6" || "${osmajor}" == "8" ]]; then
   patch_ena_uek_detection
+fi
+
+# ---- OL5/UEK R2 (el5uek) source shims [el5uek-shims] ------------------------
+# UEK R2 reports 2.6.39 but is a Linux 3.0.36-base kernel carrying Oracle
+# backports of 3.1-3.5-era APIs; kcompat.h gates purely on LINUX_VERSION_CODE
+# with RHEL/SLE/Ubuntu exceptions and knows nothing about UEK R2 (its Makefile
+# even hard-rejects any UEK that is not UEK3 3.8.13, where it checks at all).
+# Every el5uek build failure is one of: (a) a backport colliding with kcompat's
+# own compat definition, or (b) kcompat assuming an API a mainline 2.6.39 would
+# lack -- where RHEL6 is rescued by an explicit RHEL_RELEASE_CODE branch and
+# UEK R2 is not (el5uek headers define no RHEL_RELEASE_CODE; live-measured).
+# The shim set below is the EXACT transform set a 2026-07-18 investigation
+# proved sufficient: 20/20 sampled releases (1.1.2-2.9.1) build against
+# kernel-uek-devel 2.6.39-400.297.3.el5uek with plain gcc 4.1.2 (vanilla: 0/20).
+# Every transform is exact-string, applied only when its pattern is present,
+# and recorded in EL5UEK_SHIMS (emitted in the buildtest result JSON).
+# P3/P5/P6 are FUNCTIONAL DEGRADATIONS of performance hints only (the RSS
+# L4-hash flag and the DMA skip-cpu-sync attr) -- semantics-safe on x86
+# coherent DMA; the rest are exact-semantics collision removals or upstream
+# re-implementations. EL5-guest-safe by construction: bash 3.2 + GNU sed 4.1
+# only (no python in an EL5 guest).
+apply_el5uek_shims() {
+  local kc="${src_dir}/kernel/linux/ena/kcompat.h"
+  local mk="${src_dir}/kernel/linux/ena/Makefile"
+  local btree tab applied=""
+  tab="$(printf '\t')"
+  [[ -f "${kc}" ]] || die "[el5uek-shims] kcompat.h not found at ${kc}"
+  [[ -f "${mk}" ]] || die "[el5uek-shims] Makefile not found at ${mk}"
+  _shim_note() { applied="${applied:+${applied},}$1"; }
+
+  # S1 (devel-tree side): include/linux/kconfig.h is absent from the UEK R2
+  # tree (introduced upstream in 3.1; RHEL6/OL6 ship a backport, which is why
+  # the el6 results never hit this). Install the upstream IS_ENABLED
+  # implementation, sentinel-marked and only when the tree has no kconfig.h.
+  btree="$(readlink -f "/lib/modules/${kver}/build" 2>/dev/null || true)"
+  if [[ -n "${btree}" && -d "${btree}/include/linux" ]]; then
+    if [[ ! -f "${btree}/include/linux/kconfig.h" ]]; then
+      cat > "${btree}/include/linux/kconfig.h" <<'EOF'
+#ifndef __LINUX_KCONFIG_H
+#define __LINUX_KCONFIG_H
+/* el5uek-shims S1: upstream >=3.1 kconfig.h equivalent. UEK R2 (2.6.39 /
+ * 3.0.36 base) does not ship this header; RHEL6 does (backport). */
+#define __ARG_PLACEHOLDER_1 0,
+#define config_enabled(cfg) _config_enabled(cfg)
+#define _config_enabled(value) __config_enabled(__ARG_PLACEHOLDER_##value)
+#define __config_enabled(arg1_or_junk) ___config_enabled(arg1_or_junk 1, 0)
+#define ___config_enabled(__ignored, val, ...) val
+#define IS_ENABLED(option) (config_enabled(option) || config_enabled(option##_MODULE))
+#define IS_BUILTIN(option) config_enabled(option)
+#define IS_MODULE(option) config_enabled(option##_MODULE)
+#endif
+EOF
+      _shim_note "S1"
+    elif grep -q 'el5uek-shims S1' "${btree}/include/linux/kconfig.h" 2>/dev/null; then
+      _shim_note "S1"   # idempotent re-run: our stub is already in place
+    fi
+  fi
+
+  # S2: UEK R2 backports `typedef u32 netdev_features_t` into netdevice.h
+  # (upstream 3.3); kcompat's guard is `<3.3 && !RHEL>=6.5` -- suppress its copy.
+  if grep -q '^typedef u32 netdev_features_t;$' "${kc}"; then
+    sed -i 's|^typedef u32 netdev_features_t;$|/* el5uek-shims S2: suppressed (netdevice.h backports netdev_features_t) */|' "${kc}"
+    _shim_note "S2"
+  fi
+
+  # S3a: force the proven IS_UEK-unset configuration deterministically. The
+  # newer Makefiles derive IS_UEK from `uname -r` (the RUNNING kernel) -- in
+  # the matrix chroot that is the non-UEK host kernel, which is exactly the
+  # configuration the 20/20 sweep proved; on a UEK host it would flip to
+  # untested kcompat paths. Pin it (the retarget-to-BUILD_KERNEL patch used on
+  # OL6/OL8 would set IS_UEK for el5uek -- the opposite of the proven config).
+  if grep -q 'uname -r | grep uek' "${mk}"; then
+    sed -i 's#uname -r | grep uek#echo el5-generic | grep uek#' "${mk}"
+    _shim_note "S3a"
+  fi
+  # S3b: 1.5.2/1.5.3 derive IS_UEK from the TARGET tree's utsrelease.h (which
+  # does contain el5uek) and $(error)-reject any UEK that is not UEK3 3.8.13.
+  if grep -q 'only UEK3 with kernel version 3.8.13' "${mk}"; then
+    # The $(error ...) text is a LITERAL make expression to match, not a shell
+    # expansion -- single quotes are the point.
+    # shellcheck disable=SC2016
+    sed -i 's#$(error only UEK3 with kernel version 3.8.13 is suppported)#\# el5uek-shims S3b: UEK3-only guard neutralized#' "${mk}"
+    _shim_note "S3b"
+  fi
+
+  # P1/P2: backport collisions (ether_addr_equal / ethtool_rxfh_indir_default
+  # exist in the UEK R2 headers; kcompat's `!(RHEL_RELEASE_CODE)` guards fire
+  # because el5uek defines no RHEL_RELEASE_CODE). Rename kcompat's copy only;
+  # call sites then use the kernel's identical implementation.
+  if grep -q 'static inline bool ether_addr_equal(const u8 \*addr1, const u8 \*addr2)' "${kc}"; then
+    sed -i 's|static inline bool ether_addr_equal(const u8 \*addr1, const u8 \*addr2)|static inline bool __el5uek_p1_ether_addr_equal(const u8 *addr1, const u8 *addr2)|' "${kc}"
+    _shim_note "P1"
+  fi
+  if grep -q 'static inline u32 ethtool_rxfh_indir_default(u32 index, u32 n_rx_rings)' "${kc}"; then
+    sed -i 's|static inline u32 ethtool_rxfh_indir_default(u32 index, u32 n_rx_rings)|static inline u32 __el5uek_p2_ethtool_rxfh_indir_default(u32 index, u32 n_rx_rings)|' "${kc}"
+    _shim_note "P2"
+  fi
+
+  # P3: kcompat's skb_set_hash compat writes skb->l4_rxhash, absent from the
+  # UEK R2 sk_buff. Degrade that one line (rxhash itself is still set; the
+  # L4-hash flag is a flow-steering hint only).
+  if grep -q "^${tab}skb->l4_rxhash = (type == PKT_HASH_TYPE_L4);\$" "${kc}"; then
+    sed -i "s|^${tab}skb->l4_rxhash = (type == PKT_HASH_TYPE_L4);\$|${tab}(void)type; /* el5uek-shims P3: sk_buff has no l4_rxhash on el5uek */|" "${kc}"
+    _shim_note "P3"
+  fi
+
+  # P4: on the pure-old-mainline path (no RHEL/SLE codes), kcompat defines
+  # netdev_rss_key_fill TWICE (the simple get_random_bytes variant AND the
+  # get_random_once-based one) -- an upstream blind spot for exactly this
+  # kernel class. Rename only the simple variant (identified by its body line).
+  if sed -n "/^static inline void netdev_rss_key_fill(void \*buffer, size_t len)\$/{N;N;/get_random_bytes(buffer, len);/p}" "${kc}" | grep -q netdev_rss_key_fill; then
+    sed -i "/^static inline void netdev_rss_key_fill(void \*buffer, size_t len)\$/{N;N;/get_random_bytes(buffer, len);/s|netdev_rss_key_fill|__el5uek_p4_netdev_rss_key_fill|}" "${kc}"
+    _shim_note "P4"
+  fi
+
+  # P5: DMA_ATTR_SKIP_CPU_SYNC (upstream 3.7+) and dma_unmap_page_attrs do not
+  # exist on el5uek. Degrade the attr constant to 0 and the attrs-unmap to a
+  # plain dma_unmap_page (the attr is a cache-sync performance hint;
+  # semantics-safe on x86 coherent DMA).
+  if grep -q '^#define ENA_DMA_ATTR_SKIP_CPU_SYNC (1 << DMA_ATTR_SKIP_CPU_SYNC)$' "${kc}"; then
+    sed -i 's|^#define ENA_DMA_ATTR_SKIP_CPU_SYNC (1 << DMA_ATTR_SKIP_CPU_SYNC)$|#define ENA_DMA_ATTR_SKIP_CPU_SYNC 0 /* el5uek-shims P5a: attr absent on el5uek */|' "${kc}"
+    _shim_note "P5a"
+  fi
+  if grep -q "^${tab}dma_unmap_page_attrs(dev, addr, size, dir, &dma_attrs);\$" "${kc}"; then
+    sed -i "s|^${tab}dma_unmap_page_attrs(dev, addr, size, dir, \&dma_attrs);\$|${tab}dma_unmap_page(dev, addr, size, dir); /* el5uek-shims P5b */|" "${kc}"
+    _shim_note "P5b"
+  fi
+  if grep -q "^${tab}dma_unmap_page_attrs(dev, addr, size, dir, attrs);\$" "${kc}"; then
+    sed -i "s|^${tab}dma_unmap_page_attrs(dev, addr, size, dir, attrs);\$|${tab}dma_unmap_page(dev, addr, size, dir); /* el5uek-shims P5c */|" "${kc}"
+    _shim_note "P5c"
+  fi
+
+  # P6/P7 tail block: (P6) a raw DMA_ATTR_SKIP_CPU_SYNC reference in 2.8.6+
+  # ena_netdev.c (value unused after P5); (P7) dma_zalloc_coherent (upstream
+  # 3.2+, removed in 5.0) re-implemented exactly. Appended after kcompat.h's
+  # own include guard with a SELF-GUARD, so a double inclusion in one TU stays
+  # a no-op (preprocessing-equivalent to the proven tail placement).
+  if ! grep -q '__EL5UEK_TAIL_SHIM__' "${kc}"; then
+    cat >> "${kc}" <<'EOF'
+
+#ifndef __EL5UEK_TAIL_SHIM__
+#define __EL5UEK_TAIL_SHIM__
+/* el5uek-shims P6/P7 tail block */
+#ifndef DMA_ATTR_SKIP_CPU_SYNC
+#define DMA_ATTR_SKIP_CPU_SYNC 0 /* el5uek-shims P6: perf-hint attr absent; unmap path degraded to plain dma_unmap_page (P5) */
+#endif
+#include <linux/dma-mapping.h>
+#include <linux/string.h>
+static inline void *__el5uek_p7_dma_zalloc_coherent(struct device *dev,
+	size_t size, dma_addr_t *dma_handle, gfp_t flag)
+{
+	void *p = dma_alloc_coherent(dev, size, dma_handle, flag);
+	if (p)
+		memset(p, 0, size);
+	return p;
+}
+#define dma_zalloc_coherent __el5uek_p7_dma_zalloc_coherent
+#endif /* __EL5UEK_TAIL_SHIM__ */
+EOF
+    _shim_note "P6"
+    _shim_note "P7"
+  fi
+
+  EL5UEK_SHIMS="${applied}"
+  log "[el5uek-shims] applied: ${EL5UEK_SHIMS:-none}"
+}
+if [[ "${osmajor}" == "5" ]]; then
+  apply_el5uek_shims
 fi
 
 # ---- report the in-box ENA driver BEFORE the self-build replaces it --------
@@ -999,7 +1255,13 @@ else
 fi
 
 # ---- regenerate initramfs for the target kernel ----------------------------
-if command -v dracut >/dev/null 2>&1; then
+if [[ "${osmajor}" == "5" ]]; then
+  # OL5 is build-test / PoC scoped: the container is provisioned devel-only
+  # (no kernel package, no /lib/modules module tree), so EL5's mkinitrd cannot
+  # assemble an initrd here and MUST NOT abort a successful module build.
+  # Real-boot initrd handling for an OL5 AMI is a separate future workstream.
+  log "OL5: skipping initramfs regeneration (build-test scope; devel-only provision has no module tree)"
+elif command -v dracut >/dev/null 2>&1; then
   log "Regenerating initramfs for ${kver}"
   dracut -f "/boot/initramfs-${kver}.img" "${kver}" || die "dracut failed for ${kver}"
 elif command -v mkinitrd >/dev/null 2>&1; then
@@ -1052,7 +1314,7 @@ log "ENA driver build complete (OL${osmajor}, kernel ${kver}, version ${ena_vers
 # status=ok. Carries the {OS x ena_linux x kernel} facts a build ledger needs.
 # Test mode only; production emits nothing here.
 if [[ "${ENA_BUILDTEST}" == "1" ]]; then
-  printf '[ena-driver][buildtest][result] {"status":"ok","osmajor":"%s","ena_version":"%s","kver":"%s","dkms":%s,"ko":"%s","ko_version":"%s","ena_express":"%s"}\n' \
+  printf '[ena-driver][buildtest][result] {"status":"ok","osmajor":"%s","ena_version":"%s","kver":"%s","dkms":%s,"ko":"%s","ko_version":"%s","ena_express":"%s","shims":"%s"}\n' \
     "${osmajor}" "${ena_version}" "${kver}" "${use_dkms}" "${ko}" "${newver}" \
-    "$(ena_express_verdict "${ena_version}")"
+    "$(ena_express_verdict "${ena_version}")" "${EL5UEK_SHIMS}"
 fi
