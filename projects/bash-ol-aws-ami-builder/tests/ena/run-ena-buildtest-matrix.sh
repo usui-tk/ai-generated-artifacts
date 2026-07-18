@@ -105,6 +105,14 @@
 #   --report-only          no builds: regenerate RESULTS-ol<N>.md (and the
 #                          ledger's derived fields) from the existing ledger.
 #                          Needs only python3 (no root / containers / network).
+#   --merge-from <path>    no builds: union ANOTHER ledger JSON (e.g. from a
+#                          zero-base sweep in a scratch checkout) into --ledger,
+#                          then regenerate every report. Same-key same-status
+#                          keeps the existing row; same-key DIFFERENT-status is
+#                          a hard error unless --merge-prefer resolves it; keys
+#                          only in the other ledger are adopted. python3 only.
+#   --merge-prefer <side>  'ours' or 'theirs': explicit resolution for
+#                          same-key different-status merge conflicts.
 #   --pinned-only          test only each OL's pinned ENA version
 #   --ledger <path>        ledger JSON (default: tests/ena/buildtest-ledger.json)
 #   --results-dir <dir>    where RESULTS-ol<N>.md are written (default: tests/ena)
@@ -141,6 +149,8 @@ INSTALL_SCRIPT="${PROJ_DIR}/install-ena-driver.sh"
 OL_LIST="6 7 8 9 10"
 FULL=0
 REPORT_ONLY=0
+MERGE_FROM=""
+MERGE_PREFER=""
 ENA_VERSIONS=""
 ENA_MIN_VERSION=""
 PINNED_ONLY=0
@@ -194,6 +204,8 @@ while [ "$#" -gt 0 ]; do
     --force)            FORCE=1 ;;
     --full)             FULL=1 ;;
     --report-only)      REPORT_ONLY=1 ;;
+    --merge-from)       MERGE_FROM="${2:-}"; shift ;;
+    --merge-prefer)     MERGE_PREFER="${2:-}"; shift ;;
     -h|--help)          sed -n '2,/^# ---.*$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)                  die "unknown argument: $1 (-h for help)" ;;
   esac
@@ -205,7 +217,26 @@ ENA_VERSIONS="${ENA_VERSIONS//,/ }"
 BUNDLE_DIR="${BUNDLE_DIR:-${CLEANCORE_DIR}/verify-bundle}"
 
 # ---- pre-flight ------------------------------------------------------------
-if [ "${REPORT_ONLY}" = "1" ]; then
+if [ -n "${MERGE_FROM}" ]; then
+  # Merge mode: union ANOTHER ledger (e.g. one produced by a zero-base sweep in
+  # a scratch checkout) into this ledger, then regenerate every report. Like
+  # --report-only this needs only python3 -- no root, no containers, no network.
+  # Conflict policy (user-adjudicated 2026-07-18): rows are keyed on the dedup
+  # key (osmajor, ena_version, kver); a key present in both with the SAME
+  # status keeps the EXISTING row unchanged (verdicts are deterministic; the
+  # fail-note first-error capture is known to wobble benignly under parallel
+  # make, so the incumbent note wins); a key present in both with a DIFFERENT
+  # status is a HARD ERROR -- it means non-determinism or a harness fault and
+  # must be looked at -- unless --merge-prefer ours|theirs explicitly resolves
+  # it. Keys only in the other ledger are adopted as-is.
+  case "${MERGE_PREFER}" in ""|ours|theirs) : ;; *) die "--merge-prefer must be 'ours' or 'theirs' (got '${MERGE_PREFER}')" ;; esac
+  command -v python3 >/dev/null 2>&1 || die "missing required host tool: python3"
+  [ -f "${MERGE_FROM}" ] || die "no ledger to merge from at ${MERGE_FROM}"
+  [ -f "${LEDGER}" ] || die "no ledger at ${LEDGER} (with no base ledger there is nothing to merge into; copy the file instead)"
+  mkdir -p "${RESULTS_DIR}"; RESULTS_DIR="$(cd "${RESULTS_DIR}" && pwd)"
+  OL_LIST=""
+  log "merge mode: merging ${MERGE_FROM} into ${LEDGER} (prefer: ${MERGE_PREFER:-none = conflict is fatal}); no builds"
+elif [ "${REPORT_ONLY}" = "1" ]; then
   # Report-only: regenerate RESULTS-ol<N>.md (and the ledger's derived fields)
   # from the existing ledger. No builds run, so this path needs only python3 --
   # no root, no containers, no network. Emptying OL_LIST makes the build loop
@@ -799,6 +830,52 @@ done
 hr
 log "ENA matrix complete -- ${g_ok} ok, ${g_fail} fail, ${g_skip} skipped across ${g_builds} build(s); OL ran ${g_ol_ran}, skipped ${g_ol_skipped} (of ${ol_total})"
 hr
+
+# ---- merge-from: union another ledger into ours (before the regen below) ----
+if [ -n "${MERGE_FROM}" ]; then
+  merge_out="$(python3 - "${LEDGER}" "${MERGE_FROM}" "${MERGE_PREFER}" <<'PY_MERGE'
+import json, sys
+ours_p, theirs_p, prefer = sys.argv[1], sys.argv[2], sys.argv[3]
+ours = json.load(open(ours_p))
+theirs = json.load(open(theirs_p))
+key = lambda e: (str(e.get("osmajor")), str(e.get("ena_version")), str(e.get("kver")))
+oi = {key(e): e for e in ours.get("entries", [])}
+adopted = kept = resolved = 0
+conflicts = []
+for e in theirs.get("entries", []):
+    k = key(e)
+    if k not in oi:
+        oi[k] = e; adopted += 1
+    elif oi[k].get("status") == e.get("status"):
+        kept += 1                      # same verdict: the incumbent row wins
+    elif prefer == "theirs":
+        oi[k] = e; resolved += 1
+    elif prefer == "ours":
+        resolved += 1                  # keep ours, count the resolution
+    else:
+        conflicts.append("OL%s ena %s kver %s: ours=%s theirs=%s"
+                         % (k[0], k[1], k[2], oi[k].get("status"), e.get("status")))
+if conflicts:
+    print("CONFLICT")
+    for c in conflicts:
+        print(c)
+    sys.exit(3)
+ours["entries"] = list(oi.values())
+json.dump(ours, open(ours_p, "w"), indent=2)
+open(ours_p, "a").write(chr(10))
+print("MERGED adopted=%d same-status-kept=%d prefer-resolved=%d total=%d"
+      % (adopted, kept, resolved, len(oi)))
+PY_MERGE
+)" || true
+  case "${merge_out}" in
+    MERGED*) log "merge-from: ${merge_out}" ;;
+    CONFLICT*)
+      printf '%s
+' "${merge_out}" | sed '1d' | while IFS= read -r c; do warn "merge conflict: ${c}"; done
+      die "merge-from: conflicting status for the same (osmajor, ena_version, kver) key(s) above -- verdicts are deterministic, so investigate; or resolve explicitly with --merge-prefer ours|theirs" ;;
+    *) die "merge-from: merge step failed (unreadable ledger JSON?)" ;;
+  esac
+fi
 
 # ---- merge into the ledger + regenerate the per-OS Markdown -----------------
 log "updating ledger ${LEDGER} and per-OS reports in ${RESULTS_DIR}"
