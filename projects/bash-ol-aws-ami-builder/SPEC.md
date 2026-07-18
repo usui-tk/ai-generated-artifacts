@@ -2341,7 +2341,12 @@ A dev/CI harness, structurally the same as the ENA matrix (B.9), that determines
 per OL major (6/7/8/9/10) which AWS SSM Agent versions **install AND run** in a
 disposable clean-core container, and evaluates them against the AWS requirement
 **SSM Agent `>= 3.3.3598.0`** (from 2026-06-16 SSM Run Command drops the legacy
-`ec2messages` endpoint; agents at/above this use `ssmmessages`). It reuses
+`ec2messages` endpoint; agents at/above this use `ssmmessages`). **OL5 is a
+MEASURED EXCLUSION** — unlike ENA (B.9) and AWS CLI v2 (B.12), OL5 is
+deliberately NOT wired into this matrix: the entire AWS-supported band is
+triple-walled against the terminal `el5uek` line at the package-install layer
+and the kernel layer alike (adjudicated 2026-07-18; the full evidence record
+is D.31). It reuses
 `tests/cleancore/build-cleancore.sh` for the rootfs and drives
 `install-ssm-agent.sh SSM_INSTALLTEST=1` per version. Manual / on-demand (NOT a
 `run-all.sh` tier); production integration into the AMI pipeline is deferred
@@ -3997,6 +4002,58 @@ identical on OL6-8): `sed -E` in `detect_bundled_python` (EL5 sed 4.1.5 has
 only `-r`; the usage error killed the whole install under `set -e` — now
 pure-bash) and the kver read's `sort -V` stderr noise (EL5 coreutils 5.97 —
 now silenced; value path untouched).
+
+## D.31 OL5 SSM Agent: a measured, triple-walled exclusion (no `--ol 5` wiring)
+
+**Question (2026-07-18).** After the OL5 opt-in integrations of ENA (D.29) and
+AWS CLI v2 (D.30), does the SSM Agent earn the same wiring? Scope was
+user-adjudicated to the AWS-supported band only (`>= 3.3.3598.0`, the
+matrix's `MIN_SSM_VERSION`): **11 versions, 9 with fetchable RPMs**
+(3.3.3883.0 / 3.3.4364.0 are upstream-unavailable per the committed release
+list) — small enough that the investigation covered the FULL population, not
+a sample.
+
+**Answer: no — the band is closed at two independent layers (adjudication:
+do not wire; record the measurement).**
+
+1. **Package-install layer (measured, verbatim).** Every band RPM uses an
+   xz payload with sha256 file digests; EL5's rpm 4.4 refuses the
+   transaction outright:
+   `rpmlib(FileDigests) <= 4.6.0-1 is needed` and
+   `rpmlib(PayloadIsXz) <= 5.2-1 is needed`. There is no in-family install
+   path; a workaround would be host-side payload extraction, which BYPASSES
+   the vendor's own `%pretrans` kernel guard (below) — actively subverting
+   the package contract.
+2. **Kernel layer (three independent attestations, all measured).** The
+   band's kernel floor is **3.2**: (a) every binary carries the ELF note
+   `for GNU/Linux 3.2.0` (Go 1.24/1.25 toolchain floor); (b) the RPM
+   `%pretrans` scriptlet explicitly verifies kernel `>= 3.2` and refuses
+   otherwise; (c) the committed `ssm-agent-releases.json` already records
+   `min_kernel: "3.2"` for every band version. UEK R2 reports 2.6.39 on a
+   Linux **3.0.36** base — below the floor on both counts, and the line is
+   terminal, so the gap is permanent.
+3. **What DOES hold (and why it changes nothing).** The band binaries are
+   `static-pie` with **zero `GLIBC_` references** — the glibc axis that
+   decided the AWS CLI v2 case is vacuous here, and all 9 fetchable versions
+   answered `amazon-ssm-agent -version` inside an OL5.11 clean-core chroot
+   (matrix execution model, unshare + /proc). That result rides the modern
+   HOST kernel and proves only the never-in-doubt userland axis.
+
+**Contrast that drove the adjudication.** ENA and AWS CLI v2 each have a
+genuinely usable OL5 band (20/20 with the D.29 shims; 7/7 up to the 2.17.51
+glibc wall) — a matrix row records something real. The SSM supported band has
+**no usable version**: a ledger row could only ever record a chroot-userland
+artifact for software that the real target kernel can never run and the real
+target rpm can never install. Under the evidence discipline ("AMI name =
+reality"), that row would mislead; the measured exclusion is the honest
+asset.
+
+**Prevention / traceability.** This entry and the B.10 pointer are the
+record; the raw evidence (per-version payload/linkage table, the verbatim
+rpm refusal, the `%pretrans` excerpt, the 9/9 chroot run log) lives in the
+2026-07-18 session artifacts. If AWS ever ships a legacy-kernel agent line
+or the supported floor drops below the 3.2-era toolchains (neither is
+expected), the question can be reopened with the same three-layer probe.
 
 ## E.1 Line format
 

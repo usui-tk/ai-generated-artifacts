@@ -20,6 +20,21 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Changed (2026-07-18 — docs: OL5 SSM Agent recorded as a measured exclusion)
+- **SPEC: new D.31 + a B.10 pointer** — the AWS-supported SSM Agent band
+  (`>= 3.3.3598.0`; 11 versions, 9 fetchable) was investigated for the same
+  OL5 opt-in wiring ENA and AWS CLI v2 received, and adjudicated as a
+  **measured exclusion** (no `--ol 5` wiring): every band RPM is
+  xz-payload/sha256-digest (EL5 rpm 4.4 refuses with two rpmlib capability
+  errors, captured verbatim) AND the band's kernel floor of 3.2 is attested
+  three independent ways (ELF note `for GNU/Linux 3.2.0`, the `%pretrans`
+  kernel guard, the committed release list's `min_kernel`) against the
+  terminal el5uek 2.6.39 / 3.0.36-base line. The binaries themselves are
+  static-pie with zero GLIBC references and all 9 ran `-version` in the
+  OL5.11 chroot — a userland-only result that cannot translate to a real
+  instance, which is exactly why a ledger row would mislead. README rows
+  updated in both languages.
+
 ### Added (2026-07-18 — OL5 clean-core carries the archived-EPEL-5 repo configuration)
 - **`tests/cleancore/build-cleancore-ol5.sh`: archived EPEL 5 wired into the
   image** (user requirement, OL6-flow parity — the OL6 path gets the archived
