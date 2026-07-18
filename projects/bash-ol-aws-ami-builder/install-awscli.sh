@@ -66,6 +66,21 @@ set -euo pipefail
 # both bundle Python 3.11.9 (security-support end 2027-10-31), so the pin gains a
 # newer CLI/botocore at no Python-EOL cost. An explicit AWSCLI_VERSION overrides
 # (the install-test matrix always sets it).
+# OL5 (legacy PoC target; glibc 2.5): ceiling-pinned to 2.17.51 -- the SAME pin
+# as OL6, for the now-measured same reason: at 2.17.52 the bundle rebases
+# Python 3.11 -> 3.12 and its empirical glibc floor jumps 2.5 -> 2.17 (launcher
+# additionally demands GLIBC_2.7/2.14; loader errors captured verbatim,
+# 2026-07-18 investigation). A 12-version boundary sweep on the OL5.11
+# clean-core measured 7/7 "runs" for the <= 2.17.51 band -- ALL via the
+# standard aws/install symlink under the matrix execution model -- and a hard,
+# permanent glibc-too-old wall for >= 2.17.52. (Investigation lesson, recorded
+# in SPEC: the 3.8/3.9-bundled-bootloader band NEEDS /proc mounted to
+# self-resolve; a proc-less ad-hoc chroot mis-resolves from the symlink dir.
+# The matrix always mounts /proc, as does any real instance.) OL5 is install-test /
+# PoC scoped: the bundle zip must be pre-staged from the host (EL5 openssl
+# 0.9.8e = TLS 1.0 max cannot reach the TLS-1.2-only awscli.amazonaws.com
+# in-OS) and a chroot "runs" does not prove the real UEK R2 kernel runtime.
+AWSCLI_VERSION_OL5="${AWSCLI_VERSION_OL5:-2.17.51}"
 AWSCLI_VERSION_OL6="${AWSCLI_VERSION_OL6:-2.17.51}"
 AWSCLI_VERSION_OL7="${AWSCLI_VERSION_OL7:-latest}"
 AWSCLI_VERSION_OL8="${AWSCLI_VERSION_OL8:-latest}"
@@ -200,7 +215,12 @@ detect_bundled_python() {
   local root="$1" lp
   lp="$(find "${root}/aws" -maxdepth 4 -name 'libpython3*.so*' -type f 2>/dev/null | head -1)"
   [[ -n "${lp}" ]] || { printf ''; return 0; }
-  printf '%s' "${lp##*/}" | sed -E 's/^libpython([0-9]+\.[0-9]+).*/\1/'
+  # Pure-bash extraction (behaviour-identical to the old `sed -E` form):
+  # EL5's sed 4.1.5 has no -E and, under set -e, its usage error killed the
+  # whole install on the OL5 container FT. "libpython3.8.so.1.0" -> "3.8".
+  local bn="${lp##*/}"
+  bn="${bn#libpython}"
+  printf '%s' "${bn%%.so*}"
 }
 bundled_python_running() {
   [[ -x "${AWSCLI_BIN_DIR}/aws" ]] || { printf ''; return 0; }
@@ -245,6 +265,7 @@ osmajor="$(detect_osmajor)"
 # always sets AWSCLI_VERSION, so this per-OL fallback is production-only.
 if [[ -z "${awscli_version}" ]]; then
   case "${osmajor}" in
+    5) awscli_version="${AWSCLI_VERSION_OL5}" ;;
     6) awscli_version="${AWSCLI_VERSION_OL6}" ;;
     7) awscli_version="${AWSCLI_VERSION_OL7}" ;;
     8) awscli_version="${AWSCLI_VERSION_OL8}" ;;
@@ -264,6 +285,19 @@ test_host_kernel="$(uname -r 2>/dev/null || true)"
 # OL6/OL7/OL8 only. Production never enters this block.
 if [[ "${AWSCLI_INSTALLTEST}" == "1" ]]; then
   case "${osmajor}" in
+    5)
+      # OL5: NO in-guest network path exists (EL5 openssl 0.9.8e = TLS 1.0 max
+      # vs the TLS-1.2-only yum.oracle.com -- a protocol-level failure
+      # sslverify=false cannot bypass). Nothing needs provisioning either:
+      # unzip 5.52 already ships in the OL5 clean-core (verified), and the
+      # kver record comes from the AWSCLI_OL5_KVER env contract (the matrix
+      # passes the live-probed terminal el5uek NVR -- "probed, not
+      # provisioned": the kernel is not the compat axis of this matrix and
+      # installing the EL5 kernel RPM in a chroot risks its %post initrd
+      # scriptlets). Verify the unzip contract and continue.
+      command -v unzip >/dev/null 2>&1 \
+        || die "AWSCLI_INSTALLTEST: unzip not present in the OL5 clean-core (contract violated; it ships in the base 125-package set)"
+      bt_uek_repo="" ;;
     6) bt_uek_repo="ol6_UEKR4" ;;
     7) bt_uek_repo="ol7_UEKR6" ;;
     8)
@@ -274,8 +308,9 @@ if [[ "${AWSCLI_INSTALLTEST}" == "1" ]]; then
         dnf -y install yum >/dev/null 2>&1 || die "AWSCLI_INSTALLTEST: failed to bootstrap yum on OL8"
       fi
       bt_uek_repo="ol8_UEKR6" ;;
-    *) die "AWSCLI_INSTALLTEST: OS major ${osmajor} not wired (OL6/OL7/OL8 only)" ;;
+    *) die "AWSCLI_INSTALLTEST: OS major ${osmajor} not wired (OL5 opt-in / OL6/OL7/OL8)" ;;
   esac
+  if [[ "${osmajor}" != "5" ]]; then
   stage "provisioning kernel-uek (OL target-kernel record) via ${bt_uek_repo}"
   if [[ "${INSECURE_TLS}" == "1" ]]; then
     yum -y --setopt=sslverify=false --enablerepo="${bt_uek_repo}" install kernel-uek \
@@ -292,12 +327,21 @@ if [[ "${AWSCLI_INSTALLTEST}" == "1" ]]; then
       yum -y install unzip >/dev/null 2>&1 || die "AWSCLI_INSTALLTEST: failed to install unzip"
     fi
   fi
+  fi
 fi
 
 # Target OL kernel + OS glibc, read authoritatively from the rpm db. glibc is the
 # install/run gate; kver is recorded for the SSM-parallel ledger. Falls back to
 # the host kernel / getconf only if rpm has no row.
-kver="$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel-uek 2>/dev/null | grep -E '^[0-9]' | sort -V | tail -1 || true)"
+# sort stderr silenced: EL5 coreutils 5.97 has no -V and prints a usage error
+# even on the empty OL5 stream (harmless -- the value is unused there -- but it
+# pollutes the evidence log). OL6-8 behaviour unchanged.
+kver="$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel-uek 2>/dev/null | grep -E '^[0-9]' | sort -V 2>/dev/null | tail -1 || true)"
+# OL5: the container has no kernel-uek rpm (see the INSTALLTEST block above);
+# the matrix passes the live-probed terminal el5uek NVR instead.
+if [[ -z "${kver}" && "${osmajor}" == "5" && -n "${AWSCLI_OL5_KVER:-}" ]]; then
+  kver="${AWSCLI_OL5_KVER}"
+fi
 [[ -n "${kver}" ]] || kver="${test_host_kernel}"
 glibc="$(rpm -q --qf '%{VERSION}' glibc 2>/dev/null | grep -E '^[0-9]' | head -1 || true)"
 [[ -n "${glibc}" ]] || glibc="$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}' || true)"
@@ -310,8 +354,20 @@ workdir="$(mktemp -d)"
 trap 'rm -rf "${workdir}"' EXIT
 zipfile="${workdir}/awscliv2.zip"
 
-stage "fetch ${url}"
-fetch "${url}" "${zipfile}" || die "download-fail: AWS CLI v2 bundle fetch failed for ${awscli_version} (${url})"
+if [[ "${osmajor}" == "5" ]]; then
+  # OL5: the bundle must be PRE-STAGED from the host (no in-OS TLS 1.2 path;
+  # the matrix stages it before invoking this script -- ENA-parallel contract).
+  prestage="/usr/src/${AWSCLI_ZIP_NAME}-${awscli_version}.zip"
+  stage "use pre-staged bundle ${prestage}"
+  if [[ -f "${prestage}" ]]; then
+    cp -f "${prestage}" "${zipfile}"
+  else
+    die "download-fail: OL5 bundle not pre-staged at ${prestage} -- EL5 cannot fetch from awscli.amazonaws.com in-OS (TLS 1.0 max); stage it from the host (the matrix OL5 branch does this automatically)"
+  fi
+else
+  stage "fetch ${url}"
+  fetch "${url}" "${zipfile}" || die "download-fail: AWS CLI v2 bundle fetch failed for ${awscli_version} (${url})"
+fi
 
 stage "unzip bundle"
 unzip -oq "${zipfile}" -d "${workdir}" || die "unpack-fail: could not unzip the AWS CLI v2 bundle"
@@ -335,6 +391,7 @@ if ! "${workdir}/aws/install" -i "${AWSCLI_INSTALL_DIR}" -b "${AWSCLI_BIN_DIR}" 
 fi
 
 installed_version="$(installed_aws_version)"
+
 [[ -n "${installed_version}" ]] || die "installs-but-wont-run: aws installed but '--version' did not execute on OL${osmajor} (glibc ${glibc}) -- bundled interpreter/glibc miss"
 # Version-provenance guard (mirrors SSM's installed-version check): a specific
 # request must match what landed (`latest` is allowed to resolve to any version).
