@@ -32,7 +32,13 @@
 #
 # OL COVERAGE. All five majors (OL6-OL10) are FIRST-CLASS targets of this
 # matrix (recorded in the ledger; default --ol set), matching the RHEL sibling
-# project's five-major coverage. install-ena-driver.sh's ENA_VERSION_OL8/9/10
+# project's five-major coverage. OL5 (UEK R2 / el5uek) is an additional
+# OPT-IN, build-test/PoC scoped target: it never runs by default, is selected
+# explicitly via --ol 5, records into the SAME ledger (osmajor=5 rows carry
+# the applied el5uek shim set in the schema-1.2 `shims` field), builds via
+# plain make only (no DKMS), and is host-side provisioned (see the OL5
+# host-side provisioning section below) because EL5 has no in-guest TLS 1.2
+# path to yum.oracle.com / github.com. install-ena-driver.sh's ENA_VERSION_OL8/9/10
 # resolve to amzn-drivers "latest" at runtime (see _ena_resolve_latest);
 # build-ol-aws-ami.sh self-builds ENA on OL6-OL10 by default (ENA Express
 # generation: the AMI must ship an express-capable driver -- see SPEC B.9).
@@ -81,7 +87,12 @@
 # Usage:
 #   bash tests/ena/run-ena-buildtest-matrix.sh [options]
 # Options:
-#   --ol <list>            OL majors to test, comma/space (default: 6,7,8,9,10)
+#   --ol <list>            OL majors to test, comma/space (default: 6,7,8,9,10).
+#                          OL5 is a supported OPT-IN target (never in the
+#                          default set): e.g. --ol 5, or --ol 5,6,7,8,9,10.
+#                          The floor semantics are UNIFORM across OSes -- an
+#                          OL5 all-release evaluation is the separate run
+#                          `--ol 5 --full` (user-adjudicated 2026-07-18).
 #   --ena-versions <list>  ENA versions to test, comma/space (default: the
 #                          in-scope set of the release-list JSON) -- the "few
 #                          cases" knob. The default floor still applies.
@@ -115,7 +126,7 @@
 # Env (passed through): INSECURE_TLS (default 1 here, for the sandbox; set 0 on a
 #   trusted host). Requires: root, unshare, chroot, tar, curl, python3, and the
 #   clean-core builder toolchain (--report-only needs python3 only).
-#   ENA_BUILDTEST is wired for OL6-OL10.
+#   ENA_BUILDTEST is wired for OL6-OL10 plus the opt-in OL5.
 # Exit: 0 = the matrix ran and the ledger/reports were written (individual build
 #   pass/fail is recorded as evidence, NOT a harness error); non-zero = a harness
 #   / infrastructure failure (missing tool, clean-core build failed, etc.).
@@ -162,7 +173,7 @@ hr()   { log "================================================================";
 # 5.15.0-322.203.3.3) built it as 2.17.2g in a container FT (2026-07-12) with
 # the installer's gcc-toolset-11 + UEK-detection fixes. OL6 stays 2.9.1 (the
 # UEK4 ceiling; 2.17.2 confirmed FAILING on OL6 in the same 2026-07-11 run).
-pin_for() { case "$1" in 6) echo 2.9.1 ;; 7) echo 2.17.2 ;; 8) echo 2.17.2 ;; 9) echo 2.17.2 ;; 10) echo 2.17.2 ;; *) echo "" ;; esac; }
+pin_for() { case "$1" in 5) echo 2.9.1 ;; 6) echo 2.9.1 ;; 7) echo 2.17.2 ;; 8) echo 2.17.2 ;; 9) echo 2.17.2 ;; 10) echo 2.17.2 ;; *) echo "" ;; esac; }
 
 # ---- args ------------------------------------------------------------------
 while [ "$#" -gt 0 ]; do
@@ -347,6 +358,100 @@ PYNEWC
   return 0
 }
 
+# ---- OL5 host-side provisioning ---------------------------------------------
+# EL5 has NO in-guest network path to today's TLS-1.2-only endpoints (openssl
+# 0.9.8e tops out at TLS 1.0 -- a protocol-level failure sslverify=false cannot
+# bypass), so unlike OL6-10 (which self-provision via in-guest yum) the OL5
+# container gets everything from the HOST before install-ena-driver.sh runs:
+#   (1) the build toolchain RPMs -- a FIXED, frozen closure from OL5/latest
+#       (OL5 repos are terminal/immutable; exact NVRs measured 2026-07-18 and
+#       proven by the 20/20 build sweep). A future 404 here is a loud, clear
+#       failure, not a silent drift.
+#   (2) kernel-uek-devel -- resolved live from the OL5 UEK/latest channel via
+#       the same probe the update gate uses (frozen line; pinned fallback).
+#   (3) the amzn-drivers source tarball for the requested version, staged at
+#       /usr/src/ena_linux_<ver>.tar.gz (the installer's OL5 pre-stage contract).
+# RPMs install via the GUEST's own rpm (chroot rpm -Uvh; no network needed),
+# then /lib/modules/<kver>/build is wired (a devel-only provision has no kernel
+# package to create it). Downloads are cached under WORK_BASE across the run.
+# Load-readiness attestation note: a devel-only provision has no stock module
+# (no kernel.vermagic source) and no initrd, so verify-ena-buildresults.sh
+# reports OL5 rows as not load-ready (L4a) by design -- an honest verdict:
+# real load proof for OL5 is a future real-Nitro workstream. The missing
+# bundle Module.symvers additionally shares the tracked host-side build-symlink
+# resolution issue already open for el7-10.
+OL5_UEK_FALLBACK_KVER="2.6.39-400.297.3.el5uek.x86_64"
+OL5_TOOLCHAIN_RPMS="binutils220-2.20.51.0.2-5.29.el5.x86_64.rpm
+cpp-4.1.2-55.el5.x86_64.rpm
+gcc-4.1.2-55.el5.x86_64.rpm
+gcc44-4.4.7-11.el5_11.x86_64.rpm
+glibc-devel-2.5-123.0.2.el5_11.3.x86_64.rpm
+glibc-headers-2.5-123.0.2.el5_11.3.x86_64.rpm
+gmp-4.1.4-10.el5.x86_64.rpm
+kernel-headers-2.6.18-419.0.0.0.2.el5.x86_64.rpm
+libgomp-4.4.7-11.el5_11.x86_64.rpm
+make-3.81-3.el5.x86_64.rpm
+perl-5.8.8-43.el5_11.x86_64.rpm
+rsyslog5-5.8.12-7.0.1.el5_11.x86_64.rpm"
+
+ol5_curl() {
+  if [ "${INSECURE_TLS}" = "1" ]; then curl -fsSL -k --max-time 300 "$@"; else curl -fsSL --max-time 300 "$@"; fi
+}
+
+ol5_rpm_ok() {
+  # RPM lead magic: ed ab ee db
+  [ "$(head -c4 "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "edabeedb" ]
+}
+
+ol5_host_provision() {
+  local img="$1" ver="$2"
+  local cache="${WORK_BASE}/ol5-provision" f kver krpm d kv
+  local tool_base="https://yum.oracle.com/repo/OracleLinux/OL5/latest/x86_64/getPackage"
+  local uek_base="https://yum.oracle.com/repo/OracleLinux/OL5/UEK/latest/x86_64/getPackage"
+  mkdir -p "${cache}/rpms" "${cache}/src" || return 1
+  # (1) toolchain (fixed frozen set)
+  for f in ${OL5_TOOLCHAIN_RPMS}; do
+    if ! ol5_rpm_ok "${cache}/rpms/${f}"; then
+      ol5_curl "${tool_base}/${f}" -o "${cache}/rpms/${f}" || { echo "OL5 provisioning: download failed: ${f}"; return 1; }
+      ol5_rpm_ok "${cache}/rpms/${f}" || { echo "OL5 provisioning: not an RPM: ${f}"; return 1; }
+    fi
+  done
+  # (2) kernel-uek-devel (live-probed latest; frozen line, pinned fallback)
+  kver="$(probe_latest_uek_kver 5 || true)"
+  [ -n "${kver}" ] || kver="${OL5_UEK_FALLBACK_KVER}"
+  krpm="kernel-uek-devel-${kver}.rpm"
+  if ! ol5_rpm_ok "${cache}/rpms/${krpm}"; then
+    ol5_curl "${uek_base}/${krpm}" -o "${cache}/rpms/${krpm}" || { echo "OL5 provisioning: download failed: ${krpm}"; return 1; }
+    ol5_rpm_ok "${cache}/rpms/${krpm}" || { echo "OL5 provisioning: not an RPM: ${krpm}"; return 1; }
+  fi
+  # (3) install via the guest rpm (no guest network involved)
+  mkdir -p "${img}/ol5-provision" || return 1
+  for f in ${OL5_TOOLCHAIN_RPMS} "${krpm}"; do
+    cp -f "${cache}/rpms/${f}" "${img}/ol5-provision/${f}" || return 1
+  done
+  chroot "${img}" /bin/rpm -Uvh --nosignature /ol5-provision/*.rpm \
+    || { echo "OL5 provisioning: guest rpm -Uvh failed"; rm -rf "${img}/ol5-provision"; return 1; }
+  rm -rf "${img}/ol5-provision"
+  # (4) wire /lib/modules/<kver>/build (devel-only provision; EL5-safe pick --
+  # a single el5uek tree is the practical case on the terminal UEK R2 line)
+  d="$(find "${img}/usr/src/kernels" -maxdepth 1 -mindepth 1 -type d -name '*el5uek*' 2>/dev/null | sort | tail -1 || true)"
+  [ -n "${d}" ] || { echo "OL5 provisioning: no el5uek devel tree after rpm install"; return 1; }
+  kv="$(basename "${d}")"
+  mkdir -p "${img}/lib/modules/${kv}" || return 1
+  ln -sfn "/usr/src/kernels/${kv}" "${img}/lib/modules/${kv}/build" || return 1
+  # (5) stage the driver source tarball (installer OL5 pre-stage contract)
+  if ! gzip -t "${cache}/src/ena_linux_${ver}.tar.gz" 2>/dev/null; then
+    ol5_curl "https://github.com/amzn/amzn-drivers/archive/refs/tags/ena_linux_${ver}.tar.gz" \
+      -o "${cache}/src/ena_linux_${ver}.tar.gz" \
+      || { echo "OL5 provisioning: source download failed: ena_linux_${ver}"; return 1; }
+    gzip -t "${cache}/src/ena_linux_${ver}.tar.gz" 2>/dev/null \
+      || { echo "OL5 provisioning: source tarball is not gzip: ena_linux_${ver}"; return 1; }
+  fi
+  cp -f "${cache}/src/ena_linux_${ver}.tar.gz" "${img}/usr/src/ena_linux_${ver}.tar.gz" || return 1
+  echo "OL5 provisioning: toolchain + kernel-uek-devel (${kv}) + ena_linux_${ver} staged"
+  return 0
+}
+
 # Run ONE ENA_BUILDTEST for (ol, version) against a clean-core tarball; echo the
 # raw [result] JSON object (or empty if the build emitted none).
 run_one_buildtest() {
@@ -355,6 +460,15 @@ run_one_buildtest() {
   tar -C "${img}" -xzf "${tarball}"
   cp /etc/resolv.conf "${img}/etc/resolv.conf" 2>/dev/null || true
   cp "${INSTALL_SCRIPT}" "${img}/install-ena-driver.sh"
+  # OL5: host-side provisioning (toolchain RPMs + kernel-uek-devel + staged
+  # driver source) BEFORE the chroot -- no in-guest network path exists on EL5.
+  # On failure the message lands in the outlog and the installer's own
+  # pre-provision contract check turns it into a recorded fail (the phrase
+  # "pre-provision" is in the preflight transient-retry set).
+  if [ "${ol}" = "5" ]; then
+    ol5_host_provision "${img}" "${ver}" >> "${outlog}" 2>&1 \
+      || echo "[ena-matrix] OL5 host provisioning failed (see above); the guest contract check will record the failure" >> "${outlog}"
+  fi
   # Force an explicit PATH that includes /bin and run bash by absolute path: the
   # EL6 clean-core ships bash only at /bin/bash (no usrmerge) and a chroot
   # inherits the host PATH, so on a usrmerge host (PATH without /bin) the old
@@ -390,6 +504,7 @@ preflight_reason_is_transient() {
   # transient = worth a retry; a clear build/compile failure is real -> no retry.
   case "$1" in
     *"No more mirrors"*|*"Could not retrieve mirrorlist"*|*"failed to provision kernel-uek"*|\
+    *"pre-provision"*|\
     *"Could not resolve host"*|*"Connection timed out"*|*"Connection refused"*|\
     *"Temporary failure"*|*"timed out"*|*"Cannot retrieve"*|*"Network is unreachable"*) return 0 ;;
     *) return 1 ;;
@@ -460,7 +575,11 @@ preflight_qa() {
 # bt_uek_repo defaults (pinned by t011) -- BUG HISTORY: OL8 said UEKR6 here
 # AND in the installer while real OL8 AMIs run UEKR7, so both the update
 # gate and every matrix cell watched/tested a track the AMIs do not ship.
-uekr_for() { case "$1" in 6) echo UEKR4 ;; 7) echo UEKR6 ;; 8) echo UEKR7 ;; 9|10) echo UEKR8 ;; *) echo "" ;; esac; }
+# OL5's UEK channel predates the UEKR<N> naming: the path segment is
+# UEK/latest (live-probed 2026-07-18; OL5/UEK2-style paths do not exist).
+# UEK R2 is the terminal el5uek line (frozen repos), so the OL5 gate is in
+# practice driven by new ENA releases only.
+uekr_for() { case "$1" in 5) echo UEK/latest ;; 6) echo UEKR4 ;; 7) echo UEKR6 ;; 8) echo UEKR7 ;; 9|10) echo UEKR8 ;; *) echo "" ;; esac; }
 
 # UEK probe: the latest kernel-uek kver (x86_64) for this OL, from yum.oracle.com
 # via repomd.xml -> primary.xml.gz, parsed with python3 stdlib only (gzip +
@@ -526,6 +645,12 @@ probe_latest_ena() {
 gate_should_run_ol() {
   local ol="$1" latest_kver latest_ena dec verdict reason probe_failed=0
   latest_kver="$(probe_latest_uek_kver "${ol}" 2>/dev/null || true)"
+  # OL5 normalization: the probe returns the RPM's NVR.arch, but EL5's modules
+  # dir / devel-tree name (= the ledger kver) carries NO arch suffix (measured:
+  # /usr/src/kernels/2.6.39-400.297.3.el5uek). Without this the extra .x86_64
+  # component compares as a perpetually "new" kernel and the OL5 gate can never
+  # skip. OL6+ kernels DO use the NVR.arch modules-dir shape -- untouched.
+  if [ "${ol}" = "5" ]; then latest_kver="${latest_kver%.x86_64}"; fi
   latest_ena="$(probe_latest_ena 2>/dev/null || true)"
   [ -z "${latest_kver}" ] && probe_failed=1
   [ -z "${latest_ena}" ] && probe_failed=1
@@ -584,7 +709,7 @@ ol_total="$(echo "${OL_LIST}" | wc -w)"
 ol_pos=0
 for ol in ${OL_LIST}; do
   ol_pos=$(( ol_pos + 1 ))
-  case "${ol}" in 6|7|8|9|10) : ;; *) warn "OL${ol}: ENA_BUILDTEST is wired for OL6/7/8/9/10 only; skipping."; g_ol_skipped=$(( g_ol_skipped + 1 )); continue ;; esac
+  case "${ol}" in 5|6|7|8|9|10) : ;; *) warn "OL${ol}: ENA_BUILDTEST is wired for OL5 (opt-in via --ol) and OL6-OL10 only; skipping."; g_ol_skipped=$(( g_ol_skipped + 1 )); continue ;; esac
 
   # Update gate (default ON; --force bypasses): skip this OL unless the live
   # upstream has a kernel-uek or ENA the ledger has not covered -- before any
@@ -686,15 +811,19 @@ def load_ledger(p):
     if os.path.exists(p):
         try: return json.load(open(p))
         except Exception: pass
-    return {"schema_version": "1.1", "ledger_type": "ena-buildtest-matrix",
+    return {"schema_version": "1.2", "ledger_type": "ena-buildtest-matrix",
             "generated_by": "tests/ena/run-ena-buildtest-matrix.sh",
             "note": "ENA Express era (2026-07): records the express-scoped sweeps "
                     "(default floor min_version from ena-driver-releases.json). The "
                     "retired pre-express all-release ledger (210 rows, OL6/7/8 x 70) "
-                    "lives in git history.",
+                    "lives in git history. OL5 rows (opt-in --ol 5; build-test/PoC "
+                    "scope, el5uek shims recorded per row) join the same ledger.",
             "dedup_key": ["osmajor", "ena_version", "kver"], "entries": []}
 
 led = load_ledger(ledger_path)
+# The writer owns the schema: 1.2 adds the per-row `shims` field (the el5uek
+# transform list the installer applied; null on OL6-10 and on pre-1.2 rows).
+led["schema_version"] = "1.2"
 idx = {(e["osmajor"], e["ena_version"], e["kver"]): e for e in led.get("entries", [])}
 now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -713,6 +842,7 @@ if os.path.exists(tsv_path):
              "ko": r.get("ko", None),
              "ko_version": r.get("ko_version", None),
              "ena_express": r.get("ena_express", None),
+             "shims": (r.get("shims") or None),
              "reason": r.get("reason", None),
              "tested_at": now}
         # Defense-in-depth (independent of install-ena-driver.sh): an "ok" whose
@@ -746,6 +876,7 @@ def express_verdict(v):
 # --report-only run back-fills it across the whole ledger deterministically.
 for e in idx.values():
     e["ena_express"] = e.get("ena_express") or express_verdict(e.get("ena_version"))
+    e.setdefault("shims", None)
 
 entries = sorted(idx.values(), key=lambda e: (int(e["osmajor"]) if e["osmajor"].isdigit() else 0,
                                               vkey(e["kver"]), vkey(e["ena_version"])))
@@ -768,6 +899,13 @@ for ol, es in sorted(by_ol.items(), key=lambda kv: int(kv[0]) if kv[0].isdigit()
              "the requested version compiled and DKMS-installed on that kernel "
              "(necessary, not sufficient); real module load and device attach are "
              "proven separately on real Nitro (B-T7/B-T8).", ""]
+    if ol == "5":
+        lines += ["_OL5 is a build-test / PoC scoped, opt-in target (`--ol 5`; not in "
+                  "the default OL set): plain `make` only (no DKMS), toolchain + "
+                  "kernel-uek-devel + driver source are host-pre-provisioned (EL5 has "
+                  "no in-OS TLS 1.2 path), and every build applies the recorded "
+                  "el5uek shim set (see each row's notes) -- vanilla source builds "
+                  "0/20. ENA Express is not applicable to this legacy target._", ""]
     # Prominent summary of the newest kernel tested, so the latest result stays
     # visible at the top of the report as older kernels accumulate below.
     if kvers:
@@ -790,7 +928,12 @@ for ol, es in sorted(by_ol.items(), key=lambda kv: int(kv[0]) if kv[0].isdigit()
                   "|:--|:--|:--|:--|:--|:--|"]
         for e in rows:
             dkms = {True: "yes", False: "no", None: "-"}.get(e.get("dkms"), str(e.get("dkms")))
-            note = (e.get("reason") or "").replace("|", "\\|")
+            note_bits = []
+            if e.get("shims"):
+                note_bits.append(f"shims: {e['shims']}")
+            if e.get("reason"):
+                note_bits.append(str(e["reason"]))
+            note = "; ".join(note_bits).replace("|", "\\|")
             lines.append(f"| {e['ena_version']} | {e['status']} | {e.get('ko_version') or '-'} | "
                          f"{dkms} | {e.get('tested_at','')} | {note} |")
         lines.append("")
