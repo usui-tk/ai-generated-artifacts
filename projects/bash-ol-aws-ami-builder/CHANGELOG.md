@@ -20,6 +20,23 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (2026-07-19 — clean-core self-test false negative on `nodev` work volumes, all six builders)
+- **`tests/cleancore/build-cleancore-ol{5..10}.sh`: the self-test chroot now
+  bind-mounts the HOST `/dev` (+ `/proc`), matching the matrix execution
+  model** — field failure on the first OL5 AWS CLI run: the user placed
+  `--work-dir` on a `nodev`-mounted data volume and the self-test failed
+  exactly one check (`package manager runs (yum --version)`) while bash/rpm
+  passed. Reproduced in-sandbox on a `nodev` tmpfs: a plain chroot inherits
+  the unpack volume's mount flags, the image's own device nodes are inert
+  (`/dev/null`: Permission denied), and python/yum dies at startup — a false
+  negative about the HOST mount, not the image. All six per-OL builders
+  shared the plain-chroot `t_run` (sibling sweep). The binds are explicitly
+  torn down BEFORE the `rm -rf` of the unpacked tree (an rm descending into
+  a live `/dev` bind would delete host devices — ordering is load-bearing).
+  FT: a full OL5 build with WORK on a `nodev` tmpfs now passes 19/0/1;
+  builder phases and matrix containers were already bind-mounted and are
+  unaffected.
+
 ### Added (2026-07-18 — OL5 ENA full-sweep evidence merged into the ledger)
 - **`tests/ena/buildtest-ledger.json` + `RESULTS-ol5.md`: the user-run OL5
   full sweep (`--ol 5 --full`, real host, all 71 in-scope releases × the

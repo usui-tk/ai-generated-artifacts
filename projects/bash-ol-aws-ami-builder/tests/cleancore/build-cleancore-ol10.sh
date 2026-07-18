@@ -340,6 +340,15 @@ tar -C "${IMG}" -xzf "${OUT_TARBALL}"
 SIZE="$(du -sh "${IMG}" | cut -f1)"   # pristine size, before any test writes cache
 
 # test-time chroot helper -- operates on the UNPACKED image, not the build tree.
+# Self-test chroot with the HOST /dev (+ /proc) bind-mounted -- the matrix
+# execution model. Rationale (2026-07-19 field failure, OL5 first hit): a
+# plain chroot inherits the unpack volume's mount flags, so on a `nodev`
+# work volume the image's own device nodes are inert and the package-manager
+# probe dies on /dev/null -- a false negative about the HOST mount, not the
+# image. The binds are explicitly torn down BEFORE the image tree is removed
+# (an `rm -rf` descending into a live /dev bind would delete host devices).
+mount --bind /dev "${IMG}/dev" 2>/dev/null || true
+mount -t proc proc "${IMG}/proc" 2>/dev/null || true
 t_run() { chroot "${IMG}" "$@"; }
 
 log "[A->C] (self-test) evaluating the unpacked clean-core image"
@@ -431,6 +440,8 @@ fi
 # ───────────────────────────────────────────────────────────────────────────
 log "[A] clean-core OL10: ${PKGS} packages, ${SIZE} (unpacked)"
 log "  tar.gz : ${OUT_TARBALL}"
+umount "${IMG}/proc" 2>/dev/null || true
+umount "${IMG}/dev" 2>/dev/null || true
 rm -rf "${IMG}"   # drop the test unpack -- the deliverable is the tar.gz
 log "[A->C] self-test: ${ST_PASS} passed, ${ST_FAIL} failed, ${ST_SKIP} skipped"
 if [ "${ST_FAIL}" -ne 0 ]; then
