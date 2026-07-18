@@ -20,6 +20,38 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Changed (2026-07-18 — docs: Boot-E2E evidence note for the 07-18 generation; OL6 instance-generation boundary)
+- **TESTING.md: new "Boot-E2E evidence note (2026-07-18)"** — the 07-18 build
+  generation (OL9.8 + the first OL10.2-ISO build, the live-verified OL10
+  developer-EPEL discovery, the ssm-identity fix) built, registered, and
+  booted on real EC2 across all five majors (OL7-10 on current-generation
+  `c8a.large`, OL6 on `c5a.large`; sosreports on every instance).
+  Highlights recorded: the AMI-name = artifact invariant held for every
+  marker **including the baked SSM Agent** (first-load `v3.3.4793.0` =
+  the AMI-name version); the first OL10.2 boot doubles as the first
+  production-path run of the OL10 EPEL discovery; DKMS autoinstall proven
+  for UEK respins never swept in the container matrix; and a
+  **verification-protocol rule** — an account-level SSM agent auto-update
+  replaced the baked agent with `3.3.4851.0` minutes after boot (from a
+  channel other than the image's install channel, ETag-verified), so the
+  SSM name=artifact check must compare the first-load version, never
+  sos-time `rpm -qa`.
+- **OL6 instance-generation boundary documented (measured)**: the frozen
+  OL6/UEK4 kernel panics at early boot on AMD Zen3+ (`c6a`/`c7a`/`c8a` —
+  `kernel BUG at arch/x86/kernel/alternative.c:708`, pre-module, so no
+  pipeline artifact is in the failure path) while Intel (through
+  `r8i-flex`, 07-13) and AMD ≤ Zen2 (`c5a`) boot. Terminal kernel —
+  documentation-only response: SPEC B.1 constraints gained the boundary
+  bullet (and the OL7-10 scoping of the "boots on all Nitro types" claim,
+  with a dated scoping note on the D.4 consequence), README EN/JA gained
+  the OL6 table-row note and a section-10 item-8 bullet.
+- **SPEC B.11 validation-status paragraph refreshed** — the stale
+  "OL9/OL10 SSM not yet boot-validated" text is superseded by the
+  07-13/07-18 real-boot record, with the auto-update caveat and the
+  first-load comparison rule. Housekeeping recorded in the TESTING note:
+  the 07-13-generation AMIs and the interim `-ssmlatest` pair were
+  deregistered after the 07-18 run superseded them.
+
 ### Fixed (2026-07-18 — AMI identity: '-ssmlatest' degradation; SSM version resolution re-grounded on the S3 /latest/ channel)
 - **The 2026-07-18 OL9.8/OL10.2 real E2E registered AMI names carrying
   `-ssmlatest`** — a degradation of the "AMI identity always carries concrete

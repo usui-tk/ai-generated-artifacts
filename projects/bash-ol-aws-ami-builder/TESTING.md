@@ -192,6 +192,52 @@ AWS account; they are documented, not run by `run-all.sh`.
 > identity/report). Remaining open: SSM Run Command round-trip and
 > `--skip-*` build variants.
 
+> **Boot-E2E evidence note (2026-07-18).** The 2026-07-18 build generation
+> (OL9.8 + the first OL10.2-ISO build after the single-touch move, the
+> live-verified OL10 developer-EPEL discovery, and the ssm-identity fix)
+> completed **real builds + registrations on all five majors** (AMI IDs:
+> OL6 `ami-059ef521d336529a9`, OL7 `ami-04127da82990c66b6`, OL8
+> `ami-006c55f863d4cf972`, OL9 `ami-08aca2d94fc88ce0e`, OL10
+> `ami-04b2bd5e14e0e992d`; ap-northeast-1) and **real EC2 boots with
+> sosreports on all five** — OL7-OL10 on `c8a.large` (current-generation
+> AMD Zen5 Nitro), OL6 on `c5a.large`. What it proves, per the sosreports:
+> (1) the **AMI-name = artifact invariant held for every marker including
+> the SSM Agent** — `ethtool -i` / the dmesg ENA probe line shows the
+> self-built `2.9.1g` (OL6) / `2.17.2g` (OL7-10), and the agent's
+> **first-load log line is `v3.3.4793.0` on OL7-10, exactly the AMI-name
+> version** (OL6's el6 sos does not capture the first-load line; inferred
+> from the post-boot rpm upgrade timestamp matching the same updater
+> window); (2) **the first OL10.2 image boots** (`oracle-release` 10.2) —
+> also the first real run of the OL10 developer-EPEL discovery through the
+> production AMI-provisioning path (the in-guest DKMS build resolved dkms
+> via the discovery); (3) **DKMS autoinstall is proven for kernels never
+> swept in the container matrix**: `UPDATE_TO_LATEST` pulled newer UEK
+> respins at bake time (OL8 `5.15.0-322.203.3.4`, OL9/OL10
+> `6.12.0-204.92.4.3.1`) and the guest-side DKMS built `2.17.2g` for them;
+> (4) zero ena/nvme error lines (the only warning is the expected
+> unsigned-DKMS module taint). **Runtime observation (verification-protocol
+> rule)**: minutes after boot, the account's SSM agent auto-update replaced
+> the baked agent with `3.3.4851.0` (updater + dnf history in the
+> sosreports; that version is not even published on the
+> `ec2-downloads-windows` channel the image installs from, ETag-verified) —
+> so the SSM half of the name=artifact check MUST compare against the
+> **first-load version line** (or the dnf/yum "Upgraded (old)" entry),
+> never against sos-time `rpm -qa`. **OL6 instance-generation boundary
+> (measured)**: `c5a.large` (AMD Zen2) boots; `c6a`/`c7a`/`c8a` (Zen3/4/5)
+> all kernel-panic at early boot — `kernel BUG at
+> arch/x86/kernel/alternative.c:708` (jump-label `text_poke` verification)
+> with `Modules linked in:` still empty, i.e. **before any module loads,
+> so no artifact of this pipeline is in the failure path**; `c7a`/`c8a`
+> additionally print `core perfctr but no constraints; unknown hardware!`.
+> Combined with 2026-07-13 (Intel proven through `r8i-flex`), the OL6/UEK4
+> boundary is: Intel generations measured so far + AMD ≤ Zen2 boot; AMD
+> Zen3 and newer do not (frozen terminal kernel; documentation-only
+> response — see SPEC B.1 constraints / README section 10 item 8).
+> Housekeeping: the 2026-07-13-generation AMIs and the interim 2026-07-18
+> `-ssmlatest` pair were deregistered after this run superseded them (their
+> IDs in earlier notes are historical record). Remaining open: SSM Run
+> Command round-trip and `--skip-*` build variants.
+
 ## Coverage ledger
 
 Tracks which tiers exist so gaps are visible top-down (the bash analogue of the

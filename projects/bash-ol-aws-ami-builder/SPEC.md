@@ -1134,7 +1134,17 @@ See Part D for the historical context behind each.
 - x86_64 only; aarch64 AMI builds are not implementable today (`oracle-linux-image-tools` AWS target is x86_64-only).
 - AWS `BOOT_MODE=bios` is the only working combination; `legacy-bios`
   AMIs cannot use NitroTPM or UEFI Secure Boot, but boot fine on all
-  Nitro instance types.
+  Nitro instance types **for OL7-OL10** (proven through current-generation
+  `c8a` on 2026-07-18).
+- **OL6 instance-generation boundary (measured 2026-07-18)**: the frozen
+  OL6/UEK4 kernel (`4.1.12`) panics at early boot on modern AMD instance
+  generations — `kernel BUG at arch/x86/kernel/alternative.c:708`
+  (jump-label `text_poke` verification) before any module loads, so no
+  artifact of this pipeline is in the failure path. Measured: Intel
+  generations through `r8i-flex` and AMD ≤ Zen2 (`c5a`) boot; AMD Zen3+
+  (`c6a`/`c7a`/`c8a`) do not. Terminal kernel, no fix possible;
+  documentation-only. See the TESTING.md 2026-07-18 evidence note and
+  README section 10 item 8.
 - `import-snapshot` is rate-limited per AWS account (default 5 concurrent).
 
 ---
@@ -2492,12 +2502,19 @@ build host's network. The final report prints a `SSM Agent:` line with the
 resolved version (or `not installed` for `--skip-ssm-agent`). An explicitly
 set `AMI_NAME`/`AMI_DESCRIPTION` is left untouched (`:=`).
 
-**Validation status.** OL6/OL7/OL8 install+run is matrix-verified (B.10) and the
-OL6/OL7 build+boot pipeline is validated on real Nitro; **OL9/OL10 install+run is
-matrix-verified, but the SSM-enabled AMI has not yet been boot-validated end to end
-on a real OL9/OL10 instance** — they ship enabled by default (per the all-OL6-OL10
-decision) with this caveat noted. A real-AMI boot check for OL9/OL10 is the natural
-follow-up.
+**Validation status.** OL6-OL10 install+run is matrix-verified (B.10), and the
+SSM-enabled AMI is **boot-validated end to end on real EC2 for all five
+majors**: 2026-07-13 (baked `3.3.4793.0` installed AND running on every
+major — upstart on OL6, systemd active on OL7-10) and again 2026-07-18
+(first-load log line = the AMI-name version on OL7-10; OL7-10 on
+current-generation `c8a`). Runtime caveat, measured 2026-07-18: an
+account-level SSM agent auto-update can replace the baked agent minutes
+after boot (observed `3.3.4793.0` → `3.3.4851.0` via the agent's own
+updater, from a channel other than the one the image installs from), so
+any name=artifact verification MUST compare the **first-load version**
+(the agent's initial log line, or the package manager's "Upgraded (old)"
+entry) — never the `rpm -qa` state at collection time. The remaining open
+item is the SSM Run Command round-trip.
 
 ## B.12 AWS CLI v2 install+run test matrix (`tests/awscli/`)
 
@@ -2733,6 +2750,10 @@ actionable message if a user sets `uefi` or `hybrid`.
 
 Consequence: NitroTPM and UEFI Secure Boot cannot be enabled on the
 resulting AMIs. The AMIs still boot on every Nitro instance type.
+(Scoping note, 2026-07-18: measured exception for OL6 only — the frozen
+UEK4 kernel panics on AMD Zen3+ instance generations regardless of boot
+mode; see the B.1 constraints and the TESTING.md 2026-07-18 evidence
+note. OL7-OL10 hold as stated, proven through `c8a`.)
 
 ## D.5 osinfo-db on RHEL 10 has no `oraclelinux10` entries
 

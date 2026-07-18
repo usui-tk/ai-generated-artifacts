@@ -116,7 +116,7 @@ streamable VMDK 変換、 S3 ステージング、 EC2 `import-snapshot`、
 | `env.properties.aws-ol9` | **Oracle Linux 9**(x86_64)用パラメータ。対象マイナーリリースはテンプレート内の `ISO_URL` のみで決まる |
 | `env.properties.aws-ol8` | **Oracle Linux 8 Update 10**(x86_64)用パラメータ |
 | `env.properties.aws-ol7` | **Oracle Linux 7 Update 9**(x86_64)用パラメータ — **実験的・アップストリーム非推奨**。重要な注意事項はセクション 9.6 および 10 を参照 |
-| `env.properties.aws-ol6` | **Oracle Linux 6 Update 10**(x86_64)用パラメータ — **実験的・アップストリームに `distr/ol6-slim/` 自体が無い**。重要な注意事項はセクション 9.7 および 10 を参照 |
+| `env.properties.aws-ol6` | **Oracle Linux 6 Update 10**(x86_64)用パラメータ — **実験的・アップストリームに `distr/ol6-slim/` 自体が無い**。起動できるのは Intel および AMD ≤ Zen2(`c5a`)世代のみ — 凍結済み UEK4 カーネルが AMD Zen3 以降でパニックする(2026-07-18 実測)。重要な注意事項はセクション 9.7 および 10 を参照 |
 | `setup-vmimport-role.sh` | AWS VM Import/Export 用の `vmimport` IAM サービスロールを初回のみ作成 |
 | `install-ena-driver.sh` | 指定バージョン(OL6 → 2.9.1、OL7 → 2.17.2)または latest 自動解決(OL8/9/10 — SPEC B.9参照)の Amazon ENA ドライバを DKMS でビルド/導入し、導入モジュールの ENA Express 対応度も表示する自己完結スクリプト。依存(EPEL・gcc/make・dkms・`kernel-uek-devel`)を自身で導入し、**素の OL インスタンス上で単体実行**して検証可能。ENA ビルド有効時(既定、**OL6〜OL10** — ENA Express 世代対応。OL8/9/10 はホスト側で解決した amzn-drivers latest を `ENA_DRIVER_VERSION` で受け取る。OL8/9/10 セルフビルド版での実 AMI ブートは 2026-07-13 に E2E 検証済み — 実 EC2 で `ethtool -i` = `2.17.2g`。SPEC B.3.4 / TESTING.md 参照)に Phase 3 がゲストの AWS プロビジョニングへ注入 |
 | `install-ssm-agent.sh` | Amazon SSM Agent の RPM を導入し起動時に有効化する自己完結スクリプト(OL6-OL10 → `latest`。OL6 は 2026-07-13 まで固定版、再固定方針は SPEC B.11)。RPM を `curl` で取得し `rpm -Uvh` で導入(EL6 の yum-over-HTTPS 問題を回避)。install+run テストマトリクス(`tests/ssm/`)向けに**単体実行**可能、または SSM 導入有効時(既定)に Phase 3 がゲストの AWS プロビジョニングへ注入 |
@@ -598,6 +598,7 @@ OL6 関連の制約の全容は [セクション 10](#10-既知の制約注意�
    - **`linux-firmware` は恒久削除できない**: `kernel-uek` が依存関係として強く要求するため、`yum install kernel-uek` のたびに再インストールされます。
    - **AWS VM Import/Export 公式サポート外**: 本ラッパーは `import-snapshot` + `register-image` を使ってポリシーを迂回しますが、将来 AWS がポリシーを厳格化すると動作不能になる可能性があります。
    - **Phase A/B/C すべて検証済み(Phase C は 2026-07-13)**: 静的検証 9 項目(osinfo-db エントリ、ISO checksum、リポジトリ HTTPS、dracut フラグ、cloud-init 提供状況、アップストリーム OL バージョン分岐)および OL6 ISO ブートテスト(virt-install + isolinux + Anaconda 13.21.263 TUI)を先行検証済み。kickstart 完走、provision.sh の OL6 環境完走、cloud-init による `ec2-user` 作成(SSH ログイン)、AWS **Nitro** 起動(r5dn.large、NVMe ルート、セルフビルド ENA 2.9.1g が NIC を駆動)までの end-to-end は 2026-07-13 に検証完了(sosreport 裏付き。TESTING.md「Boot-E2E evidence note (2026-07-13)」参照)。
+   - **新世代 AMD インスタンスでは起動時にカーネルパニック(2026-07-18 実測)**: 凍結済み UEK4 カーネル(`4.1.12`)が `c6a`/`c7a`/`c8a`(AMD Zen3/Zen4/Zen5)の初期ブートで `kernel BUG at arch/x86/kernel/alternative.c:708`(jump-label `text_poke` 検証)に到達します。モジュールロード前の発生であり、本パイプラインの成果物起因ではなくカーネル×CPU の非互換です。実測で起動可能: Intel 各世代(`r8i-flex` まで、2026-07-13)および AMD ≤ Zen2(`c5a.large`、2026-07-18)。カーネルは終端・凍結済みで修正手段はありません — OL6 AMI は Intel または AMD Zen2 世代のインスタンスタイプでのみ起動してください。TESTING.md「Boot-E2E evidence note (2026-07-18)」参照。
    - **本番利用禁止**: OL7 よりさらに強い制約です。検証・学習・レガシーマイグレーション以外には絶対に使用しないでください。
 
 ---
