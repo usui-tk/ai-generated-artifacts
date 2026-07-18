@@ -375,7 +375,7 @@ run_one_installtest() {
     mount -t sysfs sys '${img}/sys'
     export AWSCLI_INSTALLTEST=1 AWSCLI_VERSION='${ver}' INSECURE_TLS='${INSECURE_TLS}' AWSCLI_OL5_KVER='${ol5kv}'
     chroot '${img}' /bin/bash /install-awscli.sh
-  " > "${outlog}" 2>&1 || true
+  " >> "${outlog}" 2>&1 || true
   rm -rf "${img}"
   { grep -E '\[awscli\]\[installtest\]\[result\]' "${outlog}" || true; } | tail -1 | sed 's/^.*\[result\] //'
 }

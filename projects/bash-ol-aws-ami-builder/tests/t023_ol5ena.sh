@@ -99,8 +99,8 @@ assert_match "${mtx}" 'case "\$\{ol\}" in 5\|6\|7\|8\|9\|10\)' \
 assert_match "${mtx}" '^OL5_UEK_FALLBACK_KVER="2\.6\.39-400\.297\.3\.el5uek\.x86_64"$' \
   "matrix: OL5 kernel-uek-devel fallback pin"
 rpm_count="$(sed -n '/^OL5_TOOLCHAIN_RPMS="/,/^[a-z].*"$/p' "${MATRIX}" | grep -c '\.rpm')"
-assert_eq "12" "${rpm_count}" \
-  "matrix: the frozen OL5 toolchain closure is exactly the 12 proven RPMs"
+assert_eq "11" "${rpm_count}" \
+  "matrix: the frozen OL5 toolchain closure is exactly the 11 proven RPMs (the stray rsyslog5 -- a Conflicts trap against the clean-core rsyslog -- stays out)"
 assert_match "${mtx}" 'gcc-4\.1\.2-55\.el5\.x86_64\.rpm' \
   "matrix: the proven gcc 4.1.2 NVR is in the closure"
 assert_match "${mtx}" 'latest_kver="\$\{latest_kver%\.x86_64\}"' \

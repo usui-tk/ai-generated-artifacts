@@ -397,7 +397,12 @@ PYNEWC
 #   (1) the build toolchain RPMs -- a FIXED, frozen closure from OL5/latest
 #       (OL5 repos are terminal/immutable; exact NVRs measured 2026-07-18 and
 #       proven by the 20/20 build sweep). A future 404 here is a loud, clear
-#       failure, not a silent drift.
+#       failure, not a silent drift. 11 RPMs: the investigation-era list
+#       carried a stray rsyslog5 (a resolver artifact, not a build tool) that
+#       Conflicts with the clean-core's own rsyslog and aborted the whole
+#       rpm -Uvh transaction on a fresh clean-core (first real-host run,
+#       2026-07-18); the 11-seed dependency closure is verified complete
+#       against the clean-core package set.
 #   (2) kernel-uek-devel -- resolved live from the OL5 UEK/latest channel via
 #       the same probe the update gate uses (frozen line; pinned fallback).
 #   (3) the amzn-drivers source tarball for the requested version, staged at
@@ -422,8 +427,7 @@ gmp-4.1.4-10.el5.x86_64.rpm
 kernel-headers-2.6.18-419.0.0.0.2.el5.x86_64.rpm
 libgomp-4.4.7-11.el5_11.x86_64.rpm
 make-3.81-3.el5.x86_64.rpm
-perl-5.8.8-43.el5_11.x86_64.rpm
-rsyslog5-5.8.12-7.0.1.el5_11.x86_64.rpm"
+perl-5.8.8-43.el5_11.x86_64.rpm"
 
 ol5_curl() {
   if [ "${INSECURE_TLS}" = "1" ]; then curl -fsSL -k --max-time 300 "$@"; else curl -fsSL --max-time 300 "$@"; fi
@@ -460,8 +464,20 @@ ol5_host_provision() {
   for f in ${OL5_TOOLCHAIN_RPMS} "${krpm}"; do
     cp -f "${cache}/rpms/${f}" "${img}/ol5-provision/${f}" || return 1
   done
-  chroot "${img}" /bin/rpm -Uvh --nosignature /ol5-provision/*.rpm \
-    || { echo "OL5 provisioning: guest rpm -Uvh failed"; rm -rf "${img}/ol5-provision"; return 1; }
+  # The guest rpm runs under the SAME execution model as every other guest
+  # step (unshare + /dev /proc /sys mounted) -- the D.30 lesson applied to
+  # host-side provisioning itself: a bare chroot worked on the dev sandbox by
+  # accident and failed on a real RHEL 10 build host (EL5 rpm/scriptlets are
+  # sensitive to the missing pseudo-filesystems; observed 2026-07-18).
+  # /ol5-provision/*.rpm is intentionally NOT host-expanded (the dir exists
+  # only in the img); EL5 rpm globs its install arguments itself.
+  echo "OL5 provisioning: installing toolchain + kernel-uek-devel via the guest rpm (unshare model)"
+  unshare --fork --pid --mount --uts --ipc -- bash -c "
+    mount --bind /dev '${img}/dev'
+    mount -t proc proc '${img}/proc'
+    mount -t sysfs sys '${img}/sys'
+    chroot '${img}' /bin/rpm -Uvh --nosignature /ol5-provision/*.rpm
+  " || { echo "OL5 provisioning: guest rpm -Uvh failed"; rm -rf "${img}/ol5-provision"; return 1; }
   rm -rf "${img}/ol5-provision"
   # (4) wire /lib/modules/<kver>/build (devel-only provision; EL5-safe pick --
   # a single el5uek tree is the practical case on the terminal UEK R2 line)
@@ -513,7 +529,7 @@ run_one_buildtest() {
     mount -t sysfs sys '${img}/sys'
     export ENA_BUILDTEST=1 ENA_DRIVER_VERSION='${ver}' INSECURE_TLS='${INSECURE_TLS}'
     chroot '${img}' /bin/bash /install-ena-driver.sh
-  " > "${outlog}" 2>&1 || true
+  " >> "${outlog}" 2>&1 || true
   # 0017: preserve the load-readiness bundle the verifier reads, while the built
   # container still exists (it is removed next). Dumb cp only -- see preserve_bundle.
   preserve_bundle "${ol}" "${ver}" "${img}" "${BUNDLE_DIR}" || true
@@ -624,7 +640,11 @@ probe_latest_uek_kver() {
   base="https://yum.oracle.com/repo/OracleLinux/OL${ol}/${uekr}/x86_64"
   repomd="$(mktemp)"; gz="$(mktemp)"; out="$(mktemp)"
   if curl -fsS --max-time 60 "${base}/repodata/repomd.xml" -o "${repomd}" 2>/dev/null; then
-    href="$(grep -oE '"[^"]*-primary\.xml\.gz"' "${repomd}" | head -1 | tr -d '"')"
+    # Hash prefix OPTIONAL: modern repos publish <hash>-primary.xml.gz but the
+    # EL5-era OL5 channels publish plain primary.xml.gz (measured live
+    # 2026-07-18) -- the old hyphen-required pattern made the OL5 probe
+    # permanently miss (silently falling back to the pinned kver).
+    href="$(grep -oE '"[^"]*primary\.xml\.gz"' "${repomd}" | head -1 | tr -d '"')"
     if [ -n "${href}" ] && curl -fsS --max-time 180 --max-filesize 134217728 "${base}/${href}" -o "${gz}" 2>/dev/null; then
       python3 - "${gz}" "${out}" 2>/dev/null <<'PY' || true
 import gzip,sys,xml.etree.ElementTree as ET

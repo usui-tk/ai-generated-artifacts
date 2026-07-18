@@ -20,6 +20,28 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (2026-07-18 — OL5 ENA host provisioning: rsyslog5 Conflicts aborted the toolchain transaction on a fresh clean-core)
+- **`tests/ena/run-ena-buildtest-matrix.sh`: the frozen OL5 toolchain closure
+  drops `rsyslog5` (12 → 11 RPMs)** — first real-host run (RHEL 10 KVM,
+  2026-07-18) failed preflight with `OL5: 'gcc' not found`. Root cause
+  (reproduced in-sandbox on a freshly built clean-core, then confirmed by
+  the raw rpm error): the investigation-era RPM list carried a stray
+  `rsyslog5` — a dependency-resolver artifact, not a build tool — which
+  `Conflicts: rsyslog` against the clean-core's own `rsyslog`, aborting the
+  ENTIRE `rpm -Uvh` transaction, so no toolchain (gcc included) was ever
+  installed and the installer's pre-provision contract check fired. The
+  session-era FT could not see it: its clean-core tarball predated the
+  builder revision that ships `rsyslog`. The 11-seed dependency closure is
+  re-verified mechanically complete against the clean-core package set
+  (resolver: 29 names, zero missing, `rsyslog5` required by nothing).
+  Regression pin updated in `tests/t023_ol5ena.sh` (count + rationale).
+- **run_one output truncation fixed in BOTH matrices (ENA + awscli)** — the
+  chroot step redirected with `>` and silently WIPED the OL5 host-side
+  provisioning/staging output that the hook had just appended to the same
+  outlog, which is exactly why the preflight diagnostic bundle showed no
+  provisioning lines and made the field failure needlessly opaque. Now `>>`
+  (behaviour identical for OL6-10: the outlog is a fresh mktemp).
+
 ### Added (2026-07-18 — OL5 opt-in AWS CLI v2 install-test support + awscli ledger merge mode)
 - **`install-awscli.sh`: OL5 (glibc 2.5) branch** — install-test / PoC scoped,
   after a same-day 12-version boundary sweep measured **7/7 "runs"** for the
