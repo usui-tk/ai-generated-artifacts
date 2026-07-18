@@ -20,6 +20,36 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Added (2026-07-18 — OL5 opt-in AWS CLI v2 install-test support + awscli ledger merge mode)
+- **`install-awscli.sh`: OL5 (glibc 2.5) branch** — install-test / PoC scoped,
+  after a same-day 12-version boundary sweep measured **7/7 "runs"** for the
+  ≤ 2.17.51 band on the OL5.11 clean-core and a hard glibc-too-old wall from
+  2.17.52 (Python 3.12 rebase; `.so` floor 2.5 → 2.17 — **empirically
+  explaining the pre-existing OL6 pin for the first time**). Ceiling pin
+  `AWSCLI_VERSION_OL5=2.17.51` (= the OL6 pin). The bundle zip must be
+  host-pre-staged (EL5 has no in-OS TLS 1.2 path); nothing else needs
+  provisioning (unzip 5.52 ships in the clean-core, asserted not installed);
+  the kver record travels via the `AWSCLI_OL5_KVER` contract (probed, not
+  provisioned). **No W1 launch wrapper ships** — the mid-band symlink
+  failures in the first ad-hoc sweep were a harness artifact (chroot without
+  `/proc`; that bootloader generation self-resolves via `/proc/self/exe`),
+  proven by an A/B on the identical binary and re-adjudicated out; the full
+  story is SPEC D.30. Shared-code EL5 hardening found by container FT
+  (behaviour identical on OL6-8): `detect_bundled_python` `sed -E` → pure
+  bash; the kver `sort -V` stderr silenced.
+- **`tests/awscli/run-awscli-installtest-matrix.sh`: opt-in OL5 wiring +
+  merge mode** — default OL set stays 6-8; `--ol 5` opt-in; `pin_for(5)` =
+  2.17.51; `ol5_stage_zip` (cached, `unzip -t`-verified host staging) +
+  `probe_ol5_uek_kver` (ENA-probe reuse-by-copy, pinned fallback);
+  `--merge-from`/`--merge-prefer` ported from the ENA matrix on this ledger
+  dedup key (same adjudicated conflict policy). Ledger schema stays 1.0; the
+  existing report generator derives the OL5 "capped at 2.17.51" verdict with
+  zero changes; RESULTS-ol5.md opens with a scope paragraph.
+- **`tests/t024_ol5awscli.sh` (new tier, 25 asserts)** — pins the installer
+  OL5 branch, the W1 absence, the EL5 shared-code safety, the matrix wiring,
+  and the three merge-policy cases (hermetic). Suite totals move 602 →
+  **629 passed / 24 tiers** (B-T1 53, B-T2 48); TESTING.md §0 re-tallied.
+
 ### Added (2026-07-18 — OL5/UEK R2 opt-in ENA build-test support + ledger merge mode)
 - **`install-ena-driver.sh`: OL5 (`el5uek`) branch** — build-test / PoC scoped,
   user-adjudicated after a same-day feasibility investigation proved **20/20**

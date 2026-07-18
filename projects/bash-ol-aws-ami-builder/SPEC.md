@@ -2568,7 +2568,8 @@ item is the SSM Run Command round-trip.
 ## B.12 AWS CLI v2 install+run test matrix (`tests/awscli/`)
 
 A dev/CI harness, structurally the same as the SSM matrix (B.10), that determines
-per OL major (**6/7/8**) which AWS CLI **v2** versions **install AND run** in a
+per OL major (**6/7/8**, plus the **opt-in OL5** — see the OL5 paragraph below)
+which AWS CLI **v2** versions **install AND run** in a
 disposable clean-core container. It reuses `tests/cleancore/build-cleancore.sh`
 for the rootfs and drives `install-awscli.sh AWSCLI_INSTALLTEST=1` per version.
 Manual / on-demand (NOT a `run-all.sh` tier); production integration into
@@ -2594,6 +2595,39 @@ axis. The ledger dedup key is `(osmajor, awscli_version, kver)` with **kver
 PRIMARY** (`kver` = the OL UEK from `rpm -q kernel-uek`, provisioned the same
 install-at-test-time way as SSM, so a new OL UEK re-tests every version);
 `test_host_kernel` is the runner kernel the binary actually ran on.
+
+**OL5 (opt-in; install-test / PoC scope; 2026-07-18).** OL5 (glibc **2.5**) is
+an additional matrix target that is **never in the default `--ol` set** — it
+runs only via an explicit `--ol 5`. A 12-version boundary sweep on the OL5.11
+clean-core measured **7/7 "runs" for the ≤ 2.17.51 band** and a hard
+glibc-too-old wall from 2.17.52 — so the OL5 ceiling pin is **2.17.51, the
+same pin as OL6, for the now-measured same reason**: the 2.17.52 Python
+3.11 → 3.12 rebase jumps the bundle's empirical `.so` floor 2.5 → 2.17 (the
+launcher additionally demands `GLIBC_2.7`/`2.14`; loader errors captured
+verbatim). This measurement empirically settles WHY the OL6 pin sits at
+2.17.51 (the pre-existing empirical boundary above is the same event seen
+from the OL6 side). OL5 differs in execution model only: EL5 has **no
+in-guest TLS 1.2 path**, so the matrix stages the requested bundle zip into
+the container from the host (`ol5_stage_zip`, cached and `unzip -t`-verified;
+the installer's `/usr/src/<zip>-<ver>.zip` pre-stage contract) — nothing else
+needs provisioning (unzip 5.52 ships in the OL5 clean-core). The `kver`
+record is the live-probed terminal `OL5/UEK/latest` NVR passed via the
+`AWSCLI_OL5_KVER` contract (**probed, not provisioned** — the kernel is not
+this matrix's compat axis and the EL5 kernel RPM's `%post` initrd scriptlets
+are unsafe in a chroot; pinned fallback `2.6.39-400.297.3.el5uek.x86_64`). A
+chroot `runs` does **not** prove the real UEK R2 kernel runtime (the bundled
+CPython may impose a minimum-kernel constraint — a future real-instance
+stage), and no W1 launch wrapper ships (D.30). The existing report generator
+needed zero changes: it derives the "capped at `2.17.51`" verdict for the
+glibc-2.5 rows by itself.
+
+**Ledger operating model.** Identical to the ENA matrix (B.9): zero-base
+rebuild and incremental append are native, and `--merge-from <ledger.json>`
+(+ `--merge-prefer ours|theirs`; python3-only) unions an externally produced
+ledger on the dedup key with the same adjudicated conflict policy (adopt new
+keys; same-status keeps the incumbent row; different-status is a hard error
+naming every conflicting key, base ledger untouched, unless `--merge-prefer`
+resolves). (Tested by `tests/t024_ol5awscli.sh`.)
 
 **Bundled Python + empirical glibc (per-entry, free).** The install-test already
 unzips each bundle, so two facts are recorded for free and survive the
@@ -3918,6 +3952,38 @@ a compile proof only — Nitro load/traffic for OL5 is unproven.
 **Prevention.** `tests/t023_ol5ena.sh` pins every proven pattern string, the
 EL5-safety rule, the matrix wiring (pin/channel/gate/closure), and the merge
 policy.
+
+## D.30 OL5 AWS CLI v2: the /proc-resolution false lead, and the measured 2.17.52 glibc wall
+
+**Symptom (investigation, 2026-07-18).** In the first OL5 feasibility sweep,
+the 2.1.x–2.7.x band (bundled Python 3.8/3.9) failed via the `aws/install`
+symlink with `Error loading Python lib '<bindir>/libpython3.N.so.1.0'` while
+2.0.30 and 2.13.0+ ran — initially (mis)read as an EL5 symlink-resolution
+defect needing a launch wrapper ("W1"), and a wrapper fallback was adjudicated
+on that basis.
+
+**Correction (measured, same day).** An A/B on the **identical installed
+binary** nailed the real cause: the ad-hoc investigation harness ran a plain
+`chroot` **without `/proc` mounted**. That bootloader generation self-resolves
+via `/proc/self/exe` and falls back to the symlink directory only when `/proc`
+is absent; with `/proc` mounted the same symlink runs perfectly. The matrix
+execution model (`unshare` + `/proc`, identical to OL6-8) and any real
+instance always mount `/proc`, so the entire ≤ 2.17.51 band runs via the
+standard symlink and a wrapper could never fire. **W1 was re-adjudicated OUT**
+(a mechanism that cannot fire in the target environment is not shipped);
+`tests/t024_ol5awscli.sh` pins its absence. Lessons: (1) an ad-hoc harness is
+itself part of the measurement — reproduce failures under the REAL execution
+model before designing around them; (2) `/proc` is load-bearing for
+PyInstaller-frozen binaries of that generation.
+
+**What stands (measured).** The 2.17.51 → 2.17.52 boundary is a genuine,
+permanent glibc wall (Python 3.12 rebase; `.so` floor 2.5 → 2.17; launcher
+`GLIBC_2.7`/`2.14`) that explains the OL6 pin and sets the identical OL5
+ceiling. Shared-code EL5 hazards found and fixed on the way (behaviour
+identical on OL6-8): `sed -E` in `detect_bundled_python` (EL5 sed 4.1.5 has
+only `-r`; the usage error killed the whole install under `set -e` — now
+pure-bash) and the kver read's `sort -V` stderr noise (EL5 coreutils 5.97 —
+now silenced; value path untouched).
 
 ## E.1 Line format
 
