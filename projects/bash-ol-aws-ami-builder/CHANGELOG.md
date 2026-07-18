@@ -20,6 +20,30 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (2026-07-19 — host TMPDIR leaked into chroot guests; guest env hygiene across all container entry points)
+- **The three matrices (ENA / AWS CLI / SSM): the guest chroot env now pins
+  `TMPDIR=/tmp`** — second field failure of the OL5 AWS CLI run: the
+  recommended `/data/temp` invocation exported `TMPDIR` (to move the
+  transient container rootfs off `/tmp`), the variable propagated through
+  `sudo env` → `unshare` → `chroot`, and the installer's own `mktemp -d`
+  inside the guest died on a path that exists only on the HOST
+  (`mktemp: cannot make temp dir /data/temp/.../tmp.XXXX`). A/B in-sandbox:
+  the unpatched matrix reproduces the exact field error under a leaked
+  TMPDIR; the patched ENA and awscli matrices both pass preflight and record
+  ok under the same leak. Host-side mktemps still honor the caller's TMPDIR
+  by design (that is the point of the recommendation).
+- **Similar-processing survey (user-required)** across all 59 chroot entry
+  points in 10 files, by failure class: the three matrix unshare blocks
+  (fixed above); the six builders' self-test `t_run` (same
+  guest-general-execution class — now `/usr/bin/env TMPDIR=/tmp`); the ENA
+  OL5 provisioning rpm and the OL5 builder's EPEL rpm (scriptlet exposure —
+  same env guard). The builders' internal build phases were measured
+  tolerant (the field run built 19/0/1 under the leaked TMPDIR; fail-loud
+  path) and are left unchanged.
+- Regression pins added to `tests/t023_ol5ena.sh` and
+  `tests/t024_ol5awscli.sh` (+1 assert each; suite 629 → 631 full-toolchain,
+  TESTING.md §0 re-tallied).
+
 ### Fixed (2026-07-19 — clean-core self-test false negative on `nodev` work volumes, all six builders)
 - **`tests/cleancore/build-cleancore-ol{5..10}.sh`: the self-test chroot now
   bind-mounts the HOST `/dev` (+ `/proc`), matching the matrix execution

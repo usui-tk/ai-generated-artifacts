@@ -85,17 +85,17 @@ non-zero if any tier fails. It records the resolved tool versions at run time.
 
 Current fixed pass count (full toolchain present — ShellCheck (pin 0.10.0;
 re-measured green on 0.11.0 at the 2026-07-14 restamp), `ksvalidator`,
-`modinfo` (kmod), and `python3`): **629 passed, 0 skipped, 0 failed** across
+`modinfo` (kmod), and `python3`): **631 passed, 0 skipped, 0 failed** across
 **24 tiers** (B-T1 parse = 53, B-T2 ShellCheck = 48, B-T3 unit = 59,
 command-mock = 15, B-T4 kickstart = 1, env-parity = 55, idempotency = 12,
 hook-timing = 19, log-format = 12, ena-uek-detect = 16, ena-reporting = 31,
 build-visibility = 17, ena-ledger-guard = 5, ena-check-2 = 6, ena-verify = 12,
 ena-verify-results = 19, ena-bundle = 13, ssm-verdict = 32,
 awscli-verdict = 43, register-validation = 27, ena-express = 33,
-ol10-epel = 37, ol5-ena = 39, ol5-awscli = 25).
+ol10-epel = 37, ol5-ena = 40, ol5-awscli = 26).
 Optional-tool degradations are the only way to see a skip: without
-`ksvalidator` B-T4 contributes a skip (-> 628/1); without `modinfo` the
-ena-uek-detect inbox-report assertions fold into one skip (-> 626/1); without
+`ksvalidator` B-T4 contributes a skip (-> 630/1); without `modinfo` the
+ena-uek-detect inbox-report assertions fold into one skip (-> 628/1); without
 ShellCheck B-T2 skips; the B-T (ena-bundle) initramfs fixture builds via cpio
 **or** a self-contained `python3` newc fallback, so it no longer skips. The
 B-T1 / B-T2 counts include the six `tests/cleancore/` clean-core builders (see

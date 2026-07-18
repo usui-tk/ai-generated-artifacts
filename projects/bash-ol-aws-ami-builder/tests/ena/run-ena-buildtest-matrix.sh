@@ -476,6 +476,7 @@ ol5_host_provision() {
     mount --bind /dev '${img}/dev'
     mount -t proc proc '${img}/proc'
     mount -t sysfs sys '${img}/sys'
+    export TMPDIR=/tmp
     chroot '${img}' /bin/rpm -Uvh --nosignature /ol5-provision/*.rpm
   " || { echo "OL5 provisioning: guest rpm -Uvh failed"; rm -rf "${img}/ol5-provision"; return 1; }
   rm -rf "${img}/ol5-provision"
@@ -527,6 +528,11 @@ run_one_buildtest() {
     mount --bind /dev '${img}/dev'
     mount -t proc proc '${img}/proc'
     mount -t sysfs sys '${img}/sys'
+        # Guest env hygiene: the HOST TMPDIR must never leak into the chroot --
+    # a caller-side TMPDIR (e.g. --work-dir companions on a data volume) does
+    # not exist inside the guest, and the installer's own mktemp dies on it
+    # (2026-07-19 field failure). Host-side mktemps still honor the caller.
+    export TMPDIR=/tmp
     export ENA_BUILDTEST=1 ENA_DRIVER_VERSION='${ver}' INSECURE_TLS='${INSECURE_TLS}'
     chroot '${img}' /bin/bash /install-ena-driver.sh
   " >> "${outlog}" 2>&1 || true

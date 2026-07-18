@@ -113,6 +113,8 @@ assert_match "${mtx}" 'OL5 is a build-test / PoC scoped, opt-in target' \
   "matrix: RESULTS-ol5.md carries the OL5 scope paragraph"
 assert_match "${mtx}" '--merge-from <path>' \
   "matrix: usage documents --merge-from"
+assert_match "${mtx}" '^    export TMPDIR=/tmp$' \
+  "matrix: the guest chroot env pins TMPDIR=/tmp (host TMPDIR must never leak into the guest)"
 
 # ---- (C) merge mode: hermetic functional check -----------------------------
 mk_row() { # ver status

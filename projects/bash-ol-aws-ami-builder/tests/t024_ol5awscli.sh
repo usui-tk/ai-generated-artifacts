@@ -87,6 +87,8 @@ assert_match "${mtx}" "AWSCLI_OL5_KVER='\\\$\{ol5kv\}'" \
   "matrix: run_one passes the probed kver through the env contract"
 assert_match "${mtx}" '--merge-from <path>' \
   "matrix: usage documents --merge-from"
+assert_match "${mtx}" '^    export TMPDIR=/tmp$' \
+  "matrix: the guest chroot env pins TMPDIR=/tmp (host TMPDIR must never leak into the guest)"
 assert_match "${mtx}" 'OL5 is an install-test / PoC scoped, opt-in target' \
   "matrix: RESULTS-ol5.md carries the OL5 scope paragraph"
 

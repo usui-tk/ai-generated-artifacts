@@ -228,6 +228,11 @@ run_one_installtest() {
     mount --bind /dev '${img}/dev'
     mount -t proc proc '${img}/proc'
     mount -t sysfs sys '${img}/sys'
+        # Guest env hygiene: the HOST TMPDIR must never leak into the chroot --
+    # a caller-side TMPDIR (e.g. --work-dir companions on a data volume) does
+    # not exist inside the guest, and the installer's own mktemp dies on it
+    # (2026-07-19 field failure). Host-side mktemps still honor the caller.
+    export TMPDIR=/tmp
     export SSM_INSTALLTEST=1 SSM_AGENT_VERSION='${ver}' INSECURE_TLS='${INSECURE_TLS}'
     chroot '${img}' /bin/bash /install-ssm-agent.sh
   " > "${outlog}" 2>&1 || true

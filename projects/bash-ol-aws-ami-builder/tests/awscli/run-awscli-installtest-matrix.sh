@@ -373,6 +373,11 @@ run_one_installtest() {
     mount --bind /dev '${img}/dev'
     mount -t proc proc '${img}/proc'
     mount -t sysfs sys '${img}/sys'
+        # Guest env hygiene: the HOST TMPDIR must never leak into the chroot --
+    # a caller-side TMPDIR (e.g. --work-dir companions on a data volume) does
+    # not exist inside the guest, and the installer's own mktemp dies on it
+    # (2026-07-19 field failure). Host-side mktemps still honor the caller.
+    export TMPDIR=/tmp
     export AWSCLI_INSTALLTEST=1 AWSCLI_VERSION='${ver}' INSECURE_TLS='${INSECURE_TLS}' AWSCLI_OL5_KVER='${ol5kv}'
     chroot '${img}' /bin/bash /install-awscli.sh
   " >> "${outlog}" 2>&1 || true

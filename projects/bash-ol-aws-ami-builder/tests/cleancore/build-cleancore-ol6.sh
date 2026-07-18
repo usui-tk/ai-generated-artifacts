@@ -520,7 +520,9 @@ SIZE="$(du -sh "${IMG}" | cut -f1)"   # pristine size, before any test writes ca
 # (an `rm -rf` descending into a live /dev bind would delete host devices).
 mount --bind /dev "${IMG}/dev" 2>/dev/null || true
 mount -t proc proc "${IMG}/proc" 2>/dev/null || true
-t_run() { chroot "${IMG}" "$@"; }
+# TMPDIR=/tmp inside the guest: a leaked host TMPDIR points at a path that
+# does not exist in the image (2026-07-19 field failure class).
+t_run() { chroot "${IMG}" /usr/bin/env TMPDIR=/tmp "$@"; }
 
 log "[A->C] (self-test) evaluating the unpacked clean-core image"
 ST_PASS=0; ST_FAIL=0; ST_SKIP=0
