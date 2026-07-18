@@ -20,6 +20,24 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Added (2026-07-18 — OL5 clean-core carries the archived-EPEL-5 repo configuration)
+- **`tests/cleancore/build-cleancore-ol5.sh`: archived EPEL 5 wired into the
+  image** (user requirement, OL6-flow parity — the OL6 path gets the archived
+  EPEL 6 at test time from `install-ena-driver.sh`). A new `[A->C] (3b)` step
+  fetches `epel-release-5-4` host-side, installs it via the EL5 builder rpm
+  against the deliverable root (db4.3 rpmdb), rewires the repo files to the
+  canonical Fedora archive (`https://dl.fedoraproject.org/pub/archive/epel/5/`),
+  comments the dead mirrorlist, and ships **every section `enabled=0`**.
+  Service model measured during implementation: the Fedora archive hosts
+  **302-force plain http to https**, and EL5 openssl 0.9.8e is TLS 1.0 max —
+  so the guest can never fetch the archive directly (either scheme); the
+  config is a canonical, gpg-keyed reference served host-mediated
+  (mirror / staging), the same doctrine as the OL5 base channel. `enabled=0`
+  is deliberate: epel*.repo are the image's ONLY repo files, and a lone
+  unreachable enabled repo would break every in-guest yum operation. Package
+  count 125 → 126; self-test grows four EPEL assertions (19 passed on a full
+  fresh build). SPEC B.6 EL5 paragraph updated in lock-step.
+
 ### Fixed (2026-07-18 — OL5 ENA host provisioning: rsyslog5 Conflicts aborted the toolchain transaction on a fresh clean-core)
 - **`tests/ena/run-ena-buildtest-matrix.sh`: the frozen OL5 toolchain closure
   drops `rsyslog5` (12 → 11 RPMs)** — first real-host run (RHEL 10 KVM,

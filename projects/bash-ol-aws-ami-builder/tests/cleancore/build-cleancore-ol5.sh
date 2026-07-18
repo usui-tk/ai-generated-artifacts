@@ -55,8 +55,19 @@
 #     git is OMITTED (EPEL-only on EL5, pulls a perl chain) and jq is OMITTED (no
 #     jq exists for EL5, not even in the EPEL-5 archive); ca-certificates is not a
 #     separate pkg (CAs ship with openssl).
-#   - EPEL: OL5 ships NO EPEL repo (EPEL 5 is fully EOL/archived; the base installs
-#     nothing from it). A harness needing EPEL 5 can add the Fedora archive on demand.
+#   - EPEL: the image CARRIES the archived-EPEL-5 repo configuration
+#     (user requirement 2026-07-18, OL6-flow parity: the OL6 path gets the
+#     archived EPEL 6 at test time from install-ena-driver.sh). epel-release-5-4
+#     is installed at build time; its repo files are rewired to the canonical
+#     Fedora ARCHIVE (https://dl.fedoraproject.org/pub/archive/epel/5/) and the
+#     dead mirrorlist service is commented out. Service model (measured
+#     2026-07-18): the archive hosts 302-force plain http to https, and EL5
+#     openssl 0.9.8e tops out at TLS 1.0 -- so the GUEST can never fetch the
+#     archive directly, exactly like the OL5 base channel. The sections ship
+#     enabled=0: a canonical, gpg-keyed reference config that a harness enables
+#     against a modern-host mirror / host-side staging (the same doctrine as
+#     the base-channel skip note in the self-test). gpgcheck stays on (the rpm
+#     ships RPM-GPG-KEY-EPEL). The base install itself pulls NOTHING from EPEL.
 # ----------------------------------------------------------------------------
 # Usage:   bash build-cleancore-ol5.sh [output.tar.gz]
 #   env :  WORK=<scratch dir>   INSECURE_TLS=1  (the OL10 work env fetches with
@@ -79,6 +90,13 @@ REPO_BASE="https://yum.oracle.com/repo/OracleLinux/OL${OSMAJOR}/latest/x86_64"
 OL10_REGISTRY="${OL10_REGISTRY:-https://container-registry.oracle.com}"
 OL10_IMAGE="${OL10_IMAGE:-os/oraclelinux}"
 OL10_TAG="${OL10_TAG:-10}"
+# Archived EPEL 5 (terminal/immutable). The release RPM is fetched HOST-side.
+# The baked-in baseurl is the CANONICAL https archive: plain http is 302-forced
+# to https by the Fedora hosts (measured 2026-07-18), so an http baseurl buys
+# nothing -- the EL5 guest cannot complete either scheme (TLS 1.0 max) and the
+# config is served host-mediated (mirror / staging), like the base channel.
+EPEL5_RELEASE_RPM_URL="${EPEL5_RELEASE_RPM_URL:-https://dl.fedoraproject.org/pub/archive/epel/5/x86_64/epel-release-5-4.noarch.rpm}"
+EPEL5_ARCHIVE_BASEURL_PREFIX="${EPEL5_ARCHIVE_BASEURL_PREFIX:-https://dl.fedoraproject.org/pub/archive/epel/5/}"
 
 WORK="${WORK:-/tmp/cleancore-ol5}"
 OUT_TARBALL="${1:-${WORK}/cleancore-ol5-rootfs.tar.gz}"
@@ -465,9 +483,9 @@ log "[B->C] clean-core install transaction complete: ${INSTALLED} packages"
 
 # ╔════════════════════════════════════════════════════════════════════════╗
 # ║ [C] CLEAN-CORE — finalize from [A] (host): device nodes, drop the build-    ║
-# ║     time repo, force any remaining repo to https, and clear machine         ║
-# ║     identity / logs. OL5 ships no EPEL and needs no NSS dynamic-CA dance     ║
-# ║     (curl is openssl-linked; the install path was file:// only).            ║
+# ║     time repo, force any remaining repo to https (Oracle hosts only),       ║
+# ║     wire the archived EPEL 5 (3b), and clear machine identity / logs.       ║
+# ║     No NSS dynamic-CA dance (curl is openssl-linked; install was file://).  ║
 # ╚════════════════════════════════════════════════════════════════════════╝
 log "[A->C] (3) device nodes, repo hygiene, drop build-time repo"
 for n in "null c 1 3" "zero c 1 5" "random c 1 8" "urandom c 1 9" \
@@ -481,6 +499,37 @@ rm -f "${DELIV}/etc/yum.repos.d/cleancore.repo"
 find "${DELIV}/etc/yum.repos.d" -type f -name '*.repo*' -print0 2>/dev/null \
   | xargs -0 -r sed -i -e 's|http://yum.oracle.com|https://yum.oracle.com|g' \
                        -e 's|http://public-yum.oracle.com|https://yum.oracle.com|g' || true
+
+# ╔════════════════════════════════════════════════════════════════════════╗
+# ║ [A->C] (3b) EPEL 5 archive repo (user requirement 2026-07-18; OL6-flow      ║
+# ║     parity). Fetch epel-release-5-4 host-side, install via the EL5         ║
+# ║     builder rpm against the deliverable root (db4.3 rpmdb), rewire the     ║
+# ║     repo files to the CANONICAL https archive (plain http is 302-forced    ║
+# ║     to https by the Fedora hosts -- measured), comment the dead            ║
+# ║     mirrorlist, and ship every section enabled=0 (host-mediated service    ║
+# ║     model; a lone unreachable enabled repo would break EVERY in-guest      ║
+# ║     yum operation since the image carries no other repo files).            ║
+# ╚════════════════════════════════════════════════════════════════════════╝
+log "[A->C] (3b) EPEL 5 archive repo (epel-release + canonical archive baseurl)"
+EPEL5_RPM_LOCAL="${BUILDER}/tmp/epel-release-5-4.noarch.rpm"
+# shellcheck disable=SC2086  # CURL_K is intentionally word-split ("" or "-k")
+curl -fsSL ${CURL_K} --max-time 120 "${EPEL5_RELEASE_RPM_URL}" -o "${EPEL5_RPM_LOCAL}" \
+  || { log "[A->C] ERROR: epel-release fetch failed (${EPEL5_RELEASE_RPM_URL})"; exit 1; }
+[ "$(head -c4 "${EPEL5_RPM_LOCAL}" | od -An -tx1 | tr -d ' \n')" = "edabeedb" ] \
+  || { log "[A->C] ERROR: epel-release download is not an RPM"; exit 1; }
+chroot "${BUILDER}" /bin/rpm --root="${OUT}" -Uvh --nosignature /tmp/epel-release-5-4.noarch.rpm \
+  || { log "[A->C] ERROR: epel-release install failed"; exit 1; }
+rm -f "${EPEL5_RPM_LOCAL}"
+# Rewire: live-mirror baseurls -> the archive (http), dead mirrorlist -> comment.
+# The shipped #baseurl lines carry the full per-section tails ($basearch, debug,
+# SRPMS), so a prefix substitution keeps every section correct.
+find "${DELIV}/etc/yum.repos.d" -type f -name 'epel*.repo' -print0 2>/dev/null \
+  | xargs -0 -r sed -i \
+      -e "s|^#baseurl=http://download.fedoraproject.org/pub/epel/5/|baseurl=${EPEL5_ARCHIVE_BASEURL_PREFIX}|" \
+      -e 's|^mirrorlist=|#mirrorlist=|' \
+      -e 's|^enabled=1|enabled=0|' || true
+grep -q '^baseurl=https://dl.fedoraproject.org/pub/archive/epel/5/' "${DELIV}/etc/yum.repos.d/epel.repo" \
+  || { log "[A->C] ERROR: epel.repo rewire did not produce the archive baseurl"; exit 1; }
 
 # ╔════════════════════════════════════════════════════════════════════════╗
 # ║ [C] CLEAN-CORE — (2-cleanup) logs / transient data. OL5 is SysV-init        ║
@@ -563,6 +612,13 @@ st "machine-id blanked (0 bytes)"                    test "${MID_SIZE}" -eq 0
 st "ssh host keys absent (regenerate on boot)"       test "${SSH_KEYS}" -eq 0
 st "logs zero-filled (no non-empty log files)"       test "${NONEMPTY_LOGS}" -eq 0
 st "build-time repo dropped"                          test "${CC_REPO}" -eq 0
+EPEL_ML="$(grep -c '^mirrorlist=' "${IMG}/etc/yum.repos.d/epel.repo" 2>/dev/null || true)"
+EPEL_BU="$(grep -c '^baseurl=https://dl.fedoraproject.org/pub/archive/epel/5/' "${IMG}/etc/yum.repos.d/epel.repo" 2>/dev/null || true)"
+EPEL_EN="$(cat "${IMG}"/etc/yum.repos.d/epel*.repo 2>/dev/null | grep -c '^enabled=1' || true)"
+st "epel-release installed (EPEL 5 archive wired)"    t_run /bin/rpm -q epel-release
+st "epel baseurl -> canonical Fedora archive (https)" test "${EPEL_BU}" -gt 0
+st "epel mirrorlist neutralized (service dead)"       test "${EPEL_ML}" -eq 0
+st "epel sections all enabled=0 (host-mediated model)" test "${EPEL_EN}" -eq 0
 st "tar.gz is a valid gzip archive"                  gzip -t "${OUT_TARBALL}"
 
 # Section 2 — readiness note. OL5's openssl 0.9.8e cannot TLS-1.2 to yum.oracle.com,

@@ -1941,8 +1941,21 @@ Each builder tags every block with the environment it runs in:
   chain; `jq` has no EL5 build even in the EPEL 5 archive), versionlock is
   `yum-versionlock`, the release package is `oraclelinux-release`, and `procps` /
   `nc` (not `procps-ng` / `nmap-ncat`) plus `net-tools` (for `hostname`) mirror
-  OL6. OL5 ships no EPEL and needs no NSS CA dance (the install path is `file://`
-  only). EL5 is SysV-init, so `systemd` does not apply.
+  OL6. The image **carries the archived-EPEL-5 repo configuration**
+  (user-required 2026-07-18, OL6-flow parity): `epel-release-5-4` is installed
+  at build time (via the EL5 builder rpm against the deliverable root) and its
+  repo files are rewired to the canonical Fedora archive
+  (`https://dl.fedoraproject.org/pub/archive/epel/5/`) with the dead mirrorlist
+  commented out and **every section `enabled=0`**. The service model is
+  measured and permanent: the Fedora archive hosts 302-force plain http to
+  https and EL5 openssl 0.9.8e tops out at TLS 1.0, so the guest can never
+  fetch the archive directly — the config is a canonical, gpg-keyed reference
+  that a harness enables against a modern-host mirror / host-side staging, the
+  same doctrine as the OL5 base channel (and the reason for `enabled=0`: the
+  epel files are the image's ONLY repo files, and a lone unreachable enabled
+  repo would break every in-guest yum operation). No NSS CA dance is needed
+  (the install path is `file://` only). EL5 is SysV-init, so `systemd` does
+  not apply.
 - **Reference + SBOM artifacts.** The official slim image each clean-core derives
   from is documented (sources, pinned commit, name+version manifest) in
   `tests/cleancore/REFERENCE-oracle-official-images.md`. Each finalized
