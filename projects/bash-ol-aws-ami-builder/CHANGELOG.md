@@ -20,6 +20,56 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Added (2026-07-18 — OL5/UEK R2 opt-in ENA build-test support + ledger merge mode)
+- **`install-ena-driver.sh`: OL5 (`el5uek`) branch** — build-test / PoC scoped,
+  user-adjudicated after a same-day feasibility investigation proved **20/20**
+  sampled ENA releases (1.1.2–2.9.1) build against `kernel-uek-devel`
+  2.6.39-400.297.3.el5uek with plain gcc 4.1.2 **with** the shim set (vanilla
+  source: 0/20). Pin `ENA_VERSION_OL5=2.9.1` (OL6 parity). EL5 has no in-OS
+  TLS 1.2 path (openssl 0.9.8e), so the toolchain/headers are verified as
+  host-pre-provisioned (`ol5_verify_preprovisioned`) and the driver source
+  must be pre-staged; DKMS is out of scope (always plain make); initramfs
+  regeneration is skipped (devel-only provision). `apply_el5uek_shims`
+  carries the proven exact-string transform set (S1 kconfig.h stub, S2
+  netdev_features_t, S3a deterministic IS_UEK-unset, S3b UEK3-only `$(error)`
+  neutralization, P1–P7 collision renames / perf-hint degradations /
+  `dma_zalloc_coherent` re-implementation — full taxonomy in SPEC D.29);
+  the applied list travels in the new result-JSON `shims` field. EL5-guest
+  hardening found by container FT: `_ena_ver_ge` is now a pure-bash numeric
+  compare (`sort -V` does not exist on EL5 coreutils 5.97;
+  behaviour-identical for x.y.z inputs, t021 green).
+- **`tests/ena/run-ena-buildtest-matrix.sh`: opt-in OL5 wiring** — the default
+  `--ol` set stays 6–10 and the floor semantics stay uniform (the OL5
+  all-release evaluation is the separate `--ol 5 --full` run);
+  `ol5_host_provision` (frozen 12-RPM OL5/latest toolchain closure +
+  live-probed `kernel-uek-devel` with pinned fallback + guest `rpm -Uvh` +
+  `/lib/modules/<kver>/build` wiring + source staging, cached under the work
+  dir); `pin_for(5)=2.9.1`, `uekr_for(5)=UEK/latest` (pre-UEKR channel
+  naming); the update-gate OL5 probe strips `.x86_64` (EL5 modules dirs carry
+  no arch suffix — without this the gate saw a perpetually "new" kernel);
+  the preflight transient set gains the "pre-provision" phrase. Ledger
+  **schema 1.1 → 1.2**: rows gain `shims` (null on OL6–10); RESULTS notes
+  render it and RESULTS-ol5.md opens with an OL5 scope paragraph. OL5
+  load-readiness attestation is not claimable by design (L4a not-ready is the
+  honest verdict; the missing bundle Module.symvers shares the tracked
+  el7–10 host-side build-symlink issue).
+- **Ledger merge mode `--merge-from <path>` (+ `--merge-prefer ours|theirs`)**
+  — python3-only union of an externally produced ledger into the committed
+  one; same-key same-status keeps the incumbent row, same-key
+  different-status is a hard error naming every conflicting key unless
+  `--merge-prefer` resolves it (base ledger untouched on the error path).
+  Completes the adjudicated operating model: zero-base rebuild / incremental
+  append (both already native) / merge (new). SPEC B.9 documents all three.
+- **`tests/t023_ol5ena.sh` (new tier, 39 asserts)** — pins the installer OL5
+  branch + every proven shim pattern + EL5 safety, the matrix OL5 wiring and
+  schema 1.2, and the three merge-policy cases (hermetic). Suite totals move
+  561 → **602 passed / 23 tiers** (B-T1 52, B-T2 47 — the new tier is itself
+  parse/lint-counted); TESTING.md §0 re-tallied.
+- **Gate restoration** — `tests/t002_shellcheck.sh` was red at HEAD on a
+  single SC2015 (info) at the `osminor` os-release fallback introduced by the
+  OL10-EPEL session (pinned ShellCheck 0.10.0 reproduces); restated as an
+  explicit if-then with identical semantics. B-T2 green again.
+
 ### Changed (2026-07-18 — docs: Boot-E2E evidence note for the 07-18 generation; OL6 instance-generation boundary)
 - **TESTING.md: new "Boot-E2E evidence note (2026-07-18)"** — the 07-18 build
   generation (OL9.8 + the first OL10.2-ISO build, the live-verified OL10

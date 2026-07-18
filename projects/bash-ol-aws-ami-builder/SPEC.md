@@ -1995,7 +1995,8 @@ reuse-by-copy of the installer's source-of-truth helper, kept in agreement by
 
 `run-ena-buildtest-matrix.sh` drives, for each target OL major (**6–10, all
 first-class** and recorded in the ledger; the default `--ol` set — matching
-the RHEL sibling project's five-major coverage) and each target ENA version,
+the RHEL sibling project's five-major coverage — plus the **opt-in OL5**, see
+the OL5 paragraph below) and each target ENA version,
 the existing pieces **as separate executables**: `tests/cleancore/build-cleancore.sh`
 (B.8) for the per-OL clean-core rootfs, then `install-ena-driver.sh
 ENA_BUILDTEST=1` (A.13) for the per-version compile-test. The **default sweep
@@ -2010,16 +2011,58 @@ environment / CI. `--report-only` regenerates the reports (and the ledger's
 derived fields) from the existing ledger with **no builds** — python3 only, no
 root / containers / network.
 
+**Ledger operating model (user-adjudicated 2026-07-18).** Three explicit modes
+cover the evidence lifecycle: (1) **zero-base rebuild** — wipe the ledger and
+reports in a scratch checkout, regenerate the release list, and re-sweep on
+the then-latest kernels (with no ledger, every key is untested); (2)
+**incremental append** — run without wiping: the kernel-primary dedup builds
+only the diff (a new kernel re-tests everything for that OL; a new ENA release
+tests only itself); (3) **merge** — `--merge-from <ledger.json>` (python3
+only, like `--report-only`) unions an externally produced ledger (e.g. a
+zero-base sweep from the user's environment) into the committed one on the
+dedup key, then regenerates every report. Merge conflict policy: a key only in
+the other ledger is adopted; a key in both with the **same** status keeps the
+existing row unchanged (verdicts are deterministic; the fail-note first-error
+capture is known to wobble benignly under parallel `make`, so the incumbent
+note wins); a key in both with a **different** status is a **hard error**
+naming every conflicting key (a determinism violation must be investigated),
+unless `--merge-prefer ours|theirs` resolves it explicitly — on the error path
+the base ledger is untouched. (Tested by `tests/t023_ol5ena.sh`.)
+
+**OL5 (opt-in; build-test / PoC scope).** OL5 (OL5.11, UEK R2 `el5uek`) is an
+additional matrix target that is **never in the default `--ol` set** — it runs
+only via an explicit `--ol 5`. The floor semantics stay **uniform** across
+OSes (no per-OS exception): the OL5 all-release evaluation is the separate run
+`--ol 5 --full` (cardinality: ≤ 1 OS × the full release list × 1 frozen
+kernel ≈ 71 cells; UEK R2 is the terminal `el5uek` line). OL5 differs from
+OL6–10 in execution model only, not in evidence model: EL5 has **no in-guest
+TLS 1.2 path** (openssl 0.9.8e tops out at TLS 1.0 — a protocol-level failure
+`sslverify=false` cannot bypass), so `ol5_host_provision()` provisions the
+container from the **host** (a fixed, frozen OL5/latest toolchain RPM closure
+— exact NVRs proven by the 2026-07-18 20/20 sweep; `kernel-uek-devel` resolved
+live via the update-gate probe with a pinned fallback; guest-side
+`rpm -Uvh`; `/lib/modules/<kver>/build` wiring; the driver source staged per
+the installer's OL5 pre-stage contract). Builds are **plain `make` only** (no
+DKMS on OL5 by design) and every build applies the installer's `el5uek` shim
+set (D.29), recorded per row in the ledger's `shims` field. Load-readiness
+attestation is **not claimable** on OL5 (a devel-only provision has no
+stock-module vermagic and no initrd), so `verify-ena-buildresults.sh` reports
+OL5 rows as not load-ready (L4a) by design — real load proof is a future
+real-Nitro workstream.
+
 ### Dedup ledger + per-OS reports
 
 Evidence is two layers, **both committed** so the state persists (a commit *is*
 the dedup state):
 
-- **`buildtest-ledger.json`** — one entry per `(osmajor, ena_version, kver)`
+- **`buildtest-ledger.json`** (schema **1.2**) — one entry per
+  `(osmajor, ena_version, kver)`
   carrying `status` (`ok`/`fail`), `dkms`, `ko`, `ko_version`, `ena_express`
   (the ENA Express readiness classification — a derived pure function of
   `ena_version`, back-filled across the whole ledger on every write incl.
-  `--report-only`), `reason`, `tested_at`. The triple is the **dedup key**,
+  `--report-only`), `shims` (schema 1.2: the `el5uek` transform list the
+  installer applied — D.29; `null` on OL6–10 and back-filled `null` on
+  pre-1.2 rows), `reason`, `tested_at`. The triple is the **dedup key**,
   with **kver primary**: a combo
   already present (pass **or** fail) is skipped; a **new kernel** (kver changes)
   shares no key with the old rows so the whole set re-tests; a **new ENA
@@ -2067,8 +2110,14 @@ version order used elsewhere:
 - **kernel-uek** — the latest `kernel-uek` (x86_64) for the OL is read from
   `yum.oracle.com` (`repomd.xml` → `primary.xml.gz`, parsed with the python3
   standard library only — `gzip` + `xml.etree`, no extra package) under the
-  fixed `OL → UEKR` map (`uekr_for()`: OL6 → `UEKR4`, OL7 → `UEKR6`,
-  OL8 → `UEKR7`, OL9/OL10 → `UEKR8`; source RPMs are ignored). The map pins
+  fixed `OL → UEKR` map (`uekr_for()`: OL5 → `UEK/latest` — the OL5 channel
+  predates the `UEKR<N>` naming (live-probed 2026-07-18) — OL6 → `UEKR4`,
+  OL7 → `UEKR6`, OL8 → `UEKR7`, OL9/OL10 → `UEKR8`; source RPMs are ignored).
+  The OL5 probe result is normalized (the trailing `.x86_64` is stripped)
+  because EL5's modules-dir / devel-tree name carries no arch suffix — without
+  this the extra component compared as a perpetually "new" kernel and the OL5
+  gate could never skip (caught by container FT). UEK R2 is terminal, so the
+  OL5 gate is in practice driven by new ENA releases only. The map pins
   the LATEST track each major ships (verified against `yum.oracle.com`
   repomd.xml, 2026-07-11: OL6=UEKR4 only, OL7=UEKR5/6, OL8=UEKR6/7,
   OL9=UEKR7/8, OL10=UEKR8 only) and must stay in lock-step with
@@ -3818,6 +3867,57 @@ append line applied twice stays single).
 
 The wrapper emits a single, uniform log stream to the console and (by default)
 to a persistent file. Three orthogonal axes describe every line.
+
+## D.29 OL5/UEK R2 (`el5uek`) needs a source shim set — kcompat has no UEK R2 knowledge
+
+**Symptom.** Every amzn-drivers release fails to compile against
+`kernel-uek-devel` 2.6.39-400/el5uek out of the box (a 2026-07-18
+investigation measured **vanilla 0/20** across 1.1.2–2.9.1), with three
+distinct first errors: a missing `linux/kconfig.h`, redefinitions of symbols
+the kernel already provides, and (1.5.2/1.5.3) a Makefile `$(error)` rejecting
+any UEK that is not UEK3 3.8.13.
+
+**Root cause (single, unifying).** UEK R2 reports `2.6.39` but is a Linux
+3.0.36-base kernel carrying Oracle backports of 3.1–3.5-era APIs
+(`netdev_features_t`, `ether_addr_equal`, `ethtool_rxfh_indir_default`, …).
+`kcompat.h` gates purely on `LINUX_VERSION_CODE` with RHEL/SLE/Ubuntu
+exceptions and knows nothing about UEK R2 — `el5uek` headers define no
+`RHEL_RELEASE_CODE` (measured: every `!(RHEL_RELEASE_CODE)` guard fired), so
+every failure is either (a) a backport colliding with kcompat's own compat
+definition, or (b) kcompat assuming an API a mainline 2.6.39 lacks, where
+RHEL6 is rescued by an explicit `RHEL_RELEASE_CODE` branch and UEK R2 is not.
+RHEL6 also *ships* `linux/kconfig.h` (a Red Hat backport), which is why the
+existing el6 evidence never hit the missing-header class.
+
+**Fix.** `apply_el5uek_shims()` in `install-ena-driver.sh` (OL5 branch only;
+OS-separation) applies the **exact transform set the investigation proved
+sufficient — 20/20 sampled releases build with plain gcc 4.1.2**: S1 installs
+an upstream-equivalent `kconfig.h` stub into the devel tree (RHEL6-parity,
+sentinel-marked); S2 suppresses kcompat's `netdev_features_t` typedef; S3a
+pins the proven `IS_UEK`-unset kcompat configuration deterministically (the
+OL6/OL8 retarget-to-`BUILD_KERNEL` patch of D-history would set `IS_UEK` for
+`el5uek` — the opposite of the proven configuration); S3b neutralizes the
+UEK3-only `$(error)`; P1/P2 rename kcompat's colliding copies (call sites then
+use the kernel's identical implementations); P3 degrades the `l4_rxhash` line
+(perf-hint flag only); P4 renames the intra-kcompat `netdev_rss_key_fill`
+duplicate (an upstream blind spot on the pure-old-mainline path); P5a–c
+degrade the DMA `SKIP_CPU_SYNC` attr path to plain `dma_unmap_page`
+(perf hint; semantics-safe on x86 coherent DMA); P6/P7 append a self-guarded
+tail block (the raw `DMA_ATTR_SKIP_CPU_SYNC` fallback and an exact
+`dma_zalloc_coherent` re-implementation). Every transform is exact-string,
+grep-before-edit, applied only when present, EL5-guest-safe (bash 3.2 + GNU
+sed 4.1; **no `sort -V`** — EL5 coreutils 5.97 lacks it, caught by container
+FT), and the applied list is emitted in the result JSON (`shims`) into the
+schema-1.2 ledger.
+
+**Degradation disclosure.** P3/P5/P6 drop performance hints (the RSS L4-hash
+flag; the DMA skip-cpu-sync attr), never correctness; the rest are
+exact-semantics collision removals or upstream re-implementations. An `ok` is
+a compile proof only — Nitro load/traffic for OL5 is unproven.
+
+**Prevention.** `tests/t023_ol5ena.sh` pins every proven pattern string, the
+EL5-safety rule, the matrix wiring (pin/channel/gate/closure), and the merge
+policy.
 
 ## E.1 Line format
 
