@@ -321,7 +321,7 @@ if [[ -r /etc/oracle-release ]]; then
 fi
 if [[ -z "${osminor}" && -r /etc/os-release ]]; then
   # shellcheck source=/dev/null
-  osminor="$(. /etc/os-release 2>/dev/null; v="${VERSION_ID#*.}"; [[ "${v}" != "${VERSION_ID}" ]] && echo "${v%%.*}" || true)"
+  osminor="$(. /etc/os-release 2>/dev/null; v="${VERSION_ID#*.}"; if [[ "${v}" != "${VERSION_ID}" ]]; then echo "${v%%.*}"; fi)"
 fi
 [[ -n "${osminor}" ]] && log "Oracle Linux minor (update) version: ${osminor}"
 
