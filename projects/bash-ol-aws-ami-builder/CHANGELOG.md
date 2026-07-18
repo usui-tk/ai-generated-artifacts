@@ -20,6 +20,27 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Added (2026-07-18 — OL5 ENA full-sweep evidence merged into the ledger)
+- **`tests/ena/buildtest-ledger.json` + `RESULTS-ol5.md`: the user-run OL5
+  full sweep (`--ol 5 --full`, real host, all 71 in-scope releases × the
+  frozen `2.6.39-400.297.3.el5uek` devel kernel) merged via the designed
+  `--merge-from` path** — MERGED adopted=71, same-status-kept=150, total 221
+  rows. The 150 OL6-10 rows of the external ledger matched the committed
+  ledger key-for-key AND status-for-status (a large-scale determinism
+  cross-check of the verdicts), and the regenerated RESULTS-ol6..10 came out
+  byte-identical.
+- Findings recorded by the sweep: **56/71 ok** — every investigation-proven
+  version reproduced, and the real buildable boundary lands at **2.12.3**
+  (three minors past the sampled 2.9.1); 2.13.0+ (11 versions) fail with no
+  module produced (genuine UEK R2 incompatibility). Early-band holes
+  2.2.0-2.2.2 fail the same way. **2.2.12 is an upstream tag/source version
+  mismatch caught by the identity invariant**: the build SUCCEEDS but the
+  module self-reports `2.12.2g` because the `ena_linux_2.2.12` tag's own
+  `ena_netdev.h` declares `DRV_MODULE_GEN 2.12.2` (verified against the
+  upstream tarball) — the "installed module version is authoritative" check
+  recorded the vendor discrepancy verbatim, exactly as designed. Ledger rows
+  are as generated; no hand edits.
+
 ### Changed (2026-07-18 — docs: OL5 SSM Agent recorded as a measured exclusion)
 - **SPEC: new D.31 + a B.10 pointer** — the AWS-supported SSM Agent band
   (`>= 3.3.3598.0`; 11 versions, 9 fetchable) was investigated for the same
