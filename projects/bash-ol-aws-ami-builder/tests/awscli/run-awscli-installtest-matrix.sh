@@ -40,7 +40,20 @@
 #
 # Usage:
 #   run-awscli-installtest-matrix.sh [--ol "6 7 8"] [--awscli-versions "..."]
-#   --ol "<list>"            OL majors to test (default: 6 7 8)
+#   --ol "<list>"            OL majors to test (default: 6 7 8). OL5 is a
+#                            supported OPT-IN target (never in the default
+#                            set; e.g. --ol 5): install-test/PoC scope, the
+#                            bundle is host-staged (EL5 has no in-guest TLS
+#                            1.2 path), unzip already ships in the clean-core,
+#                            and the kver record is the live-probed terminal
+#                            el5uek NVR (AWSCLI_OL5_KVER contract). Ceiling
+#                            pin 2.17.51 = the OL6 pin, same measured reason.
+#   --merge-from <path>      no builds: union ANOTHER ledger JSON into
+#                            --ledger, then regenerate every report (python3
+#                            only). Same-key same-status keeps the existing
+#                            row; same-key DIFFERENT-status is a hard error
+#                            unless --merge-prefer resolves it.
+#   --merge-prefer <side>    'ours' or 'theirs' for merge conflicts.
 #   --awscli-versions "..."  explicit version list (default: from the release JSON)
 #   --full                   parity flag (all v2 already in scope)
 #   --ledger <path>          ledger JSON (default: tests/awscli/awscli-installtest-ledger.json)
@@ -64,6 +77,8 @@ ORCHESTRATOR="${SCRIPT_DIR}/../cleancore/build-cleancore.sh"
 INSTALL_SCRIPT="${PROJ_DIR}/install-awscli.sh"
 
 OL_LIST="6 7 8"
+MERGE_FROM=""
+MERGE_PREFER=""
 AWSCLI_VERSIONS=""
 FULL=0
 LEDGER="${SCRIPT_DIR}/awscli-installtest-ledger.json"
@@ -88,7 +103,10 @@ hr()   { log "================================================================";
 # the last GLIBC_2.5 / Python-3.11.9 build -- and it runs on OL7 (2.17) and OL8
 # (2.28) alike, so it is a safe health-check across the scope. Kept in step with
 # install-awscli.sh's OL6 production pin (AWSCLI_VERSION_OL6).
-pin_for() { case "$1" in 6|7|8) echo 2.17.51 ;; *) echo "" ;; esac; }
+# OL5 shares the 2.17.51 ceiling pin with OL6 -- the 2.17.52 Python 3.12
+# rebase jumps the bundle glibc floor 2.5 -> 2.17, walling out both glibc 2.12
+# (OL6) and 2.5 (OL5); measured 2026-07-18, see install-awscli.sh.
+pin_for() { case "$1" in 5|6|7|8) echo 2.17.51 ;; *) echo "" ;; esac; }
 
 # ===========================================================================
 # Pure helpers (no I/O) -- unit-tested by tests/t019_awscliverdict.sh. Keep each a
@@ -182,6 +200,8 @@ while [ "$#" -gt 0 ]; do
     --preflight-retries) PREFLIGHT_RETRIES="${2:-}"; shift ;;
     --strict)            STRICT=1 ;;
     --force)             FORCE=1 ;;
+    --merge-from)        MERGE_FROM="${2:-}"; shift ;;
+    --merge-prefer)      MERGE_PREFER="${2:-}"; shift ;;
     -h|--help)           sed -n '2,/^# ---.*$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *)                   die "unknown argument: $1 (-h for help)" ;;
   esac
@@ -191,6 +211,22 @@ OL_LIST="${OL_LIST//,/ }"
 AWSCLI_VERSIONS="${AWSCLI_VERSIONS//,/ }"
 
 # ---- pre-flight ------------------------------------------------------------
+if [ -n "${MERGE_FROM}" ]; then
+  # Merge mode (reuse-by-copy of the ENA matrix implementation, same
+  # user-adjudicated policy 2026-07-18): union ANOTHER ledger into --ledger on
+  # the dedup key (osmajor, awscli_version, kver), then regenerate every
+  # report. python3 only -- no root, no containers, no network. Same-key
+  # same-status keeps the EXISTING row; same-key DIFFERENT-status is a HARD
+  # ERROR unless --merge-prefer ours|theirs resolves it; keys only in the
+  # other ledger are adopted.
+  case "${MERGE_PREFER}" in ""|ours|theirs) : ;; *) die "--merge-prefer must be 'ours' or 'theirs' (got '${MERGE_PREFER}')" ;; esac
+  command -v python3 >/dev/null 2>&1 || die "missing required host tool: python3"
+  [ -f "${MERGE_FROM}" ] || die "no ledger to merge from at ${MERGE_FROM}"
+  [ -f "${LEDGER}" ] || die "no ledger at ${LEDGER} (with no base ledger there is nothing to merge into; copy the file instead)"
+  mkdir -p "${RESULTS_DIR}"; RESULTS_DIR="$(cd "${RESULTS_DIR}" && pwd)"
+  OL_LIST=""
+  log "merge mode: merging ${MERGE_FROM} into ${LEDGER} (prefer: ${MERGE_PREFER:-none = conflict is fatal}); no builds"
+else
 [ "$(id -u)" -eq 0 ] || die "must run as root (clean-core build + unshare/chroot need it)."
 case "${SCRIPT_DIR}" in
   ""|/) die "refusing to run: matrix script resolves to '${SCRIPT_DIR:-<empty>}' (irregular placement; destructive clean-core cleanup could hit the OS root)." ;;
@@ -204,6 +240,7 @@ WORK_BASE="${WORK_BASE:-${TMPDIR:-/tmp}/cleancore-work-awscli-installtest}"
 case "${WORK_BASE}" in ""|/|//) die "refusing to run: --work-dir resolves to '${WORK_BASE:-<empty>}' (would risk destructive cleanup)." ;; esac
 mkdir -p "${WORK_BASE}"; WORK_BASE="$(cd "${WORK_BASE}" && pwd)"
 [ "${WORK_BASE}" = "/" ] && die "refusing to run: --work-dir resolved to '/'."
+fi
 
 # ---- the version list for an OL (from --awscli-versions, else the release JSON),
 # filtered by the mode (all v2 are in scope). --------------------------------
@@ -236,20 +273,107 @@ print(g.get(sys.argv[2],''))" "${RELEASES}" "${v}" 2>/dev/null || true)"
   printf '%s' "${mg}"
 }
 
+# ---- OL5 host-side staging + kver probe -------------------------------------
+# EL5 has NO in-guest network path (openssl 0.9.8e = TLS 1.0 max vs the
+# TLS-1.2-only awscli.amazonaws.com / yum.oracle.com), so unlike OL6-8 the
+# matrix stages the requested bundle zip into the container from the HOST
+# (cached under WORK_BASE) -- the installer OL5 pre-stage contract. Nothing
+# else needs provisioning (unzip 5.52 ships in the OL5 clean-core). The kver
+# record comes from a live probe of the terminal OL5 UEK/latest channel
+# (reuse-by-copy of the ENA matrix probe, OL5-fixed; pinned fallback) and is
+# passed via AWSCLI_OL5_KVER -- "probed, not provisioned": the kernel is not
+# this matrix's compat axis and the EL5 kernel RPM %post initrd scriptlets
+# are unsafe in a chroot.
+OL5_UEK_FALLBACK_KVER="2.6.39-400.297.3.el5uek.x86_64"
+OL5_KVER_CACHE=""
+
+probe_ol5_uek_kver() {
+  local base="https://yum.oracle.com/repo/OracleLinux/OL5/UEK/latest/x86_64"
+  local repomd gz out href kver
+  repomd="$(mktemp)"; gz="$(mktemp)"; out="$(mktemp)"
+  kver=""
+  if curl -fsS --max-time 60 "${base}/repodata/repomd.xml" -o "${repomd}" 2>/dev/null; then
+    href="$(grep -oE '"[^"]*primary\.xml\.gz"' "${repomd}" | head -1 | tr -d '"')"
+    if [ -n "${href}" ] && curl -fsS --max-time 180 --max-filesize 268435456 "${base}/${href}" -o "${gz}" 2>/dev/null; then
+      python3 - "${gz}" "${out}" 2>/dev/null <<'PYK' || true
+import gzip, sys, xml.etree.ElementTree as ET
+gz, outp = sys.argv[1], sys.argv[2]
+ns = {"c": "http://linux.duke.edu/metadata/common"}
+best = None
+def vkey(s):
+    o = []
+    for part in str(s).replace("-", ".").split("."):
+        o.append((1, int(part)) if part.isdigit() else (0, part))
+    return o
+root = ET.parse(gzip.open(gz)).getroot()
+for pkg in root.findall("c:package", ns):
+    name = pkg.findtext("c:name", default="", namespaces=ns)
+    arch = pkg.findtext("c:arch", default="", namespaces=ns)
+    if name != "kernel-uek" or arch != "x86_64":
+        continue
+    v = pkg.find("c:version", ns)
+    if v is None:
+        continue
+    kv = "%s-%s.%s" % (v.get("ver", ""), v.get("rel", ""), arch)
+    if best is None or vkey(kv) > vkey(best):
+        best = kv
+if best:
+    open(outp, "w").write(best)
+PYK
+      kver="$(cat "${out}" 2>/dev/null || true)"
+    fi
+  fi
+  rm -f "${repomd}" "${gz}" "${out}"
+  printf '%s' "${kver}"
+}
+
+ol5_kver() {
+  if [ -z "${OL5_KVER_CACHE}" ]; then
+    OL5_KVER_CACHE="$(probe_ol5_uek_kver || true)"
+    [ -n "${OL5_KVER_CACHE}" ] || OL5_KVER_CACHE="${OL5_UEK_FALLBACK_KVER}"
+  fi
+  printf '%s' "${OL5_KVER_CACHE}"
+}
+
+ol5_stage_zip() { # $1=img $2=version ; stage the bundle zip into the container
+  local img="$1" ver="$2" cache="${WORK_BASE}/ol5-awscli-zips" f
+  f="awscli-exe-linux-x86_64-${ver}.zip"
+  mkdir -p "${cache}" || return 1
+  if ! unzip -tqq "${cache}/${f}" >/dev/null 2>&1; then
+    if [ "${INSECURE_TLS}" = "1" ]; then
+      curl -fsSL -k --max-time 300 "https://awscli.amazonaws.com/${f}" -o "${cache}/${f}" || { echo "OL5 staging: bundle download failed: ${f}"; return 1; }
+    else
+      curl -fsSL --max-time 300 "https://awscli.amazonaws.com/${f}" -o "${cache}/${f}" || { echo "OL5 staging: bundle download failed: ${f}"; return 1; }
+    fi
+    unzip -tqq "${cache}/${f}" >/dev/null 2>&1 || { echo "OL5 staging: not a zip: ${f}"; return 1; }
+  fi
+  cp -f "${cache}/${f}" "${img}/usr/src/${f}" || return 1
+  echo "OL5 staging: ${f} staged (kver record $(ol5_kver))"
+  return 0
+}
+
 # ---- run ONE install+run test for (ol, version) against a clean-core tarball;
 # echo the raw [result] JSON object (or empty if the test emitted none). ------
 run_one_installtest() {
-  local ol="$1" ver="$2" tarball="$3" outlog="$4" img
+  local ol="$1" ver="$2" tarball="$3" outlog="$4" img ol5kv=""
   img="$(mktemp -d)"
   tar -C "${img}" -xzf "${tarball}"
   cp /etc/resolv.conf "${img}/etc/resolv.conf" 2>/dev/null || true
   cp "${INSTALL_SCRIPT}" "${img}/install-awscli.sh"
+  # OL5: host-side bundle staging + probed kver (see the OL5 section above).
+  # A staging failure lands in the outlog; the installer OL5 pre-stage
+  # contract then records the fail with a clear reason.
+  if [ "${ol}" = "5" ]; then
+    ol5_stage_zip "${img}" "${ver}" >> "${outlog}" 2>&1 \
+      || echo "[awscli-matrix] OL5 staging failed (see above); the guest pre-stage contract will record the failure" >> "${outlog}"
+    ol5kv="$(ol5_kver)"
+  fi
   unshare --fork --pid --mount --uts --ipc -- bash -c "
     export PATH=/usr/sbin:/usr/bin:/sbin:/bin
     mount --bind /dev '${img}/dev'
     mount -t proc proc '${img}/proc'
     mount -t sysfs sys '${img}/sys'
-    export AWSCLI_INSTALLTEST=1 AWSCLI_VERSION='${ver}' INSECURE_TLS='${INSECURE_TLS}'
+    export AWSCLI_INSTALLTEST=1 AWSCLI_VERSION='${ver}' INSECURE_TLS='${INSECURE_TLS}' AWSCLI_OL5_KVER='${ol5kv}'
     chroot '${img}' /bin/bash /install-awscli.sh
   " > "${outlog}" 2>&1 || true
   rm -rf "${img}"
@@ -332,7 +456,7 @@ ol_total=0; g_ol_ran=0; g_ol_skipped=0; g_ok=0; g_fail=0; g_skip=0; g_tests=0
 for ol in ${OL_LIST}; do ol_total=$(( ol_total + 1 )); done
 
 for ol in ${OL_LIST}; do
-  case "${ol}" in 6|7|8) : ;; *) warn "OL${ol}: wired for OL6/7/8 only; skipping."; g_ol_skipped=$(( g_ol_skipped + 1 )); continue ;; esac
+  case "${ol}" in 5|6|7|8) : ;; *) warn "OL${ol}: wired for OL5 (opt-in via --ol) and OL6/7/8 only; skipping."; g_ol_skipped=$(( g_ol_skipped + 1 )); continue ;; esac
 
   if ! gate_should_run_ol "${ol}"; then g_ol_skipped=$(( g_ol_skipped + 1 )); continue; fi
 
@@ -407,6 +531,51 @@ if [ -s "${RESULTS_TSV}" ]; then
     mg="$(min_glibc_of "${ver}")"
     printf '%s\t%s\t%s\t%s\n' "${ol}" "${ver}" "${mg}" "${rjson}" >> "${ENRICHED_TSV}"
   done < "${RESULTS_TSV}"
+fi
+
+# ---- merge-from: union another ledger into ours (before the regen below) ----
+if [ -n "${MERGE_FROM}" ]; then
+  merge_out="$(python3 - "${LEDGER}" "${MERGE_FROM}" "${MERGE_PREFER}" <<'PY_MERGE'
+import json, sys
+ours_p, theirs_p, prefer = sys.argv[1], sys.argv[2], sys.argv[3]
+ours = json.load(open(ours_p))
+theirs = json.load(open(theirs_p))
+key = lambda e: (str(e.get("osmajor")), str(e.get("awscli_version")), str(e.get("kver")))
+oi = {key(e): e for e in ours.get("entries", [])}
+adopted = kept = resolved = 0
+conflicts = []
+for e in theirs.get("entries", []):
+    k = key(e)
+    if k not in oi:
+        oi[k] = e; adopted += 1
+    elif oi[k].get("status") == e.get("status"):
+        kept += 1                      # same verdict: the incumbent row wins
+    elif prefer == "theirs":
+        oi[k] = e; resolved += 1
+    elif prefer == "ours":
+        resolved += 1
+    else:
+        conflicts.append("OL%s awscli %s kver %s: ours=%s theirs=%s"
+                         % (k[0], k[1], k[2], oi[k].get("status"), e.get("status")))
+if conflicts:
+    print("CONFLICT")
+    for c in conflicts:
+        print(c)
+    sys.exit(3)
+ours["entries"] = list(oi.values())
+json.dump(ours, open(ours_p, "w"), indent=2)
+open(ours_p, "a").write(chr(10))
+print("MERGED adopted=%d same-status-kept=%d prefer-resolved=%d total=%d"
+      % (adopted, kept, resolved, len(oi)))
+PY_MERGE
+)" || true
+  case "${merge_out}" in
+    MERGED*) log "merge-from: ${merge_out}" ;;
+    CONFLICT*)
+      printf '%s\n' "${merge_out}" | sed '1d' | while IFS= read -r c; do warn "merge conflict: ${c}"; done
+      die "merge-from: conflicting status for the same (osmajor, awscli_version, kver) key(s) above -- verdicts are deterministic, so investigate; or resolve explicitly with --merge-prefer ours|theirs" ;;
+    *) die "merge-from: merge step failed (unreadable ledger JSON?)" ;;
+  esac
 fi
 
 # ---- merge into the ledger + regenerate the per-OS Markdown -----------------
@@ -530,6 +699,16 @@ for ol, entries in by_ol.items():
     kvers = sorted({e.get('kver', '') for e in entries}, reverse=True)
     lines = []
     lines.append(f"# AWS CLI v2 install+run matrix -- OL{ol}")
+    if ol == "5":
+        lines.append("")
+        lines.append("_OL5 is an install-test / PoC scoped, opt-in target (`--ol 5`; never in "
+                     "the default OL set): the bundle zip is host-pre-staged (EL5 has no "
+                     "in-OS TLS 1.2 path), the recorded kver is the live-probed terminal "
+                     "el5uek NVR (probed, not provisioned -- the kernel is not this "
+                     "matrix's compat axis), and a chroot `runs` does not prove the real "
+                     "UEK R2 kernel runtime. Ceiling pin 2.17.51 = the OL6 pin: the "
+                     "2.17.52 Python 3.12 rebase jumps the bundle glibc floor to 2.17, "
+                     "walling out glibc 2.5 and 2.12 alike._")
     lines.append("")
     lines.append("Generated by `tests/awscli/run-awscli-installtest-matrix.sh` from "
                  "`awscli-installtest-ledger.json` -- DO NOT hand-edit (regenerated each run).")
