@@ -503,8 +503,8 @@ load_env() {
         SSM_AGENT_RESOLVED="${_ssm_latest}"
         log_info "[OLAWS-SSM02] resolved SSM Agent 'latest' -> ${SSM_AGENT_RESOLVED} for the AMI identity/report (the guest still installs the /latest/ alias)"
       else
-        SSM_AGENT_RESOLVED="latest"
-        log_warn "[OLAWS-SSM02] could not resolve SSM Agent 'latest' to a concrete version; AMI identity/report will show 'latest'"
+        SSM_AGENT_RESOLVED=""
+        log_warn "[OLAWS-SSM02] could not resolve SSM Agent 'latest' to a concrete version; the AMI identity will omit the ssm marker (no non-concrete 'latest' in the AMI name)"
       fi
     fi
   fi
@@ -596,19 +596,16 @@ load_env() {
       _ena_desc_sfx=" with self-built Amazon ENA ${ENA_BUILD_VERSION:-driver} (DKMS, AWS-optimized for Nitro)"
     fi
     # SSM Agent identity, folded into the AMI name/desc the same way. Default ON
-    # for OL6-OL10; --skip-ssm-agent leaves it empty. A pinned OL (OL6) shows the
-    # version; a /latest/ OL shows '-ssmlatest'. AUTO defaults only (:=).
+    # for OL6-OL10; --skip-ssm-agent leaves it empty. SSM_AGENT_RESOLVED is a
+    # concrete x.y.z.w (resolved above; empty if resolution failed) -- so the
+    # marker ALWAYS carries a concrete version and is omitted entirely rather
+    # than ever printing the word "latest" (parity with the awscli marker;
+    # regression pin: the 2026-07-18 OL9/OL10 E2E registered '-ssmlatest'
+    # AMI names when the GitHub-first resolution failed). AUTO defaults only (:=).
     local _ssm_name_sfx="" _ssm_desc_sfx=""
-    if [[ "${SSM_AGENT_INSTALL}" -eq 1 ]]; then
-      # SSM_AGENT_RESOLVED was resolved above (a concrete version when "latest"
-      # could be looked up; the literal "latest" only if resolution failed).
-      if [[ -z "${SSM_AGENT_RESOLVED}" || "${SSM_AGENT_RESOLVED}" == "latest" ]]; then
-        _ssm_name_sfx="-ssmlatest"
-        _ssm_desc_sfx=", Amazon SSM Agent (latest)"
-      else
-        _ssm_name_sfx="-ssm${SSM_AGENT_RESOLVED}"
-        _ssm_desc_sfx=", Amazon SSM Agent ${SSM_AGENT_RESOLVED}"
-      fi
+    if [[ "${SSM_AGENT_INSTALL}" -eq 1 && -n "${SSM_AGENT_RESOLVED}" && "${SSM_AGENT_RESOLVED}" != "latest" ]]; then
+      _ssm_name_sfx="-ssm${SSM_AGENT_RESOLVED}"
+      _ssm_desc_sfx=", Amazon SSM Agent ${SSM_AGENT_RESOLVED}"
     fi
     # AWS CLI v2 identity, folded into the AMI name/desc the same way. Default ON
     # for OL6/OL7/OL8; --skip-awscli and OL9/OL10 (out of scope) leave it empty.
@@ -3546,14 +3543,28 @@ _ssm_pin_for_major() {
 # for the persistent AMI name/description + the final report only ("latest" is
 # unsuitable for a persistent artifact). The guest install is UNCHANGED: the hook
 # still installs the per-OL target (the /latest/ alias for OL7-OL10). Strategy,
-# curl-only (no rpm dependency on the build host): read GitHub's releases/latest
-# tag via the redirect, then VERIFY that version's RPM is actually published on S3
-# (a HEAD) -- the GitHub tag can lead S3 publication (e.g. 3.3.3883.0 / 3.3.4364.0
-# are tagged but 403 on S3). Echoes the concrete version, or "" on any failure
-# (the caller then keeps the literal "latest").
+# Resolve the SSM Agent "latest" to a concrete, S3-published version -- for the
+# persistent AMI name/description + the final report only (the AMI identity
+# always carries a concrete x.y.z.w and NEVER the word "latest"; parity with
+# the awscli marker). curl-only (no rpm dependency on the build host).
+# Layer 1 (primary): read the S3 release channel's own latest/VERSION file --
+# this is the exact content of the /latest/ alias the guest installs, so it can
+# neither lead nor lag the install. (Root cause of the 2026-07-18 '-ssmlatest'
+# AMI-name degradation: the previous GitHub-first strategy failed closed
+# precisely when the GitHub tag led S3 publication -- 3.3.4851.0 was tagged
+# with its RPM still 403 on S3 while latest/VERSION answered 3.3.4793.0.)
+# Layer 2 (fallback, e.g. if the VERSION file scheme ever disappears): GitHub's
+# releases/latest tag, VERIFIED against S3 with a HEAD (tags can lead S3 --
+# e.g. 3.3.3883.0 / 3.3.4364.0 / 3.3.4851.0). Echoes the concrete version, or
+# "" on total failure (the caller then OMITS the ssm marker entirely).
 _ssm_resolve_latest() {
   local base="https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent" arch="linux_amd64"
   local loc ver
+  ver="$(curl -fsSL --max-time 15 "${base}/latest/VERSION" 2>/dev/null | tr -d '[:space:]' || true)"
+  if [[ "${ver}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    printf '%s' "${ver}"
+    return 0
+  fi
   loc="$(curl -fsSL -o /dev/null -w '%{url_effective}' --max-time 15 \
          https://github.com/aws/amazon-ssm-agent/releases/latest 2>/dev/null || true)"
   ver="$(printf '%s' "${loc}" | sed -nE 's#.*/tag/([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+).*#\1#p')"
@@ -4262,7 +4273,11 @@ phase9_register_ami() {
   log_info "  ENA Support:     enabled"
   local ssm_summary
   if [[ "${SSM_AGENT_INSTALL}" -eq 1 ]]; then
-    ssm_summary="${SSM_AGENT_RESOLVED:-latest} (installed + enabled for boot)"
+    if [[ -n "${SSM_AGENT_RESOLVED}" && "${SSM_AGENT_RESOLVED}" != "latest" ]]; then
+      ssm_summary="${SSM_AGENT_RESOLVED} (installed + enabled for boot)"
+    else
+      ssm_summary="installed + enabled for boot (/latest/ alias; concrete version unresolved at build time)"
+    fi
   else
     ssm_summary="not installed (--skip-ssm-agent)"
   fi

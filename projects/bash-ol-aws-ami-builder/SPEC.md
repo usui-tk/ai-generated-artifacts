@@ -426,7 +426,7 @@ bash. Avoid command substitutions in env files (security and reproducibility).
 |-----|--------------|
 | `DISTR` | `ol${OL_MAJOR_VERSION}-slim` |
 | `CLOUD` | `aws` |
-| `AMI_NAME` | `OracleLinux-${MAJOR}-U${UPDATE}-x86_64-$(date +%Y%m%d-%H%M)`; when the ENA self-build is enabled (default), the auto-default also appends `-ena${ENA_BUILD_VERSION}` (the installer's pin); when the SSM Agent install is enabled (default), it further appends `-ssm${version}` (or `-ssmlatest`); and when the AWS CLI v2 install is enabled (default, OL6/OL7/OL8), it further appends `-awscli${version}` — a **concrete** `x.y.z` (the OL6 pin, or the resolved OL7/OL8 `latest`), so an ENA-self-built / SSM-managed / AWS-CLI-bearing AMI is distinguishable pre-launch. The awscli marker carries a concrete version only and is **omitted** rather than ever printing `latest` (resolution failure → no marker; OL9/OL10 → no marker). An explicitly set `AMI_NAME` is left untouched. |
+| `AMI_NAME` | `OracleLinux-${MAJOR}-U${UPDATE}-x86_64-$(date +%Y%m%d-%H%M)`; when the ENA self-build is enabled (default), the auto-default also appends `-ena${ENA_BUILD_VERSION}` (the installer's pin); when the SSM Agent install is enabled (default), it further appends `-ssm${version}`; and when the AWS CLI v2 install is enabled (default, OL6/OL7/OL8), it further appends `-awscli${version}` — a **concrete** `x.y.z` (the OL6 pin, or the resolved OL7/OL8 `latest`), so an ENA-self-built / SSM-managed / AWS-CLI-bearing AMI is distinguishable pre-launch. The ssm and awscli markers carry a concrete version only and are **omitted** rather than ever printing `latest` (resolution failure → no marker; awscli additionally: OL9/OL10 → no marker). An explicitly set `AMI_NAME` is left untouched. |
 | `AMI_DESCRIPTION` | `Oracle Linux ${MAJOR} Update ${UPDATE} (x86_64) custom AMI built via oracle-linux-image-tools`; the auto-default appends ` with self-built Amazon ENA ${ENA_BUILD_VERSION} (DKMS, AWS-optimized for Nitro)` when self-build is on, or ` (pure OL; ENA self-build skipped)` for `--skip-ena-driver`, further appends `, Amazon SSM Agent ${version}` when the SSM install is on (omitted for `--skip-ssm-agent`), and further appends `, AWS CLI v2 ${version}` (a concrete `x.y.z`) when the AWS CLI v2 install is on (OL6/OL7/OL8; omitted for `--skip-awscli`, OL9/OL10, or an unresolved version). `ENA_BUILD_VERSION` is read from `install-ena-driver.sh`'s `ENA_VERSION_OL<major>` pin, the SSM version from `install-ssm-agent.sh`'s `SSM_AGENT_VERSION_OL<major>` pin, and the AWS CLI version from `install-awscli.sh`'s `AWSCLI_VERSION_OL<major>` pin (single source of truth). |
 | `BOOT_MODE_BUILD` | `bios` (Oracle tool restricts AWS to bios) |
 | `BOOT_MODE` | `legacy-bios` (must match `BOOT_MODE_BUILD`) |
@@ -2468,20 +2468,29 @@ hook, by contrast, is fatal.)
 **AMI naming + version resolution.** When enabled, the AUTO-default `AMI_NAME`
 appends `-ssm${version}` and the description appends `, Amazon SSM Agent
 ${version}`, so an SSM-managed AMI is distinguishable pre-launch. Because
-"latest" is unsuitable for a persistent artifact, the wrapper **resolves the
-`/latest/` alias to a concrete version** for the AMI name/description, the
-injection log (`[OLAWS-SSM01]`), and the final build report: `_ssm_resolve_latest()`
-reads GitHub's `amazon-ssm-agent` `releases/latest` tag and then VERIFIES that
-version's RPM is actually published on S3 with a HEAD (the GitHub tag can lead S3
-publication — e.g. `3.3.3883.0` / `3.3.4364.0` are tagged but 403 on S3), logging
-the outcome as `[OLAWS-SSM02]`. This is **display/identity only**: the in-guest
+"latest" is unsuitable for a persistent artifact, the AMI identity carries a
+**concrete version only, or no ssm marker at all** (parity with the awscli
+marker — never the word `latest`). The wrapper resolves the `/latest/` alias in
+`_ssm_resolve_latest()`, layered: **layer 1 (primary) reads the S3 release
+channel's own `latest/VERSION` file** — the exact content of the alias the
+guest installs, which by construction can neither lead nor lag the install —
+and **layer 2 (fallback)** reads GitHub's `amazon-ssm-agent` `releases/latest`
+tag and VERIFIES that version's RPM on S3 with a HEAD (tags can lead S3
+publication — e.g. `3.3.3883.0` / `3.3.4364.0` / `3.3.4851.0` were tagged
+while 403 on S3), logging the outcome as `[OLAWS-SSM02]`. On total failure the
+marker is **omitted** (`SSM_AGENT_RESOLVED` stays empty; the final report says
+so explicitly instead of printing a bare `latest`). Regression record
+(2026-07-18): the original GitHub-first strategy failed closed exactly when
+the tag led S3 — the OL9.8/OL10.2 real E2E registered `-ssmlatest` AMI names
+(GitHub said `3.3.4851.0`, its RPM was 403, while `latest/VERSION` answered
+`3.3.4793.0`) — which is what motivated the layer-1-primary redesign and the
+omit-on-failure contract; pinned by t004 mocked-curl scenarios and t020
+identity-invariant asserts. This is **display/identity only**: the in-guest
 install path is unchanged (the hook still installs the per-OL target, i.e. the
-`/latest/` S3 alias for OL7-OL10), so install behaviour does not depend on the
-build host's network. If resolution fails (offline, or GitHub leads S3), the
-identity gracefully falls back to the literal `latest`. The final report prints a
-`SSM Agent:` line with the resolved version (or `not installed` for
-`--skip-ssm-agent`). An explicitly set `AMI_NAME`/`AMI_DESCRIPTION` is left
-untouched (`:=`).
+`/latest/` S3 alias for OL6-OL10), so install behaviour does not depend on the
+build host's network. The final report prints a `SSM Agent:` line with the
+resolved version (or `not installed` for `--skip-ssm-agent`). An explicitly
+set `AMI_NAME`/`AMI_DESCRIPTION` is left untouched (`:=`).
 
 **Validation status.** OL6/OL7/OL8 install+run is matrix-verified (B.10) and the
 OL6/OL7 build+boot pipeline is validated on real Nitro; **OL9/OL10 install+run is

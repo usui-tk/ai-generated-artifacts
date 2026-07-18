@@ -115,4 +115,80 @@ else
   assert_eq "1|" "${out}" "detect_os_variant: rc 1 when osinfo-query is absent"
 fi
 
+# --- _ssm_resolve_latest (mocks `curl`) --------------------------------------
+# The AMI-identity SSM version resolver is layered: (1) the S3 release
+# channel's own latest/VERSION file (the exact content of the /latest/ alias
+# the guest installs), then (2) GitHub's releases/latest tag VERIFIED against
+# S3 with a HEAD, else "" (marker omitted). Mocked-curl scenarios pin the
+# layering and the fail-closed contract (regression: the 2026-07-18 OL9/OL10
+# E2E registered '-ssmlatest' AMI names because the then-GitHub-first strategy
+# failed exactly when the tag led S3 publication).
+
+# (1) layer 1 clean: latest/VERSION answers -> that version, GitHub never asked
+td="${WORK}/s1"; mkdir -p "${td}"
+out="$(
+  (
+    # shellcheck source=/dev/null
+    . "${MAIN}" >/dev/null 2>&1
+    mock_setup "${td}"
+    # Literal behaviour string (see note above); SC2016 false positive.
+    # shellcheck disable=SC2016
+    mock_cmd curl 'case "$*" in *latest/VERSION*) printf "3.3.4793.0\n"; exit 0;; *) exit 22;; esac'
+    _ssm_resolve_latest
+  ) 2>/dev/null
+)"
+assert_eq "3.3.4793.0" "${out}" "_ssm_resolve_latest: layer 1 - S3 latest/VERSION answers the concrete version"
+assert_match "$(cat "${td}/calls")" "latest/VERSION" "_ssm_resolve_latest: spy - latest/VERSION was queried"
+if grep -q "github.com" "${td}/calls"; then
+  t_fail "_ssm_resolve_latest: spy - GitHub is NOT consulted when layer 1 succeeds"
+else
+  t_pass "_ssm_resolve_latest: spy - GitHub is NOT consulted when layer 1 succeeds"
+fi
+
+# (2) layer 1 garbage (e.g. an S3 error document) -> layer 2: GitHub tag + S3
+#     HEAD verification succeed -> the tag's version
+td="${WORK}/s2"; mkdir -p "${td}"
+out="$(
+  (
+    # shellcheck source=/dev/null
+    . "${MAIN}" >/dev/null 2>&1
+    mock_setup "${td}"
+    # Literal behaviour string (see note above); SC2016 false positive.
+    # shellcheck disable=SC2016
+    mock_cmd curl 'case "$*" in *latest/VERSION*) printf "<Error><Code>AccessDenied</Code></Error>"; exit 0;; *github.com*) printf "https://github.com/aws/amazon-ssm-agent/releases/tag/3.3.4851.0"; exit 0;; *amazon-ssm-agent.rpm*) exit 0;; *) exit 22;; esac'
+    _ssm_resolve_latest
+  ) 2>/dev/null
+)"
+assert_eq "3.3.4851.0" "${out}" "_ssm_resolve_latest: layer 2 - GitHub tag verified on S3 when layer 1 yields garbage"
+
+# (3) the 2026-07-18 field failure shape, now only reachable with layer 1 also
+#     down: GitHub tag leads S3 publication (HEAD fails) -> "" (fail-closed,
+#     marker omitted; never the word "latest")
+td="${WORK}/s3"; mkdir -p "${td}"
+out="$(
+  (
+    # shellcheck source=/dev/null
+    . "${MAIN}" >/dev/null 2>&1
+    mock_setup "${td}"
+    # Literal behaviour string (see note above); SC2016 false positive.
+    # shellcheck disable=SC2016
+    mock_cmd curl 'case "$*" in *latest/VERSION*) exit 22;; *github.com*) printf "https://github.com/aws/amazon-ssm-agent/releases/tag/3.3.4851.0"; exit 0;; *amazon-ssm-agent.rpm*) exit 22;; *) exit 22;; esac'
+    _ssm_resolve_latest; printf '|rc=%s' "$?"
+  ) 2>/dev/null
+)"
+assert_eq "|rc=0" "${out}" "_ssm_resolve_latest: tag-leads-S3 with layer 1 down -> empty (fail-closed), rc 0"
+
+# (4) everything offline -> ""
+td="${WORK}/s4"; mkdir -p "${td}"
+out="$(
+  (
+    # shellcheck source=/dev/null
+    . "${MAIN}" >/dev/null 2>&1
+    mock_setup "${td}"
+    mock_cmd curl 'exit 6'
+    _ssm_resolve_latest; printf '|rc=%s' "$?"
+  ) 2>/dev/null
+)"
+assert_eq "|rc=0" "${out}" "_ssm_resolve_latest: fully offline -> empty (marker omitted), rc 0"
+
 t_done

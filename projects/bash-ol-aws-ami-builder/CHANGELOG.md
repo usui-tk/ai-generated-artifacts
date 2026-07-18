@@ -20,6 +20,42 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (2026-07-18 — AMI identity: '-ssmlatest' degradation; SSM version resolution re-grounded on the S3 /latest/ channel)
+- **The 2026-07-18 OL9.8/OL10.2 real E2E registered AMI names carrying
+  `-ssmlatest`** — a degradation of the "AMI identity always carries concrete
+  versions, never the word latest" invariant (earlier builds stamped e.g.
+  `-ssm3.3.4793.0`). Root cause, reproduced live: `_ssm_resolve_latest()` was
+  GitHub-first (releases/latest tag, then an S3 HEAD verification) and failed
+  closed exactly when the GitHub tag led S3 publication — at fix time GitHub
+  said `3.3.4851.0` with its RPM 403 on S3 — and the failure fallback then
+  printed the literal `latest` into the persistent identity, contradicting
+  the awscli marker's established omit-on-failure contract one block below.
+- Fix, two-part:
+  - `_ssm_resolve_latest()` is now layered with the **S3 release channel's
+    own `latest/VERSION` file as layer 1** — the exact content of the
+    `/latest/` alias the guest installs, which by construction can neither
+    lead nor lag the install (live-measured `3.3.4793.0`, matching the
+    version proven running on the 2026-07-13 real-boot E2E); the GitHub
+    tag + S3-HEAD route stays as layer 2 fallback.
+  - **Marker conformance (awscli parity)**: on total resolution failure
+    `SSM_AGENT_RESOLVED` stays empty and the ssm marker is omitted from the
+    AMI name/description entirely — the word `latest` can no longer reach
+    the persistent identity; the final report line states the unresolved
+    case explicitly instead of printing a bare `latest`. Guest install
+    behavior is unchanged (the hook still installs the `/latest/` alias).
+- Tests: command-mock tier +6 (mocked-curl scenarios pinning the layer order,
+  the layer-1-success/no-GitHub-call spy, the tag-leads-S3 fail-closed shape,
+  and full-offline → empty); register-validation tier +4 identity-invariant
+  pins (the `-ssmlatest` branch can never regrow, the marker is gated on a
+  non-empty resolved version, layer 1 reads `latest/VERSION`, failure empties
+  rather than stores `latest`) and the realistic-name fixture updated to the
+  2026-07-18 E2E shape with a concrete version. Suite: 551 -> 561
+  full-toolchain, 22 tiers.
+- Docs lock-step: SPEC AMI_NAME table row + B.11 naming/resolution paragraph
+  rewritten to the layered resolver and omit-on-failure contract, with the
+  2026-07-18 regression record. READMEs untouched (they do not document the
+  marker mechanics).
+
 ### Changed (2026-07-16 — ENA buildtest ledger: full re-sweep on refreshed UEK kernels)
 - **ENA buildtest ledger + RESULTS-ol6..10 replaced with the 2026-07-16 full
   sweep** (user-host matrix run, single-sweep replacement per the pre-release
