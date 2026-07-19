@@ -321,6 +321,15 @@ parse_ol_version_from_iso() {
     OL_UPDATE_VERSION="${BASH_REMATCH[2]}"
     return 0
   fi
+  # OL5-era naming: the 5.x media predates the "OracleLinux-R*" convention and
+  # ships as "Enterprise-R5-U11-Server-x86_64-dvd.iso" (Oracle's original
+  # "Enterprise Linux" branding; the kernel.org mirror carries this exact
+  # name). OS-separation: this branch can only ever match the legacy media.
+  if [[ "${iso_filename}" =~ Enterprise-R([0-9]+)-U([0-9]+) ]]; then
+    OL_MAJOR_VERSION="${BASH_REMATCH[1]}"
+    OL_UPDATE_VERSION="${BASH_REMATCH[2]}"
+    return 0
+  fi
   return 1
 }
 
@@ -348,6 +357,13 @@ normalize_imds_support() {
   # metadata-based SSH-key injection on first boot. Reject v2.0 for OL6 up front.
   if [[ "${OL_MAJOR_VERSION}" -eq 6 && "${IMDS_SUPPORT}" == "v2.0" ]]; then
     die "IMDS_SUPPORT=v2.0 is not supported for OL6: its cloud-init 0.7.5 cannot fetch instance metadata over IMDSv2, so an IMDSv2-only AMI would fail SSH-key injection. Use IMDS_SUPPORT=default (IMDSv1+v2) for OL6."
+  fi
+  # Same class of failure, older generation: OL5's cloud-init is EPEL5's 0.6.3
+  # whose DataSourceEc2 speaks plain (token-less) IMDSv1 only, so an
+  # IMDSv2-only AMI would fail SSH-key injection on first boot. Explicit OL5
+  # branch (OS-separation; see the OL6 rationale above / SPEC D.27).
+  if [[ "${OL_MAJOR_VERSION}" -eq 5 && "${IMDS_SUPPORT}" == "v2.0" ]]; then
+    die "IMDS_SUPPORT=v2.0 is not supported for OL5: its cloud-init 0.6.3 (EPEL5) fetches instance metadata over plain IMDSv1 only, so an IMDSv2-only AMI would fail SSH-key injection. Use IMDS_SUPPORT=default (IMDSv1+v2) for OL5."
   fi
 }
 
@@ -473,6 +489,68 @@ load_env() {
     log_warn "============================================================================"
   fi
 
+  # Emit a prominent advisory when the user targets OL5, and enforce the OL5
+  # measured invariants up front. OL5 is the deepest legacy target: upstream
+  # ships no distr/ol5-slim/, EL5 userspace has NO TLS-1.2 path (openssl
+  # 0.9.8e), bash is 3.2, dracut/systemd/grub2 do not exist, and the guest can
+  # reach NO https repository -- every package beyond the ISO is pre-staged
+  # from the HOST (the provision.d files channel). See SPEC B (OL5) and the
+  # D-part investigation records.
+  if [[ "${OL_MAJOR_VERSION}" -eq 5 ]]; then
+    log_warn "============================================================================"
+    log_warn " Oracle Linux 5 target selected (OL${OL_MAJOR_VERSION}U${OL_UPDATE_VERSION})."
+    log_warn ""
+    log_warn "  * OL5 Premier Support ended 2017; Extended Support ended 2021."
+    log_warn "  * Upstream oracle-linux-image-tools does NOT ship distr/ol5-slim/;"
+    log_warn "    build-ol-aws-ami.sh generates it at runtime in Phase 3."
+    log_warn "  * ALL guest packages beyond the ISO are HOST-staged (EL5 has no"
+    log_warn "    in-OS TLS 1.2 path): UEK R2 kernel, the frozen ENA build"
+    log_warn "    toolchain, the EPEL5 cloud-init 0.6.3 closure, and gdisk."
+    log_warn "  * The ENA driver is SELF-BUILT (UEK R2 has no in-box ena; the"
+    log_warn "    in-box nvme IS present -- the Nitro boot precondition)."
+    log_warn "  * The Amazon SSM Agent is a MEASURED EXCLUSION on OL5 (rpmlib +"
+    log_warn "    kernel-floor walls; SPEC B.10/D.31) and is never wired."
+    log_warn "  * x86_64 / BIOS / MBR + GRUB Legacy only. UEK Release 2 only."
+    log_warn "  * Nitro boot is unproven until the real-instance E2E; Xen-"
+    log_warn "    generation instances are the measured fallback path."
+    log_warn ""
+    log_warn "  This target is intended ONLY for verification, learning, or"
+    log_warn "  legacy migration scenarios. NEVER use the resulting AMI for"
+    log_warn "  production workloads."
+    log_warn "============================================================================"
+
+    # SSM Agent: measured exclusion (SPEC B.10/D.31 -- xz/sha256 rpmlib wall +
+    # kernel 3.2 floor, all three empirically proven). Forced OFF regardless of
+    # flags so the hook can never be wired and the AMI name never carries an
+    # ssm marker on OL5.
+    if [[ "${SSM_AGENT_INSTALL}" -eq 1 ]]; then
+      log_info "[OLAWS-OL5] SSM Agent install FORCED OFF on OL5 (measured exclusion; SPEC B.10/D.31 -- not a --skip default)"
+      SSM_AGENT_INSTALL=0
+    fi
+
+    # cloud-init 0.6.3 has no users-groups module: the key-injection target
+    # user must ALREADY exist (setup_user_keys is getpwnam-only), and the
+    # synthesized kickstart %post creates exactly 'ec2-user'. The upstream
+    # cloud/aws default (CLOUD_USER=opc) therefore cannot work here; pin it.
+    if [[ "${CLOUD_USER:-}" != "" && "${CLOUD_USER}" != "ec2-user" ]]; then
+      log_warn "[OLAWS-OL5] CLOUD_USER='${CLOUD_USER}' overridden to 'ec2-user' on OL5 (cloud-init 0.6.3 cannot create users; the kickstart pre-creates ec2-user only)"
+    fi
+    CLOUD_USER="ec2-user"
+
+    # Upstream common::retrieve_iso hard-requires a SHA1/SHA256 ISO_CHECKSUM.
+    # The kernel.org mirror publishes MD5SUMS only, so the operator computes
+    # the SHA256 once (cross-checking the documented mirror MD5) and bakes it
+    # into the env file -- fail loudly here instead of deep inside upstream.
+    if [[ -z "${ISO_CHECKSUM:-}" ]]; then
+      die "ISO_CHECKSUM is empty. OL5 requires a SHA256 you compute once from the
+     downloaded ISO (upstream accepts SHA1/SHA256 only; the kernel.org mirror
+     publishes MD5SUMS). Steps (documented in env.properties.aws-ol5):
+       1) curl -fL -o Enterprise-R5-U11-Server-x86_64-dvd.iso '<ISO_URL>'
+       2) md5sum  <iso>   # MUST equal the mirror MD5SUMS value recorded in the env file
+       3) sha256sum <iso> # paste into ISO_CHECKSUM"
+    fi
+  fi
+
   # DISTR slug used by oracle-linux-image-tools.
   # Convention: ol{major}-slim (e.g. ol10-slim, ol9-slim, ol8-slim, ol7-slim).
   : "${DISTR:=ol${OL_MAJOR_VERSION}-slim}"
@@ -510,15 +588,15 @@ load_env() {
   fi
 
   # Resolve the AWS CLI v2 version for the persistent AMI identity + report.
-  # Wired for OL6/OL7/OL8 ONLY (OL9/OL10 install v2 from their default package
+  # Wired for OL5/OL6/OL7/OL8 ONLY (OL9/OL10 install v2 from their default package
   # manager -- out of scope here). AWSCLI_RESOLVED starts as the per-OL target
-  # (OL6 pin 2.17.51, OL7/OL8 "latest"); if it is "latest", resolve it to the
+  # (OL5/OL6 pin 2.17.51, OL7/OL8 "latest"); if it is "latest", resolve it to the
   # concrete published version so the AMI name/description always carries a
   # concrete x.y.z, never the word "latest". The guest install is UNCHANGED --
   # the OL7/OL8 hook still installs the /latest/ bundle; this is display/identity
   # only. If resolution fails (e.g. offline --build-only), AWSCLI_RESOLVED is left
   # empty and the AMI identity simply omits the awscli marker (never "latest").
-  if [[ "${AWSCLI_INSTALL}" -eq 1 && ( "${OL_MAJOR_VERSION}" == "6" || "${OL_MAJOR_VERSION}" == "7" || "${OL_MAJOR_VERSION}" == "8" ) ]]; then
+  if [[ "${AWSCLI_INSTALL}" -eq 1 && ( "${OL_MAJOR_VERSION}" == "5" || "${OL_MAJOR_VERSION}" == "6" || "${OL_MAJOR_VERSION}" == "7" || "${OL_MAJOR_VERSION}" == "8" ) ]]; then
     AWSCLI_RESOLVED="$(_awscli_pin_for_major "${OL_MAJOR_VERSION}")"
     if [[ -z "${AWSCLI_RESOLVED}" || "${AWSCLI_RESOLVED}" == "latest" ]]; then
       local _awscli_latest; _awscli_latest="$(_awscli_resolve_latest)"
@@ -1395,7 +1473,21 @@ _p3_validate_ks() {
   local n_sec n_end
   n_sec="$(grep -cE '^%(packages|pre-install|pre|post|addon|anaconda|onerror|traceback)([[:space:]]|$)' "${ks}" || true)"
   n_end="$(grep -cE '^%end$' "${ks}" || true)"
-  if [[ "${n_sec}" -ne "${n_end}" ]]; then
+  if [[ "${major}" -eq 5 ]]; then
+    # EL5/anaconda-11.1 predates '%end' entirely: a literal '%end' inside
+    # %packages would be consumed as a PACKAGE NAME and fail the install, so
+    # the OL5 shape is ZERO '%end' with exactly the synthesized %packages +
+    # %post openers. (OS-separation: the balanced-%end rule below keeps
+    # guarding OL6-10 unchanged.)
+    if [[ "${n_end}" -ne 0 ]]; then
+      log_error "  [P3GATE] OL5 kickstart must contain NO '%end' (anaconda-11.1 reads it as a package name); found ${n_end}: ${ks}"
+      fails=$((fails+1))
+    fi
+    if [[ "${n_sec}" -ne 2 ]]; then
+      log_error "  [P3GATE] OL5 kickstart must have exactly 2 section openers (%packages + %post), found ${n_sec}: ${ks}"
+      fails=$((fails+1))
+    fi
+  elif [[ "${n_sec}" -ne "${n_end}" ]]; then
     log_error "  [P3GATE] unbalanced kickstart sections: ${n_sec} openers vs ${n_end} '%end': ${ks}"
     fails=$((fails+1))
   fi
@@ -1483,7 +1575,7 @@ _p3_exit_gate() {
   if command -v ksvalidator >/dev/null 2>&1; then
     local prof out
     case "${OL_MAJOR_VERSION}" in
-      6) prof="RHEL6" ;; 7) prof="RHEL7" ;; 8) prof="RHEL8" ;; 9) prof="RHEL9" ;; 10) prof="RHEL10" ;;
+      5) prof="RHEL5" ;; 6) prof="RHEL6" ;; 7) prof="RHEL7" ;; 8) prof="RHEL8" ;; 9) prof="RHEL9" ;; 10) prof="RHEL10" ;;
     esac
     out="$(ksvalidator -v "${prof}" "${ks}" 2>&1 || true)"
     if printf '%s' "${out}" | grep -qiE 'unknown.*version|invalid.*version'; then
@@ -1726,7 +1818,197 @@ phase3_clone_repository() {
     fi
   fi
 
+  # OL5 virt-install disk-bus patch (bin/build-image.sh).
+  #
+  # Upstream pins the build VM disk to virtio-scsi (bus=scsi). The EL5
+  # installer kernel (2.6.18) has NO virtio-scsi driver (mainline 3.4+), so
+  # anaconda would see no disk at all. It DOES have plain virtio-blk
+  # (RHEL 5.3+ KVM-guest support), and the F1 payload probe confirmed UEK R2
+  # ships the virtio set too -- so the minimal, period-correct fix is
+  # bus=scsi -> bus=virtio for OL5 only (the unused virtio-scsi controller
+  # device is harmless; the installed image never boots under qemu again --
+  # provisioning is offline virt-customize). Marker-guarded + idempotent.
+  if [[ "${OL_MAJOR_VERSION}" -eq 5 ]]; then
+    local build_image_ol5="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/bin/build-image.sh"
+    log_info "Applying OL5 virt-install disk-bus patch to upstream bin/build-image.sh (bus=scsi -> bus=virtio)"
+    if [[ ! -f "${build_image_ol5}" ]]; then
+      die "Cannot apply OL5 disk-bus patch: ${build_image_ol5} not found"
+    fi
+    if grep -Fq '[ol-aws-ami-builder OL5 disk-bus PATCH]' "${build_image_ol5}"; then
+      log_info "  -> OL5 disk-bus patch already present (idempotent skip)"
+    elif grep -q 'bus=scsi,cache=unsafe' "${build_image_ol5}"; then
+      sed -i".ol5-diskbus.bak" \
+        -e 's|bus=scsi,cache=unsafe|bus=virtio,cache=unsafe|' \
+        -e '1a # [ol-aws-ami-builder OL5 disk-bus PATCH] virt-install disk bus=scsi -> bus=virtio (EL5 installer has no virtio-scsi; see build-ol-aws-ami.sh phase3)' \
+        "${build_image_ol5}"
+      if grep -q 'bus=virtio,cache=unsafe' "${build_image_ol5}"; then
+        log_info "  -> OL5 disk-bus patch applied (backup at ${build_image_ol5}.ol5-diskbus.bak)"
+      else
+        die "Failed to apply OL5 disk-bus patch to ${build_image_ol5}"
+      fi
+    else
+      log_warn "  Upstream 'bus=scsi,cache=unsafe' disk spec not found in ${build_image_ol5}."
+      log_warn "  Assuming the upstream disk spec has been refactored; OL5 install may not see its disk."
+    fi
+  fi
+
+  # OL5 host-supply executor + cloud:: overrides ([OLAWS-OL5S1] / [OLAWS-OL5S2]).
+  #
+  # EL5 has NO in-OS TLS 1.2 path (openssl 0.9.8e), so unlike OL6-10 the guest
+  # can fetch nothing: every package beyond the ISO is staged by the HOST into
+  # the synthesized distr/ol5-slim/files/ tree, which upstream build-image.sh
+  # copies into provision.d/distr/ and virt-customize copies into the guest at
+  # /tmp/provision.d/ (the standard files channel -- no upstream changes).
+  #
+  # Execution model: hook blocks appended to cloud/aws/provision.sh run at
+  # SOURCE time (bin/provision.sh load_env), in file order. This block is
+  # appended BEFORE the ENA/awscli hooks, so by the time those hooks invoke
+  # their installers the toolchain, kernel-uek(+devel), the cloud-init 0.6.3
+  # closure, gdisk, and the /usr/src source artifacts are already in place.
+  #
+  # Ordering INSIDE the block is load-bearing:
+  #   (1) /etc/modprobe.conf aliases FIRST (scsi_hostadapter nvme + xen-blkfront,
+  #       eth0 ena) -- the kernel-uek RPM %post runs new-kernel-pkg -> mkinitrd,
+  #       which reads scsi_hostadapter aliases, so nvme is baked into the initrd
+  #       by the package's own install;
+  #   (2) DEFAULTKERNEL=kernel-uek BEFORE the transaction (the %post makes the
+  #       new kernel the grub default);
+  #   (3) one rpm -Uvh transaction over ALL staged RPMs (toolchain closure +
+  #       kernel + cloud-init closure + fdisk/gdisk tooling);
+  #   (4) stage /usr/src source artifacts (ena tarball, awscli zip);
+  #   (5) assert: UEK kernel present, its initrd exists AND contains nvme.ko
+  #       (remediate once via mkinitrd --with, then hard-fail), grub default
+  #       entry boots el5uek, cloud-init installed.
+  # Guest side is EL5 bash 3.2: POSIX constructs only (no ${var,,}, no mapfile).
+  #
+  # [OLAWS-OL5S2] then REDEFINES cloud::install_aws_packages / cloud::cloud_init
+  # (bash: the later definition wins) -- the upstream bodies are yum/dracut
+  # based and would abort on EL5; the overrides make them verify-only. The
+  # upstream definitions become dead code that is never executed (their
+  # bash-4-only expansions are harmless at parse time).
+  if [[ "${OL_MAJOR_VERSION}" -eq 5 ]]; then
+    local aws_provision_ol5="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/cloud/aws/provision.sh"
+    log_info "Injecting OL5 host-supply executor + cloud:: overrides into cloud/aws/provision.sh"
+    if [[ ! -f "${aws_provision_ol5}" ]]; then
+      die "Cannot inject OL5 host-supply block: ${aws_provision_ol5} not found"
+    fi
+    if grep -Fq '[ol-aws-ami-builder PATCH ol5-host-supply]' "${aws_provision_ol5}"; then
+      log_info "  -> OL5 host-supply block already present (idempotent skip)"
+    else
+      local ol5s1_body
+      ol5s1_body="$(cat <<'OLAWS_OL5S1_BODY'
+#!/bin/sh
+# [OLAWS-OL5S1] OL5 host-supply executor (EL5 bash 3.2 safe; POSIX only).
+# Runs at provision source time, before the ENA/awscli hooks.
+set -e
+PDIR="${PROVISION_DIR:-/tmp/provision.d}"
+RPMDIR="${PDIR}/distr/rpms"
+SRCDIR="${PDIR}/distr/src"
+echo "[ol5-host-supply] begin (rpms=${RPMDIR} src=${SRCDIR})"
+
+# (1) modprobe aliases BEFORE any kernel install (mkinitrd reads these).
+touch /etc/modprobe.conf
+grep -q '^alias scsi_hostadapter nvme$' /etc/modprobe.conf 2>/dev/null \
+  || echo 'alias scsi_hostadapter nvme' >> /etc/modprobe.conf
+grep -q '^alias scsi_hostadapter1 xen-blkfront$' /etc/modprobe.conf 2>/dev/null \
+  || echo 'alias scsi_hostadapter1 xen-blkfront' >> /etc/modprobe.conf
+grep -q '^alias eth0 ena$' /etc/modprobe.conf 2>/dev/null \
+  || echo 'alias eth0 ena' >> /etc/modprobe.conf
+
+# (2) UEK becomes the default kernel via the package's own %post.
+if [ -f /etc/sysconfig/kernel ]; then
+  sed -i -e 's/^DEFAULTKERNEL=.*/DEFAULTKERNEL=kernel-uek/' /etc/sysconfig/kernel
+else
+  echo 'DEFAULTKERNEL=kernel-uek' > /etc/sysconfig/kernel
+fi
+
+# (3) one transaction over every staged RPM (assert-all-then-write: verify the
+# stage is non-empty and every file has the RPM lead magic BEFORE installing).
+[ -d "${RPMDIR}" ] || { echo "[ol5-host-supply] FATAL: staged RPM dir missing: ${RPMDIR}"; exit 1; }
+count=0
+for f in "${RPMDIR}"/*.rpm; do
+  [ -f "$f" ] || { echo "[ol5-host-supply] FATAL: no staged RPMs under ${RPMDIR}"; exit 1; }
+  magic="$(od -An -N4 -tx1 "$f" 2>/dev/null | tr -d ' \n')"
+  [ "$magic" = "edabeedb" ] || { echo "[ol5-host-supply] FATAL: not an RPM (bad lead magic): $f"; exit 1; }
+  count=$((count+1))
+done
+echo "[ol5-host-supply] installing ${count} staged RPM(s)"
+rpm -Uvh --replacepkgs "${RPMDIR}"/*.rpm || { echo "[ol5-host-supply] FATAL: rpm transaction failed"; exit 1; }
+
+# (4) stage source artifacts for the ENA / awscli installers (an EMPTY src
+# dir is legitimate under --skip-ena-driver + --skip-awscli).
+[ -d "${SRCDIR}" ] || { echo "[ol5-host-supply] FATAL: staged src dir missing: ${SRCDIR}"; exit 1; }
+for f in "${SRCDIR}"/*; do
+  [ -f "$f" ] || continue
+  cp -f "$f" /usr/src/ || { echo "[ol5-host-supply] FATAL: staging $f into /usr/src failed"; exit 1; }
+done
+
+# (5) asserts.
+kv=""
+for d in /lib/modules/*el5uek*; do
+  [ -d "$d" ] && kv="$(basename "$d")"
+done
+[ -n "$kv" ] || { echo "[ol5-host-supply] FATAL: no el5uek kernel under /lib/modules after install"; exit 1; }
+echo "[ol5-host-supply] UEK R2 kernel installed: ${kv}"
+initrd="/boot/initrd-${kv}.img"
+check_initrd() { zcat "$1" 2>/dev/null | cpio -it 2>/dev/null | grep -q 'nvme\.ko'; }
+if [ ! -f "${initrd}" ] || ! check_initrd "${initrd}"; then
+  echo "[ol5-host-supply] initrd missing or lacks nvme.ko; regenerating with mkinitrd --with"
+  mkinitrd --with=nvme --with=xen-blkfront -f "${initrd}" "${kv}" \
+    || { echo "[ol5-host-supply] FATAL: mkinitrd regen failed"; exit 1; }
+  check_initrd "${initrd}" || { echo "[ol5-host-supply] FATAL: initrd still lacks nvme.ko after regen"; exit 1; }
+fi
+echo "[ol5-host-supply] initrd contains nvme.ko: ${initrd}"
+# grub default must boot el5uek (GRUB Legacy: resolve default=N to its kernel line).
+awk -v needle="el5uek" '
+  /^default=/ { split($0, a, "="); def = a[2] + 0 }
+  /^title/    { t++ }
+  /^[ \t]*kernel/ { if (t - 1 == def && index($0, needle)) found = 1 }
+  END { exit found ? 0 : 1 }
+' /boot/grub/grub.conf || { echo "[ol5-host-supply] FATAL: grub default entry does not boot el5uek (check /boot/grub/grub.conf)"; exit 1; }
+echo "[ol5-host-supply] grub default boots el5uek"
+rpm -q cloud-init >/dev/null 2>&1 || { echo "[ol5-host-supply] FATAL: cloud-init not installed by the staged closure"; exit 1; }
+echo "[ol5-host-supply] cloud-init installed: $(rpm -q cloud-init)"
+echo "[ol5-host-supply] done"
+OLAWS_OL5S1_BODY
+)"
+      {
+        printf '\n# >>> [ol-aws-ami-builder PATCH ol5-host-supply] >>>\n'
+        printf "cat > /usr/local/sbin/ol-aws-ol5-host-supply.sh <<'OLAWS_OL5S1_EOF'\n"
+        printf '%s\n' "${ol5s1_body}"
+        printf 'OLAWS_OL5S1_EOF\n'
+        printf 'chmod +x /usr/local/sbin/ol-aws-ol5-host-supply.sh\n'
+        printf 'sh /usr/local/sbin/ol-aws-ol5-host-supply.sh\n'
+        printf '# [OLAWS-OL5S2] EL5-safe overrides: the LATER definition wins in bash, so\n'
+        printf '# these replace the upstream yum/dracut-based bodies (never executed on OL5).\n'
+        printf 'cloud::install_aws_packages() {\n'
+        printf '  common::echo_message "OL5: kernel/driver packages are HOST-staged ([OLAWS-OL5S1]); upstream kernel-uek-modules/dracut path skipped"\n'
+        printf '}\n'
+        printf 'cloud::cloud_init() {\n'
+        printf '  common::echo_message "OL5: cloud-init 0.6.3 (EPEL5) came from the host-staged closure ([OLAWS-OL5S1]); verify-only"\n'
+        printf '  rpm -q cloud-init >/dev/null 2>&1 || { echo "FATAL: cloud-init missing at cloud::cloud_init"; exit 1; }\n'
+        printf '  # Keep the 0.6.3 upstream defaults: user ec2-user / disable_root 1.\n'
+        printf '  # (system_info/default_user + 90_ol.cfg are 0.7.x concepts -- not written.)\n'
+        printf '}\n'
+        printf '# <<< [ol-aws-ami-builder PATCH ol5-host-supply] <<<\n'
+      } >> "${aws_provision_ol5}"
+      if grep -Fq '[ol-aws-ami-builder PATCH ol5-host-supply]' "${aws_provision_ol5}"; then
+        log_info "  [OLAWS-OL5S1] OL5 host-supply executor injected (modprobe aliases -> DEFAULTKERNEL -> rpm transaction -> /usr/src staging -> initrd/grub/cloud-init asserts)"
+        log_info "  [OLAWS-OL5S2] cloud::install_aws_packages / cloud::cloud_init overridden with EL5-safe verify-only bodies"
+      else
+        die "Failed to inject OL5 host-supply block into ${aws_provision_ol5}"
+      fi
+    fi
+  fi
+
   # cloud/aws/provision.sh Nitro initramfs-drivers hook (ALWAYS on).
+  #
+  # OL5 EXCEPTION (OS-separation): EL5 has no dracut at all -- initrd handling
+  # on OL5 is owned end-to-end by the OL5 host-supply block ([OLAWS-OL5S1]:
+  # modprobe.conf scsi_hostadapter aliases written BEFORE the kernel-uek RPM
+  # install so its %post mkinitrd bakes nvme in, plus an explicit mkinitrd
+  # regen + content assert). Injecting this dracut-based hook on OL5 would
+  # only write an inert (or, worse, misleading) /etc/dracut.conf.d drop-in.
   #
   # Forcing nvme + ena into the initramfs is a Nitro BOOT requirement (the root
   # is NVMe-backed), independent of the ENA driver *version* and of
@@ -1792,7 +2074,9 @@ fi
 exit 0
 OLAWS_NITRO_BODY
 )"
-  if [[ -f "${aws_provision}" ]]; then
+  if [[ "${OL_MAJOR_VERSION}" -eq 5 ]]; then
+    log_info "Nitro initramfs-drivers hook NOT injected on OL5 (no dracut on EL5; initrd/nvme handling is owned by the [OLAWS-OL5S1] host-supply block)"
+  elif [[ -f "${aws_provision}" ]]; then
     if grep -Fq '[ol-aws-ami-builder PATCH nitro-initramfs]' "${aws_provision}"; then
       log_info "Nitro initramfs-drivers hook already present (idempotent skip)"
     else
@@ -2100,8 +2384,12 @@ OLAWS_OL6_CLOUD_USER_BODY
         printf '# its (earlier) stage; ena arrives via the DKMS build below. Add ena to the\n'
         printf '# shared drop-in NOW (idempotent) so the installer'"'"'s own dracut regen bakes\n'
         printf '# it into the initramfs and in-instance kernel updates keep it.\n'
-        printf '%s\n' 'mkdir -p /etc/dracut.conf.d'
-        printf '%s\n' 'grep -qsw ena /etc/dracut.conf.d/02-ol-aws-nitro.conf || printf '\''add_drivers+=" ena "\n'\'' >> /etc/dracut.conf.d/02-ol-aws-nitro.conf'
+        if [[ "${OL_MAJOR_VERSION}" -ne 5 ]]; then
+          printf '%s\n' 'mkdir -p /etc/dracut.conf.d'
+          printf '%s\n' 'grep -qsw ena /etc/dracut.conf.d/02-ol-aws-nitro.conf || printf '\''add_drivers+=" ena "\n'\'' >> /etc/dracut.conf.d/02-ol-aws-nitro.conf'
+        else
+          printf '%s\n' '# (OL5: no dracut on EL5 -- the drop-in is omitted; ena loads via the modprobe.conf alias written by [OLAWS-OL5S1], and nvme is baked into the initrd by mkinitrd)'
+        fi
         printf '%s\n' "${_ena_hook_invoke}"
         printf '# <<< [ol-aws-ami-builder PATCH ena-driver-build] <<<\n'
       } >> "${aws_provision_ena}"
@@ -2201,7 +2489,7 @@ OLAWS_OL6_CLOUD_USER_BODY
   # wrapper marker.
   if [[ "${AWSCLI_INSTALL}" -ne 1 ]]; then
     log_info "AWS CLI v2 install disabled (--skip-awscli); the AMI ships without AWS CLI v2"
-  elif [[ "${OL_MAJOR_VERSION}" != "6" && "${OL_MAJOR_VERSION}" != "7" && "${OL_MAJOR_VERSION}" != "8" ]]; then
+  elif [[ "${OL_MAJOR_VERSION}" != "5" && "${OL_MAJOR_VERSION}" != "6" && "${OL_MAJOR_VERSION}" != "7" && "${OL_MAJOR_VERSION}" != "8" ]]; then
     log_info "AWS CLI v2 install skipped on OL${OL_MAJOR_VERSION} (out of scope; OL9/OL10 install AWS CLI v2 from the default package manager)"
   else
     local aws_provision_cli="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/cloud/aws/provision.sh"
@@ -2954,6 +3242,638 @@ EOF_OL6_PROV
 
     chmod +x "${ol6_slim_dir}/image-scripts.sh" "${ol6_slim_dir}/provision.sh"
     log_info "  -> Generated 4 files in ${ol6_slim_dir}/"
+  fi
+
+  # OL5 distr/ol5-slim/ runtime generation + host-supply artifact staging.
+  #
+  # Background:
+  #   Like OL6, OL5 has NO distr directory upstream; unlike OL6, the guest can
+  #   fetch NOTHING (EL5 = TLS 1.0 max), so this block also downloads every
+  #   guest artifact on the HOST into distr/ol5-slim/files/ -- the standard
+  #   upstream files channel (build-image.sh copies files/ into provision.d/,
+  #   virt-customize copies it to /tmp/provision.d/ in the guest, and the
+  #   [OLAWS-OL5S1] executor installs from there).
+  #
+  # Templates mirror distr/ol6-slim's structure with EL5 adjustments:
+  #   - SysV init (no Upstart/systemd), GRUB Legacy, anaconda-11.1 kickstart
+  #     syntax (NO %end; 'key --skip'; no services/cmdline/--only-use)
+  #   - UEK Release 2 only (in-box nvme, F1-proven; ena self-built)
+  #   - ext3 root (EL5 anaconda's solid choice; ext4 is a 5.6 tech preview)
+  #   - guest-side provision code is EL5 bash 3.2 / POSIX safe
+  #   - LABEL-based boot everywhere (hda/sda -> nvme device-name transitions)
+  if [[ "${OL_MAJOR_VERSION}" -eq 5 ]]; then
+    local ol5_slim_dir="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/distr/ol5-slim"
+    log_info "Generating distr/ol5-slim/ at runtime (upstream does not ship this directory)"
+    mkdir -p "${ol5_slim_dir}"
+
+    # ----- distr/ol5-slim/env.properties -----
+    cat > "${ol5_slim_dir}/env.properties" <<'EOF_OL5_ENV'
+# Default parameters for OL5 distribution.
+# Do NOT change anything in this file; customisation must be done in a
+# separate env file (e.g. env.properties.aws-ol5).
+#
+# This file is created at build time by ol-aws-ami-builder because the
+# upstream oracle-linux-image-tools project does not ship a distr/ol5-slim/
+# directory. See SPEC.md (Part B/D) for the rationale.
+
+# Distribution name (auto-derived from ISO_URL by build-image.sh; this is fallback)
+DISTR_NAME="OL5U11_x86_64"
+
+# Distribution release
+readonly ORACLE_RELEASE=5
+
+# Setup swap? (Cloud images: no)
+SETUP_SWAP="no"
+
+# Root filesystem: ext3 ONLY on OL5 (EL5 anaconda-11.1; ext4 is a 5.6 tech
+# preview behind a boot flag and xfs/lvm/btrfs roots are unsupported).
+ROOT_FS="ext3"
+
+# Location of kernel/initrd on the distribution image (relative to ISO root)
+BOOT_LOCATION="isolinux"
+
+# Boot mode - Must be "bios" for OL5 (no UEFI support in EL5 anaconda)
+BOOT_MODE="bios"
+
+# Boot command for EL5 anaconda (NO 'inst.' prefix; NO stage2= -- the EL5
+# loader auto-probes the attached install media, and the kickstart's 'cdrom'
+# directive pins the package source). Variables MUST be escaped as they are
+# evaluated at build time.
+BOOT_COMMAND=(
+  'text'
+  'ks=file:/${KS_FILE}'
+)
+# Additional parameters to enable serial console
+BOOT_COMMAND_SERIAL_CONSOLE=(
+  'console=tty0'
+  'console=ttyS0'
+)
+
+# Kernel: uek only on OL5 + AWS (UEK R2 carries the in-box nvme driver --
+# the Nitro boot precondition; RHCK 2.6.18 has neither nvme nor ena).
+KERNEL="uek"
+
+# UEK release: 2 (the only UEK line published for OL5; terminal/frozen)
+UEK_RELEASE=2
+
+# Update: no ONLY on OL5 (the guest has no reachable repository -- EL5 has
+# no TLS 1.2 path; every package is host-staged).
+UPDATE_TO_LATEST="no"
+
+# Keep linux-firmware package? EL5 has no linux-firmware package at all;
+# kernel-uek-firmware is host-staged with the kernel. Fixed "no".
+LINUX_FIRMWARE="no"
+
+# Strip locales to only keep en_US? yes, no
+STRIP_LOCALES="no"
+
+# Exclude documentation? yes, no, minimal
+EXCLUDE_DOCS="no"
+
+# Directory used to save build information
+readonly BUILD_INFO="/.build-info"
+EOF_OL5_ENV
+
+    # ----- distr/ol5-slim/image-scripts.sh (HOST side; modern bash OK) -----
+    cat > "${ol5_slim_dir}/image-scripts.sh" <<'EOF_OL5_IMG'
+#!/usr/bin/env bash
+#
+# image scripts for OL5
+#
+# Created by ol-aws-ami-builder (not part of upstream oracle-linux-image-tools).
+# Mirrors distr/ol6-slim/image-scripts.sh with EL5-specific hard constraints:
+#   - ROOT_FS must be ext3 (EL5 anaconda-11.1: ext4 is a 5.6 tech preview
+#     behind a boot flag; xfs/lvm/btrfs roots are unsupported)
+#   - UEK_RELEASE accepts only 2 (the only UEK line ever published for OL5)
+#   - UPDATE_TO_LATEST must be no (no reachable in-guest repository on EL5)
+#
+
+#######################################
+# Validate distribution parameters
+#######################################
+distr::validate() {
+  [[ "${ROOT_FS,,}" == "ext3" ]] || common::error "ROOT_FS must be ext3 on OL5 (EL5 anaconda-11.1: ext4 is a 5.6 tech preview; xfs/lvm/btrfs roots unsupported)"
+  [[ "${TMP_IN_TMPFS,,}" =~ ^((yes)|(no))$ ]] || common::error "TMP_IN_TMPFS must be yes or no"
+  [[ "${UEK_RELEASE}" =~ ^2$ ]] || common::error "UEK_RELEASE must be 2 (the only UEK line published for OL5; it carries the in-box nvme driver)"
+  [[ "${UPDATE_TO_LATEST,,}" == "no" ]] || common::error "UPDATE_TO_LATEST must be no on OL5 (EL5 has no TLS 1.2 path; there is no reachable in-guest repository -- packages are host-staged)"
+  [[ "${LINUX_FIRMWARE,,}" =~ ^((yes)|(no))$ ]] || common::error "LINUX_FIRMWARE must be yes or no"
+  [[ "${STRIP_LOCALES,,}" =~ ^((yes)|(no))$ ]] || common::error "STRIP_LOCALES must be yes or no"
+  [[ "${EXCLUDE_DOCS,,}" =~ ^((yes)|(no)|(minimal))$ ]] || common::error "EXCLUDE_DOCS must be yes, no or minimal"
+  readonly ROOT_FS TMP_IN_TMPFS UEK_RELEASE UPDATE_TO_LATEST LINUX_FIRMWARE STRIP_LOCALES EXCLUDE_DOCS
+}
+
+#######################################
+# Kickstart fixup
+#######################################
+distr::kickstart() {
+  local ks_file="$1"
+
+  # The embedded kickstart already declares ext3 everywhere and
+  # distr::validate() rejects any other ROOT_FS during preflight, so no
+  # fstype rewrite is performed here (see the OL6 precedent).
+
+  # Docs
+  if [[ "${EXCLUDE_DOCS,,}" = "yes" ]]; then
+    sed -i -e 's!^%packages !%packages --excludedocs !' "${ks_file}"
+  fi
+}
+EOF_OL5_IMG
+
+    # ----- distr/ol5-slim/ol5-ks.cfg -----
+    # EL5 anaconda-11.1 shape. Deliberate differences from the OL6 template,
+    # each a measured EL5 constraint:
+    #   * NO %end anywhere (anaconda-11.1 predates it; a literal '%end' inside
+    #     %packages would be read as a package name)
+    #   * 'key --skip' (EL5-only installation-number prompt suppressor)
+    #   * 'cdrom' pins the package source (no stage2= boot arg)
+    #   * NO 'services'/'cmdline'/'ignoredisk --only-use'/'rootpw --lock'/
+    #     'bootloader --timeout' (all RHEL6+/anaconda-13+); rootpw uses the
+    #     no-valid-password crypted form; services are chkconfig'd in %post
+    #   * NO --ondisk (single build disk; hda/sda naming varies by kernel) and
+    #     LABEL-based everything (survives the hda/sda -> nvme transition)
+    #   * %post has NO --log (RHEL6+); an exec redirect captures the log
+    cat > "${ol5_slim_dir}/ol5-ks.cfg" <<'EOF_OL5_KS'
+# OL5 kickstart file (EL5 anaconda-11.1 syntax; no %end -- see SPEC Part B/D)
+
+install
+cdrom
+text
+key --skip
+
+auth --enableshadow --enablemd5
+keyboard us
+lang en_US.UTF-8
+reboot
+timezone --utc UTC
+network --bootproto=dhcp --device=eth0 --onboot=yes --hostname=localhost.localdomain
+
+# Locked, no-valid-password root (anaconda-11.1 has no 'rootpw --lock')
+rootpw --iscrypted *
+
+selinux --permissive
+firewall --enabled --ssh
+
+# GRUB Legacy; console on tty0 (ttyS0 appended in %post -- see SPEC D.25)
+bootloader --location=mbr --append="console=tty0"
+
+zerombr
+clearpart --all --initlabel
+
+part /boot    --fstype=ext3 --size=200  --label=/boot --asprimary
+part swap     --fstype=swap --size=1024 --label=swap
+part /        --fstype=ext3 --size=4096 --label=root  --grow
+
+%packages --nobase
+openssh-server
+openssh-clients
+dhclient
+chkconfig
+initscripts
+rootfiles
+passwd
+sudo
+# cloud-init 0.6.3 hard-requires rsyslog (closure-verified against OL5 base)
+rsyslog
+# sosreport tooling baked in (parity with the OL6-10 sos-package invariant)
+sos
+# cloud-init closure members that are NOT in the minimal set (closure-verified)
+crontabs
+procps
+net-tools
+iproute
+ethtool
+e4fsprogs
+libselinux-python
+# kernel/initrd handling for the host-staged UEK R2 install
+module-init-tools
+mkinitrd
+grub
+# growroot one-shot (fdisk lives in util-linux on EL5)
+util-linux
+e2fsprogs
+ntp
+acpid
+which
+tar
+gzip
+findutils
+sed
+gawk
+curl
+-sendmail
+
+%post --interpreter /bin/bash
+# EL5 %post has no --log; capture manually (common::ks_log reads this path)
+exec > /root/ks-post.log 2>&1
+set -x
+
+echo "Network fixes"
+cat > /etc/sysconfig/network <<'EOF_NET'
+NETWORKING=yes
+NOZEROCONF=yes
+EOF_NET
+
+cat > /etc/sysconfig/network-scripts/ifcfg-eth0 <<'EOF_ETH0'
+DEVICE="eth0"
+BOOTPROTO="dhcp"
+ONBOOT="yes"
+TYPE="Ethernet"
+USERCTL="yes"
+PEERDNS="yes"
+IPV6INIT="no"
+PERSISTENT_DHCLIENT="1"
+EOF_ETH0
+
+cat > /etc/hosts <<'EOF_HOSTS'
+127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4
+::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
+EOF_HOSTS
+
+echo "RUN_FIRSTBOOT=NO" > /etc/sysconfig/firstboot
+
+# Serial console on GRUB Legacy (same two layers as the OL6 template; D.25):
+# (1) kernel cmdline ttyS0 so 'Get System Log' captures boot output
+if ! grep -q 'console=ttyS0' /boot/grub/grub.conf; then
+  sed -i -e 's/console=tty0/console=tty0 console=ttyS0,115200n8/g' /boot/grub/grub.conf
+fi
+# (2) GRUB-over-serial so the interactive EC2 Serial Console reaches the menu
+if ! grep -q '^serial ' /boot/grub/grub.conf; then
+  sed -i '0,/^title/ s/^title/serial --unit=0 --speed=115200\nterminal --timeout=10 serial console\n&/' /boot/grub/grub.conf
+fi
+
+# ec2-user: MUST exist at build time -- cloud-init 0.6.3's setup_user_keys is
+# getpwnam-only (no users-groups module in 0.6.x); key injection would fail
+# silently without this account. Passwordless sudo via a direct sudoers line
+# (EL5 sudo predates a stock #includedir /etc/sudoers.d).
+/usr/sbin/useradd -m -s /bin/bash ec2-user
+passwd -l ec2-user
+if ! grep -q '^ec2-user ' /etc/sudoers; then
+  echo 'ec2-user ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
+fi
+
+# One-shot root grow (fdisk delete/recreate pattern -- the MBR adaptation of
+# the RHEL6-HVM gdisk workaround; gdisk itself is staged as a TOOL but never
+# used here: writing GPT to this MBR disk would break GRUB Legacy).
+# Runs before cloud-init (S08 < S20); repartitions to the disk end, marks
+# itself done, reboots once; cloud-init's resizefs then grows the ext3
+# filesystem online on the next boot. Marker-idempotent; every failure path
+# marks done and exits 0 (never a boot loop).
+cat > /etc/init.d/ol-aws-growroot <<'EOF_GROWROOT'
+#!/bin/sh
+# chkconfig: 2345 08 92
+# description: one-shot root partition grow to disk end (fdisk MBR pattern)
+### BEGIN INIT INFO
+# Provides: ol-aws-growroot
+### END INIT INFO
+MARKER=/var/lib/ol-aws-growroot.done
+case "$1" in
+  start|"") ;;
+  *) exit 0 ;;
+esac
+[ -f "$MARKER" ] && exit 0
+mkdir -p /var/lib
+exec >> /var/log/ol-aws-growroot.log 2>&1
+echo "[growroot] start: $(date)"
+finish() { touch "$MARKER"; sync; }
+rootdev=$(df -P / | awk 'NR==2{print $1}')
+echo "[growroot] rootdev=${rootdev}"
+case "$rootdev" in
+  /dev/nvme*)
+    disk=$(echo "$rootdev" | sed 's/p[0-9][0-9]*$//')
+    part=$(echo "$rootdev" | sed 's/^.*p\([0-9][0-9]*\)$/\1/')
+    ;;
+  /dev/*)
+    disk=$(echo "$rootdev" | sed 's/[0-9][0-9]*$//')
+    part=$(echo "$rootdev" | sed 's/^[^0-9]*\([0-9][0-9]*\)$/\1/')
+    ;;
+  *)
+    echo "[growroot] unrecognized root device; skipping"; finish; exit 0 ;;
+esac
+dbase=$(basename "$disk"); pbase=$(basename "$rootdev")
+[ -b "$disk" ] || { echo "[growroot] no block device ${disk}; skipping"; finish; exit 0; }
+dsz=$(cat "/sys/block/${dbase}/size" 2>/dev/null)
+pstart=$(cat "/sys/block/${dbase}/${pbase}/start" 2>/dev/null)
+psz=$(cat "/sys/block/${dbase}/${pbase}/size" 2>/dev/null)
+if [ -z "$dsz" ] || [ -z "$pstart" ] || [ -z "$psz" ]; then
+  echo "[growroot] sysfs geometry unavailable; skipping"; finish; exit 0
+fi
+# root must be the LAST partition on the disk (highest start sector)
+for p in /sys/block/${dbase}/${dbase}*; do
+  [ -d "$p" ] || continue
+  os=$(cat "$p/start" 2>/dev/null)
+  [ -n "$os" ] && [ "$os" -gt "$pstart" ] && {
+    echo "[growroot] a partition starts after root; refusing to grow"; finish; exit 0; }
+done
+pend=$((pstart + psz))
+if [ $((pend + 2048)) -ge "$dsz" ]; then
+  echo "[growroot] root already spans the disk (end=${pend} disk=${dsz}); nothing to do"
+  finish; exit 0
+fi
+echo "[growroot] growing partition ${part} on ${disk}: start=${pstart} end=${pend} -> disk=${dsz} sectors"
+# EL5 fdisk: 'u' switches to sector units; d/n recreate at the SAME start
+# sector to the disk end; 'w' re-read fails on the busy disk by design (the
+# on-disk table IS updated) -- hence the marker + one reboot.
+printf 'u\nd\n%s\nn\np\n%s\n%s\n\nw\n' "$part" "$part" "$pstart" | fdisk "$disk"
+echo "[growroot] fdisk done (rc=$? -- nonzero re-read is expected on a busy disk)"
+finish
+echo "[growroot] rebooting once so the kernel sees the new table"
+/sbin/reboot
+exit 0
+EOF_GROWROOT
+chmod 755 /etc/init.d/ol-aws-growroot
+/sbin/chkconfig --add ol-aws-growroot
+/sbin/chkconfig ol-aws-growroot on
+
+# virt-sysprep prerequisites (see SPEC D.20; same rationale as OL6 -- EL5 has
+# no systemd, so /etc/machine-id does not exist and the upstream --truncate
+# would abort the Cleanup stage).
+: > /etc/machine-id
+[ -e /etc/resolv.conf ] || : > /etc/resolv.conf
+EOF_OL5_KS
+
+    # ----- distr/ol5-slim/provision.sh (GUEST side; EL5 bash 3.2 / POSIX) -----
+    cat > "${ol5_slim_dir}/provision.sh" <<'EOF_OL5_PROV'
+#!/usr/bin/env bash
+#
+# Provisioning script for OL5
+#
+# Created by ol-aws-ami-builder (not part of upstream oracle-linux-image-tools).
+# GUEST-SIDE code: EL5 ships bash 3.2 -- POSIX constructs only in every
+# EXECUTED path (no ${var,,}/${var^^}, no mapfile, no |& etc.).
+# Package installation is NOT done here: the [OLAWS-OL5S1] host-supply
+# executor (appended to cloud/aws/provision.sh, source-time) has already
+# installed the staged UEK R2 kernel, toolchain, cloud-init closure, and
+# gdisk before any provision function runs.
+#
+
+# Never used on OL5 (no dracut on EL5); defined so any stray upstream
+# reference fails loudly instead of resolving to an unrelated binary.
+readonly DRACUT_CMD="/bin/false # dracut does not exist on EL5"
+
+#######################################
+# Remove packages (plain rpm; no usable yum repository on EL5)
+#######################################
+distr::remove_rpms() {
+  rpm -e "$@" 2>/dev/null || true
+}
+
+#######################################
+# Kernel configuration (verify-only -- [OLAWS-OL5S1] owns the install)
+#######################################
+distr::kernel_config() {
+  common::echo_message "Verify kernel: UEK R2 (host-staged by [OLAWS-OL5S1])"
+  kv=""
+  for d in /lib/modules/*el5uek*; do
+    [ -d "$d" ] && kv=$(basename "$d")
+  done
+  if [ -z "$kv" ]; then
+    common::echo_message "FATAL: no el5uek kernel present -- [OLAWS-OL5S1] did not run?"
+    exit 1
+  fi
+  common::echo_message "UEK R2 kernel present: ${kv}"
+  if ! grep -q '^alias scsi_hostadapter nvme$' /etc/modprobe.conf; then
+    common::echo_message "FATAL: modprobe.conf nvme alias missing"
+    exit 1
+  fi
+}
+
+#######################################
+# Common configuration (EL5-safe)
+#######################################
+distr::common_cfg() {
+  mkdir -p "${BUILD_INFO}"
+
+  common::echo_message "Update image: NO (OL5 has no reachable in-guest repository)"
+
+  # sshd root policy: cloud-init 0.6.3 (disable_root: 1) installs a
+  # command-prefixed root key that prints the ec2-user hint -- that hint only
+  # works when key-based root login is allowed. EL5 OpenSSH 4.3 accepts
+  # 'without-password' (the modern 'prohibit-password' is unknown to it --
+  # same class as the OL6/5.3 lesson).
+  common::echo_message "sshd root login policy (OL5/OpenSSH 4.3): without-password"
+  sed -i -e 's/^#\{0,1\}\(PermitRootLogin\) .*$/\1 without-password/' /etc/ssh/sshd_config
+  # Validate with sshd's own parser before sealing (loud build-time abort
+  # instead of a silent first-boot 'Connection refused'; OL6 precedent).
+  sshd_bin=""
+  [ -x /usr/sbin/sshd ] && sshd_bin=/usr/sbin/sshd
+  if [ -n "$sshd_bin" ] && command -v ssh-keygen >/dev/null 2>&1; then
+    tkey=/tmp/ol-aws-sshd-test.key
+    rm -f "$tkey" "$tkey.pub"
+    if ssh-keygen -q -t rsa -b 2048 -f "$tkey" -N "" </dev/null 2>/dev/null && [ -f "$tkey" ]; then
+      if "$sshd_bin" -t -f /etc/ssh/sshd_config -h "$tkey" 2>/tmp/ol-aws-sshd-test.err; then
+        common::echo_message "sshd_config validated by 'sshd -t' (OK)"
+      else
+        common::echo_message "FATAL: 'sshd -t' rejected the generated sshd_config:"
+        cat /tmp/ol-aws-sshd-test.err 2>/dev/null || true
+        rm -f "$tkey" "$tkey.pub" /tmp/ol-aws-sshd-test.err
+        exit 1
+      fi
+      rm -f "$tkey" "$tkey.pub" /tmp/ol-aws-sshd-test.err
+    else
+      common::echo_message "WARNING: could not create an ephemeral test host key; skipped 'sshd -t'"
+    fi
+  else
+    common::echo_message "WARNING: sshd/ssh-keygen not found; skipped 'sshd -t'"
+  fi
+
+  # ntp (EL5: /etc/ntp.conf; no chrony)
+  if [ -f /etc/ntp.conf ]; then
+    sed -i -e '/^server .*/d' /etc/ntp.conf
+    cat >> /etc/ntp.conf <<'EOF_NTP'
+server 0.rhel.pool.ntp.org iburst
+server 1.rhel.pool.ntp.org iburst
+server 2.rhel.pool.ntp.org iburst
+server 3.rhel.pool.ntp.org iburst
+EOF_NTP
+  fi
+
+  common::echo_message "Setting default runlevel to 3 (multi-user text mode)"
+  sed -i -e 's/^id:.*:initdefault:/id:3:initdefault:/' /etc/inittab
+
+  common::echo_message "Disable services (chkconfig)"
+  for service in kudzu rhnsd sendmail kdump mcstrans; do
+    common::echo_message "    ${service}"
+    /sbin/chkconfig --del "${service}" 2>/dev/null || true
+    /sbin/service "${service}" stop 2>/dev/null || true
+  done
+  common::echo_message "Enable services (chkconfig)"
+  for service in rsyslog sshd network ntpd acpid; do
+    /sbin/chkconfig "${service}" on 2>/dev/null || true
+  done
+
+  # rp_filter: EL5 (2.6.18) knows 0/1 only (loose mode '2' is 2.6.32+); the
+  # cloud-friendly choice on this kernel is 0.
+  echo "net.ipv4.conf.default.rp_filter = 0" >> /etc/sysctl.conf
+
+  common::echo_message "Clear network persistent data"
+  rm -f /etc/udev/rules.d/70-persistent-net.rules
+
+  common::echo_message "Enable login on serial console ports"
+  for tty in hvc0 ttyS0; do
+    grep -q "${tty}" /etc/securetty || echo "${tty}" >> /etc/securetty
+  done
+}
+
+#######################################
+# Provisioning
+#######################################
+distr::provision() {
+  common::ks_log
+  distr::kernel_config
+  distr::common_cfg
+}
+
+#######################################
+# Cleanup (EL5-safe, self-contained -- common::distr_cleanup is NOT called:
+# its systemctl / /etc/yum/vars / ${EXCLUDE_DOCS^^} paths all break on EL5)
+#######################################
+distr::cleanup() {
+  /sbin/service rsyslog stop 2>/dev/null || true
+  /sbin/service auditd stop 2>/dev/null || true
+
+  common::echo_message "Package manager cleanup (rpmdb only; no usable yum on EL5)"
+  rm -rf /var/cache/yum/* 2>/dev/null || true
+  rpm --rebuilddb
+
+  common::echo_message "Cleanup resolver files"
+  : > /etc/resolv.conf
+  rm -f /etc/resolv.conf.* 2>/dev/null || true
+
+  common::echo_message "Misc cleanup"
+  rm -f /root/.viminfo
+  rm -f /etc/udev/rules.d/70-persistent-cd.rules
+  find /etc/ -name "*.old" -exec rm -f {} \; 2>/dev/null || true
+}
+EOF_OL5_PROV
+
+    chmod +x "${ol5_slim_dir}/image-scripts.sh" "${ol5_slim_dir}/provision.sh"
+    log_info "  -> Generated 4 files in ${ol5_slim_dir}/"
+
+    # ----- host-supply artifact staging: distr/ol5-slim/files/ -----
+    #
+    # Downloaded on the HOST (cached under WORKSPACE/ol5-stage across runs),
+    # verified (RPM lead magic / gzip magic / zip magic), then staged into the
+    # files channel. assert-all-then-write: everything is fetched and verified
+    # in the cache first; the stage directory is (re)built only after ALL
+    # artifacts pass.
+    #   rpms/ : frozen ENA build-toolchain closure (11 RPMs, OL5/latest --
+    #           byte-identical to the matrix's proven OL5_TOOLCHAIN_RPMS list),
+    #           kernel-uek + -devel + -firmware (UEK/latest, live-resolved with
+    #           a frozen fallback), the EPEL5 cloud-init 0.6.3 closure (9 RPMs)
+    #           and gdisk (frozen NVRs, archives.fedoraproject.org)
+    #   src/  : ena_linux_<ver>.tar.gz (the installer's /usr/src pre-stage
+    #           contract) and awscli-exe-linux-x86_64-<ver>.zip
+    local ol5_stage_cache="${WORKSPACE}/ol5-stage"
+    local ol5_files_rpms="${ol5_slim_dir}/files/rpms"
+    local ol5_files_src="${ol5_slim_dir}/files/src"
+    local ol5_tool_base="https://yum.oracle.com/repo/OracleLinux/OL5/latest/x86_64/getPackage"
+    local ol5_uek_base="https://yum.oracle.com/repo/OracleLinux/OL5/UEK/latest/x86_64"
+    local ol5_epel_base="https://archives.fedoraproject.org/pub/archive/epel/5/x86_64"
+    # Frozen toolchain closure (OL5 repos are terminal/immutable; a future 404
+    # is a loud failure, not silent drift). MUST stay byte-identical to the
+    # matrix's OL5_TOOLCHAIN_RPMS (tests/ena/run-ena-buildtest-matrix.sh).
+    local ol5_toolchain_rpms="binutils220-2.20.51.0.2-5.29.el5.x86_64.rpm
+cpp-4.1.2-55.el5.x86_64.rpm
+gcc-4.1.2-55.el5.x86_64.rpm
+gcc44-4.4.7-11.el5_11.x86_64.rpm
+glibc-devel-2.5-123.0.2.el5_11.3.x86_64.rpm
+glibc-headers-2.5-123.0.2.el5_11.3.x86_64.rpm
+gmp-4.1.4-10.el5.x86_64.rpm
+kernel-headers-2.6.18-419.0.0.0.2.el5.x86_64.rpm
+libgomp-4.4.7-11.el5_11.x86_64.rpm
+make-3.81-3.el5.x86_64.rpm
+perl-5.8.8-43.el5_11.x86_64.rpm"
+    # Frozen EPEL5 closure (archive is immutable; NVRs are the full dependency
+    # closure of cloud-init 0.6.3 against OL5 base, machine-resolved from the
+    # repo primary metadata -- see SPEC Part D) + gdisk (staged as a TOOL per
+    # adjudication; the growroot implementation itself uses fdisk).
+    local ol5_epel_rpms="cloud-init-0.6.3-0.12.bzr532.el5.noarch.rpm
+gdisk-0.8.4-1.el5.x86_64.rpm
+libffi-3.0.5-1.el5.x86_64.rpm
+libyaml-0.1.2-8.el5.x86_64.rpm
+python26-2.6.8-2.el5.x86_64.rpm
+python26-PyYAML-3.08-4.el5.x86_64.rpm
+python26-boto-2.27.0-1.el5.noarch.rpm
+python26-cheetah-2.4.4-3.el5.x86_64.rpm
+python26-configobj-4.7.2-5.el5.noarch.rpm
+python26-libs-2.6.8-2.el5.x86_64.rpm"
+    local ol5_uek_fallback_kver="2.6.39-400.297.3.el5uek"
+
+    log_info "Staging OL5 host-supply artifacts (cache: ${ol5_stage_cache})"
+    mkdir -p "${ol5_stage_cache}"
+
+    _ol5_fetch() {
+      # _ol5_fetch URL DEST MAGIC-HEX-PREFIX  (cache-aware; loud fail)
+      local url="$1" dest="$2" magic="$3" got
+      if [[ ! -s "${dest}" ]]; then
+        log_info "  fetch: ${url##*/}"
+        curl -fsSL --max-time 900 -o "${dest}.part" "${url}" \
+          || die "OL5 staging: download failed: ${url}"
+        mv -f "${dest}.part" "${dest}"
+      fi
+      got="$(od -An -N4 -tx1 "${dest}" 2>/dev/null | tr -d ' \n')"
+      [[ "${got}" == ${magic}* ]] \
+        || die "OL5 staging: magic mismatch for ${dest##*/} (got ${got}, want ${magic}*) -- corrupt download?"
+    }
+
+    # (1) toolchain closure
+    local _rpm
+    for _rpm in ${ol5_toolchain_rpms}; do
+      _ol5_fetch "${ol5_tool_base}/${_rpm}" "${ol5_stage_cache}/${_rpm}" "edabeedb"
+    done
+    # (2) UEK R2 kernel set: live-resolve the newest NVRs from the (frozen)
+    # UEK/latest channel; fall back to the pinned terminal kver offline.
+    local ol5_uek_primary="${ol5_stage_cache}/uek-primary.xml.gz"
+    local _uek_pkgs="" _n
+    if curl -fsSL --max-time 120 -o "${ol5_uek_primary}" "${ol5_uek_base}/repodata/primary.xml.gz" 2>/dev/null; then
+      for _n in kernel-uek kernel-uek-devel kernel-uek-firmware; do
+        _rpm="$(zcat "${ol5_uek_primary}" \
+                 | grep -oE "getPackage/${_n}-2[^\"]*\.rpm" \
+                 | sed 's!^getPackage/!!' | sort -V | tail -1 || true)"
+        [[ -n "${_rpm}" ]] || die "OL5 staging: could not resolve ${_n} from ${ol5_uek_base} repodata"
+        _uek_pkgs="${_uek_pkgs} ${_rpm}"
+      done
+    else
+      log_warn "  UEK/latest repodata unreachable; using the frozen fallback kver ${ol5_uek_fallback_kver}"
+      _uek_pkgs="kernel-uek-${ol5_uek_fallback_kver}.x86_64.rpm kernel-uek-devel-${ol5_uek_fallback_kver}.x86_64.rpm kernel-uek-firmware-${ol5_uek_fallback_kver}.noarch.rpm"
+    fi
+    for _rpm in ${_uek_pkgs}; do
+      _ol5_fetch "${ol5_uek_base}/getPackage/${_rpm}" "${ol5_stage_cache}/${_rpm}" "edabeedb"
+    done
+    # (3) EPEL5 closure + gdisk
+    for _rpm in ${ol5_epel_rpms}; do
+      _ol5_fetch "${ol5_epel_base}/${_rpm}" "${ol5_stage_cache}/${_rpm}" "edabeedb"
+    done
+    # (4) source artifacts (per-feature: skipped with the feature)
+    local ol5_src_files=""
+    if [[ "${ENA_DRIVER_BUILD}" -eq 1 ]]; then
+      local _ena_v="${ENA_BUILD_VERSION:-$(_ena_pin_for_major 5)}"
+      [[ -n "${_ena_v}" ]] || die "OL5 staging: could not determine the ENA build version"
+      _ol5_fetch "https://github.com/amzn/amzn-drivers/archive/refs/tags/ena_linux_${_ena_v}.tar.gz" \
+        "${ol5_stage_cache}/ena_linux_${_ena_v}.tar.gz" "1f8b"
+      ol5_src_files="${ol5_src_files} ena_linux_${_ena_v}.tar.gz"
+    fi
+    if [[ "${AWSCLI_INSTALL}" -eq 1 ]]; then
+      local _cli_v="${AWSCLI_RESOLVED:-$(_awscli_pin_for_major 5)}"
+      [[ -n "${_cli_v}" && "${_cli_v}" != "latest" ]] || die "OL5 staging: could not determine the AWS CLI v2 version"
+      _ol5_fetch "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-${_cli_v}.zip" \
+        "${ol5_stage_cache}/awscli-exe-linux-x86_64-${_cli_v}.zip" "504b0304"
+      ol5_src_files="${ol5_src_files} awscli-exe-linux-x86_64-${_cli_v}.zip"
+    fi
+    # (5) everything verified -- (re)build the stage tree
+    rm -rf "${ol5_slim_dir}/files"
+    mkdir -p "${ol5_files_rpms}" "${ol5_files_src}"
+    for _rpm in ${ol5_toolchain_rpms} ${_uek_pkgs} ${ol5_epel_rpms}; do
+      cp -f "${ol5_stage_cache}/${_rpm}" "${ol5_files_rpms}/"
+    done
+    local _src
+    for _src in ${ol5_src_files}; do
+      cp -f "${ol5_stage_cache}/${_src}" "${ol5_files_src}/"
+    done
+    # src/ must exist even when empty (the [OLAWS-OL5S1] guest assert requires
+    # the directory; per-feature files are legitimately absent under --skip-*).
+    log_info "  -> Staged $(find "${ol5_files_rpms}" -name '*.rpm' | wc -l) RPM(s) + $(find "${ol5_files_src}" -type f | wc -l) source artifact(s) into ${ol5_slim_dir}/files/"
+    unset -f _ol5_fetch
   fi
 
   # Finalize the reproducibility record with the applied markers + artifact

@@ -20,6 +20,59 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Added (2026-07-19 — OL5 AWS AMI builder support: runtime-synthesized distr + full host-supply model)
+- **`build-ol-aws-ami.sh`: Oracle Linux 5 (U11 / UEK R2) build target** —
+  the deepest legacy target, gated by the completed OL5 investigation
+  (in-box nvme in the UEK R2 payload = the Nitro precondition; ENA
+  self-build boundary; awscli ceiling; SSM measured exclusion; EPEL5
+  cloud-init 0.6.3 closure). Design decisions and evidence records land in
+  SPEC Part B/D in this series. Key mechanics, all OL5-branched
+  (OS-separation; OL6-10 paths untouched):
+  - `Enterprise-R5-U11` ISO naming accepted (kernel.org mirror of the
+    original Enterprise Linux tree); OL5 requires an operator-computed
+    SHA256 `ISO_CHECKSUM` (upstream accepts SHA1/SHA256 only; the mirror
+    publishes MD5SUMS — the documented mirror MD5 is the cross-check).
+  - `distr/ol5-slim/` runtime synthesis (OL6 precedent): EL5
+    anaconda-11.1 kickstart (NO `%end`, `key --skip`, `cdrom`, ext3,
+    LABEL-based partitions, no `--ondisk`), `%post` creates `ec2-user`
+    (cloud-init 0.6.3 is getpwnam-only — it cannot create users), bakes
+    GRUB-Legacy serial console, `modprobe.conf` nvme/ena/xen aliases and
+    the one-shot `ol-aws-growroot` SysV script (fdisk MBR delete/recreate
+    at the same start sector + single reboot; cloud-init `resizefs` then
+    grows ext3 online — the MBR adaptation of the RHEL6-HVM gdisk
+    workaround; gdisk is staged as a tool but never used on the MBR disk).
+  - **Full host-supply model** (`[OLAWS-OL5S1]`): EL5 has no TLS 1.2 path,
+    so the host stages every guest artifact into `distr/ol5-slim/files/`
+    (the standard provision.d channel): the frozen 11-RPM ENA build
+    toolchain (byte-identical to the matrix's proven list), kernel-uek +
+    -devel + -firmware (live-resolved from the frozen UEK/latest channel
+    with a pinned fallback), the 9-RPM EPEL5 cloud-init closure + gdisk
+    (frozen immutable-archive NVRs), the ENA source tarball and the AWS
+    CLI v2 bundle zip. The guest-side executor orders modprobe aliases →
+    DEFAULTKERNEL → one rpm transaction → /usr/src staging → hard asserts
+    (el5uek kernel present, initrd contains nvme.ko with one mkinitrd
+    remediation retry, grub default boots el5uek, cloud-init installed).
+  - `[OLAWS-OL5S2]`: EL5-safe function overrides of the upstream
+    yum/dracut-based `cloud::install_aws_packages` / `cloud::cloud_init`
+    (bash last-definition-wins; guest code is bash-3.2/POSIX clean).
+  - OL5 virt-install disk-bus patch (`bus=scsi` → `bus=virtio`; the EL5
+    installer has no virtio-scsi), Nitro-initramfs (dracut) hook not
+    injected on OL5, ENA hook's dracut drop-in lines omitted on OL5,
+    IMDSv2-only rejected (cloud-init 0.6.3 is plain IMDSv1; D.27-class
+    guard), SSM Agent FORCED OFF (measured exclusion, SPEC B.10/D.31),
+    `CLOUD_USER` pinned to `ec2-user`, awscli identity/hook wiring extended
+    to OL5 (pre-staged zip contract; ceiling pin).
+  - P3GATE: OL5 branch added (EL5 shape = ZERO `%end` + exactly 2 section
+    openers; the balanced-`%end` rule keeps guarding OL6-10) and the
+    ksvalidator advisory gains the RHEL5 profile.
+- **`env.properties.aws-ol5`** — new template (kernel.org mirror ISO_URL +
+  recorded mirror MD5, ext3, `UPDATE_TO_LATEST=no` mandatory,
+  `DISK_SIZE_GB=10`, SELinux permissive with rationale, UEK_RELEASE=2).
+- Tests: `tests/t007_idempotency.sh` marker-count pin 11 → 12 (the new
+  `ol5-host-supply` marker; +1 assertion — suite baseline 631 → 632).
+  TESTING.md §0 counts updated in lock-step. Dedicated OL5-synthesis
+  tiers and SPEC/README documentation land later in this same series.
+
 ### Changed (2026-07-19 — OL5 pinned versions aligned to the merged sweep evidence)
 - **`install-ena-driver.sh`: `ENA_VERSION_OL5` raised `2.9.1` -> `2.12.3`** —
   the canonical ledger's full 71-version OL5 sweep (kernel-uek-devel
