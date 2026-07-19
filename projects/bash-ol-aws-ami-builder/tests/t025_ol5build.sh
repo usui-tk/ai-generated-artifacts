@@ -83,7 +83,7 @@ assert_match "${ks}" '^install$'      "ks: 'install' present"
 assert_match "${ks}" '^cdrom$'        "ks: 'cdrom' pins the package source (no stage2= boot arg)"
 assert_match "${ks}" '^key --skip$'   "ks: 'key --skip' (EL5-only installation-number suppressor)"
 assert_match "${ks}" "^rootpw --iscrypted \*$" "ks: locked no-valid-password rootpw (no RHEL6+ --lock)"
-assert_match "${ks}" '^firewall --enabled --ssh$' "ks: EL5 firewall form (--enabled --ssh, not --service=)"
+assert_match "${ks}" '^firewall --enabled --ssh$' "ks: firewall --enabled --ssh (VERIFIED against real pykickstart 0.43.9: --ssh is a port-map option, ssh->22:tcp -- D.32 grammar record)"
 assert_match "${ks}" '^part /boot +--fstype=ext3 .*--label=/boot' "ks: /boot is ext3 + LABELed"
 assert_match "${ks}" '^part / +--fstype=ext3 .*--label=root +--grow' "ks: / is ext3 + LABEL=root + --grow (growroot target)"
 for tok in '^services ' '^cmdline$' '--only-use' '--ondisk' '^bootloader.*--timeout' '^rootpw --lock'; do
@@ -93,7 +93,7 @@ for tok in '^services ' '^cmdline$' '--only-use' '--ondisk' '^bootloader.*--time
     t_pass "ks: RHEL6+ token absent: ${tok}"
   fi
 done
-assert_match "${ks}" '^%post --interpreter /bin/bash$' "ks: %post has NO --log (RHEL6+); plain interpreter form"
+assert_match "${ks}" '^%post --interpreter /bin/bash$' "ks: plain %post --interpreter form (logging via exec redirect by choice; the real 0.43 parser does accept --log -- D.32 grammar record)"
 assert_match "${ks}" '^exec > /root/ks-post\.log 2>&1$' "ks: %post log captured via exec redirect (common::ks_log path)"
 assert_match "${ks}" '/usr/sbin/useradd -m -s /bin/bash ec2-user' "ks: ec2-user pre-created (cloud-init 0.6.3 is getpwnam-only)"
 assert_match "${ks}" "ec2-user ALL=\(ALL\) NOPASSWD:ALL" "ks: passwordless sudo for ec2-user (direct sudoers line)"
@@ -338,6 +338,9 @@ assert_match "${main}" '"\$\{OL_MAJOR_VERSION\}" != "5" && "\$\{OL_MAJOR_VERSION
 assert_match "${main}" 'ol-aws-ami-builder OL5 disk-bus PATCH' "wiring: virt-install disk-bus patch (bus=virtio; EL5 has no virtio-scsi)"
 assert_match "${main}" 'OL5 kickstart must contain NO .%end' "wiring: P3GATE OL5 zero-%end branch present"
 assert_match "${main}" '5\) prof="RHEL5" ;;' "wiring: ksvalidator advisory maps OL5 -> RHEL5 profile"
+vks="$(cat "${PROJ}/tests/validate-kickstart.sh")"
+assert_match "${vks}" 'KNOWN MODERN-TOOL DIVERGENCE' "B-T4: the single modern-ksvalidator divergence (--nobase, valid in real 0.43.9) is normalized WITH its rationale"
+assert_match "${vks}" 'nobase..%packages' "B-T4: exactly the --nobase construct is normalized before the RHEL5 validation (everything else verbatim)"
 assert_match "${main}" "CLOUD_USER=\"ec2-user\"" "wiring: CLOUD_USER pinned to ec2-user on OL5"
 
 # _p3_validate_ks: behavioral (the REAL extracted gate against the REAL ks)

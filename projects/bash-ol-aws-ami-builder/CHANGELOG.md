@@ -20,6 +20,44 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Changed (2026-07-19 — OL5 kickstart grammar re-verified against the REAL RHEL5 parser; user-requested)
+- **Investigation:** the authoritative EL5 kickstart parser —
+  **pykickstart-0.43.9-1.el5** (what anaconda-11.1 loads) — was fetched
+  from the OL5 repository, its per-command option tables machine-derived,
+  and EVERY option on every directive line of the synthesized OL5
+  kickstart checked against them: **zero invalid options** (record: SPEC
+  D.32). `firewall --enabled --ssh` is confirmed VALID (a 0.43 port-map
+  option, `ssh → 22:tcp`); `part --label`, `key --skip`, bare `zerombr`,
+  and the rest are all in the real tables; `auth` is a raw pass-through.
+- **Single modern-tool divergence found and absorbed:** `%packages
+  --nobase` is valid in real 0.43 but falsely rejected by modern
+  pykickstart's RHEL5 profile. B-T4 (`tests/validate-kickstart.sh`) now
+  validates the OL5 heredoc with exactly that construct normalized away
+  (rationale + evidence pointer in-file); the normalized file passes
+  `ksvalidator -v RHEL5` cleanly, so B-T4 is green with ksvalidator
+  installed instead of failing on the tool's modeling gap.
+- **Correction:** `%post --log` IS parseable in 0.43 (the earlier "no
+  --log on EL5" note was wrong — fixed in the ks comments and SPEC
+  B.15.3). Behavior unchanged: the exec redirect remains the chosen
+  logging mechanism (single mechanism; also captures `set -x`).
+- **Fixed (pipefail-hygiene recurrence, caught by this work):** the new
+  B-T4 OL5 branch's `ksvalidator -l | grep -qw RHEL5` probe SIGPIPEd
+  under `set -o pipefail` (the documented `grep -q`-on-a-pipe lesson
+  class) and flaked to the no-RHEL5-profile SKIP; combined with t005's
+  over-broad `^SKIP:` detection (ANY per-heredoc SKIP degraded the whole
+  tier), B-T4 could falsely skip with ksvalidator installed. Fixed both:
+  the profile list is captured first (`grep -c` on a variable), and t005
+  now keys on the exact tool-missing message (`^SKIP: ksvalidator`) so a
+  per-heredoc SKIP can never mask the OL6 result. t005 re-verified stable
+  across repeated runs.
+- Tests: t025 gains the grammar pins (grounded `firewall --ssh` label,
+  corrected `--log` label, and two B-T4-normalization pins): 115 → 117
+  asserts; suite baseline 749 → **751** (measured 751/0/0 with the full
+  toolchain incl. ksvalidator). TESTING.md counts + tier row and SPEC
+  (B.15.3 correction + D.32 grammar-verification record) updated in
+  lock-step.
+
+
 ### Changed (2026-07-19 — growroot refined to the growpart decision model; user adjudication)
 - **`ol-aws-growroot` (OL5 kickstart-baked one-shot): the execution
   criterion is now the ACTUAL DISK/PARTITION STATE (primary), with the

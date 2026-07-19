@@ -16,7 +16,9 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 KS="${HERE}/validate-kickstart.sh"
 out="$(bash "${KS}" 2>&1)"; rc=$?
 
-if printf '%s\n' "${out}" | grep -q '^SKIP:'; then
+if printf '%s\n' "${out}" | grep -q '^SKIP: ksvalidator'; then
+  # ONLY the tool-missing SKIP degrades the tier; a per-heredoc SKIP (e.g.
+  # the OL5 no-RHEL5-profile case) must not mask the OL6 PASS/FAIL result.
   t_skip "kickstart conformance: ksvalidator (pykickstart) not installed"
 elif [ "${rc}" -eq 0 ] && printf '%s\n' "${out}" | grep -q '^RESULT: PASS'; then
   t_pass "kickstart conformance (validate-kickstart.sh: RESULT PASS)"

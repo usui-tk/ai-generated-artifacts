@@ -2860,8 +2860,10 @@ as a package name); exactly two section openers (`%packages` + `%post`);
 `--lock`); `firewall --enabled --ssh`; no `services`/`cmdline`/`ignoredisk
 --only-use`/`--ondisk`/`bootloader --timeout`; LABEL-based ext3 partitions
 (`/boot`, swap — removed by `SETUP_SWAP=no` — and a `--grow` root);
-`%post` without `--log` (exec-redirect into `/root/ks-post.log`, the
-`common::ks_log` path). `%post` pre-creates `ec2-user` (locked password +
+`%post` logging via an exec redirect into `/root/ks-post.log` (the
+`common::ks_log` path; the redirect is the chosen single mechanism and also
+captures `set -x` -- the real 0.43 parser does accept `--log`, see the D.32
+grammar record). `%post` pre-creates `ec2-user` (locked password +
 direct sudoers line — EL5 sudo predates a stock `#includedir`), bakes the
 GRUB-Legacy serial-console layers (D.25 pattern), the `ol-aws-growroot`
 one-shot, and the virt-sysprep stubs (D.20 pattern). The P3GATE
@@ -4418,3 +4420,46 @@ findings frozen here:
   self-heal (re-armed for future EBS enlargements — a capability the
   marker-primary first implementation did not have); marker-as-secondary
   loud no-retry; sub-fudge `NOCHANGE`; and the `Id=83` guard refusal.
+
+**Kickstart-grammar verification record (2026-07-19, user-requested
+re-investigation):** the operator questioned whether constructs like
+`firewall --enabled --ssh` are genuinely valid EL5 kickstart. The
+authoritative parser -- **pykickstart-0.43.9-1.el5** (what anaconda-11.1
+loads), fetched from the OL5 repository -- was extracted and its
+per-command option tables were machine-derived from `parser.py`; every
+option on every directive line of the synthesized OL5 kickstart was then
+checked against those tables. **Result: zero invalid options.** Specific
+findings frozen here:
+
+- `firewall --enabled --ssh` **IS valid**: 0.43 declares
+  `--ftp/--http/--smtp/--ssh/--telnet` as port-map options
+  (`ssh -> 22:tcp`), plus the RHEL5 `--no-ssh`. (An initial extraction
+  regex mis-paired the option tuple and briefly suggested otherwise --
+  corrected against the raw `add_option` source.)
+- `part --label`, `key --skip` (special-cased: exactly one argument,
+  `--skip` recognized in the handler body), bare `zerombr` (arguments
+  draw a deprecation warning; bare is canonical), `rootpw --iscrypted`,
+  `timezone --utc`, `clearpart --all --initlabel`,
+  `bootloader --location/--append`, `selinux --permissive`, and
+  `network --bootproto/--device/--onboot/--hostname` are all present in
+  the 0.43 tables. `auth` is a raw pass-through (the whole line is handed
+  to authconfig), so `--enableshadow --enablemd5` cannot be a parse error.
+- `%packages --nobase` **is valid in 0.43**
+  (`add_option("--nobase", ...)` in the packages-header parser) but
+  **modern pykickstart's RHEL5 profile falsely rejects it** (nobase was
+  dropped from the shared section parser upstream). This is the SINGLE
+  modern-tool divergence found: B-T4 (`tests/validate-kickstart.sh`)
+  validates the OL5 heredoc with exactly that construct normalized away
+  and everything else verbatim -- the normalized file passes
+  `ksvalidator -v RHEL5` with zero findings.
+- **Correction to an earlier note:** `%post --log` IS parseable in 0.43
+  (`add_option("--log", "--logfile")` in the script-header parser); the
+  earlier "no --log on EL5" claim was wrong. The exec-redirect mechanism
+  is retained by choice (single mechanism, also captures `set -x`), so no
+  behavior changes.
+- Static tooling status: `ksvalidator -v RHEL5` (modern pykickstart) is
+  wired as the OL5 advisory both in P3GATE and in B-T4 (with the
+  documented normalization); the exhaustive real-0.43 option sweep above
+  is the stronger, grammar-level evidence. What static tools cannot prove
+  remains the D.32 first-contact list (package-name existence, anaconda
+  runtime behavior).

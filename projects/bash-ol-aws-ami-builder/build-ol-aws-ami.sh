@@ -3391,7 +3391,9 @@ EOF_OL5_IMG
     #     no-valid-password crypted form; services are chkconfig'd in %post
     #   * NO --ondisk (single build disk; hda/sda naming varies by kernel) and
     #     LABEL-based everything (survives the hda/sda -> nvme transition)
-    #   * %post has NO --log (RHEL6+); an exec redirect captures the log
+    #   * %post logs via an exec redirect (chosen single mechanism -- it also
+    #     captures set -x; the real 0.43 parser DOES accept --log, contrary
+    #     to an earlier note here -- see the SPEC D.32 grammar record)
     cat > "${ol5_slim_dir}/ol5-ks.cfg" <<'EOF_OL5_KS'
 # OL5 kickstart file (EL5 anaconda-11.1 syntax; no %end -- see SPEC Part B/D)
 
@@ -3463,7 +3465,9 @@ curl
 -sendmail
 
 %post --interpreter /bin/bash
-# EL5 %post has no --log; capture manually (common::ks_log reads this path)
+# Log via exec redirect (single mechanism; also captures the set -x below --
+# 0.43 does parse --log, but the redirect is used regardless).
+# common::ks_log reads this exact path.
 exec > /root/ks-post.log 2>&1
 set -x
 

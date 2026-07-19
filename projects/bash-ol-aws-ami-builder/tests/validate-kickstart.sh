@@ -72,8 +72,39 @@ validate_heredoc 'EOF_OL6_KS' RHEL6 'OL6 synthesized kickstart'
 # releases may drop it); an absent profile is an explicit SKIP, never a
 # silent false PASS (validate_heredoc greps 'problem occurred' only, which
 # an unknown-version error would not print).
-if ksvalidator -l 2>/dev/null | grep -qw 'RHEL5'; then
-  validate_heredoc 'EOF_OL5_KS' RHEL5 'OL5 synthesized kickstart'
+#
+# KNOWN MODERN-TOOL DIVERGENCE (machine-verified 2026-07-19, SPEC D.32):
+# '%packages --nobase' is VALID in the real RHEL5 parser -- pykickstart
+# 0.43.9 (the anaconda-11.1 grammar) declares add_option("--nobase") in its
+# packages-header parser -- but modern pykickstart dropped nobase from the
+# shared section parser, so its RHEL5 profile falsely rejects it. The OL5
+# heredoc is validated with that ONE construct normalized away; everything
+# else is checked verbatim (the full option-by-option sweep against the
+# real 0.43.9 tables reported zero invalid options).
+# pipefail hygiene (project lesson): grep -q on a pipe SIGPIPEs the producer
+# under `set -o pipefail` and turns this test flaky-false -- capture first.
+ksv_profiles=$(ksvalidator -l 2>/dev/null || true)
+if printf '%s' "${ksv_profiles}" | grep -cw 'RHEL5' >/dev/null; then
+  ol5tmp=$(mktemp)
+  awk -v m='EOF_OL5_KS' '
+    $0 ~ ("<<\x27" m "\x27") { f=1; next }
+    $0 == m                  { f=0 }
+    f                        { print }
+  ' "${script}" | sed 's/^%packages --nobase$/%packages/' > "${ol5tmp}"
+  if [[ ! -s "${ol5tmp}" ]]; then
+    echo "FAIL: OL5 synthesized kickstart: could not extract heredoc EOF_OL5_KS"
+    fail=1
+  else
+    out=$(ksvalidator -v RHEL5 "${ol5tmp}" 2>&1 || true)
+    if printf '%s' "${out}" | grep -q 'problem occurred'; then
+      echo "FAIL: OL5 synthesized kickstart (ksvalidator -v RHEL5; --nobase already normalized):"
+      printf '%s\n' "${out}" | sed 's/^/    /'
+      fail=1
+    else
+      echo "PASS: OL5 synthesized kickstart (ksvalidator -v RHEL5, $(wc -l < "${ol5tmp}") lines; known --nobase divergence normalized)"
+    fi
+  fi
+  rm -f "${ol5tmp}"
 else
   echo "SKIP: OL5 synthesized kickstart (this pykickstart has no RHEL5 profile)"
 fi
