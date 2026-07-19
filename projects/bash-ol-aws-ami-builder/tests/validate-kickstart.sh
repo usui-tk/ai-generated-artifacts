@@ -68,6 +68,16 @@ validate_heredoc() {
 echo "== kickstart syntax conformance =="
 validate_heredoc 'EOF_OL6_KS' RHEL6 'OL6 synthesized kickstart'
 
+# OL5: only when this pykickstart still ships the RHEL5 handler (modern
+# releases may drop it); an absent profile is an explicit SKIP, never a
+# silent false PASS (validate_heredoc greps 'problem occurred' only, which
+# an unknown-version error would not print).
+if ksvalidator -l 2>/dev/null | grep -qw 'RHEL5'; then
+  validate_heredoc 'EOF_OL5_KS' RHEL5 'OL5 synthesized kickstart'
+else
+  echo "SKIP: OL5 synthesized kickstart (this pykickstart has no RHEL5 profile)"
+fi
+
 if [[ ${fail} -ne 0 ]]; then
   echo "RESULT: FAIL"
   exit 1

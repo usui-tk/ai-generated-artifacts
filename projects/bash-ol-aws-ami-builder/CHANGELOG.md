@@ -73,6 +73,25 @@ This CHANGELOG is **English only** per the repository-wide
   TESTING.md §0 counts updated in lock-step. Dedicated OL5-synthesis
   tiers and SPEC/README documentation land later in this same series.
 
+- **Tests: `tests/t025_ol5build.sh`** — dedicated OL5-synthesis tier (97
+  asserts; L1/L2). Extracts the embedded `distr/ol5-slim` templates + the
+  `[OLAWS-OL5S1]` executor and asserts the EL5 kickstart shape (zero
+  `%end`, `key --skip`, `cdrom`, ext3/LABEL, RHEL6+ tokens absent,
+  ec2-user pre-creation, the fdisk growroot one-shot), the mechanical
+  bash-3.2 safety scan of every guest-side block, the OL5S1 load-bearing
+  order + hard asserts, the provision EL5 discipline, the host-supply
+  manifests (toolchain list BYTE-IDENTICAL to the matrix's
+  `OL5_TOOLCHAIN_RPMS`; 10 frozen EPEL5 NVRs), the wrapper wiring
+  (behavioral `Enterprise-R` parse; behavioral P3GATE: the real extracted
+  gate passes the real extracted kickstart and fails `%end`-injected /
+  sos-dropped mutations), and the `env.properties.aws-ol5` invariants.
+  `tests/validate-kickstart.sh` (B-T4) additionally validates the OL5
+  kickstart under pykickstart's RHEL5 profile when this ksvalidator still
+  ships it (explicit SKIP otherwise — never a silent false PASS). Suite
+  baseline 632 → **731 across 25 tiers** (t025 = 97; B-T1/B-T2 +1 each
+  for the new script); TESTING.md §0 counts, degradation table, and the
+  tier table updated in lock-step.
+
 ### Changed (2026-07-19 — OL5 pinned versions aligned to the merged sweep evidence)
 - **`install-ena-driver.sh`: `ENA_VERSION_OL5` raised `2.9.1` -> `2.12.3`** —
   the canonical ledger's full 71-version OL5 sweep (kernel-uek-devel
