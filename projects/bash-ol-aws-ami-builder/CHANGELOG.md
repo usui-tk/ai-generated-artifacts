@@ -92,6 +92,20 @@ This CHANGELOG is **English only** per the repository-wide
   for the new script); TESTING.md §0 counts, degradation table, and the
   tier table updated in lock-step.
 
+- **Docs: SPEC B.15 + D.32, README (EN/JA) OL5 sections** — SPEC gains
+  **B.15** (the OL5 build target: model, enforcement table for every hard
+  constraint, the EL5 kickstart shape, the growroot design, the operator
+  E2E protocol) and **D.32** (the frozen design record: the machine-grounded
+  evidence — in-box nvme with the class-match PCI alias, the 9-RPM EPEL5
+  closure and getpwnam-only key injection, the upstream transport
+  mechanics, the guest bash-3.2 constraint — plus the six binding
+  adjudications and the explicit first-contact-unproven surface list).
+  README.md / README.ja.md updated in lock-step: intro paragraph, the
+  `env.properties.aws-ol5` table row, installer-table OL5 wiring notes,
+  the `--skip-*` / `--imds-support` / `DISK_SIZE_GB` rows, a new section
+  9.8 (mechanism) and section 10 item 9 (limitations, led by the
+  E2E-unproven warning).
+
 ### Changed (2026-07-19 — OL5 pinned versions aligned to the merged sweep evidence)
 - **`install-ena-driver.sh`: `ENA_VERSION_OL5` raised `2.9.1` -> `2.12.3`** —
   the canonical ledger's full 71-version OL5 sweep (kernel-uek-devel

@@ -18,6 +18,8 @@ Oracle 公式の [`oracle-linux-image-tools`](https://github.com/oracle/oracle-l
 
 **Oracle Linux 6** (x86_64) はさらに実験的なサポートです。アップストリームには `distr/ol6-slim/` ディレクトリそのものが存在しないため、本ラッパーは sed パッチ 2 種に加えて、必要な 4 ファイルを実行時に動的生成します。仕組みは [セクション 9.7](#97-oracle-linux-6-サポート実験的)、制約は [セクション 10](#10-既知の制約注意事項) 項目 8 を参照してください。
 
+最深部のレガシーターゲットが **Oracle Linux 5** (x86_64) です。OL6 と同じ動的生成モデルに加えて**完全ホスト供給パイプライン**を備えます: EL5 には TLS 1.2 経路が存在しないため、ISO 以外の全ゲストパッケージ(UEK R2 カーネル一式、ENA ビルドツールチェーン、EPEL5 cloud-init 0.6.3 閉包、gdisk、ENA ソース tarball、AWS CLI v2 バンドル)をビルドホスト側でダウンロードし、標準の `provision.d` files チャネルで搬入します。仕組みは [セクション 9.8](#98-oracle-linux-5-サポート実験的)、制約は [セクション 10](#10-既知の制約注意事項) 項目 9 を参照してください。**実 EL5 anaconda / 実 EC2 起動の E2E は未実施**です — その証跡が揃うまで OL5 経路は未検証として扱ってください。
+
 Oracle 公式 AMI(オーナー ID `131827586825`)の AWS Marketplace 提供が終了したため、独自の AMI 構築・運用フローを確立する目的で作成しています。
 
 > **2026 年 2 月以降の AWS 新機能対応**
@@ -117,10 +119,11 @@ streamable VMDK 変換、 S3 ステージング、 EC2 `import-snapshot`、
 | `env.properties.aws-ol8` | **Oracle Linux 8 Update 10**(x86_64)用パラメータ |
 | `env.properties.aws-ol7` | **Oracle Linux 7 Update 9**(x86_64)用パラメータ — **実験的・アップストリーム非推奨**。重要な注意事項はセクション 9.6 および 10 を参照 |
 | `env.properties.aws-ol6` | **Oracle Linux 6 Update 10**(x86_64)用パラメータ — **実験的・アップストリームに `distr/ol6-slim/` 自体が無い**。起動できるのは Intel および AMD ≤ Zen2(`c5a`)世代のみ — 凍結済み UEK4 カーネルが AMD Zen3 以降でパニックする(2026-07-18 実測)。重要な注意事項はセクション 9.7 および 10 を参照 |
+| `env.properties.aws-ol5` | **Oracle Linux 5 Update 11**(x86_64)用パラメータ — **最深部レガシー・アップストリーム非提供・E2E 未証明**。完全ホスト供給モデル(EL5 のゲスト内ネットワークは利用不能)。ミラーの MD5 をテンプレートに記録済みのクロスチェックとして、オペレータが一度だけ SHA256 を計算して `ISO_CHECKSUM` に記入する契約。重要な注意事項はセクション 9.8 および 10 を参照 |
 | `setup-vmimport-role.sh` | AWS VM Import/Export 用の `vmimport` IAM サービスロールを初回のみ作成 |
-| `install-ena-driver.sh` | 指定バージョン(OL6 → 2.9.1、OL7 → 2.17.2)または latest 自動解決(OL8/9/10 — SPEC B.9参照)の Amazon ENA ドライバを DKMS でビルド/導入し、導入モジュールの ENA Express 対応度も表示する自己完結スクリプト。依存(EPEL・gcc/make・dkms・`kernel-uek-devel`)を自身で導入し、**素の OL インスタンス上で単体実行**して検証可能。ENA ビルド有効時(既定、**OL6〜OL10** — ENA Express 世代対応。OL8/9/10 はホスト側で解決した amzn-drivers latest を `ENA_DRIVER_VERSION` で受け取る。OL8/9/10 セルフビルド版での実 AMI ブートは 2026-07-13 に E2E 検証済み — 実 EC2 で `ethtool -i` = `2.17.2g`。SPEC B.3.4 / TESTING.md 参照)に Phase 3 がゲストの AWS プロビジョニングへ注入 加えて **OL5（UEK R2 / `el5uek`）をオプトインのビルドテスト/PoC 限定ターゲット**としてサポート: plain `make` のみ（DKMS 非使用）、ツールチェーン/ヘッダー/ソースはホスト側で事前供給（EL5 には OS 内 TLS 1.2 経路が存在しない）、実証済み `el5uek` シム集合をビルド毎に適用・記録 — SPEC B.9（OL5）および D.29 を参照。 |
+| `install-ena-driver.sh` | 指定バージョン(OL6 → 2.9.1、OL7 → 2.17.2)または latest 自動解決(OL8/9/10 — SPEC B.9参照)の Amazon ENA ドライバを DKMS でビルド/導入し、導入モジュールの ENA Express 対応度も表示する自己完結スクリプト。依存(EPEL・gcc/make・dkms・`kernel-uek-devel`)を自身で導入し、**素の OL インスタンス上で単体実行**して検証可能。ENA ビルド有効時(既定、**OL6〜OL10** — ENA Express 世代対応。OL8/9/10 はホスト側で解決した amzn-drivers latest を `ENA_DRIVER_VERSION` で受け取る。OL8/9/10 セルフビルド版での実 AMI ブートは 2026-07-13 に E2E 検証済み — 実 EC2 で `ethtool -i` = `2.17.2g`。SPEC B.3.4 / TESTING.md 参照)に Phase 3 がゲストの AWS プロビジョニングへ注入 加えて **OL5（UEK R2 / `el5uek`）**をサポート: plain `make` のみ（DKMS 非使用）、ツールチェーン/ヘッダー/ソースはホスト側で事前供給（EL5 には OS 内 TLS 1.2 経路が存在しない）、実証済み `el5uek` シム集合をビルド毎に適用・記録 — ビルドテストで実証済みであり、OL5 AMI ビルド経路にも配線済み（Phase 3 がツールチェーンとソースをホスト供給。セクション 9.8 参照）— SPEC B.9（OL5）および D.29 を参照。 |
 | `install-ssm-agent.sh` | Amazon SSM Agent の RPM を導入し起動時に有効化する自己完結スクリプト(OL6-OL10 → `latest`。OL6 は 2026-07-13 まで固定版、再固定方針は SPEC B.11)。RPM を `curl` で取得し `rpm -Uvh` で導入(EL6 の yum-over-HTTPS 問題を回避)。install+run テストマトリクス(`tests/ssm/`)向けに**単体実行**可能、または SSM 導入有効時(既定)に Phase 3 がゲストの AWS プロビジョニングへ注入 OL5 は（ENA/AWS CLI v2 と異なり）**測定済み除外**: AWS サポート帯全体がパッケージインストール層（xz/sha256 rpmlib vs EL5 rpm 4.4）とカーネル層（三点実証の 3.2 フロア vs 終端 el5uek）の両方で閉じている — SPEC D.31 参照。 |
-| `install-awscli.sh` | AWS CLI v2 を導入(OL6 → 固定 `2.17.51`、OL7/OL8 → `latest`)し、OL リポジトリの `awscli`(v1)を versionlock で除外する自己完結スクリプト。自己完結の v2 バンドルを展開しバンドル同梱の `aws/install` で導入。install+run テストマトリクス(`tests/awscli/`)向けに**単体実行**可能、または AWS CLI 導入有効時(既定、OL6/OL7/OL8 — OL9/OL10 は既定のパッケージマネージャを利用)に Phase 3 がゲストの AWS プロビジョニングへ注入 加えて **OL5 をオプトインのインストールテスト/PoC 限定ターゲット**としてサポート（天井 pin 2.17.51 = OL6 と同一・同じ glibc 壁を実測で確認。バンドルはホスト側で事前ステージ — EL5 には OS 内 TLS 1.2 経路が存在しない）— SPEC B.12（OL5）および D.30 を参照。 |
+| `install-awscli.sh` | AWS CLI v2 を導入(OL6 → 固定 `2.17.51`、OL7/OL8 → `latest`)し、OL リポジトリの `awscli`(v1)を versionlock で除外する自己完結スクリプト。自己完結の v2 バンドルを展開しバンドル同梱の `aws/install` で導入。install+run テストマトリクス(`tests/awscli/`)向けに**単体実行**可能、または AWS CLI 導入有効時(既定、OL6/OL7/OL8 — OL9/OL10 は既定のパッケージマネージャを利用)に Phase 3 がゲストの AWS プロビジョニングへ注入 加えて **OL5** をサポート（天井 pin 2.17.51 = OL6 と同一・同じ glibc 壁を実測で確認。バンドルはホスト側で事前ステージ — EL5 には OS 内 TLS 1.2 経路が存在しない）— インストールテストで実証済みであり、OL5 AMI ビルド経路にも配線済み（Phase 3 がバンドル zip をホスト供給。セクション 9.8 参照）— SPEC B.12（OL5）および D.30 を参照。 |
 | `README.md` | エンドユーザ向けドキュメント(英語、ベースライン) |
 | `README.ja.md` | エンドユーザ向けドキュメント(日本語) |
 | `SPEC.md` | 開発者向け仕様書(英語)— phase contract、ログ規約、設計判断の詳細 |
@@ -296,7 +299,7 @@ aws sts get-caller-identity
 ./setup-vmimport-role.sh my-oracle-linux-ami-import-bucket
 ```
 
-このロールは AWS VM Import/Export が S3 から VMDK を読み出すために必須です。**初回 1 回のみ**作成してください。上記のバケット名は、本ディレクトリ内のすべての `env.properties.aws-ol{N}` テンプレートで共有される `S3_BUCKET` の値と一致しているため、この 1 つのロールで OL6 / OL7 / OL8 / OL9 / OL10 すべてのビルドをカバーします。各 env ファイルの `S3_KEY_PREFIX`(例: `ol10-ami-import`)によって、バケット内でバージョンごとに VMDK が分離されます。
+このロールは AWS VM Import/Export が S3 から VMDK を読み出すために必須です。**初回 1 回のみ**作成してください。上記のバケット名は、本ディレクトリ内のすべての `env.properties.aws-ol{N}` テンプレートで共有される `S3_BUCKET` の値と一致しているため、この 1 つのロールで OL5 / OL6 / OL7 / OL8 / OL9 / OL10 すべてのビルドをカバーします。各 env ファイルの `S3_KEY_PREFIX`(例: `ol10-ami-import`)によって、バケット内でバージョンごとに VMDK が分離されます。
 
 ### 5.4 環境設定ファイルの編集
 
@@ -331,7 +334,7 @@ vi env.properties.local
 | `S3_BUCKET` | `my-oracle-linux-ami-import-bucket`(全 OL バージョン共通。`setup-vmimport-role.sh` と一致) |
 | `AWS_REGION` | 空のままにすると EC2 IMDSv2/v1 から自動取得(EC2 外では `ap-northeast-1` にフォールバック)。明示的に指定するとオーバーライドされます。 |
 | `UPDATE_TO_LATEST` | デフォルト `yes`。ゲスト VM 内でインストール後に `dnf/yum update` を実行し、ISO リリース以降に発見された kernel および userspace の CVE を解消します。トレードオフを理解した上でのみ `security` や `no` に変更してください。 |
-| `DISK_SIZE_GB` | デフォルト `7`(OL6-10 一律。Oracle 公式 AWS AMI と同水準)。ルートパーティションは自動拡張(`--grow`)かつ `cloud-utils-growpart` 焼き込み済みのため、より大きい EBS ボリュームで起動すれば自動で広がります — この値は下限であって上限ではありません。SPEC B.3.4 参照。 |
+| `DISK_SIZE_GB` | デフォルト `7`(OL6-10 一律。Oracle 公式 AWS AMI と同水準。OL5 は `10` — ホスト供給アーティファクト分が大きく、EL5 に growpart が無いため、拡張は焼き込み済みワンショット `ol-aws-growroot` + cloud-init `resizefs` が担う)。ルートパーティションは自動拡張(`--grow`)かつ `cloud-utils-growpart` 焼き込み済みのため、より大きい EBS ボリュームで起動すれば自動で広がります — この値は下限であって上限ではありません。SPEC B.3.4 参照。 |
 | `LINUX_FIRMWARE` | OL8 テンプレートのみ `no`。ゲスト内 update の**前に**大容量 `linux-firmware` を外し、`UPDATE_TO_LATEST` トランザクションを 7 GB ルートに収めます(EL8 の firmware だけが非圧縮 installed 約 1.9 GB で、保持したままだと溢れる)。これは**ビルド時のヘッドルーム確保ノブ**であり最終内容の保証ではありません — 2026-07-13 の起動済みイメージでは後続プロビジョニング経由で `linux-firmware` が再導入されていることを実測(機能影響なし)。`linux-firmware-core` はいずれにせよ残ります。SPEC B.3.4 参照。 |
 | `AMAZON_TIME_SYNC` | デフォルト `no`(時刻設定は AMI のエンドユーザーに委ねる)。`yes` を指定するか `--enable-amazon-time-sync` を渡すと、link-local の Amazon Time Sync Service(`169.254.169.123`)をゲストの優先時刻ソースとして構成します。 |
 | `ENA_DRIVER_VERSION` | 任意のユーザーピン(緊急用レバー。通常は未設定のまま)。具体的な `x.y.z` を指定すると、全 OL メジャーでセルフビルド ENA ドライバー版数の最優先ソースになります — AMI 名とゲストビルドの両方に入るため、identity と成果物が常に一致します。未設定時は installer ピン(OL6/7)→ amzn-drivers latest(OL8-10)→ フォールバックピンの順。 |
@@ -368,11 +371,11 @@ vi env.properties.local
 | `--skip-prereq` | KVM 等のパッケージ導入(Phase 1)をスキップ。2 回目以降の実行で時間短縮 |
 | `--build-only` | Phase 6(VMDK 生成 + Nitro 起動準備チェック)まで実行し、AWS 取り込みフェーズ(7〜9)の手前で停止。AWS 取り込みは別途実行したい場合。`--skip-aws-import` と同等 |
 | `--skip-aws-import` | Phase 7〜9 をスキップ(`--build-only` と同等) |
-| `--skip-ena-driver` | ゲスト内で Amazon ENA ドライバをビルド/導入**しない**。既定では OL6〜OL10 でビルド(AWS 最適化・ENA Express 対応 AMI、Nitro v4+/ENAv3)。本スイッチで純粋な(無改変の)OL AMI を生成 |
-| `--skip-ssm-agent` | ゲスト内で Amazon SSM Agent を導入**しない**。既定では導入し起動時に有効化(OL6-OL10)するため、AMI は AWS SSM Run Command 準拠で出荷される。本スイッチでエージェントを除外 |
-| `--skip-awscli` | ゲスト内で AWS CLI v2 を導入**しない**。既定では OL6/OL7/OL8 に導入し(AWS CLI v1 が非サポート化しつつあるため標準 CLI として)、v1 パッケージを versionlock で除外する。本スイッチで導入を除外。OL9/OL10 は対象外(既定のパッケージマネージャで AWS CLI v2 を導入)で本スイッチの影響を受けない |
+| `--skip-ena-driver` | ゲスト内で Amazon ENA ドライバをビルド/導入**しない**。既定では OL5〜OL10 でビルド(AWS 最適化・ENA Express 対応 AMI、Nitro v4+/ENAv3)。本スイッチで純粋な(無改変の)OL AMI を生成 |
+| `--skip-ssm-agent` | ゲスト内で Amazon SSM Agent を導入**しない**。既定では導入し起動時に有効化(OL6-OL10)するため、AMI は AWS SSM Run Command 準拠で出荷される。本スイッチでエージェントを除外。OL5 は**実測に基づく除外**(SPEC D.31): 本スイッチに関わらず強制 OFF となり、AMI 名に ssm マーカーは付かない |
+| `--skip-awscli` | ゲスト内で AWS CLI v2 を導入**しない**。既定では OL5/OL6/OL7/OL8 に導入し(AWS CLI v1 が非サポート化しつつあるため標準 CLI として)、v1 パッケージを versionlock で除外する。本スイッチで導入を除外。OL9/OL10 は対象外(既定のパッケージマネージャで AWS CLI v2 を導入)で本スイッチの影響を受けない |
 | `--enable-amazon-time-sync` | **オプトイン(既定は無効)。** link-local の Amazon Time Sync Service(`169.254.169.123`)をゲストの*優先*時刻ソースとして構成する(OL7-OL10 は chrony、OL6 は ntpd。ディストリビューション既定の pool はフォールバックとして温存)。既定では時刻設定は AMI 利用者(エンドユーザー)に委ねる。env ファイルの `AMAZON_TIME_SYNC="yes"` と等価 |
-| `--imds-support <mode>` | AMI に焼き込む IMDS サポート: `default`(IMDSv1+v2、`HttpTokens=optional`)または `v2.0`(IMDSv2 必須、**OL7+ のみ**)。既定は `default`。OL6 + `v2.0` は拒否(cloud-init 0.7.5 が IMDSv2 非対応のため) |
+| `--imds-support <mode>` | AMI に焼き込む IMDS サポート: `default`(IMDSv1+v2、`HttpTokens=optional`)または `v2.0`(IMDSv2 必須、**OL7+ のみ**)。既定は `default`。OL6 + `v2.0` は拒否(cloud-init 0.7.5 が IMDSv2 非対応のため)。OL5 + `v2.0` も同様に拒否(cloud-init 0.6.3 は素の IMDSv1 のみ) |
 | `--log-file <path>` | 実行ログの出力先。既定は `${WORKSPACE}/build-ol-aws-ami-YYYYMMDD-hhmmss.log`(いずれの場合もコンソール出力をファイルにも記録。ファイルは ANSI 除去済み) |
 | `--debug` | `[DEBUG]` 行をコンソールにも出力(ファイルには指定有無に関わらず常時記録) |
 
@@ -556,6 +559,22 @@ OL6 は OL7 よりさらに深い回避が必要なサポート対象です。�
 
 OL6 関連の制約の全容は [セクション 10](#10-既知の制約注意事項) の項目 8 を参照してください。
 
+### 9.8 Oracle Linux 5 サポート(実験的)
+
+OL5 は最深部のレガシーターゲットで、OL6 の動的生成モデルに**完全ホスト供給パイプライン**を加えた構成です(EL5 の openssl 0.9.8e は TLS 1.0 止まりのため、ゲストは現行リポジトリに一切到達できません)。
+
+- **動的生成される `distr/ol5-slim/`**: 4 ファイル(`env.properties`, `image-scripts.sh`, `ol5-ks.cfg`, `provision.sh`)を埋め込みヒアドキュメントから書き出します。OL6 フローを踏襲しつつ EL5 固有の調整を反映: anaconda-11.1 kickstart 構文(**`%end` 無し**、`key --skip`、`cdrom`、`services`/`--ondisk`/`rootpw --lock` 不使用)、LABEL ベースの **ext3** ルート、GRUB Legacy シリアルコンソール、そしてゲスト側コードは **bash 3.2 / POSIX 安全**(EL5 の bash は `${var,,}` や `mapfile` を持たない — `t025` テスト tier が機械的に強制)。
+- **完全ホスト供給(`[OLAWS-OL5S1]`)**: ビルドホストが全ゲストアーティファクトをダウンロード・検証して `distr/ol5-slim/files/` に配置します — 凍結 11 RPM の ENA ビルドツールチェーン(ENA テストマトリクスの実証済みリストとバイト同一)、`kernel-uek`/`-devel`/`-firmware`(UEK R2、凍結チャネルからライブ解決 + ピン留めフォールバック)、9 RPM の EPEL5 cloud-init 0.6.3 閉包 + `gdisk`(不変アーカイブの凍結 NVR)、ENA ソース tarball、AWS CLI v2 バンドル zip。アップストリーム標準の files チャネル(`provision.d` → `virt-customize --copy-in`)がゲストへ搬入し、source 時実行のエグゼキュータが順序厳守でインストールします: `modprobe.conf` エイリアス(カーネル RPM 自身の `mkinitrd` が `nvme` を焼き込むように先行)→ `DEFAULTKERNEL=kernel-uek` → 単一 `rpm -Uvh` トランザクション → `/usr/src` ステージ → ハードアサート(el5uek カーネル存在、initrd に `nvme.ko` 含有(`mkinitrd` による 1 回の是正リトライ付き)、grub デフォルトが el5uek を起動、cloud-init 導入済み)。
+- **EL5 安全なプロビジョニング上書き(`[OLAWS-OL5S2]`)**: アップストリームの `cloud::install_aws_packages` / `cloud::cloud_init` は yum/dracut 前提のため、追記による関数再定義(bash は後勝ち)で検証専用の EL5 安全版に置換します。dracut ベースの Nitro-initramfs フックは OL5 では注入せず、ENA フックの dracut drop-in 行も省略します。
+- **`ec2-user` + cloud-init 0.6.3**: EPEL5 の cloud-init はユーザーを作成できない(`setup_user_keys` は getpwnam のみ)ため、kickstart `%post` が `ec2-user` を事前作成(パスワードロック + パスワードレス sudo)し、`CLOUD_USER` は固定です。`DataSourceEc2` は素の IMDSv1 のみのため `--imds-support v2.0` は拒否されます。
+- **growpart 無しでのルート拡張**: EL5 には `cloud-utils-growpart` が存在しません。焼き込み済みワンショット SysV スクリプト(`ol-aws-growroot`、S08)が古典的な fdisk の削除・同一開始セクタ再作成パターン(RHEL6-HVM gdisk ワークアラウンドの MBR 適応 — `gdisk` は診断ツールとして同梱するが MBR ディスクには使用しない: GPT を書けば GRUB Legacy が壊れる)でルートパーティションをディスク末尾まで拡張し、完了マーカーを置いて 1 回だけ再起動します。その後 cloud-init の `resizefs` が ext3 をオンライン拡張します。
+- **virt-install のディスクバス**: アップストリームはビルド VM のディスクを virtio-scsi に固定していますが、EL5 インストーラカーネルはこれを認識できません。Phase 3 が OL5 のみバスを素の `virtio`(5.11 インストーラカーネル・UEK R2 の両方に存在)へパッチします。
+- **ISO とチェックサム契約**: 5.11 メディアは kernel.org ミラー上に当時の「Enterprise Linux」命名(`Enterprise-R5-U11-Server-x86_64-dvd.iso`)で存在します。アップストリームは SHA1/SHA256 のみを受理する一方ミラーは MD5SUMS のみを公開するため、オペレータが一度だけ SHA256 を計算し(env テンプレートに記録済みのミラー MD5 でクロスチェック)`ISO_CHECKSUM` に記入します — 空のままではビルドは即時に失敗します。
+- **SSM Agent: 実測に基づく除外**: ENA/AWS CLI v2 と異なり、エージェントの AWS サポート帯全体が EL5 で壁に当たります(xz/sha256 rpmlib vs rpm 4.4、カーネル 3.2 フロア vs 終端 el5uek — SPEC D.31)。フラグに関わらず強制 OFF です。
+- **E2E ステータス**: 合成形状はゲート検証済み(`t025`、P3GATE OL5 分岐)ですが、**実 EL5 anaconda 接触と実 EC2 起動は未実施**です。初回接触は `SERIAL_CONSOLE="yes"` + `--build-only` でインストールをライブ観察することを推奨します。Nitro 起動は UEK R2 の in-box `nvme`(実測)と自己ビルド ENA の 2 本柱に依拠し、Xen 世代インスタンスが実測済みフォールバックです。
+
+OL5 関連の制約の全容は [セクション 10](#10-既知の制約注意事項) の項目 9 を参照してください。
+
 ---
 
 ## 10. 既知の制約・注意事項
@@ -600,6 +619,16 @@ OL6 関連の制約の全容は [セクション 10](#10-既知の制約注意�
    - **Phase A/B/C すべて検証済み(Phase C は 2026-07-13)**: 静的検証 9 項目(osinfo-db エントリ、ISO checksum、リポジトリ HTTPS、dracut フラグ、cloud-init 提供状況、アップストリーム OL バージョン分岐)および OL6 ISO ブートテスト(virt-install + isolinux + Anaconda 13.21.263 TUI)を先行検証済み。kickstart 完走、provision.sh の OL6 環境完走、cloud-init による `ec2-user` 作成(SSH ログイン)、AWS **Nitro** 起動(r5dn.large、NVMe ルート、セルフビルド ENA 2.9.1g が NIC を駆動)までの end-to-end は 2026-07-13 に検証完了(sosreport 裏付き。TESTING.md「Boot-E2E evidence note (2026-07-13)」参照)。
    - **新世代 AMD インスタンスでは起動時にカーネルパニック(2026-07-18 実測)**: 凍結済み UEK4 カーネル(`4.1.12`)が `c6a`/`c7a`/`c8a`(AMD Zen3/Zen4/Zen5)の初期ブートで `kernel BUG at arch/x86/kernel/alternative.c:708`(jump-label `text_poke` 検証)に到達します。モジュールロード前の発生であり、本パイプラインの成果物起因ではなくカーネル×CPU の非互換です。実測で起動可能: Intel 各世代(`r8i-flex` まで、2026-07-13)および AMD ≤ Zen2(`c5a.large`、2026-07-18)。カーネルは終端・凍結済みで修正手段はありません — OL6 AMI は Intel または AMD Zen2 世代のインスタンスタイプでのみ起動してください。TESTING.md「Boot-E2E evidence note (2026-07-18)」参照。
    - **本番利用禁止**: OL7 よりさらに強い制約です。検証・学習・レガシーマイグレーション以外には絶対に使用しないでください。
+
+9. **Oracle Linux 5 固有の制約**
+   - **EOL からはるかに経過**: Premier Support は 2017 年、Extended Support は 2021 年に終了。以後いかなる更新も出荷されておらず、リポジトリは終端・凍結状態です。
+   - **E2E 未証明**: OL6-10(2026-07-13 に実起動検証済み)と異なり、OL5 経路は**実 EL5 anaconda 接触も実 EC2 起動も未実施**です。kickstart 形状、virt-customize 内の rpm トランザクション、Nitro 起動のすべてが初回接触リスクです。初回は `SERIAL_CONSOLE="yes"` + `--build-only` を使用してください。
+   - **ゲスト内ネットワークは永久に無し**: EL5 に TLS 1.2 経路は存在せず、ISO 以外の全パッケージはホスト供給です。起動後の `yum update` も不可能 — 焼き込んだものがそのまま恒久的に動きます。
+   - **cloud-init 0.6.3 の限界**: 素の IMDSv1 のみ(IMDSv2-only AMI は拒否)。ユーザー作成不可(ec2-user はインストール時に事前作成)。growpart 無し(焼き込み済み `ol-aws-growroot` ワンショット + `resizefs` で代替)。EBS ボリュームがイメージより大きい場合、初回起動に**自動再起動が 1 回**含まれます。
+   - **x86_64 / BIOS / MBR / GRUB Legacy / ext3 / UEK R2 のみ**: いずれも `distr::validate` または kickstart 形状が強制する EL5 のハード制約です。
+   - **SSM Agent は除外(実測)**: OL5 への配線は存在せず、存在し得ません: 三重の壁による除外です(SPEC D.31)。
+   - **Nitro 互換性は 2 本柱に依拠**: UEK R2 の in-box `nvme` ドライバ(カーネルペイロードから実測: v0.9 世代・クラスマッチ PCI バインディング)と、自己ビルド ENA(掃引済みビルド境界にピン)。この 3.0.36 ベースカーネルが現行 Nitro ハードウェアで起動するかは、まさに保留中の E2E が証明すべき事項です。Xen 世代インスタンスが実測済みフォールバックです。
+   - **本番利用禁止**: 本リポジトリ中で最も強い禁止です: 検証・学習・考古学的用途に限ります。
 
 ---
 

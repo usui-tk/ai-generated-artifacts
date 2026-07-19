@@ -2787,6 +2787,113 @@ Kept opt-in per user decision (2026-07-11).
 
 ---
 
+## B.15 OL5 build target (`distr/ol5-slim/` synthesis + full host-supply)
+
+**Status: implemented 2026-07-19; gate-checked (t025 + P3GATE OL5 branch); real
+EL5 anaconda contact and real EC2 boot E2E are PENDING.** Treat every
+first-contact surface (kickstart acceptance, the virt-customize rpm
+transaction, Nitro boot) as unproven until that evidence lands (the
+gate-maturity lesson: new gates/shapes are untested until first real-world
+contact with each major).
+
+### B.15.1 Model
+
+OL5 extends the OL6 runtime-synthesis precedent (B.4) with a **full
+host-supply pipeline**, because EL5's openssl 0.9.8e tops out at TLS 1.0 and
+the guest can reach no current repository at any stage:
+
+1. **Synthesis.** Phase 3 writes `distr/ol5-slim/` (`env.properties`,
+   `image-scripts.sh`, `ol5-ks.cfg`, `provision.sh`) from embedded heredocs
+   (`EOF_OL5_ENV` / `EOF_OL5_IMG` / `EOF_OL5_KS` / `EOF_OL5_PROV`).
+2. **Host staging.** Phase 3 downloads and magic-verifies every guest
+   artifact into `distr/ol5-slim/files/{rpms,src}/` (cache:
+   `${WORKSPACE}/ol5-stage`): the frozen 11-RPM ENA build-toolchain closure
+   (MUST stay byte-identical to the matrix's `OL5_TOOLCHAIN_RPMS` — t025
+   enforces this), `kernel-uek`/`-devel`/`-firmware` (UEK R2; newest NVRs
+   live-resolved from the frozen `OL5/UEK/latest` channel, pinned fallback
+   `2.6.39-400.297.3.el5uek`), the 9-RPM EPEL5 cloud-init 0.6.3 closure +
+   `gdisk` (frozen NVRs; the EPEL5 archive is immutable), the ENA source
+   tarball (`ena_linux_<pin>.tar.gz`) and the AWS CLI v2 bundle zip.
+   Upstream's standard files channel carries the tree into the guest
+   (`stage_provisioning_files` → `provision.d/distr/` →
+   `virt-customize --copy-in` → `/tmp/provision.d/`). No upstream changes.
+3. **Guest execution (`[OLAWS-OL5S1]`).** A source-time executor appended to
+   `cloud/aws/provision.sh` (BEFORE the ENA/awscli hooks, so their
+   prerequisites exist when they run) installs in load-bearing order:
+   `/etc/modprobe.conf` aliases first (`scsi_hostadapter nvme`,
+   `scsi_hostadapter1 xen-blkfront`, `eth0 ena` — the kernel RPM's own
+   `%post`→`new-kernel-pkg`→`mkinitrd` reads the scsi_hostadapter aliases,
+   so nvme is baked into the initrd by the package install itself) →
+   `DEFAULTKERNEL=kernel-uek` → ONE `rpm -Uvh --replacepkgs` transaction over
+   the staged set → `/usr/src` staging (ENA tarball + awscli zip; an empty
+   src/ is legitimate under `--skip-ena-driver` + `--skip-awscli`) → hard
+   asserts: el5uek kernel present; `/boot/initrd-<kv>.img` contains
+   `nvme.ko` (one `mkinitrd --with=nvme --with=xen-blkfront` remediation
+   retry, then FATAL); the grub.conf `default=` entry boots el5uek;
+   cloud-init installed.
+4. **Overrides (`[OLAWS-OL5S2]`).** Appended redefinitions (bash
+   last-definition-wins) replace the upstream yum/dracut-based
+   `cloud::install_aws_packages` / `cloud::cloud_init` with verify-only
+   EL5-safe bodies. The upstream definitions become dead parse-only code
+   (their bash-4 expansions are harmless unexecuted).
+
+### B.15.2 Hard constraints (all enforced)
+
+| Constraint | Enforcement |
+|---|---|
+| x86_64 / BIOS / MBR / GRUB Legacy | env template + EL5 reality |
+| `ROOT_FS=ext3` | `distr::validate` (ext4 = 5.6 tech preview behind a boot flag; xfs/lvm/btrfs roots unsupported by anaconda-11.1) |
+| `UEK_RELEASE=2` | `distr::validate` (the only UEK line for OL5; in-box nvme — the Nitro precondition, measured from the kernel payload) |
+| `UPDATE_TO_LATEST=no` | `distr::validate` (no reachable in-guest repository) |
+| `CLOUD_USER=ec2-user` | `load_env` forces it (cloud-init 0.6.3 `setup_user_keys` is getpwnam-only; the kickstart pre-creates exactly ec2-user) |
+| IMDSv2-only rejected | `normalize_imds_support` (0.6.3 DataSourceEc2 = plain IMDSv1; D.27 class) |
+| SSM Agent forced OFF | `load_env` (measured triple-walled exclusion; B.10/B.11 context + D.31) |
+| SHA256 `ISO_CHECKSUM` required | `load_env` fails fast when empty (upstream accepts SHA1/SHA256 only; the kernel.org mirror publishes MD5SUMS — the mirror MD5 `8af2121088c7e6f5ebdb6d5900403240` is recorded in the env template as the operator cross-check) |
+| Guest-side code bash-3.2/POSIX | t025 mechanical scan of every guest block (non-comment lines) |
+| Disk bus `virtio` (not virtio-scsi) | Phase 3 marker patch on `bin/build-image.sh` (the EL5 installer kernel has no virtio-scsi; both the 5.11 installer kernel and UEK R2 carry plain virtio) |
+
+### B.15.3 Kickstart shape (EL5 / anaconda-11.1)
+
+Zero `%end` (anaconda-11.1 would consume a literal `%end` inside `%packages`
+as a package name); exactly two section openers (`%packages` + `%post`);
+`install` + `cdrom` + `text` + `key --skip`; `rootpw --iscrypted *` (no
+`--lock`); `firewall --enabled --ssh`; no `services`/`cmdline`/`ignoredisk
+--only-use`/`--ondisk`/`bootloader --timeout`; LABEL-based ext3 partitions
+(`/boot`, swap — removed by `SETUP_SWAP=no` — and a `--grow` root);
+`%post` without `--log` (exec-redirect into `/root/ks-post.log`, the
+`common::ks_log` path). `%post` pre-creates `ec2-user` (locked password +
+direct sudoers line — EL5 sudo predates a stock `#includedir`), bakes the
+GRUB-Legacy serial-console layers (D.25 pattern), the `ol-aws-growroot`
+one-shot, and the virt-sysprep stubs (D.20 pattern). The P3GATE
+`_p3_validate_ks` has an explicit OL5 branch for this shape (the
+balanced-`%end` rule keeps guarding OL6-10 unchanged).
+
+### B.15.4 Root growth without growpart (`ol-aws-growroot`)
+
+EL5 has no `cloud-utils-growpart`. A baked SysV one-shot (`chkconfig:
+2345 08 92` — before cloud-init) grows the root partition with the classic
+fdisk MBR pattern: sysfs geometry read; REFUSES unless the root partition is
+the last on disk; `fdisk` sector-units delete + recreate at the SAME start
+sector to the disk end (`printf 'u\nd\n<n>\nn\np\n<n>\n<start>\n\nw\n'` — the
+`w` re-read failure on the busy disk is expected; the on-disk table IS
+written); marker (`/var/lib/ol-aws-growroot.done`) + ONE reboot; cloud-init's
+`resizefs` then grows ext3 online on the next boot. Every failure path marks
+done and exits 0 (never a boot loop). This is the MBR adaptation of the
+RHEL6-HVM gdisk workaround (usui-tk/amazon-ec2-userdata); per adjudication,
+`gdisk` is STAGED as a diagnostic tool but never used against the MBR disk —
+writing GPT there would break GRUB Legacy.
+
+### B.15.5 E2E protocol (operator side)
+
+First contact: `SERIAL_CONSOLE="yes"` + `--build-only` to watch anaconda
+live (the OL7-diagnosis protocol). Boot targets: Nitro c5/m5-class first
+(nvme root + self-built ENA), Xen-generation instances as the measured
+fallback (xen-blkfront/xen-netfront are in-box and alias-wired). Expected
+first-boot behavior includes one automatic growroot reboot when the EBS
+volume exceeds the image size.
+
+---
+
 # Part D — Known Pitfalls & Lessons Learned
 
 These are documented so that future revisions do not regress on
@@ -4162,3 +4269,81 @@ to the new major version.
 If Oracle changes the ISO naming convention or moves the checksum URL
 again, update Part D with a new entry and add the new pattern to
 `parse_ol_version_from_iso` / `derive_oracle_checksum_url` respectively.
+
+---
+
+## D.32 OL5 build-target design record — evidence, adjudications, first-contact surfaces
+
+**Date:** 2026-07-19. The OL5 AMI build target (B.15) was designed from
+scripted, machine-grounded probes; this entry freezes the evidence and the
+binding adjudications so future revisions do not re-litigate or regress them.
+
+**Evidence (scripted probes over the real artifacts):**
+- **In-box nvme in UEK R2 (the Nitro precondition).** Full-payload scan of
+  `kernel-uek-2.6.39-400.297.3.el5uek` (all 2,075 modules): `nvme.ko` is
+  present (the v0.9-era driver) with a **class-match PCI alias**
+  (`pci:v*d*sv*sd*bc01sc08i02*`) that covers Amazon EBS NVMe (1d0f:8061);
+  `depends` is empty; the io_timeout module param is byte-typed (max 255 s).
+  ENA is NOT in-box (self-build; B.9/D.29). xen-blkfront/xen-netfront and
+  the virtio set are in-box (fallback + build-VM paths).
+- **cloud-init 0.6.3 (EPEL5) closure.** BFS dependency resolution against
+  the OL5 base repo: 99 packages total, only 9 from EPEL5 (frozen NVRs:
+  cloud-init-0.6.3-0.12.bzr532, python26 2.6.8-2 + libs, PyYAML 3.08-4,
+  boto 2.27.0-1, cheetah 2.4.4-3, configobj 4.7.2-5, libffi 3.0.5-1,
+  libyaml 0.1.2-8), zero unresolved. Defaults: `user: ec2-user`,
+  `disable_root: 1`, `ssh_pwauth: 0`; DataSourceEc2 = plain IMDSv1 with
+  built-in retry. **`setup_user_keys` is getpwnam-only** (no users-groups
+  module in 0.6.x) → the target account MUST pre-exist → kickstart `%post`
+  creates ec2-user. No growpart equivalent exists.
+- **Historical grounding.** RHEL5-era AMIs used rc.local/SysV
+  `ec2-get-credentials` + IMDSv1 → `/root` (AWS building-shared-amis
+  documentation; 2010-era operator records); cloud-init entered RHEL at
+  6.4 together with the root→ec2-user switch (AWS official blog). Choosing
+  0.6.3 + pre-created ec2-user gives OL5 the modern login contract on
+  period-correct plumbing.
+- **Upstream transport mechanics (from the real `oracle/oracle-linux`
+  tree).** `distr/<DISTR>/files/` → `provision.d/` →
+  `virt-customize --copy-in` → guest `/tmp/provision.d/` is a standard,
+  generic channel — binary RPM host-supply needs NO upstream change.
+  Appended hook blocks execute at SOURCE time in file order, and bash
+  function redefinition is last-wins → the OL5S1 executor (earlier append)
+  and the OL5S2 overrides need no sed surgery on upstream bodies.
+  `virt-install` pins the build disk to virtio-scsi (absent from the EL5
+  installer kernel) → the OL5 disk-bus patch; `ISO_CHECKSUM` is hard-typed
+  SHA1/SHA256 upstream → the operator-computed SHA256 contract.
+- **Guest bash is 3.2.** `${var,,}`/`${var^^}`/`mapfile` in executed guest
+  paths die at runtime on EL5. Executed-path analysis: the upstream
+  bash-4 sites live in bodies the OL5 flow never runs
+  (`common::distr_cleanup`, `common::remove_kernels`, the overridden
+  cloud:: bodies); everything OL5 executes is bash-3.2/POSIX clean and
+  t025 enforces this mechanically on the synthesized blocks.
+
+**Binding adjudications (user decisions, 2026-07-19):**
+1. **F3 runtime model:** OL6-style wrapper synthesis of `distr/ol5-slim/`
+   (not an upstream fork, not a vendored tree).
+2. **cloud-init:** EPEL5 0.6.3 with the frozen 9-RPM closure (not the
+   no-cloud-init/SysV-key-script alternative).
+3. **Growroot:** implement with **fdisk** (MBR delete/recreate at the same
+   start + one reboot). **Both** fdisk and gdisk ship in the AMI, but
+   gdisk is a diagnostic tool only — MBR→GPT conversion would break GRUB
+   Legacy. (MBR adaptation of the usui-tk/amazon-ec2-userdata RHEL6-HVM
+   gdisk workaround.)
+4. **ENA toolchain host-injection:** the frozen 11-RPM closure, kept
+   byte-identical to the matrix's `OL5_TOOLCHAIN_RPMS` (t025-enforced).
+5. **Pins:** ENA OL5 = 2.12.3 (the swept build boundary; 2.13.0+ all fail
+   against UEK R2), awscli OL5 = 2.17.51 ceiling (D.30). SSM = measured
+   exclusion, forced off (D.31).
+6. **ec2-user fixed; ext3 root; UPDATE_TO_LATEST=no; SELinux permissive;
+   DISK_SIZE_GB=10; E2E first target Nitro c5/m5 with Xen-generation
+   fallback.**
+
+**First-contact surfaces (UNPROVEN until the operator E2E):** EL5
+anaconda-11.1 accepting the synthesized kickstart exactly as researched
+(`%end`-free shape, `key --skip`, `cdrom`, LABEL/ext3 partitions); the
+`rpm -Uvh` transaction (incl. kernel `%post` → `new-kernel-pkg` → `mkinitrd`)
+inside the virt-customize appliance chroot; grub.conf default resolution on
+the freshly installed tree; the growroot fdisk pipeline against a real EBS
+geometry; and Nitro boot of a 3.0.36-base kernel on current hardware. The
+P3GATE OL5 branch and t025 encode the researched shapes; per the
+gate-maturity lesson, first-contact adjustments are expected and must be
+recorded here when they land.
