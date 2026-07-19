@@ -105,14 +105,149 @@ assert_match "${ks}" '^rsyslog$' "ks: rsyslog listed (cloud-init 0.6.3 hard Requ
 for p in e4fsprogs libselinux-python iproute crontabs util-linux mkinitrd module-init-tools; do
   assert_match "${ks}" "^${p}\$" "ks: closure/tooling package listed: ${p}"
 done
-# growroot one-shot
+# growroot one-shot -- growpart decision model (adjudicated 2026-07-19):
+# geometry PRIMARY, marker SECONDARY (loop breaker, self-healed on success)
 assert_match "${ks}" '/etc/init.d/ol-aws-growroot' "ks: growroot one-shot init script baked"
 assert_match "${ks}" '# chkconfig: 2345 08 92' "ks: growroot runs BEFORE cloud-init (S08 < S20)"
-assert_match "${ks}" 'MARKER=/var/lib/ol-aws-growroot\.done' "ks: growroot is marker-idempotent"
-assert_match "${ks}" "printf 'u\\\\nd\\\\n%s\\\\nn\\\\np\\\\n%s\\\\n%s\\\\n\\\\nw\\\\n'" "ks: fdisk sector-units delete/recreate pipeline (the MBR pattern; gdisk never touches the MBR disk)"
 assert_match "${ks}" '/sbin/chkconfig --add ol-aws-growroot' "ks: growroot registered via chkconfig"
-assert_match "${ks}" 'a partition starts after root; refusing to grow' "ks: growroot refuses when root is not the last partition"
-assert_match "${ks}" '/sbin/reboot' "ks: growroot reboots once so the kernel re-reads the table"
+extract_heredoc_from() {
+  awk -v m="$2" '
+    $0 ~ ("<<\x27" m "\x27") { f=1; next }
+    $0 == m                  { f=0 }
+    f                        { print }
+  ' "$1" > "$3"
+}
+extract_heredoc_from "${WORK}/ks" 'EOF_GROWROOT' "${WORK}/gr"
+if [ -s "${WORK}/gr" ]; then
+  t_pass "growroot: EOF_GROWROOT extracted from the kickstart ($(wc -l < "${WORK}/gr") lines)"
+else
+  t_fail "growroot: EOF_GROWROOT heredoc not extractable"
+fi
+gr="$(cat "${WORK}/gr")"
+bash -n "${WORK}/gr" 2>/dev/null
+assert_rc 0 $? "growroot: extracted script parses (bash -n)"
+# structural pins of the adjudicated model
+l_geo="$(grep -n 'PRIMARY criterion' "${WORK}/gr" | head -1 | cut -d: -f1)"
+l_mk="$(grep -n 'SECONDARY criterion' "${WORK}/gr" | head -1 | cut -d: -f1)"
+if [ -n "${l_geo}" ] && [ -n "${l_mk}" ] && [ "${l_geo}" -lt "${l_mk}" ]; then
+  t_pass "growroot: geometry decision precedes the marker check (PRIMARY < SECONDARY by position)"
+else
+  t_fail "growroot: PRIMARY/SECONDARY ordering broken (geo=${l_geo:-?} marker=${l_mk:-?})"
+fi
+assert_match "${gr}" 'MARKER=/var/lib/ol-aws-growroot\.attempt' "growroot: marker is an ATTEMPT record (loop breaker), not the execution criterion"
+assert_match "${gr}" 'FUDGE_SECTORS=2048' "growroot: growpart-style 1 MiB fudge on the NOCHANGE decision"
+assert_match "${gr}" 'stale attempt marker cleared' "growroot: marker self-heals on success (re-armed for future volume growth)"
+assert_match "${gr}" 'NOT retrying \(reboot-loop protection\)' "growroot: marker blocks only the retry-reboot, loudly"
+assert_match "${gr}" 'sfdisk -d ' "growroot: reads the on-disk table via sfdisk dump (growpart model, not fdisk keystrokes)"
+if grep -Eq 'printf .u.n' "${WORK}/gr"; then
+  t_fail "growroot: legacy fdisk keystroke pipeline still present"
+else
+  t_pass "growroot: legacy fdisk keystroke pipeline removed"
+fi
+assert_match "${gr}" 'sfdisk --no-reread --force' "growroot: applies with --no-reread --force (busy-disk model; kernel re-read deferred to the reboot)"
+assert_match "${gr}" 'start=\[ \]\*\$\{pstart\},' "growroot: table entry addressed by START SECTOR (util-linux 2.13 sfdisk misnames NVMe partitions)"
+assert_match "${gr}" 'Id=\$\{pid\} \(only plain Linux 83' "growroot: partition-type guard (only Id=83 grown; ee=GPT refused)"
+assert_match "${gr}" 'a partition starts after the root partition' "growroot: refuses when root is not the last partition"
+assert_match "${gr}" 'ol-aws-growroot\.sfdisk-backup' "growroot: old dump saved as the restore vehicle before writing"
+assert_match "${gr}" 'POST-WRITE VERIFY FAILED' "growroot: post-write verify by re-dump, with restore on mismatch"
+assert_match "${gr}" 'BLKPG_RESIZE_PARTITION \(kernel 3\.6\+\)' "growroot: the one-reboot requirement is grounded (no online root resize below 3.6; UEK R2 = 3.0.36)"
+assert_match "${gr}" '/sbin/reboot' "growroot: reboots once so the kernel re-reads the table"
+
+# behavioral: fake sysfs + mock df/sfdisk/reboot drive the real decision logic
+GRT="${WORK}/grt"
+mkdir -p "${GRT}/bin" "${GRT}/sys/block/xvda/xvda1" "${GRT}/sys/block/xvda/xvda2" "${GRT}/state" "${GRT}/varlib"
+echo 20971520 > "${GRT}/sys/block/xvda/size"
+echo 2048     > "${GRT}/sys/block/xvda/xvda1/start"
+echo 409600   > "${GRT}/sys/block/xvda/xvda1/size"
+echo 411648   > "${GRT}/sys/block/xvda/xvda2/start"
+echo 8388608  > "${GRT}/sys/block/xvda/xvda2/size"
+cat > "${GRT}/state/dump-old" <<'EOF_DUMP'
+# partition table of /dev/xvda
+unit: sectors
+
+/dev/xvda1 : start=     2048, size=   409600, Id=83, bootable
+/dev/xvda2 : start=   411648, size=  8388608, Id=83
+/dev/xvda3 : start=        0, size=        0, Id= 0
+/dev/xvda4 : start=        0, size=        0, Id= 0
+EOF_DUMP
+sed 's/size=  8388608/size= 20559872/' "${GRT}/state/dump-old" > "${GRT}/state/dump-new"
+cat > "${GRT}/bin/df" <<EOF_DF
+#!/bin/sh
+echo "Filesystem 512-blocks Used Available Capacity Mounted on"
+echo "/dev/xvda2 4194304 1000 4193304 1% /"
+EOF_DF
+cat > "${GRT}/bin/sfdisk" <<EOF_SF
+#!/bin/sh
+S="${GRT}/state"
+if [ "\$1" = "-d" ]; then
+  if [ -f "\$S/applied" ]; then cat "\$S/dump-new"; else cat "\$S/dump-old"; fi
+  exit 0
+fi
+cat > "\$S/applied-input"
+touch "\$S/applied"
+exit 0
+EOF_SF
+cat > "${GRT}/bin/reboot" <<EOF_RB
+#!/bin/sh
+touch "${GRT}/state/rebooted"
+EOF_RB
+chmod +x "${GRT}/bin/"*
+: > "${GRT}/dev-xvda"
+# shellcheck disable=SC2016
+sed -e "s|/sys/block|${GRT}/sys/block|g" \
+    -e 's|\[ -b "\$disk" \]|[ -e "'"${GRT}"'/dev-xvda" ]|' \
+    -e 's|/sbin/reboot|reboot|' \
+    -e "s|MARKER=/var/lib/ol-aws-growroot.attempt|MARKER=${GRT}/varlib/attempt|" \
+    -e "s|bak=/var/lib/ol-aws-growroot.sfdisk-backup|bak=${GRT}/varlib/backup|" \
+    -e "s|LOG=/var/log/ol-aws-growroot.log|LOG=${GRT}/state/log|" \
+    -e "s|mkdir -p /var/lib|mkdir -p ${GRT}/varlib|" \
+    "${WORK}/gr" > "${GRT}/run.sh"
+gr_run() { rm -f "${GRT}/state/log"; PATH="${GRT}/bin:${PATH}" sh "${GRT}/run.sh" start >/dev/null 2>&1; }
+# case: grow path -- edit + apply + verify + reboot + marker
+gr_run
+if grep -q 'size= 20559872' "${GRT}/state/applied-input" 2>/dev/null \
+   && [ -f "${GRT}/state/rebooted" ] && grep -q 'verified:' "${GRT}/varlib/attempt" 2>/dev/null; then
+  t_pass "growroot(behavioral): grow path -- correct single-field edit applied, verified, one reboot, attempt recorded"
+else
+  t_fail "growroot(behavioral): grow path broken (edit/apply/verify/reboot/marker)"
+fi
+# case: post-reboot self-heal -- geometry grown => NOCHANGE + marker cleared
+echo 20559872 > "${GRT}/sys/block/xvda/xvda2/size"
+rm -f "${GRT}/state/rebooted"
+gr_run
+if grep -q 'NOCHANGE' "${GRT}/state/log" && [ ! -f "${GRT}/varlib/attempt" ] && [ ! -f "${GRT}/state/rebooted" ]; then
+  t_pass "growroot(behavioral): post-grow boot -- NOCHANGE by geometry, marker self-healed, no reboot"
+else
+  t_fail "growroot(behavioral): post-grow self-heal broken"
+fi
+# case: marker is SECONDARY -- growth needed + marker => loud, no apply, no reboot
+echo 8388608 > "${GRT}/sys/block/xvda/xvda2/size"
+rm -f "${GRT}/state/applied" "${GRT}/state/applied-input" "${GRT}/state/rebooted"
+echo "attempted: earlier" > "${GRT}/varlib/attempt"
+gr_run
+if grep -q 'NOT retrying' "${GRT}/state/log" && [ ! -f "${GRT}/state/applied" ] && [ ! -f "${GRT}/state/rebooted" ]; then
+  t_pass "growroot(behavioral): marker as SECONDARY -- growth still needed is reported loudly, no write, no reboot"
+else
+  t_fail "growroot(behavioral): marker-secondary semantics broken"
+fi
+# case: fudge NOCHANGE (free tail 1024 < 2048)
+rm -f "${GRT}/varlib/attempt"
+echo 20558848 > "${GRT}/sys/block/xvda/xvda2/size"
+gr_run
+if grep -q 'NOCHANGE' "${GRT}/state/log" && [ ! -f "${GRT}/state/rebooted" ]; then
+  t_pass "growroot(behavioral): sub-fudge free tail -> NOCHANGE (growpart semantics)"
+else
+  t_fail "growroot(behavioral): fudge NOCHANGE broken"
+fi
+# case: Id guard (root Id=8e in the table)
+echo 8388608 > "${GRT}/sys/block/xvda/xvda2/size"
+sed -i 's|size=  8388608, Id=83|size=  8388608, Id=8e|' "${GRT}/state/dump-old"
+gr_run
+if grep -q 'REFUSING: root entry has Id=8e' "${GRT}/state/log" && [ ! -f "${GRT}/state/applied" ]; then
+  t_pass "growroot(behavioral): non-83 partition type is REFUSED before any write"
+else
+  t_fail "growroot(behavioral): Id guard broken"
+fi
 
 # ---- (C) bash-3.2 safety of guest-side blocks ------------------------------
 b32_re='\$\{[A-Za-z_][A-Za-z_0-9]*(,,|\^\^)|mapfile|readarray|declare -A|\|&'

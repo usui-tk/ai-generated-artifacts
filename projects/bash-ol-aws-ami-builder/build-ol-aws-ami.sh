@@ -3514,70 +3514,156 @@ fi
 # One-shot root grow (fdisk delete/recreate pattern -- the MBR adaptation of
 # the RHEL6-HVM gdisk workaround; gdisk itself is staged as a TOOL but never
 # used here: writing GPT to this MBR disk would break GRUB Legacy).
-# Runs before cloud-init (S08 < S20); repartitions to the disk end, marks
-# itself done, reboots once; cloud-init's resizefs then grows the ext3
-# filesystem online on the next boot. Marker-idempotent; every failure path
-# marks done and exits 0 (never a boot loop).
+# Runs before cloud-init (S08 < S20).
+# DECISION MODEL (adjudicated): the PRIMARY execution criterion is the REAL
+# disk/partition geometry -- grow whenever sysfs shows the root partition can
+# actually be extended (this also re-fires naturally after a later EBS volume
+# resize). The state file is a SECONDARY condition only: it records the disk
+# size of the last attempt so a grow that did not take effect at the SAME
+# size is not retried forever (reboot-loop guard); a LARGER disk than the
+# recorded attempt proceeds again. After a grow: record + one reboot;
+# cloud-init's resizefs then grows the ext3 filesystem on the next boot.
+# Every skip/failure path exits 0 (never blocks boot).
 cat > /etc/init.d/ol-aws-growroot <<'EOF_GROWROOT'
 #!/bin/sh
 # chkconfig: 2345 08 92
-# description: one-shot root partition grow to disk end (fdisk MBR pattern)
+# description: grow the root partition to the disk end when the ON-DISK
+#              geometry says growth is needed and possible (growpart model)
 ### BEGIN INIT INFO
 # Provides: ol-aws-growroot
 ### END INIT INFO
-MARKER=/var/lib/ol-aws-growroot.done
+#
+# DECISION MODEL (adjudicated 2026-07-19): the PRIMARY execution criterion is
+# the actual disk/partition state -- growth needed AND possible, decided from
+# sysfs geometry + the on-disk table every boot. The attempt marker is
+# SECONDARY: a reboot-loop breaker only, consulted AFTER the geometry
+# decision and self-healed on success (so a later EBS enlargement grows
+# again, matching real growpart semantics).
+#
+# MECHANISM mirrors cloud-utils growpart: sfdisk dump -> edit ONLY the size
+# field of the root entry -> apply with --no-reread --force, with the old
+# dump saved as the restore vehicle and a post-write verify re-dump. Adapted
+# to EL5 util-linux 2.13; NOTE: 2.13 sfdisk composes NVMe partition NAMES
+# wrongly (no 'p' separator), so the root entry is addressed by its START
+# SECTOR (unique, name-independent), never by device name.
+#
+# A reboot IS required on this kernel line: online resize of a mounted root
+# partition needs BLKPG_RESIZE_PARTITION (kernel 3.6+); UEK R2 is 3.0.36 --
+# the same reason the RHEL6 era used initramfs-time growroot.
+MARKER=/var/lib/ol-aws-growroot.attempt
+LOG=/var/log/ol-aws-growroot.log
+FUDGE_SECTORS=2048
 case "$1" in
   start|"") ;;
   *) exit 0 ;;
 esac
-[ -f "$MARKER" ] && exit 0
 mkdir -p /var/lib
-exec >> /var/log/ol-aws-growroot.log 2>&1
+exec >> "$LOG" 2>&1
 echo "[growroot] start: $(date)"
-finish() { touch "$MARKER"; sync; }
+
+# --- resolve root device -> disk ---
 rootdev=$(df -P / | awk 'NR==2{print $1}')
-echo "[growroot] rootdev=${rootdev}"
 case "$rootdev" in
-  /dev/nvme*)
-    disk=$(echo "$rootdev" | sed 's/p[0-9][0-9]*$//')
-    part=$(echo "$rootdev" | sed 's/^.*p\([0-9][0-9]*\)$/\1/')
-    ;;
-  /dev/*)
-    disk=$(echo "$rootdev" | sed 's/[0-9][0-9]*$//')
-    part=$(echo "$rootdev" | sed 's/^[^0-9]*\([0-9][0-9]*\)$/\1/')
-    ;;
-  *)
-    echo "[growroot] unrecognized root device; skipping"; finish; exit 0 ;;
+  /dev/nvme*) disk=$(echo "$rootdev" | sed 's/p[0-9][0-9]*$//') ;;
+  /dev/*)     disk=$(echo "$rootdev" | sed 's/[0-9][0-9]*$//') ;;
+  *) echo "[growroot] unrecognized root device '$rootdev'; nothing to do"; exit 0 ;;
 esac
 dbase=$(basename "$disk"); pbase=$(basename "$rootdev")
-[ -b "$disk" ] || { echo "[growroot] no block device ${disk}; skipping"; finish; exit 0; }
+[ -b "$disk" ] || { echo "[growroot] no block device ${disk}; nothing to do"; exit 0; }
+
+# --- PRIMARY criterion: on-disk / sysfs geometry ---
 dsz=$(cat "/sys/block/${dbase}/size" 2>/dev/null)
 pstart=$(cat "/sys/block/${dbase}/${pbase}/start" 2>/dev/null)
-psz=$(cat "/sys/block/${dbase}/${pbase}/size" 2>/dev/null)
-if [ -z "$dsz" ] || [ -z "$pstart" ] || [ -z "$psz" ]; then
-  echo "[growroot] sysfs geometry unavailable; skipping"; finish; exit 0
+psize=$(cat "/sys/block/${dbase}/${pbase}/size" 2>/dev/null)
+if [ -z "$dsz" ] || [ -z "$pstart" ] || [ -z "$psize" ]; then
+  echo "[growroot] sysfs geometry unavailable; skipping (re-evaluated next boot)"; exit 0
 fi
-# root must be the LAST partition on the disk (highest start sector)
+# root must be the LAST partition on the disk (name-independent sysfs walk)
 for p in /sys/block/${dbase}/${dbase}*; do
   [ -d "$p" ] || continue
   os=$(cat "$p/start" 2>/dev/null)
-  [ -n "$os" ] && [ "$os" -gt "$pstart" ] && {
-    echo "[growroot] a partition starts after root; refusing to grow"; finish; exit 0; }
+  if [ -n "$os" ] && [ "$os" -gt "$pstart" ]; then
+    echo "[growroot] REFUSING: a partition starts after the root partition"; exit 0
+  fi
 done
-pend=$((pstart + psz))
-if [ $((pend + 2048)) -ge "$dsz" ]; then
-  echo "[growroot] root already spans the disk (end=${pend} disk=${dsz}); nothing to do"
-  finish; exit 0
+pend=$((pstart + psize))
+free=$((dsz - pend))
+if [ "$free" -le "$FUDGE_SECTORS" ]; then
+  echo "[growroot] NOCHANGE: root already spans the disk (free tail ${free} <= fudge ${FUDGE_SECTORS} sectors)"
+  if [ -f "$MARKER" ]; then
+    rm -f "$MARKER"
+    echo "[growroot] stale attempt marker cleared (re-armed for future volume growth)"
+  fi
+  exit 0
 fi
-echo "[growroot] growing partition ${part} on ${disk}: start=${pstart} end=${pend} -> disk=${dsz} sectors"
-# EL5 fdisk: 'u' switches to sector units; d/n recreate at the SAME start
-# sector to the disk end; 'w' re-read fails on the busy disk by design (the
-# on-disk table IS updated) -- hence the marker + one reboot.
-printf 'u\nd\n%s\nn\np\n%s\n%s\n\nw\n' "$part" "$part" "$pstart" | fdisk "$disk"
-echo "[growroot] fdisk done (rc=$? -- nonzero re-read is expected on a busy disk)"
-finish
-echo "[growroot] rebooting once so the kernel sees the new table"
-/sbin/reboot
+
+# --- read the on-disk table; guard the entry type ---
+dump=$(mktemp /tmp/growroot-dump.XXXXXX) || exit 0
+if ! sfdisk -d "$disk" > "$dump" 2>/dev/null; then
+  echo "[growroot] sfdisk -d failed on ${disk}; skipping"; rm -f "$dump"; exit 0
+fi
+line=$(grep "start=[ ]*${pstart}," "$dump" | head -1)
+if [ -z "$line" ]; then
+  echo "[growroot] no table entry with start=${pstart}; skipping"; rm -f "$dump"; exit 0
+fi
+pid=$(echo "$line" | sed 's/.*Id=[ ]*\([0-9a-fA-F][0-9a-fA-F]*\).*/\1/')
+if [ "$pid" != "83" ]; then
+  echo "[growroot] REFUSING: root entry has Id=${pid} (only plain Linux 83 is grown; ee would mean GPT)"
+  rm -f "$dump"; exit 0
+fi
+if grep "Id=[ ]*5" "$dump" >/dev/null 2>&1 || grep "Id=[ ]*f" "$dump" >/dev/null 2>&1 || grep "Id=[ ]*85" "$dump" >/dev/null 2>&1; then
+  echo "[growroot] REFUSING: extended partition present (not a builder layout)"
+  rm -f "$dump"; exit 0
+fi
+
+# --- SECONDARY criterion: attempt marker (reboot-loop breaker ONLY) ---
+if [ -f "$MARKER" ]; then
+  echo "[growroot] GROWTH STILL NEEDED (free tail ${free} sectors) but a previous attempt is recorded:"
+  cat "$MARKER"
+  echo "[growroot] NOT retrying (reboot-loop protection). Inspect ${LOG}; remove ${MARKER} to re-arm."
+  rm -f "$dump"; exit 0
+fi
+
+# --- grow: dump -> single size-field edit -> apply -> verify (growpart model) ---
+newsize=$((dsz - pstart))
+echo "[growroot] growing root: start=${pstart} size ${psize} -> ${newsize} (disk ${dsz} sectors)"
+bak=/var/lib/ol-aws-growroot.sfdisk-backup
+cp -f "$dump" "$bak"
+new=$(mktemp /tmp/growroot-new.XXXXXX) || { rm -f "$dump"; exit 0; }
+sed "/start=[ ]*${pstart},/s/size=[ ]*[0-9][0-9]*/size= ${newsize}/" "$dump" > "$new"
+if ! grep "start=[ ]*${pstart}," "$new" | grep "size= ${newsize}" >/dev/null; then
+  echo "[growroot] FAILED to edit the dump; aborting without writing"
+  rm -f "$dump" "$new"; exit 0
+fi
+{
+  echo "attempted: $(date)"
+  echo "geometry: start=${pstart} old_size=${psize} new_size=${newsize} disk=${dsz}"
+} > "$MARKER"
+sync
+if ! sfdisk --no-reread --force "$disk" < "$new" >> "$LOG" 2>&1; then
+  echo "[growroot] sfdisk apply FAILED; restoring from the backup dump"
+  if sfdisk --no-reread --force "$disk" < "$bak" >> "$LOG" 2>&1; then
+    echo "[growroot] restore applied"
+  else
+    echo "[growroot] RESTORE ALSO FAILED -- inspect ${bak} manually"
+  fi
+  rm -f "$dump" "$new"; exit 0
+fi
+if sfdisk -d "$disk" 2>/dev/null | grep "start=[ ]*${pstart}," | grep "size=[ ]*${newsize}," >/dev/null; then
+  echo "[growroot] on-disk table verified (size=${newsize}); rebooting once so the kernel re-reads it"
+  echo "verified: $(date)" >> "$MARKER"
+  rm -f "$dump" "$new"
+  sync
+  /sbin/reboot
+  exit 0
+fi
+echo "[growroot] POST-WRITE VERIFY FAILED; restoring from the backup dump"
+if sfdisk --no-reread --force "$disk" < "$bak" >> "$LOG" 2>&1; then
+  echo "[growroot] restore applied"
+else
+  echo "[growroot] restore failed -- inspect ${bak} manually"
+fi
+rm -f "$dump" "$new"
 exit 0
 EOF_GROWROOT
 chmod 755 /etc/init.d/ol-aws-growroot

@@ -2871,17 +2871,49 @@ balanced-`%end` rule keeps guarding OL6-10 unchanged).
 ### B.15.4 Root growth without growpart (`ol-aws-growroot`)
 
 EL5 has no `cloud-utils-growpart`. A baked SysV one-shot (`chkconfig:
-2345 08 92` — before cloud-init) grows the root partition with the classic
-fdisk MBR pattern: sysfs geometry read; REFUSES unless the root partition is
-the last on disk; `fdisk` sector-units delete + recreate at the SAME start
-sector to the disk end (`printf 'u\nd\n<n>\nn\np\n<n>\n<start>\n\nw\n'` — the
-`w` re-read failure on the busy disk is expected; the on-disk table IS
-written); marker (`/var/lib/ol-aws-growroot.done`) + ONE reboot; cloud-init's
-`resizefs` then grows ext3 online on the next boot. Every failure path marks
-done and exits 0 (never a boot loop). This is the MBR adaptation of the
-RHEL6-HVM gdisk workaround (usui-tk/amazon-ec2-userdata); per adjudication,
-`gdisk` is STAGED as a diagnostic tool but never used against the MBR disk —
-writing GPT there would break GRUB Legacy.
+2345 08 92` — before cloud-init) implements the **growpart decision model**
+(adjudicated 2026-07-19; grounded in the real cloud-utils `growpart`
+implementation):
+
+- **PRIMARY execution criterion = the actual disk/partition state, every
+  boot.** sysfs geometry (disk size; the root partition's start/size; a
+  name-independent walk proving root is the LAST partition) decides whether
+  growth is needed AND possible. A free tail at or below the growpart-style
+  fudge (2048 sectors = 1 MiB) is `NOCHANGE`. Guards read the on-disk table
+  (`sfdisk -d`): only a plain Linux entry (`Id=83`) is ever grown (`ee`
+  would mean GPT), and any extended partition (`5`/`f`/`85`) is refused —
+  neither is a builder layout.
+- **SECONDARY criterion = the attempt marker
+  (`/var/lib/ol-aws-growroot.attempt`), a reboot-loop breaker only.** It is
+  consulted AFTER the geometry decision: growth-needed + marker means the
+  previous attempt failed → log loudly, never reboot again (the operator
+  removes the marker to re-arm). On the success path the next boot's
+  `NOCHANGE` **self-heals** the marker away, so a LATER EBS enlargement
+  grows again — real growpart semantics.
+- **Write mechanism = the growpart model, adapted to EL5 util-linux 2.13:**
+  `sfdisk -d` dump → a single size-field edit of the root entry → apply with
+  `sfdisk --no-reread --force` (the busy-disk kernel re-read is deferred to
+  the reboot), with the old dump saved as the restore vehicle
+  (`/var/lib/ol-aws-growroot.sfdisk-backup`) and a **post-write verify**
+  re-dump (restore on mismatch). The entry is addressed by its **start
+  sector**, never by device name — util-linux 2.13's sfdisk composes NVMe
+  partition names without the `p` separator, so name-matching would break
+  exactly on Nitro.
+- **One reboot is REQUIRED on this kernel line** (not a style choice):
+  online resize of a mounted root partition needs `BLKPG_RESIZE_PARTITION`
+  (kernel 3.6+); UEK R2 is 3.0.36 — the same wall that made the RHEL6 era
+  use initramfs-time growroot. After the single reboot, cloud-init's
+  `resizefs` grows ext3 online.
+- `gdisk` is STAGED as a diagnostic tool but never used against the MBR
+  disk — writing GPT there would break GRUB Legacy. (The fdisk-keystroke
+  pipeline of the first implementation was superseded by this adjudication;
+  the dump-edit-apply model preserves every other table field byte-exactly
+  and is verifiable.)
+
+The decision logic is behaviorally tested (t025): a fake-sysfs +
+mocked-sfdisk harness drives the real extracted script through the grow,
+post-grow self-heal, marker-secondary, sub-fudge `NOCHANGE`, and Id-guard
+paths.
 
 ### B.15.5 E2E protocol (operator side)
 
@@ -4323,11 +4355,12 @@ binding adjudications so future revisions do not re-litigate or regress them.
    (not an upstream fork, not a vendored tree).
 2. **cloud-init:** EPEL5 0.6.3 with the frozen 9-RPM closure (not the
    no-cloud-init/SysV-key-script alternative).
-3. **Growroot:** implement with **fdisk** (MBR delete/recreate at the same
-   start + one reboot). **Both** fdisk and gdisk ship in the AMI, but
-   gdisk is a diagnostic tool only — MBR→GPT conversion would break GRUB
-   Legacy. (MBR adaptation of the usui-tk/amazon-ec2-userdata RHEL6-HVM
-   gdisk workaround.)
+3. **Growroot:** grow the root partition in-place with one reboot. **Both**
+   fdisk and gdisk ship in the AMI, but gdisk is a diagnostic tool only —
+   MBR→GPT conversion would break GRUB Legacy. *(Refined by the 2026-07-19
+   follow-up adjudication below: the execution criterion is the disk state,
+   and the write mechanism is the growpart dump-edit model, superseding the
+   initial fdisk-keystroke implementation.)*
 4. **ENA toolchain host-injection:** the frozen 11-RPM closure, kept
    byte-identical to the matrix's `OL5_TOOLCHAIN_RPMS` (t025-enforced).
 5. **Pins:** ENA OL5 = 2.12.3 (the swept build boundary; 2.13.0+ all fail
@@ -4347,3 +4380,41 @@ geometry; and Nitro boot of a 3.0.36-base kernel on current hardware. The
 P3GATE OL5 branch and t025 encode the researched shapes; per the
 gate-maturity lesson, first-contact adjustments are expected and must be
 recorded here when they land.
+
+**Follow-up adjudication + growpart implementation research (2026-07-19,
+same session):** the user adjudicated that the growroot **execution
+criterion must be the actual disk/partition state (growth needed AND
+possible), with the flag file demoted to a secondary condition**. The real
+cloud-utils `growpart` source was fetched and read to ground the refinement;
+findings frozen here:
+
+- growpart itself is **markerless and geometry-primary**: `pt_end ==
+  max_end` → `NOCHANGE`, and a growable delta at or below `FUDGE`
+  (default 1 MiB) → `NOCHANGE` — the state IS the criterion, re-evaluated
+  on every invocation. The OL5 script adopts this exactly; the attempt
+  marker survives only as a reboot-loop breaker (growpart never reboots, so
+  it needs none; our one-reboot model does), consulted after the geometry
+  decision and self-healed on success.
+- growpart's MBR write path is `sfdisk --dump` → edit ONLY the target
+  entry's size field → apply with `--no-reread --force`, with a sector
+  backup (`-O`) + `RESTORE_FUNC` on failure and an explicit tolerance for
+  "wrote the table but BLKRRPART said busy". The OL5 script mirrors this
+  (dump-file backup/restore + post-write verify re-dump) — byte-preserving
+  for every other field, verifiable, and strictly more robust than fdisk
+  keystrokes.
+- **EL5 adaptation discovered during the port:** util-linux 2.13's sfdisk
+  composes NVMe partition NAMES without the `p` separator
+  (`/dev/nvme0n1` + `2` → `/dev/nvme0n12`), so any name-based match would
+  break precisely on Nitro. The script therefore addresses the table entry
+  by its **start sector** (unique, name-independent; sysfs is the
+  authoritative geometry source).
+- **Why one reboot stays:** `BLKPG_RESIZE_PARTITION` (the online resize of
+  a mounted partition) is kernel 3.6+; UEK R2 is 3.0.36. This is the same
+  wall that made the RHEL6 era ship *initramfs-time* growroot
+  (cloud-initramfs-growroot) rather than online growpart of the root disk.
+- The refined decision logic is behaviorally proven in-sandbox (and pinned
+  in t025) with a fake-sysfs + mocked-sfdisk harness driving the REAL
+  script: grow/apply/verify/reboot; post-grow `NOCHANGE` + marker
+  self-heal (re-armed for future EBS enlargements — a capability the
+  marker-primary first implementation did not have); marker-as-secondary
+  loud no-retry; sub-fudge `NOCHANGE`; and the `Id=83` guard refusal.

@@ -20,6 +20,39 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Changed (2026-07-19 — growroot refined to the growpart decision model; user adjudication)
+- **`ol-aws-growroot` (OL5 kickstart-baked one-shot): the execution
+  criterion is now the ACTUAL DISK/PARTITION STATE (primary), with the
+  flag file demoted to a secondary, reboot-loop-breaker-only role** — per
+  the user's adjudication, grounded in a source-level read of real
+  cloud-utils growpart (itself markerless and geometry-primary:
+  `NOCHANGE` on at-max / sub-`FUDGE` growable deltas). Concretely:
+  geometry (sysfs + `sfdisk -d`) is re-evaluated EVERY boot; the marker is
+  consulted only after a growth-needed decision (previous-attempt-failed →
+  loud, no retry-reboot) and **self-heals on success** — so a later EBS
+  enlargement grows again (real growpart semantics; the marker-primary
+  first implementation could not do this). The write mechanism switches
+  from fdisk keystrokes to the growpart model: dump → single size-field
+  edit → `sfdisk --no-reread --force` apply, with a dump backup/restore
+  vehicle and a **post-write verify** re-dump. New guards: `Id=83`-only
+  (refuses `ee`=GPT and anything else), extended-partition refusal, and
+  **start-sector addressing** of the table entry (util-linux 2.13's sfdisk
+  composes NVMe partition names without the `p` separator — name matching
+  would break exactly on Nitro). The one-reboot requirement is retained
+  and now grounded: `BLKPG_RESIZE_PARTITION` is kernel 3.6+, UEK R2 is
+  3.0.36 (the same wall behind the RHEL6-era initramfs-time growroot).
+- Tests: t025 growroot section rewritten for the new model — structural
+  pins (dump-edit-apply, start-sector anchor, guards, backup/verify,
+  BLKPG grounding, PRIMARY-before-SECONDARY ordering by position, legacy
+  fdisk pipeline absent) plus a **behavioral harness** (fake sysfs +
+  mocked df/sfdisk/reboot driving the REAL extracted script through five
+  paths: grow/apply/verify/reboot; post-grow NOCHANGE + marker self-heal;
+  marker-as-secondary loud no-retry; sub-fudge NOCHANGE; Id-guard
+  refusal). t025 97 → 115 asserts; suite baseline 731 → **749**.
+  TESTING.md §0 + tier table, SPEC B.15.4 (rewritten) + D.32 (follow-up
+  adjudication + growpart research record), README EN/JA updated in
+  lock-step.
+
 ### Added (2026-07-19 — OL5 AWS AMI builder support: runtime-synthesized distr + full host-supply model)
 - **`build-ol-aws-ami.sh`: Oracle Linux 5 (U11 / UEK R2) build target** —
   the deepest legacy target, gated by the completed OL5 investigation
