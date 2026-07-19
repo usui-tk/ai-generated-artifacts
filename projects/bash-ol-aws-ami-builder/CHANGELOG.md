@@ -20,6 +20,19 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Changed (2026-07-19 — OL5 ISO SHA256 baked from the operator's measurement)
+- **`env.properties.aws-ol5`: `ISO_CHECKSUM` is now baked** with the
+  operator-measured value
+  `b098bda92990134ea3bc8052a43b314eaffe93790a4bf872ae555b5cb467d421`,
+  recorded with its full provenance chain (mirror-MD5 cross-check
+  `8af2121088c7e6f5ebdb6d5900403240` matched; size 4222615552 bytes;
+  measured on the operator's KVM host 2026-07-19). The 5.11 media is
+  terminal/frozen, so the value is permanent; the wrapper's fail-fast on
+  an empty `ISO_CHECKSUM` remains as the safety net. t025's env pin
+  updated from ships-empty to the exact baked value (count unchanged);
+  README EN/JA rows updated in lock-step.
+
+
 ### Changed (2026-07-19 — OL5 kickstart grammar re-verified against the REAL RHEL5 parser; user-requested)
 - **Investigation:** the authoritative EL5 kickstart parser —
   **pykickstart-0.43.9-1.el5** (what anaconda-11.1 loads) — was fetched

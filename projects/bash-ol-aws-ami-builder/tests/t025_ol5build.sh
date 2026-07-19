@@ -369,7 +369,7 @@ fi
 assert_match "${envf}" '^DISTR="ol5-slim"$' "env: DISTR=ol5-slim"
 assert_match "${envf}" 'Enterprise-R5-U11-Server-x86_64-dvd\.iso' "env: kernel.org mirror ISO_URL (frozen terminal update)"
 assert_match "${envf}" '8af2121088c7e6f5ebdb6d5900403240' "env: mirror MD5 recorded as the operator cross-check"
-assert_match "${envf}" '^ISO_CHECKSUM=""$' "env: ISO_CHECKSUM ships empty (operator computes SHA256 once; wrapper fails fast)"
+assert_match "${envf}" '^ISO_CHECKSUM="b098bda92990134ea3bc8052a43b314eaffe93790a4bf872ae555b5cb467d421"$' "env: the operator-measured SHA256 is baked (2026-07-19; mirror-MD5 cross-checked -- the wrapper's fail-fast on empty stays as the safety net)"
 assert_match "${envf}" '^ROOT_FS="ext3"$' "env: ROOT_FS=ext3 (EL5 anaconda constraint)"
 assert_match "${envf}" '^UPDATE_TO_LATEST="no"$' "env: UPDATE_TO_LATEST=no (no reachable in-guest repository)"
 assert_match "${envf}" '^UEK_RELEASE="2"$' "env: UEK_RELEASE=2 (the only OL5 UEK line; in-box nvme)"
