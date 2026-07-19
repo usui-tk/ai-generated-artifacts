@@ -38,8 +38,8 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "${WORK}"' EXIT
 
 # ---- (A) installer: OL5 branch + el5uek shim set ---------------------------
-assert_match "${inst}" '^ENA_VERSION_OL5="\$\{ENA_VERSION_OL5:-2\.9\.1\}"$' \
-  "installer: OL5 pin defaults to 2.9.1 (OL6 parity; top of the proven range)"
+assert_match "${inst}" '^ENA_VERSION_OL5="\$\{ENA_VERSION_OL5:-2\.12\.3\}"$' \
+  "installer: OL5 pin defaults to 2.12.3 (swept build boundary; RESULTS-ol5)"
 assert_match "${inst}" '^  5\)  ena_version="\$\{ENA_DRIVER_VERSION:-\$\{ENA_VERSION_OL5\}\}" ;;$' \
   "installer: osmajor case dispatches 5"
 assert_match "${inst}" 'ol5_verify_preprovisioned\(\)' \
@@ -90,8 +90,8 @@ assert_match "${inst}" '"shims":"%s"' \
 # ---- (B) matrix: OL5 opt-in wiring -----------------------------------------
 assert_match "${mtx}" '^OL_LIST="6 7 8 9 10"$' \
   "matrix: the DEFAULT OL set stays 6-10 (OL5 is opt-in only)"
-assert_match "${mtx}" '5\) echo 2\.9\.1 ;;' \
-  "matrix: pin_for(5) = 2.9.1"
+assert_match "${mtx}" '5\) echo 2\.12\.3 ;;' \
+  "matrix: pin_for(5) = 2.12.3"
 assert_match "${mtx}" '5\) echo UEK/latest ;;' \
   "matrix: uekr_for(5) = UEK/latest (pre-UEKR channel naming)"
 assert_match "${mtx}" 'case "\$\{ol\}" in 5\|6\|7\|8\|9\|10\)' \

@@ -183,7 +183,7 @@ hr()   { log "================================================================";
 # 5.15.0-322.203.3.3) built it as 2.17.2g in a container FT (2026-07-12) with
 # the installer's gcc-toolset-11 + UEK-detection fixes. OL6 stays 2.9.1 (the
 # UEK4 ceiling; 2.17.2 confirmed FAILING on OL6 in the same 2026-07-11 run).
-pin_for() { case "$1" in 5) echo 2.9.1 ;; 6) echo 2.9.1 ;; 7) echo 2.17.2 ;; 8) echo 2.17.2 ;; 9) echo 2.17.2 ;; 10) echo 2.17.2 ;; *) echo "" ;; esac; }
+pin_for() { case "$1" in 5) echo 2.12.3 ;; 6) echo 2.9.1 ;; 7) echo 2.17.2 ;; 8) echo 2.17.2 ;; 9) echo 2.17.2 ;; 10) echo 2.17.2 ;; *) echo "" ;; esac; }
 
 # ---- args ------------------------------------------------------------------
 while [ "$#" -gt 0 ]; do

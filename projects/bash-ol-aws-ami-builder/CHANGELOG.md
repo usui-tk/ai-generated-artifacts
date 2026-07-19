@@ -20,6 +20,22 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Changed (2026-07-19 — OL5 pinned versions aligned to the merged sweep evidence)
+- **`install-ena-driver.sh`: `ENA_VERSION_OL5` raised `2.9.1` -> `2.12.3`** —
+  the canonical ledger's full 71-version OL5 sweep (kernel-uek-devel
+  `2.6.39-400.297.3.el5uek`; 56/71 ok) measured the buildable boundary at
+  exactly `2.12.3` / `2.13.0` (every 2.13.0+ build produces no `ena.ko`), so
+  the pin now sits on the highest proven-buildable release instead of the
+  initial-investigation ceiling. `tests/ena/run-ena-buildtest-matrix.sh`
+  `pin_for(5)` and the t023 regression pins move in lock-step (assertion
+  count unchanged). OL6 stays at `2.9.1` (different kernel, different
+  boundary — see SPEC B.3.2).
+- **`install-awscli.sh`: the OL5 ceiling-pin comment now cites the FULL
+  merged sweep** (all 921 fetchable v2 releases, 493 ok / 428 fail,
+  boundary exactly `2.17.51` / `2.17.52`) instead of the 12-version
+  boundary investigation. The pin VALUE is unchanged: the full sweep
+  confirmed `2.17.51` as already correct.
+
 ### Added (2026-07-19 — OL5 AWS CLI v2 full-sweep evidence merged into the ledger)
 - **`tests/awscli/awscli-installtest-ledger.json` + `RESULTS-ol5.md`: the
   user-run OL5 full sweep (`--ol 5 --full`, real host, all 921 fetchable v2

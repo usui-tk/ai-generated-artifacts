@@ -84,17 +84,19 @@
 set -euo pipefail
 
 # ---- pinned versions (overridable) -----------------------------------------
-# OL5 (legacy PoC target; UEK R2 2.6.39-400/el5uek only): pinned to 2.9.1,
-# mirroring the OL6/UEK4 pin. A 20/20 build sweep (1.1.2, 1.5.0-1.5.3,
-# 2.2.9-2.2.11, 2.8.0-2.9.1; 2026-07-18, kernel-uek-devel
-# 2.6.39-400.297.3.el5uek, gcc 4.1.2) established that every sampled release
-# builds WITH the el5uek shim set below (apply_el5uek_shims); vanilla source
-# builds 0/20. OL5 support is build-test / PoC scoped: DKMS is not used, the
-# toolchain + kernel headers + driver source must be pre-provisioned from the
-# host (EL5's openssl 0.9.8e tops out at TLS 1.0 and cannot reach the
-# TLS-1.2-only yum.oracle.com / github.com in-OS), and a compile success does
-# NOT prove Nitro load/traffic.
-ENA_VERSION_OL5="${ENA_VERSION_OL5:-2.9.1}"
+# OL5 (legacy PoC target; UEK R2 2.6.39-400/el5uek only): pinned to 2.12.3 --
+# the highest buildable release measured by the FULL 71-version sweep
+# (2026-07-18, kernel-uek-devel 2.6.39-400.297.3.el5uek, gcc 4.1.2; ledger
+# `tests/ena/buildtest-ledger.json`, report `tests/ena/RESULTS-ol5.md`):
+# 56/71 ok, and every 2.13.0+ release fails (the build produces no ena.ko),
+# so the buildable boundary lands exactly at 2.12.3 / 2.13.0. Every ok build
+# requires the el5uek shim set below (apply_el5uek_shims); vanilla source
+# built 0/20 in the initial investigation. OL5 support is build-test / PoC
+# scoped: DKMS is not used, the toolchain + kernel headers + driver source
+# must be pre-provisioned from the host (EL5's openssl 0.9.8e tops out at
+# TLS 1.0 and cannot reach the TLS-1.2-only yum.oracle.com / github.com
+# in-OS), and a compile success does NOT prove Nitro load/traffic.
+ENA_VERSION_OL5="${ENA_VERSION_OL5:-2.12.3}"
 ENA_VERSION_OL6="${ENA_VERSION_OL6:-2.9.1}"
 ENA_VERSION_OL7="${ENA_VERSION_OL7:-2.17.2}"
 # OL8/OL9/OL10 resolve to the amzn-drivers LATEST tag at runtime (see

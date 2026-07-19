@@ -70,10 +70,13 @@ set -euo pipefail
 # as OL6, for the now-measured same reason: at 2.17.52 the bundle rebases
 # Python 3.11 -> 3.12 and its empirical glibc floor jumps 2.5 -> 2.17 (launcher
 # additionally demands GLIBC_2.7/2.14; loader errors captured verbatim,
-# 2026-07-18 investigation). A 12-version boundary sweep on the OL5.11
-# clean-core measured 7/7 "runs" for the <= 2.17.51 band -- ALL via the
-# standard aws/install symlink under the matrix execution model -- and a hard,
-# permanent glibc-too-old wall for >= 2.17.52. (Investigation lesson, recorded
+# 2026-07-18 investigation). The FULL OL5 sweep (all 921 fetchable v2
+# releases on the OL5.11 clean-core, merged into the canonical ledger:
+# 493 ok / 428 fail, `tests/awscli/RESULTS-ol5.md`) confirms the boundary
+# lands exactly at 2.17.51 / 2.17.52: zero ok above the ceiling -- ALL ok
+# rows via the standard aws/install symlink under the matrix execution
+# model -- and a hard, permanent glibc-too-old wall for >= 2.17.52 (the sole
+# other fail, 2.0.32, is an upstream S3 404). (Investigation lesson, recorded
 # in SPEC: the 3.8/3.9-bundled-bootloader band NEEDS /proc mounted to
 # self-resolve; a proc-less ad-hoc chroot mis-resolves from the symlink dir.
 # The matrix always mounts /proc, as does any real instance.) OL5 is install-test /
