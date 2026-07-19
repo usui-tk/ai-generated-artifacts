@@ -20,6 +20,27 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Added (2026-07-19 — OL5 AWS CLI v2 full-sweep evidence merged into the ledger)
+- **`tests/awscli/awscli-installtest-ledger.json` + `RESULTS-ol5.md`: the
+  user-run OL5 full sweep (`--ol 5 --full`, real host, all 921 fetchable v2
+  releases × the probed terminal el5uek kver) merged via the designed
+  `--merge-from` path** — MERGED adopted=921, same-status-kept=2763, total
+  3684 rows. The 2763 OL6-8 rows of the external ledger matched the
+  committed ledger key-for-key AND status-for-status (the largest
+  determinism cross-check yet), and the regenerated RESULTS-ol6..8 came out
+  byte-identical.
+- Findings recorded by the sweep (**493 ok / 428 fail**): the boundary lands
+  **exactly at the investigated 2.17.51 / 2.17.52 line** — every release up
+  to 2.17.51 runs on glibc 2.5 (all 7 investigation-proven versions
+  reproduce; zero ok above the ceiling), and every 2.17.52+ release fails
+  as `installs-but-wont-run` (the Python 3.12 rebase glibc wall; 427 rows).
+  The report generator derives "capped at `2.17.51`" for OL5 unaided —
+  empirically the same cap as OL6, per D.30. The single remaining fail,
+  **2.0.32, is an upstream distribution hole**: awscli.amazonaws.com has no
+  versioned zip for it (HTTP 404, verified live during review), so the
+  staging failed and the pre-stage contract recorded the fail honestly.
+  Ledger rows are as generated; no hand edits.
+
 ### Fixed (2026-07-19 — host TMPDIR leaked into chroot guests; guest env hygiene across all container entry points)
 - **The three matrices (ENA / AWS CLI / SSM): the guest chroot env now pins
   `TMPDIR=/tmp`** — second field failure of the OL5 AWS CLI run: the
