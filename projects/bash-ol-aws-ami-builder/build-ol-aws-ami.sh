@@ -4156,8 +4156,51 @@ distr::provision() {
 }
 
 #######################################
+# build-info contract (first-contact record #6): upstream build-image.sh
+# unconditionally does `mv ${VM_DIR}/.build-info/* ${VM_DIR}/` after
+# provisioning, so an EMPTY /.build-info fails the build even when
+# provisioning fully succeeded. On OL6+ the files are written by
+# common::distr_cleanup, which is EL5-unsafe -- so OL5 writes the same
+# four files itself, EL5-safe. The path variables are overridable ONLY so
+# the conformance tier can execute this function against fixtures; in the
+# guest they always resolve to the defaults.
+#######################################
+distr::write_build_info() {
+  : "${OL5_GRUB_CONF:=/boot/grub/grub.conf}"
+  : "${OL5_MODULES_DIR:=/lib/modules}"
+  mkdir -p "${BUILD_INFO}"
+
+  echo "no reachable repositories on EL5 (host-supply model; see SPEC B.15)" \
+    > "${BUILD_INFO}/repolist.txt"
+  rpm -qa --qf "%{name}.%{arch}\n" | sort -u > "${BUILD_INFO}/pkglist.txt"
+  # EL5 rpm 4.4 has no %{EPOCHNUM}; %{EPOCH} prints (none) for unset epochs.
+  rpm -qa --qf '"%{NAME}","%{EPOCH}","%{VERSION}","%{RELEASE}","%{ARCH}"\n' \
+    | sort > "${BUILD_INFO}/pkglist.csv"
+
+  # kernel.txt: the DEFAULT kernel (upstream uses grubby, absent on EL5) --
+  # parse grub.conf's default= entry; fall back to the newest el5uek under
+  # /lib/modules; FATAL if neither yields a value (an empty kernel.txt would
+  # silently break the build-info contract downstream).
+  kv=""
+  if [ -r "${OL5_GRUB_CONF}" ]; then
+    idx=$(sed -n 's/^default=\([0-9][0-9]*\).*/\1/p' "${OL5_GRUB_CONF}" | head -1)
+    [ -n "$idx" ] || idx=0
+    kv=$(grep -E '^[[:space:]]*kernel[[:space:]]' "${OL5_GRUB_CONF}" \
+         | sed -n "$((idx+1))p" \
+         | sed -e 's!.*vmlinuz-!!' -e 's![[:space:]].*$!!')
+  fi
+  if [ -z "$kv" ]; then
+    kv=$( (cd "${OL5_MODULES_DIR}" 2>/dev/null && ls -1 | grep el5uek | sort | tail -1) || true )
+  fi
+  [ -n "$kv" ] || { echo "[ol5-build-info] FATAL: cannot determine the default kernel for kernel.txt"; exit 1; }
+  echo "$kv" > "${BUILD_INFO}/kernel.txt"
+  common::echo_message "build-info written (kernel ${kv})"
+}
+
+#######################################
 # Cleanup (EL5-safe, self-contained -- common::distr_cleanup is NOT called:
-# its systemctl / /etc/yum/vars / ${EXCLUDE_DOCS^^} paths all break on EL5)
+# its systemctl / /etc/yum/vars / ${EXCLUDE_DOCS^^} paths all break on EL5;
+# its BUILD_INFO outputs are replaced by distr::write_build_info above)
 #######################################
 distr::cleanup() {
   /sbin/service rsyslog stop 2>/dev/null || true
@@ -4166,6 +4209,8 @@ distr::cleanup() {
   common::echo_message "Package manager cleanup (rpmdb only; no usable yum on EL5)"
   rm -rf /var/cache/yum/* 2>/dev/null || true
   rpm --rebuilddb
+
+  distr::write_build_info
 
   common::echo_message "Cleanup resolver files"
   : > /etc/resolv.conf

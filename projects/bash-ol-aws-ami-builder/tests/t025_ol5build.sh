@@ -456,6 +456,7 @@ printf 'glibc = 2.5-123.0.1\n' > "${WORK}/stage/c.rpm.requires"
 printf 'glibc-devel\n' > "${WORK}/stage/c.rpm.name"
 closure_run() {
   ( set -u
+    # shellcheck disable=SC2030
     PATH="${WORK}/rpmstub:${PATH}"
     # shellcheck disable=SC2329
     log_info() { :; }
@@ -478,6 +479,71 @@ closure_run "2.5-123.0.1" a.rpm c.rpm >/dev/null 2>&1
 assert_rc 9 $? "closure(behavioral): removing the libicu provider FAILS the gate (real failure class #1)"
 closure_run "2.5-999" a.rpm b.rpm c.rpm >/dev/null 2>&1
 assert_rc 9 $? "closure(behavioral): a glibc exact-NVR mismatch FAILS the gate (real failure class #2)"
+
+# build-info contract (record #6): upstream's `mv ${VM_DIR}/.build-info/*`
+# fails on an EMPTY dir even when provisioning fully succeeded; the OL5
+# distr must therefore write the four contract files itself (EL5-safe).
+# Behavioral: the REAL template function is executed against fixtures and
+# the REAL upstream mv sequence is simulated.
+assert_match "${prov}" 'distr::write_build_info$' "prov: distr::cleanup invokes distr::write_build_info (the EL5-safe common::distr_cleanup replacement)"
+printf '%s\n' "${prov}" > "${WORK}/prov.file"
+mkdir -p "${WORK}/bistub" "${WORK}/biroot/modules/2.6.39-400.297.3.el5uek" "${WORK}/biroot/modules/2.6.18-419.el5" "${WORK}/bi" "${WORK}/bivm" "${WORK}/biempty"
+cat > "${WORK}/bistub/rpm" <<'EOF_BIST'
+#!/usr/bin/env bash
+case "$*" in
+  *"%{name}.%{arch}"*) printf 'kernel-uek.x86_64\ngdisk.x86_64\n' ;;
+  *NAME*EPOCH*) printf '"kernel-uek","(none)","2.6.39","400.297.3.el5uek","x86_64"\n' ;;
+  *) exit 1 ;;
+esac
+EOF_BIST
+chmod +x "${WORK}/bistub/rpm"
+cat > "${WORK}/biroot/grub.conf" <<'EOF_BIGR'
+default=1
+title RHCK
+	kernel /vmlinuz-2.6.18-419.el5 ro root=LABEL=/
+title UEK
+	kernel /vmlinuz-2.6.39-400.297.3.el5uek ro root=LABEL=/ console=ttyS0
+EOF_BIGR
+bi_run() {
+  ( set -u
+    # shellcheck disable=SC2329
+    common::echo_message() { :; }
+    # shellcheck disable=SC2034
+    BUILD_INFO="$1"
+    # shellcheck disable=SC2034
+    OL5_GRUB_CONF="$2"
+    # shellcheck disable=SC2034
+    OL5_MODULES_DIR="$3"
+    # shellcheck disable=SC2030,SC2031
+    PATH="${WORK}/bistub:${PATH}"
+    eval "$(sed -n '/^distr::write_build_info() {/,/^}/p' "${WORK}/prov.file")"
+    distr::write_build_info
+  )
+}
+bi_run "${WORK}/bi" "${WORK}/biroot/grub.conf" "${WORK}/biroot/modules" >/dev/null 2>&1
+rc=$?
+n_ok=0
+for f in repolist.txt pkglist.txt pkglist.csv kernel.txt; do
+  [ -s "${WORK}/bi/${f}" ] && n_ok=$((n_ok+1))
+done
+if [ "${rc}" = "0" ] && [ "${n_ok}" = "4" ] && grep -qx "2.6.39-400.297.3.el5uek" "${WORK}/bi/kernel.txt"; then
+  t_pass "buildinfo(behavioral): REAL template fn writes all four contract files; kernel.txt = the grub default entry"
+else
+  t_fail "buildinfo(behavioral): rc=${rc} non-empty=${n_ok}/4"
+fi
+mv "${WORK}/bi"/* "${WORK}/bivm/" 2>/dev/null && rmdir "${WORK}/bi" 2>/dev/null
+assert_rc 0 $? "buildinfo(behavioral): the exact upstream sequence (mv .build-info/* ; rmdir) succeeds -- the record-#6 failure is dead"
+mkdir -p "${WORK}/bi3"
+bi_run "${WORK}/bi3" "/nonexistent" "${WORK}/biroot/modules" >/dev/null 2>&1
+rc=$?
+if [ "${rc}" = "0" ] && grep -qx "2.6.39-400.297.3.el5uek" "${WORK}/bi3/kernel.txt"; then
+  t_pass "buildinfo(behavioral): grub.conf absent -> newest el5uek modules-dir fallback"
+else
+  t_fail "buildinfo(behavioral): fallback failed (rc=${rc})"
+fi
+mkdir -p "${WORK}/bi4"
+bi_run "${WORK}/bi4" "/nonexistent" "${WORK}/biempty" >/dev/null 2>&1
+assert_rc 1 $? "buildinfo(behavioral): no kernel derivable -> loud FATAL (never an empty kernel.txt)"
 
 # env-defaults patch x channel gate: INTEGRATION (first-contact record #2:
 # both sides were unit-pinned but never run TOGETHER -- the gate flagged the

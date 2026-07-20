@@ -4601,3 +4601,31 @@ libicu fails listing exactly the two ICU caps; reintroducing the old
 t025 behaviorals (real gate fn + real caps table, rpm stubbed). A future
 UEK live-resolution bump that introduces new caps dies loudly at this gate
 by design (verify, then extend the table deliberately).
+
+**First-contact record #6 (2026-07-20, sixth run — the post-provision
+packaging contract):** the run failed at
+`mv: cannot stat '${VM_DIR}/.build-info/*': No such file or directory`.
+Upstream build-image.sh unconditionally `virt-copy-out`s `/.build-info`
+and then `mv`s its contents into `${VM_DIR}` — on OL6+ those files
+(repolist/pkglist/pkglist.csv/kernel.txt) are written by
+`common::distr_cleanup`, which the OL5 distr deliberately does not call
+(EL5-unsafe: systemctl, /etc/yum/vars, `${EXCLUDE_DOCS^^}`) — but no
+EL5-safe replacement wrote them, so `/.build-info` was always going to be
+empty and the mv fails **even when provisioning fully succeeds**. Fix:
+`distr::write_build_info` (invoked from `distr::cleanup`) writes the same
+four files EL5-safely — static repolist note (host-supply model), `rpm
+-qa` pkglist, `%{EPOCH}`-based csv (EL5 rpm 4.4 has no `%{EPOCHNUM}`),
+and kernel.txt from grub.conf's `default=` entry with a newest-el5uek
+modules-dir fallback and a loud FATAL when neither yields a value. The
+fixture-path variables (`OL5_GRUB_CONF`/`OL5_MODULES_DIR`) exist ONLY as
+a conformance-tier seam; guests always use the defaults. Verified
+pre-landing by executing the real template function on fixtures —
+including the exact upstream `mv`+`rmdir` sequence — and permanently
+pinned as t025 behaviorals (four-files/mv-contract/fallback/FATAL).
+**Open item carried to the next run:** the same log shows provisioning
+completing in ~16 s with no visible qcow2 growth, which is too fast for
+the in-guest ENA build; whether the OL5S1/ENA/awscli chain actually
+executed is determined by `${VM_DIR}/builder.log` (upstream copies the
+guest's `/tmp/builder.log` out BEFORE the failed mv, so
+`/data/ol5-build-ws/OL5U11_x86_64-aws-b2/builder.log` exists on the
+operator host) — to be read before the next conclusion is drawn.

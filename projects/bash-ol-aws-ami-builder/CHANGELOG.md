@@ -20,6 +20,30 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (2026-07-20 — record #6: /.build-info was structurally empty on OL5; upstream's post-provision mv could never succeed)
+- **Sixth run failed at `mv ${VM_DIR}/.build-info/*`** — upstream
+  unconditionally moves the build-info files out after provisioning; on
+  OL6+ they are written by `common::distr_cleanup`, which the OL5 distr
+  deliberately skips (EL5-unsafe) — with no replacement, `/.build-info`
+  was ALWAYS empty and the failure was deterministic even for a fully
+  successful provisioning (SPEC D.32 record #6).
+- **Fix:** `distr::write_build_info` (called from `distr::cleanup`)
+  writes the four contract files EL5-safely: static repolist note,
+  `rpm -qa` pkglist, `%{EPOCH}`-based csv (EL5 rpm 4.4 lacks
+  `%{EPOCHNUM}`), and kernel.txt from grub.conf's `default=` entry with
+  a newest-el5uek fallback and a loud FATAL when underivable. Verified
+  by executing the real template function on fixtures incl. the exact
+  upstream `mv`+`rmdir` sequence; permanent t025 behaviorals added
+  (four-files / mv-contract / fallback / FATAL).
+- **Open item (evidence pending):** the same run's provisioning window
+  (~16 s, no visible disk growth) is too fast for the in-guest ENA
+  build; `${VM_DIR}/builder.log` (copied out by upstream before the
+  failed mv) will show exactly what executed — requested from the
+  operator before drawing further conclusions.
+- Tests: t025 143 → 148 asserts; suite baseline 778 → **783**.
+  TESTING.md counts + rows and SPEC D.32 (record #6) in lock-step.
+
+
 ### Fixed (2026-07-20 — record #5: guest rpm transaction — gdisk needs libicu; glibc-devel/-headers must match the U11 GA guest base; closure now gated host-side)
 - **Fifth run reached the `[OLAWS-OL5S1]` rpm transaction** (serial v2
   held) and failed on four lines: gdisk's `libicu*.so.36` requires
