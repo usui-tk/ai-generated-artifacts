@@ -4519,3 +4519,25 @@ findings; raw `declare -gA` still caught; shape-strict; host-bash source
 keeps `REPO` associative; idempotent), and the integration is permanently
 pinned in t025 as behavioral cases so a patch×gate inconsistency of this
 class cannot ship again.
+
+**First-contact record #3 (2026-07-20, real KVM host, third `--build-only`
+run, `SERIAL_CONSOLE="yes"`):** all patched paths held (env-defaults guard +
+channel gate green; P3GATE PASS) and EL5 anaconda completed the install
+again in ~1 minute (disk 21M→1.5G; clean domain shutdown). The build then
+sat for 75+ minutes with the heartbeat showing `vm (no domain)`: upstream
+adds `--wait ${INSTALL_WAIT_TIME} --noautoconsole` ONLY in the
+`SERIAL_CONSOLE=no` branch — with `yes` it ATTACHES the console (designed
+for a human at a TTY pressing Ctrl+]); under this wrapper stdio is piped
+for logging, so the attached console client never exits after the domain
+shuts down and `virt-install` blocks until the outer watchdog fires. Fix:
+the `serial-noninteractive` marker patch (all majors; behavior changes only
+when `SERIAL_CONSOLE=yes`) makes the yes branch non-interactive — serial
+boot args kept, `--wait`/`--noautoconsole` added (returns on shutdown like
+the no branch), and ttyS0 backed by a FILE
+(`${WORKSPACE}/<vm>-install-serial.log`), so the complete anaconda serial
+output is captured persistently (strictly better for diagnosis than an
+interactive attach the wrapper cannot offer). Phase 5 prints the capture
+path and a `tail -f` hint when `SERIAL_CONSOLE=yes`. Note: `virsh console`
+no longer attaches to the install VM (the serial device is file-backed) —
+the file IS the diagnostic channel. `SERIAL_CONSOLE_RUNTIME` (the AMI's
+runtime serial config) is unrelated and unaffected.

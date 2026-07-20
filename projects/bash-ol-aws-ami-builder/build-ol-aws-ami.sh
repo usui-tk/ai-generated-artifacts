@@ -1771,6 +1771,46 @@ phase3_clone_repository() {
     fi
   fi
 
+  # Serial-console non-interactive patch (bin/build-image.sh; ALL majors).
+  #
+  # First-contact record #3 (2026-07-20, real KVM run): upstream adds
+  # `--wait ${INSTALL_WAIT_TIME} --noautoconsole` ONLY in the
+  # SERIAL_CONSOLE=no branch; with yes it ATTACHES the console (design
+  # intent: a human at a TTY presses Ctrl+] after the install). Under this
+  # wrapper stdio is piped for logging, so after the install domain shuts
+  # down the attached console client never exits and virt-install blocks
+  # until the outer watchdog kills the build (~75 min observed dead-wait
+  # while the install itself had completed in ~1 min). The patch makes the
+  # yes branch behave like a NON-INTERACTIVE diagnostic: keep the serial
+  # boot args, add --wait/--noautoconsole (returns on shutdown exactly
+  # like the no branch), and back ttyS0 with a FILE
+  # (${WORKSPACE}/<vm>-install-serial.log) so the full anaconda serial
+  # output is captured persistently -- strictly better for diagnosis than
+  # the interactive attach this wrapper can't offer. Behavior with
+  # SERIAL_CONSOLE=no is untouched. Marker-guarded + idempotent.
+  local build_image_serial="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/bin/build-image.sh"
+  log_info "Applying serial-noninteractive patch to upstream bin/build-image.sh (SERIAL_CONSOLE=yes: file-backed ttyS0 + --wait, no console attach)"
+  if [[ ! -f "${build_image_serial}" ]]; then
+    die "Cannot apply serial-noninteractive patch: ${build_image_serial} not found"
+  fi
+  # shellcheck disable=SC2016
+  if grep -Fq '[ol-aws-ami-builder PATCH serial-noninteractive]' "${build_image_serial}"; then
+    log_info "  -> serial-noninteractive patch already present (idempotent skip)"
+  elif grep -q 'BOOT_COMMAND+=( "${BOOT_COMMAND_SERIAL_CONSOLE\[@\]}" )' "${build_image_serial}"; then
+    # shellcheck disable=SC2016
+    sed -i".serial-noninteractive.bak" \
+      -e '/BOOT_COMMAND+=( "${BOOT_COMMAND_SERIAL_CONSOLE\[@\]}" )/a\    # [ol-aws-ami-builder PATCH serial-noninteractive] non-interactive wrapper drive: never attach a console (hangs after domain shutdown when stdio is piped); capture ttyS0 to a file instead and return via --wait like the "no" branch\n    virt_install_args+=(--wait "${INSTALL_WAIT_TIME}" --noautoconsole --serial "file,path=${WORKSPACE}/${VM_NAME}-install-serial.log")' \
+      "${build_image_serial}"
+    if grep -Fq '[ol-aws-ami-builder PATCH serial-noninteractive]' "${build_image_serial}"; then
+      log_info "  -> serial-noninteractive patch applied (backup at ${build_image_serial}.serial-noninteractive.bak)"
+    else
+      die "Failed to apply serial-noninteractive patch to ${build_image_serial}"
+    fi
+  else
+    log_warn "  Upstream serial-console BOOT_COMMAND line not found in ${build_image_serial}."
+    log_warn "  Assuming upstream refactored it; SERIAL_CONSOLE=yes may hang under this wrapper (attached console)."
+  fi
+
   # Guest package manager by OL generation (see SPEC B.7 "Guest OS
   # package-manager matrix"):
   #   * OL6, OL7  -> yum  (yum-config-manager comes from yum-utils;
@@ -4480,6 +4520,11 @@ phase5_run_build() {
 
   log_info "Starting build (this typically takes 20-60 minutes)"
   log_info "Build watchdog: ${BUILD_TIMEOUT_MIN} min outer bound (SERIAL_CONSOLE=${SERIAL_CONSOLE})"
+  if [[ "${SERIAL_CONSOLE,,}" == "yes" ]]; then
+    log_info "SERIAL_CONSOLE=yes under this wrapper is NON-INTERACTIVE (serial-noninteractive patch):"
+    log_info "  the full anaconda serial output is captured to ${WORKSPACE}/<vm-name>-install-serial.log"
+    log_info "  (watch live from another terminal: tail -f ${WORKSPACE}/*-install-serial.log)"
+  fi
 
   # Snapshot running libvirt domains BEFORE the build so a watchdog timeout can
   # reap the transient install VM. virt-install --transient domains are managed

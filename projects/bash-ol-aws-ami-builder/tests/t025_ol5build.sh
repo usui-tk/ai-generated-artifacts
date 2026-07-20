@@ -340,6 +340,8 @@ assert_match "${main}" 'ol-aws-ami-builder OL5 env-defaults PATCH' "wiring: env.
 assert_match "${main}" 'declare -gA REPO \|\| true' "wiring: the guard keeps host semantics (declares on bash 4+) and is set-e safe on the guest (|| true)"
 assert_match "${main}" 'guest-bound env member contains bash-4-only' "wiring: P3GATE scans the guest-bound env CONCAT CHANNEL (defaults + distr + cloud members)"
 assert_match "${main}" 'env.properties.local contains bash-4-only' "wiring: the Phase-4 wrapper-generated local env is scanned too (channel fully covered)"
+assert_match "${main}" 'ol-aws-ami-builder PATCH serial-noninteractive' "wiring: SERIAL_CONSOLE=yes is non-interactive under the wrapper (record #3: attached console hangs after domain shutdown when stdio is piped)"
+assert_match "${main}" '--noautoconsole --serial "file,path=' "wiring: yes-branch gains --wait/--noautoconsole and a FILE-backed ttyS0 (anaconda serial output captured persistently)"
 
 # env-defaults patch x channel gate: INTEGRATION (first-contact record #2:
 # both sides were unit-pinned but never run TOGETHER -- the gate flagged the

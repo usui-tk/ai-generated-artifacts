@@ -85,17 +85,17 @@ non-zero if any tier fails. It records the resolved tool versions at run time.
 
 Current fixed pass count (full toolchain present — ShellCheck (pin 0.10.0;
 re-measured green on 0.11.0 at the 2026-07-14 restamp), `ksvalidator`,
-`modinfo` (kmod), and `python3`): **761 passed, 0 skipped, 0 failed** across
+`modinfo` (kmod), and `python3`): **764 passed, 0 skipped, 0 failed** across
 **25 tiers** (B-T1 parse = 54, B-T2 ShellCheck = 49, B-T3 unit = 59,
-command-mock = 15, B-T4 kickstart = 1, env-parity = 55, idempotency = 13,
+command-mock = 15, B-T4 kickstart = 1, env-parity = 55, idempotency = 14,
 hook-timing = 19, log-format = 12, ena-uek-detect = 16, ena-reporting = 31,
 build-visibility = 17, ena-ledger-guard = 5, ena-check-2 = 6, ena-verify = 12,
 ena-verify-results = 19, ena-bundle = 13, ssm-verdict = 32,
 awscli-verdict = 43, register-validation = 27, ena-express = 33,
-ol10-epel = 37, ol5-ena = 40, ol5-awscli = 26, ol5-build = 127).
+ol10-epel = 37, ol5-ena = 40, ol5-awscli = 26, ol5-build = 129).
 Optional-tool degradations are the only way to see a skip: without
-`ksvalidator` B-T4 contributes a skip (-> 760/1); without `modinfo` the
-ena-uek-detect inbox-report assertions fold into one skip (-> 758/1); without
+`ksvalidator` B-T4 contributes a skip (-> 763/1); without `modinfo` the
+ena-uek-detect inbox-report assertions fold into one skip (-> 761/1); without
 ShellCheck B-T2 skips; the B-T (ena-bundle) initramfs fixture builds via cpio
 **or** a self-contained `python3` newc fallback, so it no longer skips. The
 B-T1 / B-T2 counts include the six `tests/cleancore/` clean-core builders (see
@@ -251,7 +251,7 @@ PowerShell canon's `tested` + fixed pass count). New tests register a row.
 | B-T (command mock) | L1 | implemented | `tests/t004_cmdmock.sh` via `tests/lib/mock.sh` (PATH-shadow + call-log spy); `detect_qemu_user` (mocks `id`), `detect_os_variant` (mocks `osinfo-query`); 9 asserts |
 | B-T (IMDS rejection) | L1 | implemented | `normalize_imds_support` extracted (behaviour-neutral) + table-driven unit in `tests/t003_unit.sh`: normalisation, invalid->die, OL6 v2.0->die; 10 asserts |
 | B-T5 env parity | L2 | implemented | `tests/t006_envparity.sh`: 20 common-core keys, OL6/OL7-only KERNEL/UEK_RELEASE extras, S3_BUCKET/AWS_REGION/UPDATE_TO_LATEST/CLOUD invariants, per-OS DISTR; plus release-agnostic maintenance invariants (every template sets `ISO_URL` — a required key with no wrapper-side default; OL9/OL10 carry the `SINGLE-TOUCH MAINTENANCE POINT` marker and no release-pinned checksum comments; the wrapper has no `DEFAULT_ISO_URL` and `load_env` rejects an unset `ISO_URL`); plus the uniform `DISK_SIZE_GB="7"` and opt-in `AMAZON_TIME_SYNC="no"` values (21 common-core keys) and the sos-in-every-kickstart wiring (OL6 heredoc lists `sos`; phase3 wires `_ks_add_sos_package` for OL7-10); 54 asserts |
-| B-T6 idempotency | L2 | implemented | `tests/t007_idempotency.sh` (structural): each of the 12 `[ol-aws-ami-builder PATCH ...]` markers (incl. the `sos-package` kickstart patch and the opt-in `amazon-time-sync` hook) is fronted by a `grep -Fq` guard; runtime apply-twice is B-T7/B-T8 |
+| B-T6 idempotency | L2 | implemented | `tests/t007_idempotency.sh` (structural): each of the 13 `[ol-aws-ami-builder PATCH ...]` markers (incl. the `sos-package` kickstart patch and the opt-in `amazon-time-sync` hook) is fronted by a `grep -Fq` guard; runtime apply-twice is B-T7/B-T8 |
 | B-T4 kickstart | L2 | implemented | `tests/validate-kickstart.sh`, **wired into the runner** via `tests/t005_kickstart.sh` (SKIPs without `ksvalidator`); see below |
 | B-T9 hook timing | L1/L2 | implemented | `tests/t008_hooktiming.sh`: hooks appended to `cloud/aws/provision.sh` run at source time, so anything stage-dependent must be staged explicitly. (1) The OL6 cloud-user hook must run *after* `cloud::cloud_init` (configs exist), never at source time; static wrapper-wiring + no-top-level-`sh` guards, plus a behavioural order/edit check. (2) The nitro-initramfs hook must be presence-aware (SPEC D.28): only drivers whose `.ko` exists enter the dracut drop-in at its stage, `ena` is deferred to the ENA hook (whose emitted, idempotent drop-in append must precede the installer invoke); static pins + behavioural runs of the extracted body against mock `/lib/modules` trees with/without `ena`; 19 asserts |
 | B-T (log format) | L1 | implemented | `tests/t009_logformat.sh`: every timestamped channel emits **date-first** (`YYYY-MM-DD HH:MM:SS` leads, `[SEVERITY]`/source tag follows; SPEC E.1); colour-stripped match across info/warn/error/build/debug/external + a negative guard against the old tag-first order; 12 asserts |

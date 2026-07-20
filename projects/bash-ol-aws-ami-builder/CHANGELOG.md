@@ -20,6 +20,27 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (2026-07-20 — record #3: SERIAL_CONSOLE=yes hung after install under the wrapper; now non-interactive with file-backed serial capture)
+- **Third real run: install completed again in ~1 min, then 75+ min of
+  dead-wait** — upstream attaches the console in the `SERIAL_CONSOLE=yes`
+  branch (`--wait/--noautoconsole` exist only in the `no` branch; the
+  attach is designed for a human pressing Ctrl+]), and under the
+  wrapper's piped stdio the attached client never exits after the domain
+  shuts down (SPEC D.32 record #3).
+- **Fix: `serial-noninteractive` marker patch** (all majors; behavior
+  changes only when `SERIAL_CONSOLE=yes`): the yes branch keeps the
+  serial boot args, gains `--wait ${INSTALL_WAIT_TIME} --noautoconsole`
+  (returns on shutdown exactly like `no`), and backs ttyS0 with a FILE —
+  `${WORKSPACE}/<vm>-install-serial.log` — so the complete anaconda
+  serial output is captured persistently (strictly better for diagnosis
+  than an attach the wrapper cannot offer). Phase 5 prints the capture
+  path + a `tail -f` hint. The sed was verified against the real
+  upstream file (parse + branch shape) before landing.
+- Tests: t007 marker pin 12 → 13 (+1); t025 +2 wiring pins (127 → 129);
+  suite baseline 761 → **764**. TESTING.md counts + rows and SPEC D.32
+  (record #3) in lock-step.
+
+
 ### Fixed (2026-07-20 — record #2: the record-#1 fix tripped its own channel gate; patch×gate now integration-tested)
 - **Second real run failed at P3GATE on the fix itself:** the channel scan
   token-matched the guard line the env-defaults patch writes (it contains
