@@ -20,6 +20,32 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (2026-07-20 — OL5 first-contact E2E: guest-bound env concat carried `declare -gA` into bash 3.2)
+- **First contact result (real KVM, `--build-only`):** EL5 anaconda
+  ACCEPTED the synthesized kickstart verbatim and completed the install —
+  the largest unknown of the OL5 target is now proven — but provisioning
+  died at source time: upstream `env.properties.defaults` line 69
+  (`declare -gA REPO`, bash 4.2+) is concatenated VERBATIM into
+  `provision.d/env.properties`, which the EL5 guest's bash 3.2 sources
+  (`declare: -g: invalid option`). Full record: SPEC D.32 first-contact
+  record #1.
+- **Fix:** OL5 Phase-3 marker patch guards the declaration
+  (`[ "${BASH_VERSINFO[0]}" -ge 4 ] && declare -gA REPO || true`) —
+  host-side semantics unchanged (modern bash still declares the
+  associative array; `REPO` is verified host-only), EL5 guest skips it,
+  `set -e`-safe. Applied via a `~`-delimited sed (the replacement itself
+  contains `||` — caught by the local apply-simulation before landing).
+- **Channel gated (gate-maturity lesson):** P3GATE now scans every
+  guest-bound env-concat member (defaults + distr + cloud, non-comment
+  lines) for bash-4-only constructs, and Phase 4 scans the
+  wrapper-generated `env.properties.local` right after writing — a future
+  upstream reintroduction dies in seconds, pre-install, instead of ~20
+  minutes into the build.
+- Tests: t025 +4 pins (patch marker, guard shape, both channel scans):
+  117 → 121 asserts; suite baseline 751 → **755**. TESTING.md counts +
+  tier row and SPEC D.32 updated in lock-step.
+
+
 ### Changed (2026-07-19 — OL5 ISO SHA256 baked from the operator's measurement)
 - **`env.properties.aws-ol5`: `ISO_CHECKSUM` is now baked** with the
   operator-measured value

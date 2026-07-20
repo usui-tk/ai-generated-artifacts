@@ -4463,3 +4463,38 @@ findings frozen here:
   is the stronger, grammar-level evidence. What static tools cannot prove
   remains the D.32 first-contact list (package-name existence, anaconda
   runtime behavior).
+
+**First-contact record #1 (2026-07-20, real KVM host, `--build-only`):**
+the first real run reached and PASSED, in order: the SHA256/ISO path, the
+host-supply staging (24 RPMs + 2 source artifacts), P3GATE, os-variant
+auto-detection (`ol5.11`), the virtio disk-bus patch, and — the largest
+unknown — **EL5 anaconda ACCEPTED the synthesized kickstart verbatim and
+completed the install** (domain shut down cleanly ~70 s after boot). The
+run then died at provisioning source time:
+
+```
+/tmp/provision.d/env.properties: line 69: declare: -g: invalid option
+```
+
+Root cause: upstream `env.properties.defaults` line 69 is
+`declare -gA REPO` (bash 4.2+, global + associative). build-image.sh
+concatenates the env files VERBATIM into `provision.d/env.properties`,
+which the guest's bash 3.2 sources before anything else. The per-script
+bash-3.2 discipline covered our templates and the executed upstream
+functions — but not this **env-concat channel** (host-authored text
+traveling to the guest as data-become-code). `REPO` is used host-side
+only (verified: no reference in `bin/provision*.sh` or
+`cloud/aws/provision.sh`), and a full hostility scan of every concat
+member found this single line.
+
+Fix (same day): (1) an OL5 Phase-3 marker patch guards the declaration —
+`[ "${BASH_VERSINFO[0]}" -ge 4 ] && declare -gA REPO || true` — keeping
+host-side semantics byte-equivalent (modern bash still declares the
+associative array) while the EL5 guest skips it, `|| true` keeping the
+AND-list `set -e`-safe; (2) the CHANNEL is now gated: P3GATE scans every
+guest-bound env member (defaults + distr + cloud) for bash-4-only
+constructs on non-comment lines, and Phase 4 scans the wrapper-generated
+`env.properties.local` right after writing it — so any future upstream
+reintroduction dies in seconds, pre-install. Gate-maturity lesson applied:
+first contact exposed a new CLASS (guest-bound concatenation channels);
+the gate now owns the class, not just the instance.

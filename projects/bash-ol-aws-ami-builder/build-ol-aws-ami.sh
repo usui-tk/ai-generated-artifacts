@@ -1571,6 +1571,32 @@ _p3_exit_gate() {
     fails=$((fails+1))
   fi
 
+  # OL5 ONLY: bash-3.2 hostility scan of the GUEST-BOUND env concatenation.
+  # First-contact lesson (2026-07-20): build-image.sh concatenates the env
+  # files VERBATIM into provision.d/env.properties, which the EL5 guest's
+  # bash 3.2 sources -- `declare -gA REPO` in upstream env.properties.defaults
+  # killed provisioning at source time. The per-script scans (t025) cover
+  # OUR templates; this gate covers the CHANNEL, so any future upstream
+  # reintroduction dies here in seconds, not ~20 minutes into the build.
+  # (env.properties.local is wrapper-generated plain KEY=VALUE and is
+  # scanned separately right after generation in Phase 4.)
+  if [[ "${OL_MAJOR_VERSION}" -eq 5 ]]; then
+    local _envm _hostile
+    for _envm in \
+      "${base}/env.properties.defaults" \
+      "${base}/distr/ol5-slim/env.properties" \
+      "${base}/cloud/aws/env.properties" \
+      "${base}/cloud/aws/ol5-slim/env.properties"; do
+      [[ -f "${_envm}" ]] || continue
+      _hostile="$(grep -nE 'declare -g|declare -A|mapfile|readarray|\$\{[A-Za-z_][A-Za-z_0-9]*(,,|\^\^)|\|&' "${_envm}" | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+      if [[ -n "${_hostile}" ]]; then
+        log_error "  [P3GATE] guest-bound env member contains bash-4-only construct(s) (EL5 guest sources this): ${_envm}"
+        while IFS= read -r _l; do log_error "    ${_l}"; done <<< "${_hostile}"
+        fails=$((fails+1))
+      fi
+    done
+  fi
+
   # ADVISORY ksvalidator pass (never gates -- see _p3_validate_ks rationale).
   if command -v ksvalidator >/dev/null 2>&1; then
     local prof out
@@ -1849,6 +1875,42 @@ phase3_clone_repository() {
     else
       log_warn "  Upstream 'bus=scsi,cache=unsafe' disk spec not found in ${build_image_ol5}."
       log_warn "  Assuming the upstream disk spec has been refactored; OL5 install may not see its disk."
+    fi
+  fi
+
+  # OL5 env-defaults bash-3.2 patch (env.properties.defaults).
+  #
+  # First-contact finding (2026-07-20, real KVM run): upstream's
+  # env.properties.defaults carries `declare -gA REPO` (bash 4.2+: global +
+  # associative). build-image.sh concatenates that file VERBATIM into
+  # provision.d/env.properties, which the GUEST's bash sources at provision
+  # start -- on EL5 (bash 3.2) it dies with "declare: -g: invalid option"
+  # before any provisioning runs. Guest-side code never uses REPO (verified
+  # across bin/provision*.sh and cloud/aws/provision.sh), so the fix guards
+  # the declaration by bash major: modern HOST bash still declares it
+  # (semantics unchanged for the host-side kickstart repo machinery), the
+  # EL5 guest skips it. `|| true` keeps the AND-list from tripping set -e.
+  if [[ "${OL_MAJOR_VERSION}" -eq 5 ]]; then
+    local env_defaults_ol5="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/env.properties.defaults"
+    log_info "Applying OL5 bash-3.2 guard to upstream env.properties.defaults (declare -gA REPO)"
+    if [[ ! -f "${env_defaults_ol5}" ]]; then
+      die "Cannot apply OL5 env-defaults patch: ${env_defaults_ol5} not found"
+    fi
+    if grep -Fq '[ol-aws-ami-builder OL5 env-defaults PATCH]' "${env_defaults_ol5}"; then
+      log_info "  -> OL5 env-defaults patch already present (idempotent skip)"
+    elif grep -q '^declare -gA REPO$' "${env_defaults_ol5}"; then
+      # shellcheck disable=SC2016
+      sed -i".ol5-envdefaults.bak" \
+        -e 's~^declare -gA REPO$~# [ol-aws-ami-builder OL5 env-defaults PATCH] declare -gA is bash 4.2+; the EL5 guest (bash 3.2) sources this file via provision.d -- guard by bash major (REPO is host-side only)\n[ "${BASH_VERSINFO[0]}" -ge 4 ] \&\& declare -gA REPO || true~' \
+        "${env_defaults_ol5}"
+      if grep -q 'BASH_VERSINFO\[0\]' "${env_defaults_ol5}"; then
+        log_info "  -> OL5 env-defaults patch applied (backup at ${env_defaults_ol5}.ol5-envdefaults.bak)"
+      else
+        die "Failed to apply OL5 env-defaults patch to ${env_defaults_ol5}"
+      fi
+    else
+      log_warn "  Upstream 'declare -gA REPO' line not found in ${env_defaults_ol5}."
+      log_warn "  Assuming upstream refactored it; the P3GATE guest-env scan below remains the safety net."
     fi
   fi
 
@@ -4280,6 +4342,16 @@ ${CLOUD_USER:+CLOUD_USER=${CLOUD_USER}}
 EOF
 
   log_info "Generated env.properties.local: ${tool_env}"
+  # OL5 ONLY: this file joins the guest-bound env concatenation (see the
+  # Phase-3 P3GATE channel scan) -- verify the wrapper's own output too.
+  if [[ "${OL_MAJOR_VERSION}" -eq 5 ]]; then
+    local _lhostile
+    _lhostile="$(grep -nE 'declare -g|declare -A|mapfile|readarray|\$\{[A-Za-z_][A-Za-z_0-9]*(,,|\^\^)|\|&' "${tool_env}" | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+    if [[ -n "${_lhostile}" ]]; then
+      die "env.properties.local contains bash-4-only construct(s) but the EL5 guest sources it:
+${_lhostile}"
+    fi
+  fi
   echo "----- env.properties.local -----"
   grep -v '^#' "${tool_env}" | grep -v '^$'
   echo "--------------------------------"
