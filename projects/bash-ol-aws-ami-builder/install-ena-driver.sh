@@ -1262,7 +1262,10 @@ if [[ "${osmajor}" == "5" ]]; then
   # (no kernel package, no /lib/modules module tree), so EL5's mkinitrd cannot
   # assemble an initrd here and MUST NOT abort a successful module build.
   # Real-boot initrd handling for an OL5 AMI is a separate future workstream.
-  log "OL5: skipping initramfs regeneration (build-test scope; devel-only provision has no module tree)"
+  # ena is a NETWORK driver: it is loaded from /lib/modules after the root
+  # mount and is NOT needed inside the initrd. The nvme-capable initrd (the
+  # actual boot requirement) is owned and hard-asserted by [OLAWS-OL5S1].
+  log "OL5: skipping initramfs regeneration (ena is not an initrd module; the nvme initrd is owned by the OL5 host-supply block)"
 elif command -v dracut >/dev/null 2>&1; then
   log "Regenerating initramfs for ${kver}"
   dracut -f "/boot/initramfs-${kver}.img" "${kver}" || die "dracut failed for ${kver}"

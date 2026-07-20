@@ -243,6 +243,13 @@ measure_min_glibc() {
 # (DNF, OL8). Best-effort: a WARNING (not fatal) if the plugin/repo is unavailable
 # -- the bundle install itself does not depend on it.
 block_awscli_v1() {
+  # OL5: there are no reachable in-guest repositories at all (EL5 has no
+  # TLS 1.2 path -- the whole point of the host-supply model), so yum can
+  # never pull the v1 package and a versionlock is meaningless noise.
+  if [[ "${osmajor}" == "5" ]]; then
+    log "v1-block: not applicable on OL5 (no reachable repositories; v1 cannot be installed)"
+    return 0
+  fi
   local -a setopt=()
   if [[ "${INSECURE_TLS}" == "1" ]]; then setopt=(--setopt=sslverify=false); fi
   if command -v dnf >/dev/null 2>&1 && dnf --version >/dev/null 2>&1; then

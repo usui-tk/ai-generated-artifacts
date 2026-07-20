@@ -4660,3 +4660,38 @@ rpm stub; the pinned 2.17.51 remains correct — per the installer's own
 measured record it is the last v2 build whose bundled .so's need only
 GLIBC_2.5). Cosmetic, accepted as-is: the awscli log's `kver` shows the
 appliance kernel under virt-customize (informational only; glibc gates).
+
+**First-contact record #8 (2026-07-20, seventh run — the boot path
+itself; found by the operator's skip-scrutiny request + `kernel.txt`):**
+the run "succeeded" end-to-end, but `build-info written (kernel
+2.6.39-400.215.10.el5uek)` exposed a boot-critical defect: the U11 media
+ALSO installs kernel-uek **400.215.10** at anaconda time, the staged
+297.3 kernel's `%post` grubby fails in the appliance ("unable to find a
+suitable template"), and the old OL5S1 assert only checked the `el5uek`
+SUBSTRING of the default entry — so grub's `default=` kept pointing at
+the media kernel. Consequences had it shipped: the default entry's
+initrd was built inside the virtio install VM (no nvme → Nitro boot
+dead) and the self-built ena.ko lives only under the 297.3 module tree
+(no network even on Xen). Phase 6 passed because CHECK 1/2 validated the
+TARGET-named artifacts, not the boot path — the validator blind spot.
+Fixes: (1) OL5S1 derives the target kver from the STAGED rpm filename
+(authoritative; the newest-modules-dir heuristic is gone); (2) every
+other installed kernel (RHCK + media UEK) is REMOVED (OL-parity;
+`rpm -e` with a `--noscripts` fallback for the expected %preun grubby
+noise); (3) grub.conf is owned EXPLICITLY: an entry for the staged kver
+is guaranteed (cloned from the current default entry, args/layout
+preserved, when the %post failed to add one), title blocks whose vmlinuz
+no longer exists are pruned, `default=` is re-pointed at the staged
+entry, and the assert now requires EXACT kver equality plus a matching
+initrd line; (4) Phase 6 gains **CHECK 6** (OL5, HARD FAIL): the DEFAULT
+grub entry's kernel must equal the target kver — validating the boot
+path, not the intended artifacts. All four grub-ownership behaviors were
+executed on fixtures pre-landing and are pinned permanently in t025.
+Message truthfulness fixed in the same change: the ENA installer's OL5
+initramfs-skip line states the real reason (ena is a network driver, not
+an initrd module; the nvme initrd is owned by OL5S1), and the awscli
+v1-versionlock step short-circuits informatively on OL5 (no reachable
+repositories — v1 cannot install). Env adjudications (2026-07-20)
+recorded: `DISK_SIZE_GB=7` (OL6-10 aligned; measured usage ~1.7 GB;
+growroot floor) and `SELINUX=enforcing` (plan B: measure real denials on
+the next build + boot; permissive is the measured fallback).

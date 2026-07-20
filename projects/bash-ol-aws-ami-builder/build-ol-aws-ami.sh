@@ -2285,14 +2285,40 @@ for f in "${SRCDIR}"/*; do
   cp -f "$f" /usr/src/ || { echo "[ol5-host-supply] FATAL: staging $f into /usr/src failed"; exit 1; }
 done
 
-# (5) asserts.
+# (5) kernel identity, non-target kernel removal, grub ownership, asserts.
+#
+# Record #8: the U11 media ALSO installs kernel-uek (2.6.39-400.215.10) at
+# anaconda time, and the staged kernel's %post grubby fails in the appliance
+# ("unable to find a suitable template") -- so the MEDIA kernel kept the grub
+# default while the old assert only checked the el5uek SUBSTRING. The target
+# kver is therefore derived from the STAGED rpm (authoritative), every other
+# kernel is removed (OL-parity: upstream removes non-target kernels), and
+# grub.conf is owned EXPLICITLY with an exact-kver default assert.
+OL5_BOOT_DIR="${OL5_BOOT_DIR:-/boot}"
+OL5_GRUB_CONF="${OL5_GRUB_CONF:-/boot/grub/grub.conf}"
 kv=""
-for d in /lib/modules/*el5uek*; do
-  [ -d "$d" ] && kv="$(basename "$d")"
+for f in "${RPMDIR}"/kernel-uek-2*.rpm; do
+  [ -f "$f" ] || continue
+  case "$f" in *-devel-*|*-firmware-*) continue ;; esac
+  kv="$(basename "$f" | sed -e 's/^kernel-uek-//' -e 's/\.x86_64\.rpm$//')"
 done
-[ -n "$kv" ] || { echo "[ol5-host-supply] FATAL: no el5uek kernel under /lib/modules after install"; exit 1; }
+[ -n "$kv" ] || { echo "[ol5-host-supply] FATAL: staged kernel-uek rpm not found under ${RPMDIR}"; exit 1; }
+[ -d "/lib/modules/${kv}" ] || { echo "[ol5-host-supply] FATAL: /lib/modules/${kv} missing after install"; exit 1; }
 echo "[ol5-host-supply] UEK R2 kernel installed: ${kv}"
-initrd="/boot/initrd-${kv}.img"
+
+# Remove every OTHER installed kernel (the RHCK and the media UEK): a second
+# kernel is a second -- wrong -- boot path. %preun grubby noise is expected;
+# --noscripts is the deterministic fallback (grub.conf is owned below).
+for n in kernel kernel-uek; do
+  for p in $(rpm -q "$n" 2>/dev/null | grep -v 'not installed'); do
+    [ "$p" = "kernel-uek-${kv}" ] && continue
+    echo "[ol5-host-supply] removing non-target kernel: $p"
+    rpm -e "$p" 2>/dev/null || rpm -e --noscripts "$p" \
+      || { echo "[ol5-host-supply] FATAL: could not remove non-target kernel $p"; exit 1; }
+  done
+done
+
+initrd="${OL5_BOOT_DIR}/initrd-${kv}.img"
 check_initrd() { zcat "$1" 2>/dev/null | cpio -it 2>/dev/null | grep -q 'nvme\.ko'; }
 if [ ! -f "${initrd}" ] || ! check_initrd "${initrd}"; then
   echo "[ol5-host-supply] initrd missing or lacks nvme.ko; regenerating with mkinitrd --with"
@@ -2301,14 +2327,75 @@ if [ ! -f "${initrd}" ] || ! check_initrd "${initrd}"; then
   check_initrd "${initrd}" || { echo "[ol5-host-supply] FATAL: initrd still lacks nvme.ko after regen"; exit 1; }
 fi
 echo "[ol5-host-supply] initrd contains nvme.ko: ${initrd}"
-# grub default must boot el5uek (GRUB Legacy: resolve default=N to its kernel line).
-awk -v needle="el5uek" '
-  /^default=/ { split($0, a, "="); def = a[2] + 0 }
+
+# grub.conf ownership (GRUB Legacy):
+#   1. ensure an entry for ${kv} exists -- if absent, CLONE the current
+#      default entry (layout-resilient: keeps its root/args shape) and
+#      rewrite the vmlinuz/initrd versions;
+#   2. prune title blocks whose vmlinuz no longer exists under /boot
+#      (the kernels removed above);
+#   3. point default= at the ${kv} entry;
+#   4. assert EXACT kver equality (substring matching is what let the media
+#      kernel keep the default -- record #8).
+[ -f "${OL5_GRUB_CONF}" ] || { echo "[ol5-host-supply] FATAL: ${OL5_GRUB_CONF} not found"; exit 1; }
+if ! grep -q "vmlinuz-${kv}\( \|$\)" "${OL5_GRUB_CONF}"; then
+  echo "[ol5-host-supply] grub: no entry for ${kv}; cloning the current default entry"
+  defblk="$(awk '
+    /^default=/ { def = substr($0, 9) + 0 }
+    /^title/    { t++ }
+    { if (t > 0 && t - 1 == def) print }
+  ' "${OL5_GRUB_CONF}")"
+  [ -n "$defblk" ] || { echo "[ol5-host-supply] FATAL: could not extract the current grub default entry"; exit 1; }
+  {
+    echo "$defblk" | sed \
+      -e "s/^title .*/title Oracle Linux Server (${kv})/" \
+      -e "s!vmlinuz-[^ ]*!vmlinuz-${kv}!" \
+      -e "s!initrd-[^ ]*\.img!initrd-${kv}.img!"
+  } >> "${OL5_GRUB_CONF}"
+fi
+# prune entries whose vmlinuz is gone, and set default= to the ${kv} entry.
+awk -v kv="${kv}" -v bootdir="${OL5_BOOT_DIR}" '
+  function flush() {
+    if (nblk == 0) return
+    ver = blkver; keep = 0
+    if (ver != "") {
+      f = bootdir "/vmlinuz-" ver
+      if ((getline _ < f) >= 0) keep = 1
+      close(f)
+    }
+    if (keep) { blocks[++nb] = blk; vers[nb] = ver }
+    nblk = 0; blk = ""; blkver = ""
+  }
+  /^title/ { flush(); nblk = 1; blk = $0; next }
+  nblk { blk = blk "\n" $0
+         if ($0 ~ /^[ \t]*kernel/) { v = $0; sub(/.*vmlinuz-/, "", v); sub(/ .*/, "", v); blkver = v }
+         next }
+  { hdr[++nh] = $0 }
+  END {
+    flush()
+    defidx = -1
+    for (i = 1; i <= nb; i++) if (vers[i] == kv) defidx = i - 1
+    for (i = 1; i <= nh; i++) {
+      if (hdr[i] ~ /^default=/) print "default=" defidx
+      else print hdr[i]
+    }
+    for (i = 1; i <= nb; i++) print blocks[i]
+    exit (defidx < 0 ? 1 : 0)
+  }
+' "${OL5_GRUB_CONF}" > "${OL5_GRUB_CONF}.new" \
+  || { echo "[ol5-host-supply] FATAL: grub rewrite could not place a ${kv} entry"; exit 1; }
+mv "${OL5_GRUB_CONF}.new" "${OL5_GRUB_CONF}"
+# exact-kver default assert (the record-#8 invariant).
+defver="$(awk '
+  /^default=/ { def = substr($0, 9) + 0 }
   /^title/    { t++ }
-  /^[ \t]*kernel/ { if (t - 1 == def && index($0, needle)) found = 1 }
-  END { exit found ? 0 : 1 }
-' /boot/grub/grub.conf || { echo "[ol5-host-supply] FATAL: grub default entry does not boot el5uek (check /boot/grub/grub.conf)"; exit 1; }
-echo "[ol5-host-supply] grub default boots el5uek"
+  /^[ \t]*kernel/ { if (t - 1 == def) { v = $0; sub(/.*vmlinuz-/, "", v); sub(/ .*/, "", v); print v; exit } }
+' "${OL5_GRUB_CONF}")"
+[ "$defver" = "$kv" ] \
+  || { echo "[ol5-host-supply] FATAL: grub default boots ${defver:-<none>}, not the staged ${kv}"; exit 1; }
+grep -q "initrd-${kv}\.img" "${OL5_GRUB_CONF}" \
+  || { echo "[ol5-host-supply] FATAL: grub ${kv} entry has no initrd-${kv}.img line"; exit 1; }
+echo "[ol5-host-supply] grub default boots the staged kernel: ${kv}"
 rpm -q cloud-init >/dev/null 2>&1 || { echo "[ol5-host-supply] FATAL: cloud-init not installed by the staged closure"; exit 1; }
 echo "[ol5-host-supply] cloud-init installed: $(rpm -q cloud-init)"
 echo "[ol5-host-supply] done"
@@ -5339,6 +5426,29 @@ phase6_nitro_readiness_check() {
     log_warn "  [OLAWS-CHK05] [CHECK 5] serial console: ADVISORY (no console=ttyS0 on the kernel cmdline in grub.cfg, /boot/loader/entries/*.conf, or grubenv kernelopts; AWS 'Get System Log' will be empty -- B4 should have set it)"
   else
     log_warn "  [OLAWS-CHK05] [CHECK 5] serial console: ADVISORY (no bootloader config located to inspect)"
+  fi
+
+  # --- CHECK 6 (OL5/GRUB Legacy): the BOOT PATH kernel is the target -------
+  # Record #8: the U11 media also installs kernel-uek 400.215.10, and the
+  # earlier validators verified the TARGET-named artifacts while grub's
+  # default= still pointed at the media kernel. This check resolves the
+  # DEFAULT entry of /boot/grub/grub.conf and requires its vmlinuz version
+  # to equal the target kver EXACTLY -- validating the boot path itself,
+  # not the intended artifacts. HARD FAIL: a wrong default kernel means no
+  # nvme initrd and no ena module at boot.
+  if [[ "${OL_MAJOR_VERSION}" -eq 5 ]]; then
+    local grub_default_kver
+    grub_default_kver="$(virt-cat -a "${img}" /boot/grub/grub.conf 2>/dev/null | awk '
+      /^default=/ { def = substr($0, 9) + 0 }
+      /^title/    { t++ }
+      /^[ \t]*kernel/ { if (t - 1 == def) { v = $0; sub(/.*vmlinuz-/, "", v); sub(/ .*/, "", v); print v; exit } }
+    ')"
+    if [[ -n "${kver}" && "${grub_default_kver}" == "${kver}" ]]; then
+      log_info "  [OLAWS-CHK06] [CHECK 6] grub default kernel: PASS (boot path = staged ${kver})"
+    else
+      log_error "  [OLAWS-CHK06] [CHECK 6] grub default kernel: FAIL (default boots '${grub_default_kver:-<none>}', target is '${kver:-<none>}' -- the media kernel kept the boot path?)"
+      fail=1
+    fi
   fi
 
   # --- Nitro instance assurance report (advisory) ----------------------------

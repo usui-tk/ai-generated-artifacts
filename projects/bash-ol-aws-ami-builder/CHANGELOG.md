@@ -20,6 +20,34 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (2026-07-20 — record #8: grub default still booted the MEDIA kernel; boot-path ownership + CHECK 6; env adjudications)
+- **Boot-critical:** `kernel.txt` exposed that grub's `default=` pointed
+  at the U11 media's kernel-uek 400.215.10 (installed by anaconda), not
+  the staged 297.3 — the staged kernel's %post grubby fails in the
+  appliance and the old assert only matched the `el5uek` substring. The
+  media kernel's initrd has no nvme (built on virtio) and ena.ko lives
+  only under 297.3: the AMI would not have booted on Nitro (SPEC D.32
+  record #8).
+- **OL5S1:** target kver now derived from the STAGED rpm filename; ALL
+  other kernels (RHCK + media UEK) removed (OL-parity); grub.conf owned
+  explicitly (guaranteed staged-kver entry via clone-from-default,
+  stale-entry prune, default re-point) with an EXACT-kver assert.
+- **Phase 6:** new CHECK 6 (OL5, HARD FAIL) — the DEFAULT grub entry's
+  kernel must equal the target: the validator now checks the boot path,
+  not the intended artifacts.
+- **Message truthfulness:** ENA's OL5 initramfs-skip line states the
+  real reason (network driver; nvme initrd owned by OL5S1); awscli's v1
+  versionlock short-circuits informatively on OL5 (no repos).
+- **Env (adjudicated 2026-07-20):** `DISK_SIZE_GB` 10 → **7** (OL6-10
+  aligned; measured usage ~1.7 GB; growroot floor) and `SELINUX`
+  permissive → **enforcing** (plan B: measure real denials; permissive
+  is the measured fallback).
+- Tests: t025 149 → 158 (grub-ownership behaviorals ×5 + structural pins
+  ×5, env pins updated ×2, old substring-assert pin retired); suite
+  baseline 788 → **797**. TESTING.md counts + rows and SPEC D.32
+  (record #8) in lock-step.
+
+
 ### Fixed (2026-07-20 — record #7: builder.log closes the record-#6 open item; awscli unzip + multilib glibc parse fixed)
 - **`builder.log` proves provisioning ran end-to-end** — 25 RPMs
   installed, all OL5S1 hard asserts passed, and the **ENA 2.12.3 driver
