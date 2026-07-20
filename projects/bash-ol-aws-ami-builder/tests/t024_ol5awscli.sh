@@ -129,4 +129,11 @@ assert_rc 0 "${rc}" "merge C3: --merge-prefer theirs resolves the conflict"
 st="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['entries'][0]['status'])" "${WORK}/led.json")"
 assert_eq "fail" "${st}" "merge C3: theirs status replaces ours"
 
+# record #7 pins: the real-guest first contact of the awscli hook
+inst="$(cat "${INST}")"
+assert_match "${inst}" "rpm -q --qf '%\{VERSION\}.n' glibc" "installer: glibc read is multilib-safe (newline qf; two glibc arches concatenated to 2.52.5 on the real guest without it)"
+assert_match "${inst}" 'sort -u | head -1' "installer: multilib duplicate versions collapse to one value"
+assert_match "${inst}" 'command -v unzip' "installer: unzip is pre-asserted before the bundle unpack (ISO minimal guest has no unzip; ks %packages supplies it)"
+assert_match "${inst}" 'kickstart %packages contract; see SPEC D.32 record #7' "installer: the unzip die message names the supplying contract"
+
 t_done

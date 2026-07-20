@@ -3788,6 +3788,10 @@ iproute
 ethtool
 e4fsprogs
 libselinux-python
+# unzip: the AWS CLI v2 bundle unpack tool (record #7 -- the EPEL5 container
+# clean-core ships unzip, but the ISO minimal guest does NOT; U11 media
+# carries unzip-5.52, so anaconda supplies it)
+unzip
 # kernel/initrd handling for the host-staged UEK R2 install
 module-init-tools
 mkinitrd

@@ -20,6 +20,29 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (2026-07-20 — record #7: builder.log closes the record-#6 open item; awscli unzip + multilib glibc parse fixed)
+- **`builder.log` proves provisioning ran end-to-end** — 25 RPMs
+  installed, all OL5S1 hard asserts passed, and the **ENA 2.12.3 driver
+  was built and installed on the real guest**
+  (`updates/ena.ko`, `2.12.3g`, all 12 el5uek shims) — the "~16 s too
+  fast" concern was wrong; the dispatch is sound. grubby-template and
+  kdump/rsyslog service noise recorded as benign (SPEC D.32 record #7).
+- **awscli fix 1:** the hook died at `unzip: command not found` — the
+  "unzip ships in the OL5 clean-core" note was a container observation
+  (record-#5 asymmetry class); `unzip` is now in the kickstart
+  `%packages` (U11 media carries unzip-5.52) and the installer
+  pre-asserts it with a message naming the supplying contract.
+- **awscli fix 2:** the glibc floor gate read `2.52.5` — the qf without
+  a newline concatenates the multilib pair; fixed with `%{VERSION}\n` +
+  `sort -u | head -1` (both parses reproduced in-sandbox against a
+  multilib rpm stub; the measured 2.17.51 pin remains correct).
+- Tests: t024 +4 pins (26 → 30; initially appended AFTER `t_done` and
+  therefore uncounted — caught via the pass-count mismatch and moved
+  before the summary), t025 +1 ks pin (148 → 149); suite baseline
+  783 → **788**. TESTING.md counts + rows and SPEC D.32 (record #7) in
+  lock-step; B-T4 re-validated green with the modified kickstart.
+
+
 ### Fixed (2026-07-20 — record #6: /.build-info was structurally empty on OL5; upstream's post-provision mv could never succeed)
 - **Sixth run failed at `mv ${VM_DIR}/.build-info/*`** — upstream
   unconditionally moves the build-info files out after provisioning; on

@@ -4629,3 +4629,34 @@ executed is determined by `${VM_DIR}/builder.log` (upstream copies the
 guest's `/tmp/builder.log` out BEFORE the failed mv, so
 `/data/ol5-build-ws/OL5U11_x86_64-aws-b2/builder.log` exists on the
 operator host) — to be read before the next conclusion is drawn.
+
+**First-contact record #7 (2026-07-20, `builder.log` analysis of the sixth
+run — the record-#6 open item CLOSED):** upstream's copied-out guest log
+proves provisioning ran END-TO-END: the OL5S1 executor installed all 25
+staged RPMs and passed every hard assert (UEK R2 in place, initrd carries
+nvme.ko, grub default boots el5uek, cloud-init 0.6.3 verified), the
+serial-console hook correctly skipped (GRUB Legacy), and — the milestone —
+**the ENA 2.12.3 driver was actually BUILT AND INSTALLED on the real
+guest**: all 12 el5uek shims applied, gcc 4.1.2 compiled the module, and
+`/lib/modules/2.6.39-400.297.3.el5uek/updates/ena.ko (2.12.3g)` landed.
+The earlier "~16 s is too fast" concern was WRONG — EL5-era RPMs and a
+9-object module compile genuinely fit in seconds on modern hardware; the
+dispatch is sound. Known-benign noise recorded: `grubby fatal error:
+unable to find a suitable template` (kernel rpm %post inside the
+appliance; the grub contract is owned and asserted by OL5S1, which
+passed) and kdump/rsyslog `service stop [FAILED]` chatter. Two REAL
+defects found and fixed: (1) **the awscli hook died at
+`unzip: command not found`** — the installer's "unzip ships in the OL5
+clean-core" note was a CONTAINER observation that does not transfer to
+the ISO minimal guest (the record-#5 container≠guest asymmetry class
+again); fixed by adding `unzip` to the kickstart `%packages` (U11 media
+carries unzip-5.52) plus a loud pre-assert in the installer that names
+the supplying contract. (2) **the glibc floor gate read a corrupt value**
+(`glibc 2.52.5` in the log): `rpm -q --qf '%{VERSION}' glibc` without a
+newline concatenates the multilib pair (glibc.x86_64 + glibc.i686 →
+"2.5"+"2.5"); fixed with a newline qf + `sort -u | head -1` (the mangled
+and corrected parses were both reproduced in-sandbox against a multilib
+rpm stub; the pinned 2.17.51 remains correct — per the installer's own
+measured record it is the last v2 build whose bundled .so's need only
+GLIBC_2.5). Cosmetic, accepted as-is: the awscli log's `kver` shows the
+appliance kernel under virt-customize (informational only; glibc gates).

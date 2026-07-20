@@ -346,7 +346,10 @@ if [[ -z "${kver}" && "${osmajor}" == "5" && -n "${AWSCLI_OL5_KVER:-}" ]]; then
   kver="${AWSCLI_OL5_KVER}"
 fi
 [[ -n "${kver}" ]] || kver="${test_host_kernel}"
-glibc="$(rpm -q --qf '%{VERSION}' glibc 2>/dev/null | grep -E '^[0-9]' | head -1 || true)"
+# multilib-safe: x86_64 guests carry glibc.x86_64 AND glibc.i686 -- without a
+# newline in the qf the two VERSIONs concatenate ("2.5"+"2.5" -> "2.52.5",
+# observed on the real OL5 guest, record #7) and corrupt the glibc floor gate.
+glibc="$(rpm -q --qf '%{VERSION}\n' glibc 2>/dev/null | grep -E '^[0-9]' | sort -u | head -1 || true)"
 [[ -n "${glibc}" ]] || glibc="$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}' || true)"
 
 log "OL${osmajor} | glibc ${glibc:-?} | kver ${kver:-?} (host ${test_host_kernel:-?}) | requested AWS CLI ${awscli_version}"
@@ -373,6 +376,11 @@ else
 fi
 
 stage "unzip bundle"
+# Pre-assert the tool (record #7: the ISO minimal OL5 guest has no unzip --
+# the ks %packages contract supplies it from the U11 media; the EPEL5
+# container clean-core observation did not transfer to the guest).
+command -v unzip >/dev/null 2>&1 \
+  || die "unpack-fail: 'unzip' is not installed (on OL5 it must come from the kickstart %packages contract; see SPEC D.32 record #7)"
 unzip -oq "${zipfile}" -d "${workdir}" || die "unpack-fail: could not unzip the AWS CLI v2 bundle"
 [[ -x "${workdir}/aws/install" ]] || die "unpack-fail: ${workdir}/aws/install missing after unzip"
 

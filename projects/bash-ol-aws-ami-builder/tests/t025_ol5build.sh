@@ -102,7 +102,7 @@ assert_match "${ks}" 'serial --unit=0 --speed=115200' "ks: GRUB-over-serial dire
 assert_match "${ks}" ': > /etc/machine-id' "ks: machine-id stub for virt-sysprep (D.20)"
 assert_match "${ks}" '^sos$' "ks: sos baked into %packages (OL6-10 parity invariant)"
 assert_match "${ks}" '^rsyslog$' "ks: rsyslog listed (cloud-init 0.6.3 hard Requires)"
-for p in e4fsprogs libselinux-python iproute crontabs util-linux mkinitrd module-init-tools; do
+for p in e4fsprogs libselinux-python iproute crontabs util-linux mkinitrd module-init-tools unzip; do
   assert_match "${ks}" "^${p}\$" "ks: closure/tooling package listed: ${p}"
 done
 # growroot one-shot -- growpart decision model (adjudicated 2026-07-19):
