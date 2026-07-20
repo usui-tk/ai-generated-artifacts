@@ -20,6 +20,30 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (2026-07-20 — record #4: the v1 serial file backend died on DAC/SELinux at domain creation; v2 = pty + virtlogd log capture)
+- **Fourth run failed instantly at domain creation**: v1's
+  `--serial file,path=${WORKSPACE}/…` requires QEMU (the `qemu` user) /
+  the confined libvirt daemon to CREATE a file in a root-owned arbitrary
+  directory — denied by DAC (no `w` on the dir) and by SELinux
+  (`default_t` on custom paths like `/data`); even virt-install's
+  rollback deletion of the never-created file was denied. Disks are
+  immune because they are storage-pool volumes; chardev files are
+  outside that machinery (SPEC D.32 record #4).
+- **Fix (v2):** libvirt-native chardev logging — the device stays `pty`
+  (`virsh console` from a second terminal works again) and
+  `log.file=/var/log/libvirt/qemu/<vm>-install-serial.log,log.append=on`
+  routes the complete serial output through **virtlogd**, whose
+  policy-native log directory that is. v1→v2 upgrade handling removes
+  stale v1 lines on reused workspaces. Verified pre-landing with the
+  real toolchain: virt-install 4.1 `--print-xml` XML shape, the v1 DAC
+  failure reproduction, and the REAL apply block executed in all three
+  states (fresh / v1-upgrade / idempotent) — now permanent t025
+  behaviorals.
+- Tests: t025 129 → 135 asserts (v2 pins incl. a v1-form-absent guard +
+  the 3-state behavioral apply); suite baseline 764 → **770**.
+  TESTING.md counts + rows and SPEC D.32 (record #4) in lock-step.
+
+
 ### Fixed (2026-07-20 — record #3: SERIAL_CONSOLE=yes hung after install under the wrapper; now non-interactive with file-backed serial capture)
 - **Third real run: install completed again in ~1 min, then 75+ min of
   dead-wait** — upstream attaches the console in the `SERIAL_CONSOLE=yes`

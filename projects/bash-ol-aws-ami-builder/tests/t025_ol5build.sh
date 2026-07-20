@@ -341,7 +341,69 @@ assert_match "${main}" 'declare -gA REPO \|\| true' "wiring: the guard keeps hos
 assert_match "${main}" 'guest-bound env member contains bash-4-only' "wiring: P3GATE scans the guest-bound env CONCAT CHANNEL (defaults + distr + cloud members)"
 assert_match "${main}" 'env.properties.local contains bash-4-only' "wiring: the Phase-4 wrapper-generated local env is scanned too (channel fully covered)"
 assert_match "${main}" 'ol-aws-ami-builder PATCH serial-noninteractive' "wiring: SERIAL_CONSOLE=yes is non-interactive under the wrapper (record #3: attached console hangs after domain shutdown when stdio is piped)"
-assert_match "${main}" '--noautoconsole --serial "file,path=' "wiring: yes-branch gains --wait/--noautoconsole and a FILE-backed ttyS0 (anaconda serial output captured persistently)"
+assert_match "${main}" 'pty,log\.file=/var/log/libvirt/qemu' "wiring: v2 keeps the device pty and captures via virtlogd <log> into the policy-native log dir (record #4: a QEMU-opened workspace file dies on DAC/SELinux)"
+if grep -q -- '--serial "file,path=' "${MAIN}"; then
+  t_fail "wiring: the failed v1 QEMU-file-backend form still present in the builder"
+else
+  t_pass "wiring: the failed v1 QEMU-file-backend form is gone from the builder"
+fi
+
+# serial patch v2: behavioral 3-state apply (real extracted block vs a
+# fixture carrying the real upstream anchor; record-#4 discipline -- the
+# apply logic must be executed, not just token-pinned)
+sed -n '/if grep -Fq .log\.file=\/var\/log\/libvirt\/qemu/,/^  fi$/p' "${MAIN}" > "${WORK}/serial.block"
+if [ -s "${WORK}/serial.block" ]; then
+  t_pass "serial(behavioral): apply block extracted from the builder ($(wc -l < "${WORK}/serial.block") lines)"
+else
+  t_fail "serial(behavioral): apply block not extractable"
+fi
+cat > "${WORK}/serial-fixture" <<'EOF_SFX'
+  if [[ "${SERIAL_CONSOLE,,}" = "yes" ]]; then
+    BOOT_COMMAND+=( "${BOOT_COMMAND_SERIAL_CONSOLE[@]}" )
+  else
+    virt_install_args+=(--wait "${INSTALL_WAIT_TIME}" --noautoconsole)
+  fi
+EOF_SFX
+serial_apply() {
+  # run the REAL extracted block with the builder's variable contract
+  # (the stub functions/vars are consumed by the sourced block)
+  ( set -u
+    # shellcheck disable=SC2329
+    log_info() { :; }
+    # shellcheck disable=SC2329
+    log_warn() { :; }
+    # shellcheck disable=SC2329
+    die() { echo "DIE: $*"; exit 9; }
+    # shellcheck disable=SC2034
+    build_image_serial="$1"
+    # shellcheck disable=SC2034
+    WORKSPACE=/tmp/ws
+    # shellcheck disable=SC2034
+    VM_NAME=TESTVM
+    # shellcheck disable=SC2034
+    INSTALL_WAIT_TIME=60
+    # shellcheck disable=SC1090,SC1091
+    . "${WORK}/serial.block"
+  )
+}
+cp "${WORK}/serial-fixture" "${WORK}/sf1"
+serial_apply "${WORK}/sf1" >/dev/null 2>&1
+n_v2="$(grep -c 'pty,log\.file=/var/log/libvirt/qemu' "${WORK}/sf1" || true)"
+assert_eq 1 "${n_v2}" "serial(behavioral): fresh upstream shape -> exactly one v2 line applied"
+bash -n "${WORK}/sf1" 2>/dev/null
+assert_rc 0 $? "serial(behavioral): patched fixture parses (bash -n)"
+cp "${WORK}/serial-fixture" "${WORK}/sf2"
+# shellcheck disable=SC2016
+sed -i '/BOOT_COMMAND+=( "${BOOT_COMMAND_SERIAL_CONSOLE\[@\]}" )/a\    # [ol-aws-ami-builder PATCH serial-noninteractive] v1 stale comment\n    virt_install_args+=(--wait "${INSTALL_WAIT_TIME}" --noautoconsole --serial "file,path=${WORKSPACE}/${VM_NAME}-install-serial.log")' "${WORK}/sf2"
+serial_apply "${WORK}/sf2" >/dev/null 2>&1
+if [ "$(grep -c 'file,path=' "${WORK}/sf2" || true)" = "0" ] && [ "$(grep -c 'pty,log\.file' "${WORK}/sf2" || true)" = "1" ]; then
+  t_pass "serial(behavioral): stale v1 lines removed and exactly one v2 line applied (workspace-reuse upgrade path)"
+else
+  t_fail "serial(behavioral): v1->v2 upgrade left remnants (file,path=$(grep -c 'file,path=' "${WORK}/sf2"); v2=$(grep -c 'pty,log\.file' "${WORK}/sf2"))"
+fi
+serial_apply "${WORK}/sf1" >/dev/null 2>&1
+n_v2="$(grep -c 'pty,log\.file' "${WORK}/sf1" || true)"
+assert_eq 1 "${n_v2}" "serial(behavioral): re-apply on v2 is an idempotent skip (no duplication)"
 
 # env-defaults patch x channel gate: INTEGRATION (first-contact record #2:
 # both sides were unit-pinned but never run TOGETHER -- the gate flagged the

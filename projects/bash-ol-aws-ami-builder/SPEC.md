@@ -4541,3 +4541,30 @@ path and a `tail -f` hint when `SERIAL_CONSOLE=yes`. Note: `virsh console`
 no longer attaches to the install VM (the serial device is file-backed) —
 the file IS the diagnostic channel. `SERIAL_CONSOLE_RUNTIME` (the AMI's
 runtime serial config) is unrelated and unaffected.
+
+**First-contact record #4 (2026-07-20, fourth run):** the v1 (record #3)
+serial fix failed at domain creation: `--serial file,path=${WORKSPACE}/…`
+makes QEMU itself (the `qemu` user) open/create the file, and under
+`qemu:///system` neither QEMU nor the confined libvirt daemon may create
+files in a root-owned arbitrary directory (DAC: no `w` on the dir;
+SELinux: custom paths like `/data` carry `default_t`). virt-install
+rolled back instantly ("Allocating disk" → "Removing disk"), and even the
+rollback deletion of the never-created file was denied — the visible
+`Unable to delete file …-install-serial.log: Permission denied`. Disks
+never hit this class because they are storage-pool volumes (libvirt owns
+their labels/ownership); chardev files sit OUTSIDE that machinery. Fix
+(v2): use libvirt's native chardev logging — the serial device stays
+`pty` (upstream-equivalent; `virsh console` from a second terminal works
+again) and a `<log file=… append='on'/>` element makes **virtlogd** (the
+root daemon whose policy-native directory is `/var/log/libvirt/qemu`,
+`virt_log_t`) write the complete output to
+`/var/log/libvirt/qemu/<vm>-install-serial.log`. Verified pre-landing
+with the real toolchain in-sandbox: virt-install 4.1 `--print-xml`
+produces `<serial type="pty"><log file=… append="on"/>`; the v1 DAC
+composition was reproduced (non-root create into a root-owned 0755 dir →
+EACCES); and the REAL apply block was executed against the real upstream
+anchor in all three states (fresh → one v2 line; v1-patched → stale lines
+removed, exactly one v2 line; v2 → idempotent, no duplication), now
+permanently pinned as t025 behaviorals. Residual (operator side): actual
+virtlogd write + SELinux behavior on the RHEL 10 host is the remaining
+first-contact surface for this feature.
