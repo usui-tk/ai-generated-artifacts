@@ -340,6 +340,48 @@ assert_match "${main}" 'ol-aws-ami-builder OL5 env-defaults PATCH' "wiring: env.
 assert_match "${main}" 'declare -gA REPO \|\| true' "wiring: the guard keeps host semantics (declares on bash 4+) and is set-e safe on the guest (|| true)"
 assert_match "${main}" 'guest-bound env member contains bash-4-only' "wiring: P3GATE scans the guest-bound env CONCAT CHANNEL (defaults + distr + cloud members)"
 assert_match "${main}" 'env.properties.local contains bash-4-only' "wiring: the Phase-4 wrapper-generated local env is scanned too (channel fully covered)"
+
+# env-defaults patch x channel gate: INTEGRATION (first-contact record #2:
+# both sides were unit-pinned but never run TOGETHER -- the gate flagged the
+# patch's own guard line on the real host. This case composes the REAL
+# extracted functions so that class of inconsistency can never ship again.)
+sed -n '/^_ol5_scan_bash32_hostile() {/,/^}/p' "${MAIN}" > "${WORK}/scan.fn"
+sed -n '/^_ol5_patch_env_defaults() {/,/^}/p' "${MAIN}" > "${WORK}/patch.fn"
+if [ -s "${WORK}/scan.fn" ] && [ -s "${WORK}/patch.fn" ]; then
+  t_pass "envgate: both real functions extracted (_ol5_scan_bash32_hostile / _ol5_patch_env_defaults)"
+else
+  t_fail "envgate: function extraction failed"
+fi
+log_warn() { :; }
+log_info() { :; }
+# shellcheck disable=SC1091
+. "${WORK}/scan.fn"
+# shellcheck disable=SC1091
+. "${WORK}/patch.fn"
+cat > "${WORK}/fx-defaults" <<'EOF_FXD'
+# fixture mirroring upstream env.properties.defaults (the relevant line)
+CACHE_DIR=".cache"
+REPO_URL=
+declare -gA REPO
+EOF_FXD
+_ol5_patch_env_defaults "${WORK}/fx-defaults" >/dev/null 2>&1
+_ol5_scan_bash32_hostile "${WORK}/fx-defaults" >/dev/null 2>&1
+assert_rc 0 $? "envgate(behavioral): patch THEN scan = zero findings (the real-host failure composition is fixed)"
+grep -q 'BASH_VERSINFO\[0\]' "${WORK}/fx-defaults"
+assert_rc 0 $? "envgate(behavioral): the guard line was actually written by the patch"
+cat > "${WORK}/fx-raw" <<'EOF_FXR'
+declare -gA REPO
+EOF_FXR
+_ol5_scan_bash32_hostile "${WORK}/fx-raw" >/dev/null 2>&1
+assert_rc 1 $? "envgate(behavioral): an UNpatched declare -gA still fails the scan (gate stays effective)"
+cat > "${WORK}/fx-tricky" <<'EOF_FXT'
+[ "${BASH_VERSINFO[0]}" -ge 4 ] && mapfile x
+declare -A other
+EOF_FXT
+_ol5_scan_bash32_hostile "${WORK}/fx-tricky" >/dev/null 2>&1
+assert_rc 1 $? "envgate(behavioral): the exemption is SHAPE-strict (guard without '|| true' and bare declare -A both caught)"
+_ol5_patch_env_defaults "${WORK}/fx-defaults" >/dev/null 2>&1
+assert_rc 0 $? "envgate(behavioral): re-apply is an idempotent skip"
 assert_match "${main}" 'OL5 kickstart must contain NO .%end' "wiring: P3GATE OL5 zero-%end branch present"
 assert_match "${main}" '5\) prof="RHEL5" ;;' "wiring: ksvalidator advisory maps OL5 -> RHEL5 profile"
 vks="$(cat "${PROJ}/tests/validate-kickstart.sh")"

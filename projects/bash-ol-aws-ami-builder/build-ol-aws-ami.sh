@@ -1376,6 +1376,63 @@ sos
 #       logged on every build AND written to ${WORKSPACE}/upstream-provenance.txt
 #       together with the applied wrapper patch markers and the sha256 of every
 #       patched artifact, so ANY later failure is reproducible byte-for-byte.
+# _ol5_scan_bash32_hostile FILE
+# Scan one guest-bound env-concat member for bash-4-only constructs that
+# would kill the EL5 guest's bash 3.2 at source time (declare -g/-A,
+# mapfile/readarray, ${var,,}/${var^^}, |&) on non-comment lines.
+#
+# EXEMPTION (principled, not author-based): a line is exempt iff it has the
+# version-guard safe shape
+#     [ "${BASH_VERSINFO[0]}" -ge 4 ] && <anything> || true
+# which is safe BY CONSTRUCTION on bash 3.2 -- the guard evaluates false, so
+# the RHS never executes (bash-4 tokens are inert at parse time), and the
+# trailing `|| true` keeps the AND-list from tripping `set -e`. This is
+# exactly the shape the OL5 env-defaults patch writes; anything else
+# carrying a hostile token still fails the scan (first-contact record #2:
+# the 2026-07-20 gate correctly failed in seconds, but on the fix line
+# itself -- the patch and the gate had never been run TOGETHER).
+# Prints findings (line-numbered) on stdout; returns 1 iff any.
+_ol5_scan_bash32_hostile() {
+  local file="$1" hostile
+  hostile="$(grep -nE 'declare -g|declare -A|mapfile|readarray|\$\{[A-Za-z_][A-Za-z_0-9]*(,,|\^\^)|\|&' "${file}" \
+    | grep -vE '^[0-9]+:[[:space:]]*#' \
+    | grep -vE '^[0-9]+:\[ "\$\{BASH_VERSINFO\[0\]\}" -ge 4 \] && .* \|\| true$' || true)"
+  if [[ -n "${hostile}" ]]; then
+    printf '%s\n' "${hostile}"
+    return 1
+  fi
+  return 0
+}
+
+# _ol5_patch_env_defaults FILE
+# Guard upstream's `declare -gA REPO` (bash 4.2+) for the EL5 guest: the
+# env-concat channel carries this file verbatim into the guest, whose bash
+# 3.2 sources it (first-contact record #1). Host-side semantics unchanged
+# (modern bash still declares the associative array; REPO is host-only).
+# Marker-guarded + idempotent; loud warn if upstream refactored the line.
+_ol5_patch_env_defaults() {
+  local file="$1"
+  if [[ ! -f "${file}" ]]; then
+    die "Cannot apply OL5 env-defaults patch: ${file} not found"
+  fi
+  if grep -Fq '[ol-aws-ami-builder OL5 env-defaults PATCH]' "${file}"; then
+    log_info "  -> OL5 env-defaults patch already present (idempotent skip)"
+  elif grep -q '^declare -gA REPO$' "${file}"; then
+    # shellcheck disable=SC2016
+    sed -i".ol5-envdefaults.bak" \
+      -e 's~^declare -gA REPO$~# [ol-aws-ami-builder OL5 env-defaults PATCH] declare -gA is bash 4.2+; the EL5 guest (bash 3.2) sources this file via provision.d -- guard by bash major (REPO is host-side only)\n[ "${BASH_VERSINFO[0]}" -ge 4 ] \&\& declare -gA REPO || true~' \
+      "${file}"
+    if grep -q 'BASH_VERSINFO\[0\]' "${file}"; then
+      log_info "  -> OL5 env-defaults patch applied (backup at ${file}.ol5-envdefaults.bak)"
+    else
+      die "Failed to apply OL5 env-defaults patch to ${file}"
+    fi
+  else
+    log_warn "  Upstream 'declare -gA REPO' line not found in ${file}."
+    log_warn "  Assuming upstream refactored it; the P3GATE guest-env scan remains the safety net."
+  fi
+}
+
 #   (2) [OLAWS-P3GATE01] -- a pre-install exit gate validates the ACTUALLY
 #       patched artifacts on the real build host at the end of Phase 3, so an
 #       upstream shape change or a mis-applied patch fails in seconds with a
@@ -1588,8 +1645,7 @@ _p3_exit_gate() {
       "${base}/cloud/aws/env.properties" \
       "${base}/cloud/aws/ol5-slim/env.properties"; do
       [[ -f "${_envm}" ]] || continue
-      _hostile="$(grep -nE 'declare -g|declare -A|mapfile|readarray|\$\{[A-Za-z_][A-Za-z_0-9]*(,,|\^\^)|\|&' "${_envm}" | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
-      if [[ -n "${_hostile}" ]]; then
+      if ! _hostile="$(_ol5_scan_bash32_hostile "${_envm}")"; then
         log_error "  [P3GATE] guest-bound env member contains bash-4-only construct(s) (EL5 guest sources this): ${_envm}"
         while IFS= read -r _l; do log_error "    ${_l}"; done <<< "${_hostile}"
         fails=$((fails+1))
@@ -1891,27 +1947,8 @@ phase3_clone_repository() {
   # (semantics unchanged for the host-side kickstart repo machinery), the
   # EL5 guest skips it. `|| true` keeps the AND-list from tripping set -e.
   if [[ "${OL_MAJOR_VERSION}" -eq 5 ]]; then
-    local env_defaults_ol5="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/env.properties.defaults"
     log_info "Applying OL5 bash-3.2 guard to upstream env.properties.defaults (declare -gA REPO)"
-    if [[ ! -f "${env_defaults_ol5}" ]]; then
-      die "Cannot apply OL5 env-defaults patch: ${env_defaults_ol5} not found"
-    fi
-    if grep -Fq '[ol-aws-ami-builder OL5 env-defaults PATCH]' "${env_defaults_ol5}"; then
-      log_info "  -> OL5 env-defaults patch already present (idempotent skip)"
-    elif grep -q '^declare -gA REPO$' "${env_defaults_ol5}"; then
-      # shellcheck disable=SC2016
-      sed -i".ol5-envdefaults.bak" \
-        -e 's~^declare -gA REPO$~# [ol-aws-ami-builder OL5 env-defaults PATCH] declare -gA is bash 4.2+; the EL5 guest (bash 3.2) sources this file via provision.d -- guard by bash major (REPO is host-side only)\n[ "${BASH_VERSINFO[0]}" -ge 4 ] \&\& declare -gA REPO || true~' \
-        "${env_defaults_ol5}"
-      if grep -q 'BASH_VERSINFO\[0\]' "${env_defaults_ol5}"; then
-        log_info "  -> OL5 env-defaults patch applied (backup at ${env_defaults_ol5}.ol5-envdefaults.bak)"
-      else
-        die "Failed to apply OL5 env-defaults patch to ${env_defaults_ol5}"
-      fi
-    else
-      log_warn "  Upstream 'declare -gA REPO' line not found in ${env_defaults_ol5}."
-      log_warn "  Assuming upstream refactored it; the P3GATE guest-env scan below remains the safety net."
-    fi
+    _ol5_patch_env_defaults "${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/env.properties.defaults"
   fi
 
   # OL5 host-supply executor + cloud:: overrides ([OLAWS-OL5S1] / [OLAWS-OL5S2]).
@@ -4346,8 +4383,7 @@ EOF
   # Phase-3 P3GATE channel scan) -- verify the wrapper's own output too.
   if [[ "${OL_MAJOR_VERSION}" -eq 5 ]]; then
     local _lhostile
-    _lhostile="$(grep -nE 'declare -g|declare -A|mapfile|readarray|\$\{[A-Za-z_][A-Za-z_0-9]*(,,|\^\^)|\|&' "${tool_env}" | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
-    if [[ -n "${_lhostile}" ]]; then
+    if ! _lhostile="$(_ol5_scan_bash32_hostile "${tool_env}")"; then
       die "env.properties.local contains bash-4-only construct(s) but the EL5 guest sources it:
 ${_lhostile}"
     fi

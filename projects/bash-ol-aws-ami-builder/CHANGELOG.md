@@ -20,6 +20,27 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (2026-07-20 — record #2: the record-#1 fix tripped its own channel gate; patch×gate now integration-tested)
+- **Second real run failed at P3GATE on the fix itself:** the channel scan
+  token-matched the guard line the env-defaults patch writes (it contains
+  `declare -gA`), so the build died at the gate. The gate behaved as
+  designed (seconds, pre-install); the root cause was ours — the patch
+  and the gate were unit-pinned separately but **never executed
+  together** before shipping (SPEC D.32 record #2).
+- **Fix:** both sides refactored into extractable functions
+  (`_ol5_patch_env_defaults` / `_ol5_scan_bash32_hostile`, shared by
+  P3GATE and the Phase-4 local-env check); the scan gained a PRINCIPLED
+  exemption — only the version-guard safe shape
+  `[ "${BASH_VERSINFO[0]}" -ge 4 ] && … || true` is exempt (safe by
+  construction on bash 3.2); an incomplete guard or any other hostile
+  line still fails. The failure composition was reproduced in-sandbox,
+  proven fixed against the real upstream defaults, and the integration is
+  now PERMANENT in t025 (behavioral: patched→0 findings; raw
+  `declare -gA` caught; shape-strict exemption; idempotent re-apply).
+- Tests: t025 121 → 127 asserts; suite baseline 755 → **761**.
+  TESTING.md counts + tier row and SPEC D.32 (record #2) in lock-step.
+
+
 ### Fixed (2026-07-20 — OL5 first-contact E2E: guest-bound env concat carried `declare -gA` into bash 3.2)
 - **First contact result (real KVM, `--build-only`):** EL5 anaconda
   ACCEPTED the synthesized kickstart verbatim and completed the install —

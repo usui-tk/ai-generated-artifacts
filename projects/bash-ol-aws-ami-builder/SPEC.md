@@ -4498,3 +4498,24 @@ constructs on non-comment lines, and Phase 4 scans the wrapper-generated
 reintroduction dies in seconds, pre-install. Gate-maturity lesson applied:
 first contact exposed a new CLASS (guest-bound concatenation channels);
 the gate now owns the class, not just the instance.
+
+**First-contact record #2 (2026-07-20, real KVM host, second `--build-only`
+run):** the record-#1 fix itself was inconsistent — P3GATE's channel scan
+flagged the very guard line the env-defaults patch writes
+(`[ "${BASH_VERSINFO[0]}" -ge 4 ] && declare -gA REPO || true` contains the
+`declare -gA` token), so the build failed at the gate. The gate design
+worked exactly as intended (seconds, pre-install); the failure was a
+process gap: **the patch and the gate were unit-pinned separately but never
+executed TOGETHER** before shipping. Fix: both sides were refactored into
+extractable functions (`_ol5_patch_env_defaults`,
+`_ol5_scan_bash32_hostile`); the scan gained a PRINCIPLED exemption — a
+line is exempt iff it has the version-guard safe shape
+`[ "${BASH_VERSINFO[0]}" -ge 4 ] && … || true`, which is safe by
+construction on bash 3.2 (guard false → RHS never executes; `|| true` is
+`set -e`-safe) — an incomplete guard (missing `|| true`) or any other
+hostile line still fails. The composition was reproduced and then proven
+fixed in-sandbox against the real upstream defaults (patch→scan = 0
+findings; raw `declare -gA` still caught; shape-strict; host-bash source
+keeps `REPO` associative; idempotent), and the integration is permanently
+pinned in t025 as behavioral cases so a patch×gate inconsistency of this
+class cannot ship again.
