@@ -20,6 +20,33 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (2026-07-20 — record #5: guest rpm transaction — gdisk needs libicu; glibc-devel/-headers must match the U11 GA guest base; closure now gated host-side)
+- **Fifth run reached the `[OLAWS-OL5S1]` rpm transaction** (serial v2
+  held) and failed on four lines: gdisk's `libicu*.so.36` requires
+  (libicu was not staged) and the staged glibc-devel/-headers' exact
+  `glibc = 2.5-123.0.2.el5_11.3` against the ISO guest's **U11 GA
+  `2.5-123.0.1`** (machine-derived from the U11 base repodata). The
+  matrix container base is the latest errata, which masked the class:
+  exact-`glibc =` requires must match the RUNTIME TARGET (SPEC D.32
+  record #5).
+- **Manifest fixes:** glibc-devel/-headers → GA `2.5-123.0.1` (single
+  URL base retained; ENA 2.12.3 build boundary unaffected);
+  `libicu-3.6-5.16.1` staged. Matrix-identity contract updated to
+  "9 byte-identical + exactly the documented 3-entry divergence"
+  (comm-based set equality in t025; the matrix file itself is
+  untouched).
+- **New host-side closure gate:** `_ol5_stage_closure_gate` + the
+  measured 101-cap `OL5_GUEST_BASE_CAPS` table run right after staging —
+  every staged requirement must resolve within (staged ∪ measured
+  guest-base), any `glibc = X` must equal the pinned guest NVR; gaps die
+  in seconds pre-install. Verified in-sandbox against the real corrected
+  25-RPM set (PASS / libicu-removed FAIL / old-NVR FAIL), and all three
+  cases are permanent t025 behaviorals (real fn + real table, rpm
+  stubbed).
+- Tests: t025 135 → 143 asserts; suite baseline 770 → **778**.
+  TESTING.md counts + rows and SPEC D.32 (record #5) in lock-step.
+
+
 ### Fixed (2026-07-20 — record #4: the v1 serial file backend died on DAC/SELinux at domain creation; v2 = pty + virtlogd log capture)
 - **Fourth run failed instantly at domain creation**: v1's
   `--serial file,path=${WORKSPACE}/…` requires QEMU (the `qemu` user) /

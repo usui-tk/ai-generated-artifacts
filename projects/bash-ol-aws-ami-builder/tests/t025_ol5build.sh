@@ -297,15 +297,28 @@ assert_match "${prov}" 'rp_filter = 0' "prov: rp_filter=0 (EL5 2.6.18 has no loo
 assert_match "${prov}" 'for service in kudzu rhnsd sendmail kdump mcstrans' "prov: EL5-era service disable set (kudzu et al.)"
 
 # ---- (F) host-supply manifests ---------------------------------------------
+guest_nvr="$(grep -oE 'local ol5_guest_glibc_nvr="[^"]+"' "${MAIN}" | sed 's/.*="//; s/"//')"
+assert_eq "2.5-123.0.1" "${guest_nvr}" "manifest: guest base glibc NVR pinned at the U11 GA value (record #5)"
 sed -n '/local ol5_toolchain_rpms="/,/^perl.*"$/p' "${MAIN}" \
-  | sed -e 's/^.*ol5_toolchain_rpms="//' -e 's/"$//' | grep -E '\.rpm$' | sort > "${WORK}/tc-builder"
+  | sed -e 's/^.*ol5_toolchain_rpms="//' -e 's/"$//' -e "s/\\\${ol5_guest_glibc_nvr}/${guest_nvr}/" \
+  | grep -E '\.rpm$' | sort > "${WORK}/tc-builder"
 sed -n '/^OL5_TOOLCHAIN_RPMS="/,/"$/p' "${MTX}" \
   | sed -e 's/^OL5_TOOLCHAIN_RPMS="//' -e 's/"$//' | grep -E '\.rpm$' | sort > "${WORK}/tc-matrix"
-if [ -s "${WORK}/tc-builder" ] && diff -q "${WORK}/tc-builder" "${WORK}/tc-matrix" >/dev/null 2>&1; then
-  t_pass "manifest: builder toolchain list is BYTE-IDENTICAL to the matrix's proven OL5_TOOLCHAIN_RPMS ($(wc -l < "${WORK}/tc-builder") RPMs)"
-else
-  t_fail "manifest: builder toolchain list diverged from the matrix's OL5_TOOLCHAIN_RPMS (rsyslog5-class drift risk)"
-fi
+# Record-#5 adjudicated divergence: 9 entries byte-identical; the builder
+# swaps glibc-devel/-headers to the GUEST-matched GA NVR (exact `glibc =`
+# requires must match the runtime target, not the matrix container base)
+# and adds libicu (gdisk links ICU). Anything beyond exactly that is drift.
+comm -12 "${WORK}/tc-builder" "${WORK}/tc-matrix" > "${WORK}/tc-common"
+comm -23 "${WORK}/tc-builder" "${WORK}/tc-matrix" > "${WORK}/tc-builder-only"
+comm -13 "${WORK}/tc-builder" "${WORK}/tc-matrix" > "${WORK}/tc-matrix-only"
+assert_eq 9 "$(wc -l < "${WORK}/tc-common")" "manifest: 9 toolchain entries byte-identical with the matrix's proven OL5_TOOLCHAIN_RPMS"
+printf '%s\n' "glibc-devel-${guest_nvr}.x86_64.rpm" "glibc-headers-${guest_nvr}.x86_64.rpm" "libicu-3.6-5.16.1.x86_64.rpm" | sort > "${WORK}/tc-expect-bonly"
+diff -q "${WORK}/tc-builder-only" "${WORK}/tc-expect-bonly" >/dev/null 2>&1
+assert_rc 0 $? "manifest: builder-only entries are EXACTLY the record-#5 set (guest-matched glibc-devel/-headers + libicu)"
+printf '%s\n' "glibc-devel-2.5-123.0.2.el5_11.3.x86_64.rpm" "glibc-headers-2.5-123.0.2.el5_11.3.x86_64.rpm" | sort > "${WORK}/tc-expect-monly"
+diff -q "${WORK}/tc-matrix-only" "${WORK}/tc-expect-monly" >/dev/null 2>&1
+assert_rc 0 $? "manifest: matrix-only entries are exactly the container-base glibc pair (documented divergence, no other drift)"
+assert_match "${main}" '_ol5_stage_closure_gate "\$\{ol5_stage_cache\}" "\$\{ol5_guest_glibc_nvr\}"' "wiring: the staged-set closure gate runs over the exact staged list before the install"
 n_epel="$(sed -n '/local ol5_epel_rpms="/,/^python26-libs.*"$/p' "${MAIN}" | grep -cE '\.rpm"?$' || true)"
 assert_eq 10 "${n_epel}" "manifest: EPEL5 closure list carries exactly 10 frozen NVRs (9-RPM cloud-init closure + gdisk)"
 assert_match "${main}" 'cloud-init-0\.6\.3-0\.12\.bzr532\.el5\.noarch\.rpm' "manifest: cloud-init 0.6.3 bzr532 NVR frozen"
@@ -404,6 +417,67 @@ fi
 serial_apply "${WORK}/sf1" >/dev/null 2>&1
 n_v2="$(grep -c 'pty,log\.file' "${WORK}/sf1" || true)"
 assert_eq 1 "${n_v2}" "serial(behavioral): re-apply on v2 is an idempotent skip (no duplication)"
+
+# closure gate: behavioral with a stubbed rpm CLI (hermetic; record #5 --
+# the REAL gate function + the REAL baked caps table are extracted and
+# executed; only the rpm metadata source is stubbed)
+sed -n '/^_ol5_stage_closure_gate() {/,/^}/p' "${MAIN}" > "${WORK}/closure.fn"
+sed -n '/^readonly OL5_GUEST_BASE_CAPS=/,/^zd1211-firmware"$/p' "${MAIN}" > "${WORK}/closure.caps"
+if [ -s "${WORK}/closure.fn" ] && [ "$(tail -1 "${WORK}/closure.caps")" = 'zd1211-firmware"' ]; then
+  t_pass "closure(behavioral): real gate function + full baked caps table extracted ($(wc -l < "${WORK}/closure.caps") lines)"
+else
+  t_fail "closure(behavioral): extraction failed"
+fi
+mkdir -p "${WORK}/rpmstub" "${WORK}/stage"
+cat > "${WORK}/rpmstub/rpm" <<'EOF_STUB'
+#!/usr/bin/env bash
+# fixture-backed rpm stub: -qp --provides|--requires|--qf %{NAME}
+ FILE
+f="${!#}"
+case "$*" in
+  *--provides*) cat "${f}.provides" ;;
+  *--requires*) cat "${f}.requires" ;;
+  *--qf*)       cat "${f}.name" ;;
+  *) exit 1 ;;
+esac
+EOF_STUB
+chmod +x "${WORK}/rpmstub/rpm"
+printf 'fake-gdisk\n' > "${WORK}/stage/a.rpm"
+printf 'gdisk = 0.8.4-1.el5\n' > "${WORK}/stage/a.rpm.provides"
+printf 'libicuuc.so.36()(64bit)\nlibc.so.6()(64bit)\n/bin/sh\n' > "${WORK}/stage/a.rpm.requires"
+printf 'gdisk\n' > "${WORK}/stage/a.rpm.name"
+printf 'fake-libicu\n' > "${WORK}/stage/b.rpm"
+printf 'libicuuc.so.36()(64bit)\nlibicu = 3.6-5.16.1\n' > "${WORK}/stage/b.rpm.provides"
+printf 'libc.so.6()(64bit)\n' > "${WORK}/stage/b.rpm.requires"
+printf 'libicu\n' > "${WORK}/stage/b.rpm.name"
+printf 'fake-gdevel\n' > "${WORK}/stage/c.rpm"
+printf 'glibc-devel = 2.5-123.0.1\n' > "${WORK}/stage/c.rpm.provides"
+printf 'glibc = 2.5-123.0.1\n' > "${WORK}/stage/c.rpm.requires"
+printf 'glibc-devel\n' > "${WORK}/stage/c.rpm.name"
+closure_run() {
+  ( set -u
+    PATH="${WORK}/rpmstub:${PATH}"
+    # shellcheck disable=SC2329
+    log_info() { :; }
+    # shellcheck disable=SC2329
+    log_warn() { :; }
+    # shellcheck disable=SC2329
+    log_error() { :; }
+    # shellcheck disable=SC2329
+    die() { exit 9; }
+    # shellcheck disable=SC1090,SC1091
+    . "${WORK}/closure.caps"
+    # shellcheck disable=SC1090,SC1091
+    . "${WORK}/closure.fn"
+    _ol5_stage_closure_gate "${WORK}/stage" "$@"
+  )
+}
+closure_run "2.5-123.0.1" a.rpm b.rpm c.rpm >/dev/null 2>&1
+assert_rc 0 $? "closure(behavioral): closed fixture set (gdisk+libicu+glibc-devel vs real caps table) PASSES"
+closure_run "2.5-123.0.1" a.rpm c.rpm >/dev/null 2>&1
+assert_rc 9 $? "closure(behavioral): removing the libicu provider FAILS the gate (real failure class #1)"
+closure_run "2.5-999" a.rpm b.rpm c.rpm >/dev/null 2>&1
+assert_rc 9 $? "closure(behavioral): a glibc exact-NVR mismatch FAILS the gate (real failure class #2)"
 
 # env-defaults patch x channel gate: INTEGRATION (first-contact record #2:
 # both sides were unit-pinned but never run TOGETHER -- the gate flagged the

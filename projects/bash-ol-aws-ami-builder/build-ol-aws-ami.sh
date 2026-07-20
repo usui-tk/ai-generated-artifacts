@@ -1376,6 +1376,191 @@ sos
 #       logged on every build AND written to ${WORKSPACE}/upstream-provenance.txt
 #       together with the applied wrapper patch markers and the sha256 of every
 #       patched artifact, so ANY later failure is reproducible byte-for-byte.
+# _ol5_stage_closure_gate DIR GLIBC_NVR RPM_FILE...
+# Host-side dependency-closure gate over the EXACT staged RPM set, run after
+# fetching and BEFORE the ~45-minute install (first-contact record #5: the
+# guest rpm transaction failed on gdisk->libicu and on glibc-devel/-headers
+# carrying exact `glibc = <newer errata>` requires against the U11 GA guest).
+#
+# Model: every requirement of every staged rpm must be satisfied by
+#   (a) the staged set itself (provides, package names, or staged files --
+#       file-requires like /usr/bin/python2.6 are satisfied by staged
+#       python26's payload and are therefore listed in the baked table), or
+#   (b) the BAKED guest-base capability table below -- the exact external
+#       surface measured from the real staged set with `rpm -qp` and proven
+#       satisfied by the real U11-guest transaction (record #5): only the 4
+#       fixed lines ever failed, so every cap in this table resolved on the
+#       real guest.
+# Plus one exact rule: any `glibc = X` requirement in the staged set must
+# equal the pinned guest base NVR (arg 2) -- the record-#5 failure class.
+# Any gap dies loudly here, in seconds, with the full list. A future UEK
+# live-resolution bump that introduces a new cap also dies loudly here --
+# that is intended (verify, then extend the table deliberately).
+# Skips with a warning when the build host has no rpm CLI.
+_ol5_stage_closure_gate() {
+  local dir="$1" guest_glibc_nvr="$2"; shift 2
+  if ! command -v rpm >/dev/null 2>&1; then
+    log_warn "  [OL5-CLOSURE] rpm CLI not available on the build host; SKIPPING the staged-set closure gate"
+    return 0
+  fi
+  local tmpd f
+  tmpd="$(mktemp -d)" || die "OL5 closure gate: mktemp failed"
+  : > "${tmpd}/provides.raw"; : > "${tmpd}/requires.raw"
+  for f in "$@"; do
+    [[ -s "${dir}/${f}" ]] || die "OL5 closure gate: staged rpm missing: ${dir}/${f}"
+    rpm -qp --provides "${dir}/${f}" >> "${tmpd}/provides.raw" 2>/dev/null \
+      || die "OL5 closure gate: rpm --provides failed for ${f}"
+    rpm -qp --requires "${dir}/${f}" >> "${tmpd}/requires.raw" 2>/dev/null \
+      || die "OL5 closure gate: rpm --requires failed for ${f}"
+    rpm -qp --qf '%{NAME}\n' "${dir}/${f}" >> "${tmpd}/provides.raw" 2>/dev/null \
+      || die "OL5 closure gate: rpm --qf NAME failed for ${f}"
+  done
+  # provides: full strings AND bare names (before any comparison operator)
+  sed -e 's/[[:space:]]*$//' "${tmpd}/provides.raw" > "${tmpd}/p1"
+  sed -e 's/ [<>=].*$//' "${tmpd}/p1" > "${tmpd}/p2"
+  sort -u "${tmpd}/p1" "${tmpd}/p2" > "${tmpd}/provides"
+  # exact-glibc rule (record-#5 failure class)
+  local bad_glibc
+  bad_glibc="$(grep -E '^glibc = ' "${tmpd}/requires.raw" | grep -Fv "glibc = ${guest_glibc_nvr}" | sort -u || true)"
+  if [[ -n "${bad_glibc}" ]]; then
+    log_error "  [OL5-CLOSURE] staged set carries exact glibc requires that do NOT match the guest base (${guest_glibc_nvr}):"
+    while IFS= read -r f; do log_error "    ${f}"; done <<< "${bad_glibc}"
+    rm -rf "${tmpd}"
+    die "OL5 staging: dependency-closure gate FAILED (glibc exact-NVR mismatch)"
+  fi
+  # external surface = requires - rpmlib() - staged provides/names
+  local gaps
+  gaps="$(
+    sed -e 's/[[:space:]]*$//' "${tmpd}/requires.raw" \
+    | grep -v '^rpmlib(' \
+    | sort -u \
+    | while IFS= read -r req; do
+        name="${req%% *}"
+        if ! grep -Fxq "${req}" "${tmpd}/provides" && ! grep -Fxq "${name}" "${tmpd}/provides"; then
+          printf '%s\n' "${name}"
+        fi
+      done \
+    | sort -u \
+    | comm -23 - <(printf '%s\n' "${OL5_GUEST_BASE_CAPS}" | sort -u)
+  )" || true
+  if [[ -n "${gaps}" ]]; then
+    log_error "  [OL5-CLOSURE] staged set has requirement(s) satisfied neither by the staged rpms nor by the measured guest-base table:"
+    while IFS= read -r f; do log_error "    ${f}"; done <<< "${gaps}"
+    rm -rf "${tmpd}"
+    die "OL5 staging: dependency-closure gate FAILED (unsatisfied external requirement(s))"
+  fi
+  rm -rf "${tmpd}"
+  log_info "  [OL5-CLOSURE] staged-set dependency closure verified ($# rpm(s); glibc pinned at ${guest_glibc_nvr})"
+}
+
+# Measured guest-base capability table for _ol5_stage_closure_gate (record
+# #5): the exact external requirement surface of the staged set, computed
+# with rpm -qp over the real artifacts and proven satisfied by the real
+# U11-guest transaction. File paths satisfied by STAGED payloads (e.g.
+# /usr/bin/python2.6) are listed here because `rpm -qp --provides` does not
+# enumerate files. Keep sorted; extend only with verified entries.
+readonly OL5_GUEST_BASE_CAPS="/bin/bash
+/bin/sh
+/sbin/install-info
+/sbin/ldconfig
+/sbin/new-kernel-pkg
+/usr/bin/env
+/usr/bin/find
+/usr/bin/perl
+/usr/bin/python2.6
+/usr/bin/python26
+/usr/bin/run-parts
+aic94xx-firmware
+atmel-firmware
+bfa-firmware
+binutils
+chkconfig
+device-mapper-multipath
+e4fsprogs
+fileutils
+glibc
+initscripts
+iproute
+ipw2100-firmware
+ipw2200-firmware
+ivtv-firmware
+iwl1000-firmware
+iwl3945-firmware
+iwl4965-firmware
+iwl5000-firmware
+iwl5150-firmware
+iwl6000-firmware
+iwl6050-firmware
+kexec-tools
+libBrokenLocale.so.1()(64bit)
+libanl.so.1()(64bit)
+libbz2.so.1()(64bit)
+libc.so.6()(64bit)
+libc.so.6(GLIBC_2.2.5)(64bit)
+libc.so.6(GLIBC_2.3)(64bit)
+libc.so.6(GLIBC_2.3.2)(64bit)
+libc.so.6(GLIBC_2.3.4)(64bit)
+libc.so.6(GLIBC_2.4)(64bit)
+libcidn.so.1()(64bit)
+libcrypt.so.1()(64bit)
+libcrypt.so.1(GLIBC_2.2.5)(64bit)
+libcrypto.so.6()(64bit)
+libdb-4.3.so()(64bit)
+libdl.so.2()(64bit)
+libdl.so.2(GLIBC_2.2.5)(64bit)
+libertas-usb8388-firmware
+libgcc
+libgcc_s.so.1()(64bit)
+libgcc_s.so.1(GCC_3.0)(64bit)
+libgdbm.so.2()(64bit)
+libm.so.6()(64bit)
+libm.so.6(GLIBC_2.2.5)(64bit)
+libncurses.so.5()(64bit)
+libncursesw.so.5()(64bit)
+libnsl.so.1()(64bit)
+libnsl.so.1(GLIBC_2.2.5)(64bit)
+libnss_compat.so.2()(64bit)
+libnss_dns.so.2()(64bit)
+libnss_files.so.2()(64bit)
+libnss_hesiod.so.2()(64bit)
+libnss_nis.so.2()(64bit)
+libnss_nisplus.so.2()(64bit)
+libpanelw.so.5()(64bit)
+libpopt.so.0()(64bit)
+libpthread.so.0()(64bit)
+libpthread.so.0(GLIBC_2.2.5)(64bit)
+libpthread.so.0(GLIBC_2.3.2)(64bit)
+libpthread.so.0(GLIBC_2.3.4)(64bit)
+libreadline.so.5()(64bit)
+libresolv.so.2()(64bit)
+librt.so.1()(64bit)
+librt.so.1(GLIBC_2.2.5)(64bit)
+libselinux-python
+libsqlite3.so.0()(64bit)
+libssl.so.6()(64bit)
+libstdc++.so.6()(64bit)
+libstdc++.so.6(CXXABI_1.3)(64bit)
+libstdc++.so.6(GLIBCXX_3.4)(64bit)
+libtermcap.so.2()(64bit)
+libthread_db.so.1()(64bit)
+libutil.so.1()(64bit)
+libutil.so.1(GLIBC_2.2.5)(64bit)
+libuuid.so.1()(64bit)
+libz.so.1()(64bit)
+mkinitrd
+module-init-tools
+net-tools
+netxen-firmware
+oraclelinux-release
+procps
+ql2xxx-firmware
+rsyslog
+rt61pci-firmware
+rt73usb-firmware
+rtld(GNU_HASH)
+shadow-utils
+zd1211-firmware"
+
 # _ol5_scan_bash32_hostile FILE
 # Scan one guest-bound env-concat member for bash-4-only constructs that
 # would kill the EL5 guest's bash 3.2 at source time (declare -g/-A,
@@ -4017,23 +4202,33 @@ EOF_OL5_PROV
     local ol5_uek_base="https://yum.oracle.com/repo/OracleLinux/OL5/UEK/latest/x86_64"
     local ol5_epel_base="https://archives.fedoraproject.org/pub/archive/epel/5/x86_64"
     # Frozen toolchain closure (OL5 repos are terminal/immutable; a future 404
-    # is a loud failure, not silent drift). MUST stay byte-identical to the
-    # matrix's OL5_TOOLCHAIN_RPMS (tests/ena/run-ena-buildtest-matrix.sh).
+    # is a loud failure, not silent drift). 9 of 11 entries are byte-identical
+    # to the matrix's OL5_TOOLCHAIN_RPMS (tests/ena/run-ena-buildtest-matrix.sh);
+    # glibc-devel/glibc-headers INTENTIONALLY diverge (first-contact record #5):
+    # they carry exact `glibc = NVR` requires, so they must match the RUNTIME
+    # TARGET's base glibc -- the matrix container base is the latest errata
+    # (123.0.2.el5_11.3) while the ISO guest base is U11 GA (123.0.1). The ENA
+    # 2.12.3 build boundary is insensitive to this glibc-devel errata step
+    # (kernel-module compile against kernel-uek-devel; gcc44 unchanged).
+    local ol5_guest_glibc_nvr="2.5-123.0.1"
     local ol5_toolchain_rpms="binutils220-2.20.51.0.2-5.29.el5.x86_64.rpm
 cpp-4.1.2-55.el5.x86_64.rpm
 gcc-4.1.2-55.el5.x86_64.rpm
 gcc44-4.4.7-11.el5_11.x86_64.rpm
-glibc-devel-2.5-123.0.2.el5_11.3.x86_64.rpm
-glibc-headers-2.5-123.0.2.el5_11.3.x86_64.rpm
+glibc-devel-${ol5_guest_glibc_nvr}.x86_64.rpm
+glibc-headers-${ol5_guest_glibc_nvr}.x86_64.rpm
 gmp-4.1.4-10.el5.x86_64.rpm
 kernel-headers-2.6.18-419.0.0.0.2.el5.x86_64.rpm
 libgomp-4.4.7-11.el5_11.x86_64.rpm
+libicu-3.6-5.16.1.x86_64.rpm
 make-3.81-3.el5.x86_64.rpm
 perl-5.8.8-43.el5_11.x86_64.rpm"
     # Frozen EPEL5 closure (archive is immutable; NVRs are the full dependency
     # closure of cloud-init 0.6.3 against OL5 base, machine-resolved from the
     # repo primary metadata -- see SPEC Part D) + gdisk (staged as a TOOL per
-    # adjudication; the growroot implementation itself uses fdisk).
+    # adjudication; the growroot implementation itself uses fdisk). gdisk
+    # links ICU (record #5) -- its libicu*.so.36 requires are satisfied by
+    # the libicu entry staged in the toolchain list above.
     local ol5_epel_rpms="cloud-init-0.6.3-0.12.bzr532.el5.noarch.rpm
 gdisk-0.8.4-1.el5.x86_64.rpm
 libffi-3.0.5-1.el5.x86_64.rpm
@@ -4107,6 +4302,12 @@ python26-libs-2.6.8-2.el5.x86_64.rpm"
         "${ol5_stage_cache}/awscli-exe-linux-x86_64-${_cli_v}.zip" "504b0304"
       ol5_src_files="${ol5_src_files} awscli-exe-linux-x86_64-${_cli_v}.zip"
     fi
+    # (4.5) dependency-closure gate over the EXACT staged set (record #5) --
+    # dies in seconds here instead of ~45 minutes into the guest install.
+    # shellcheck disable=SC2086
+    _ol5_stage_closure_gate "${ol5_stage_cache}" "${ol5_guest_glibc_nvr}" \
+      ${ol5_toolchain_rpms} ${_uek_pkgs} ${ol5_epel_rpms}
+
     # (5) everything verified -- (re)build the stage tree
     rm -rf "${ol5_slim_dir}/files"
     mkdir -p "${ol5_files_rpms}" "${ol5_files_src}"

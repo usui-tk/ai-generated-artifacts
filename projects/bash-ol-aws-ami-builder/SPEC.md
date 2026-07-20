@@ -4568,3 +4568,36 @@ removed, exactly one v2 line; v2 → idempotent, no duplication), now
 permanently pinned as t025 behaviorals. Residual (operator side): actual
 virtlogd write + SELinux behavior on the RHEL 10 host is the remaining
 first-contact surface for this feature.
+
+**First-contact record #5 (2026-07-20, fifth run — the provisioning rpm
+transaction's first contact):** serial v2 held (virtlogd capture live) and
+the run reached the `[OLAWS-OL5S1]` guest rpm transaction, which failed on
+exactly four dependency lines: `libicuio.so.36`/`libicuuc.so.36` needed by
+gdisk-0.8.4 (EPEL5 gdisk links ICU; libicu was not staged) and
+`glibc = 2.5-123.0.2.el5_11.3` needed by the staged glibc-devel/-headers —
+the ISO guest's base glibc is the **U11 GA `2.5-123.0.1`** (machine-derived
+from the U11 base repodata), so the latest-errata devel/headers carry an
+unsatisfiable exact-NVR require. The matrix container never exposed this
+because its base IS the latest errata — the exact-`glibc =` class must
+match the RUNTIME TARGET, not the toolchain-proving container. Fixes:
+(1) glibc-devel/-headers swapped to the GA NVR (present in OL5/latest
+getPackage; single URL base retained) — the ENA 2.12.3 build boundary is
+insensitive to this errata step; the manifest's matrix-identity contract is
+now "9 byte-identical + exactly the documented 3-entry divergence"
+(t025-enforced with comm-based set equality). (2) `libicu-3.6-5.16.1`
+staged (provides both required caps; self-contained; its own external
+requires are guest-satisfied — proven by the same run, which resolved
+everything except the four lines). (3) A **staged-set dependency-closure
+gate** (`_ol5_stage_closure_gate` + the measured `OL5_GUEST_BASE_CAPS`
+table, 101 caps) now runs on the build host right after staging: every
+requirement of the exact staged set must resolve within (staged provides ∪
+the measured guest-base table), and any `glibc = X` must equal the pinned
+guest NVR — gaps die in seconds pre-install with the full list. The table
+is the empirically proven external surface (`rpm -qp` over the real
+artifacts; satisfied by the real guest transaction). Verified pre-landing
+in-sandbox against the real corrected 25-RPM set: closure PASS; removing
+libicu fails listing exactly the two ICU caps; reintroducing the old
+123.0.2 devel fails on the exact-NVR rule — all three permanently pinned as
+t025 behaviorals (real gate fn + real caps table, rpm stubbed). A future
+UEK live-resolution bump that introduces new caps dies loudly at this gate
+by design (verify, then extend the table deliberately).
