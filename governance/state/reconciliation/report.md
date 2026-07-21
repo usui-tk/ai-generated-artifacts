@@ -1,13 +1,13 @@
 # Reconciliation report (regenerated - do not hand-edit)
 
-- coldloop 1.0.0 / DuckDB 1.5.4 / generated 20260720T195833Z (UTC)
-- observation files: 38 / proposals appended this run: 0 / open: 0
+- coldloop 1.0.0 / DuckDB 1.5.4 / generated 20260721T195418Z (UTC)
+- observation files: 40 / proposals appended this run: 0 / open: 0
 
 ## Totals by drift status
 
-- `forked-frozen`: 76
-- `match`: 4142
-- `n/a`: 133
+- `forked-frozen`: 80
+- `match`: 4360
+- `n/a`: 140
 
 ## Drift rows (unit x status, drift only)
 
