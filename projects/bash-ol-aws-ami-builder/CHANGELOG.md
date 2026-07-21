@@ -20,6 +20,26 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Changed (2026-07-20 — CHECK 6 extended to OL6: same-class audit after record #8)
+- Audited OL6 (the other runtime-synthesized major) for the record-#8
+  class: the precondition is shared (anaconda RHCK -> kickstart-%post
+  UEK4 default switch) but the bug is not active — the switch runs in
+  the anaconda %post where grubby's template resolution succeeds (OL5
+  failed in the virt-customize appliance), non-target kernels are
+  removed with upstream-parity `common::remove_kernels`, and two
+  generations of real Nitro E2E prove the boot path. The BLIND SPOT is
+  shared: `yum install -y` masks a failed kernel-%post grubby (rc=0),
+  and the appliance-side %preun could leave a default entry pointing at
+  a removed kernel — either would ship undetected.
+- **Phase 6 CHECK 6 now covers both GRUB Legacy majors**
+  (`OL_MAJOR_VERSION -le 6`; adjudicated plan 1): a pure validator
+  extension — the proven OL6 production path is untouched. OL7-10
+  (GRUB2/BLS) recorded as separate future scope (SPEC D.32 record #8
+  follow-up).
+- Tests: t025 158 -> 159 (CHECK-6 OL5/OL6-coverage pin); suite baseline
+  797 -> **798**. TESTING.md counts + row and SPEC D.32 in lock-step.
+
+
 ### Fixed (2026-07-20 — record #8: grub default still booted the MEDIA kernel; boot-path ownership + CHECK 6; env adjudications)
 - **Boot-critical:** `kernel.txt` exposed that grub's `default=` pointed
   at the U11 media's kernel-uek 400.215.10 (installed by anaconda), not

@@ -283,6 +283,7 @@ assert_match "${s1}" 'removing non-target kernel' "s1: non-target kernels (RHCK 
 assert_match "${s1}" 'cloning the current default entry' "s1: grub entry for the staged kver is guaranteed (clone-from-default when %post grubby failed)"
 assert_match "${s1}" 'kernel-uek rpm not found under ' "s1: target kver is derived from the STAGED rpm filename (authoritative), not a modules-dir heuristic"
 assert_match "${main}" 'OLAWS-CHK06. .CHECK 6. grub default kernel' "phase6: CHECK 6 validates the BOOT PATH kernel equals the target (record-#8 blind spot closed)"
+assert_match "${main}" 'CHECK 6 .GRUB Legacy majors, OL5/OL6.' "phase6: CHECK 6 covers BOTH GRUB Legacy majors (OL6 shares the RHCK->UEK default-switch shape; yum rc=0 masks a grubby scriptlet failure)"
 assert_match "${s1}" 'rpm -q cloud-init' "s1: cloud-init install asserted"
 assert_match "${s1}" 'an EMPTY src' "s1: empty src dir tolerated (legitimate under --skip-ena-driver + --skip-awscli)"
 

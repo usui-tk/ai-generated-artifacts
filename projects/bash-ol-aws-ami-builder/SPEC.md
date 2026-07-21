@@ -4695,3 +4695,25 @@ repositories — v1 cannot install). Env adjudications (2026-07-20)
 recorded: `DISK_SIZE_GB=7` (OL6-10 aligned; measured usage ~1.7 GB;
 growroot floor) and `SELINUX=enforcing` (plan B: measure real denials on
 the next build + boot; permissive is the measured fallback).
+
+**Record #8 follow-up (2026-07-20 — CHECK 6 extended to OL6 after a
+same-class audit):** the operator asked whether OL6 (the other
+non-upstream, runtime-synthesized major) carries the same bug. Audit
+result: the PRECONDITION is shared (anaconda installs the RHCK; the
+kickstart `%post` switches the default to UEK4 via the kernel rpm's own
+%post grubby) but the bug is NOT active, for a decisive environmental
+reason: on OL6 that switch runs inside the anaconda %post (real target,
+grub.conf already populated with the RHCK entry, so grubby's template
+resolution succeeds), whereas OL5 performed it inside the virt-customize
+appliance where grubby fails — and OL6's synthesized provision.sh keeps
+the upstream parity `common::remove_kernels` calls, so non-target
+kernels are removed. Two generations of real Nitro E2E (ethtool ena
+matching the AMI-name pin) prove the OL6 boot path empirically. The
+BLIND SPOT is shared, however: `yum install -y` returns 0 even when the
+kernel %post grubby scriptlet fails, and the appliance-side %preun on
+RHCK removal could leave a default entry pointing at a removed kernel —
+either failure would ship undetected. Adjudicated fix (plan 1): CHECK 6
+now covers both GRUB Legacy majors (`OL_MAJOR_VERSION -le 6`) — a pure
+validator extension; the proven production path is untouched. OL7-10
+(GRUB2/BLS, two E2E generations) are recorded as a separate future
+scope for boot-path validation.

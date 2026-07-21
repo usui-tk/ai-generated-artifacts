@@ -5428,15 +5428,22 @@ phase6_nitro_readiness_check() {
     log_warn "  [OLAWS-CHK05] [CHECK 5] serial console: ADVISORY (no bootloader config located to inspect)"
   fi
 
-  # --- CHECK 6 (OL5/GRUB Legacy): the BOOT PATH kernel is the target -------
-  # Record #8: the U11 media also installs kernel-uek 400.215.10, and the
-  # earlier validators verified the TARGET-named artifacts while grub's
-  # default= still pointed at the media kernel. This check resolves the
-  # DEFAULT entry of /boot/grub/grub.conf and requires its vmlinuz version
-  # to equal the target kver EXACTLY -- validating the boot path itself,
-  # not the intended artifacts. HARD FAIL: a wrong default kernel means no
-  # nvme initrd and no ena module at boot.
-  if [[ "${OL_MAJOR_VERSION}" -eq 5 ]]; then
+  # --- CHECK 6 (GRUB Legacy majors, OL5/OL6): the BOOT PATH kernel is the ---
+  # --- target ---------------------------------------------------------------
+  # Record #8 (OL5): the U11 media also installs kernel-uek 400.215.10, and
+  # the earlier validators verified the TARGET-named artifacts while grub's
+  # default= still pointed at the media kernel. OL6 shares the same shape
+  # without an active bug: anaconda installs the RHCK, the kickstart %post
+  # switches the default to UEK4 via the kernel's own %post grubby, and
+  # `yum install -y` returns 0 EVEN IF that grubby scriptlet fails -- so a
+  # silent failure would ship an RHCK-default AMI (and the appliance-side
+  # %preun on RHCK removal could leave a default entry pointing at a removed
+  # kernel) with zero detection. This check resolves the DEFAULT entry of
+  # /boot/grub/grub.conf and requires its vmlinuz version to equal the
+  # target kver EXACTLY -- validating the boot path itself, not the intended
+  # artifacts. HARD FAIL: a wrong default kernel means no nvme initrd and no
+  # ena module at boot.
+  if [[ "${OL_MAJOR_VERSION}" -le 6 ]]; then
     local grub_default_kver
     grub_default_kver="$(virt-cat -a "${img}" /boot/grub/grub.conf 2>/dev/null | awk '
       /^default=/ { def = substr($0, 9) + 0 }
@@ -5446,7 +5453,7 @@ phase6_nitro_readiness_check() {
     if [[ -n "${kver}" && "${grub_default_kver}" == "${kver}" ]]; then
       log_info "  [OLAWS-CHK06] [CHECK 6] grub default kernel: PASS (boot path = staged ${kver})"
     else
-      log_error "  [OLAWS-CHK06] [CHECK 6] grub default kernel: FAIL (default boots '${grub_default_kver:-<none>}', target is '${kver:-<none>}' -- the media kernel kept the boot path?)"
+      log_error "  [OLAWS-CHK06] [CHECK 6] grub default kernel: FAIL (default boots '${grub_default_kver:-<none>}', target is '${kver:-<none>}' -- a non-target kernel kept the boot path?)"
       fail=1
     fi
   fi
