@@ -2824,7 +2824,9 @@ OLAWS_OL6_CLOUD_USER_BODY
       } >> "${aws_provision_ena}"
 
       if grep -Fq '[ol-aws-ami-builder PATCH ena-driver-build]' "${aws_provision_ena}"; then
-        log_info "  [OLAWS-ENA01] ENA driver hook injected (target: OL${OL_MAJOR_VERSION} ${ENA_BUILD_VERSION:-$(_ena_pin_for_major "${OL_MAJOR_VERSION}")}; in-guest DKMS build)"
+        local ena_build_kind="in-guest DKMS build"
+        [[ "${OL_MAJOR_VERSION}" -eq 5 ]] && ena_build_kind="in-guest plain-make build (no DKMS on EL5)"
+        log_info "  [OLAWS-ENA01] ENA driver hook injected (target: OL${OL_MAJOR_VERSION} ${ENA_BUILD_VERSION:-$(_ena_pin_for_major "${OL_MAJOR_VERSION}")}; ${ena_build_kind})"
       else
         die "Failed to inject ENA driver hook into ${aws_provision_ena}"
       fi
@@ -2923,7 +2925,7 @@ OLAWS_OL6_CLOUD_USER_BODY
   else
     local aws_provision_cli="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/cloud/aws/provision.sh"
     local awscli_installer="${SCRIPT_DIR}/install-awscli.sh"
-    log_info "Injecting AWS CLI v2 install hook into cloud/aws/provision.sh (default ON for OL6/OL7/OL8; --skip-awscli disables)"
+    log_info "Injecting AWS CLI v2 install hook into cloud/aws/provision.sh (default ON for OL5-OL8; --skip-awscli disables)"
 
     if [[ ! -f "${aws_provision_cli}" ]]; then
       die "Cannot inject AWS CLI v2 hook: ${aws_provision_cli} not found"
@@ -5135,8 +5137,9 @@ _awscli_resolve_latest() {
 }
 
 # CHECK 2 provenance verdict: is the effective ena.ko acceptable for THIS build?
-# When a self-build was performed (ENA_BUILD_VERSION is non-empty -- set only for
-# OL6/OL7 with the default self-build on), the in-guest DKMS build MUST have
+# When a self-build was performed (ENA_BUILD_VERSION is non-empty -- set for
+# OL5/OL6/OL7 with the default self-build on), the in-guest self-build (DKMS on
+# OL6/OL7; plain make on OL5 -- no DKMS on EL5) MUST have
 # produced the module in /updates or /extra; the stock in-tree /kernel copy alone
 # means the self-build did not take effect and the AMI would ship the stock
 # driver instead of the requested pin. When no self-build was requested
@@ -5302,9 +5305,13 @@ phase6_nitro_readiness_check() {
   ena_mod="$(printf '%s\n' "${ena_all}" | grep -E '(^|/)updates/' | head -1 || true)"
   [[ -z "${ena_mod}" ]] && ena_mod="$(printf '%s\n' "${ena_all}" | grep -E '(^|/)extra/' | head -1 || true)"
   [[ -z "${ena_mod}" ]] && ena_mod="$(printf '%s\n' "${ena_all}" | grep -E '\S' | head -1 || true)"
+  # Build-kind truthfulness: OL5 self-builds via plain make (no DKMS on EL5);
+  # OL6+ self-build via DKMS. /updates|/extra placement is shared.
+  local ena_bk="DKMS"
+  [[ "${OL_MAJOR_VERSION}" -eq 5 ]] && ena_bk="plain-make"
   case "${ena_mod}" in
-    */updates/*) ena_loc="self-built, DKMS /updates" ;;
-    */extra/*)   ena_loc="self-built, DKMS /extra" ;;
+    */updates/*) ena_loc="self-built, ${ena_bk} /updates" ;;
+    */extra/*)   ena_loc="self-built, ${ena_bk} /extra" ;;
     ?*)          ena_loc="stock in-tree /kernel" ;;
   esac
   if [[ "${ena_cfg}" == "y" ]]; then
@@ -5554,10 +5561,12 @@ phase6_nitro_readiness_check() {
     ena_self_mod="$(printf '%s\n' "${ena_all}" | grep -E '(^|/)(updates|extra)/' | head -1 || true)"
     inbox_ver="$(_ena_module_version "${img}" "${kver}" "${work}" "${ena_inbox_mod}")"
     self_ver="$(_ena_module_version "${img}" "${kver}" "${work}" "${ena_self_mod}")"
-    self_loc="DKMS"
+    local self_bk="DKMS"
+    [[ "${OL_MAJOR_VERSION}" -eq 5 ]] && self_bk="plain-make"
+    self_loc="${self_bk}"
     case "${ena_self_mod}" in
-      */updates/*) self_loc="DKMS /updates" ;;
-      */extra/*)   self_loc="DKMS /extra" ;;
+      */updates/*) self_loc="${self_bk} /updates" ;;
+      */extra/*)   self_loc="${self_bk} /extra" ;;
     esac
     local inbox_disp self_disp
     if [[ "${ena_cfg}" == "y" ]]; then

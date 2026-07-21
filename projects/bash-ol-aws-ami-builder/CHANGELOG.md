@@ -20,6 +20,26 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (2026-07-21 — run-8 log review: message truthfulness on OL5)
+- The eighth build (first with 0015+0016) verified all record-#8 fixes
+  on the real image: CHECK 1-6 PASS incl. **CHECK 6 boot-path = staged
+  2.6.39-400.297.3.el5uek**, 7 GB disk, SELinux enforcing build
+  completed, VMDK 422M. Log review found stale/misleading messages,
+  fixed here:
+  - awscli hook injection line claimed "default ON for OL6/OL7/OL8" —
+    the true span (and the running major) is **OL5-OL8** (OL9/OL10 use
+    the default package manager, existing separate message).
+  - ENA hook injection line and the Phase-6 provenance labels said
+    "DKMS" unconditionally — on OL5 the self-build is **plain make**
+    (no DKMS on EL5; t023-pinned installer fact). Labels are now
+    build-kind aware: `plain-make /updates` on OL5, `DKMS /updates`
+    on OL6+.
+  - CHECK-2 verdict comment updated: ENA_BUILD_VERSION is set for
+    OL5/OL6/OL7 (was "only OL6/OL7").
+- Tests: t025 159 -> 161 (message-truthfulness pins ×2); suite baseline
+  798 -> **800**. TESTING.md counts + row in lock-step.
+
+
 ### Changed (2026-07-20 — CHECK 6 extended to OL6: same-class audit after record #8)
 - Audited OL6 (the other runtime-synthesized major) for the record-#8
   class: the precondition is shared (anaconda RHCK -> kickstart-%post
