@@ -20,6 +20,40 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (2026-07-27 — record #10: first real OL5 E2E boots; summary-message fixes; the ks selinux hardcode)
+- **Milestone (docs updated accordingly): the OL5 path is E2E-PROVEN.**
+  `ami-0f9a04a9b4683fd44` booted on `t2` (Xen) and `c5` (Nitro),
+  sosreport-backed: staged kernel `297.3` live on both (record #8),
+  NVMe root + self-built `ena 2.12.3g` on `c5`, growroot 7 GB → ~124
+  GiB on both naming schemes, clean kernel logs. OL6
+  `ami-03be4f95afdc8cc6f` booted `c5`/`c6i` on the CHECK-6-verified
+  `124.48.6` — enforcing, zero AVC, SSM running, awscli 2.17.51.
+  READMEs (both languages), SPEC D.32 record #10 and a TESTING.md
+  "Boot-E2E evidence note (2026-07-27)" record the measured instance
+  ledger: OL5 = `t2` + `c5` (boundary beyond `c5` unmeasured); OL6
+  adds `c5`/`c6i`.
+- **Summary-message defects (run-9 review):** the AMI-summary awscli
+  gate omitted OL5 (printed "not installed" while the AMI name carried
+  `awscli2.17.51`) — the gate now includes OL5; the AMI description
+  and the ENA summary said "DKMS" unconditionally — both are now
+  build-kind aware (plain make on OL5).
+- **Boot-relevant: the OL5 kickstart hardcoded `selinux --permissive`**
+  (pre-2026-07-20 leftover), silently overriding the enforcing
+  adjudication — on EL5 the anaconda directive writes
+  /etc/selinux/config and the OL5 path has no later application
+  (upstream applies `${SELINUX}` in distr provision for OL6-10). The
+  directive is now templated from `${SELINUX}` at generation time
+  (validated + hard-asserted; B-T4 revalidates). The plan-B enforcing
+  measurement moves to the next boot generation; the permissive boots
+  logged the complete would-be-denial preview (two benign syslog-socket
+  entries per instance).
+- Housekeeping: the TESTING.md coverage-ledger idempotency row still
+  said 13 markers (missed in the record-#9 change) — corrected to 14.
+- Tests: t025 163 -> 166 (selinux-templating pins ×2, awscli-summary
+  gate pin); suite baseline 804 -> **807**. TESTING.md counts + rows,
+  both READMEs, and SPEC D.32 (record #10) in lock-step.
+
+
 ### Fixed (2026-07-27 — record #9: EC2 nested-virt host first contact; resolver-cleanup EROFS + OL6 unzip)
 - **Fatal on both OL5 and OL6 (same line):** newer guestfs-tools (the
   Fedora 44 EC2 nested host) bind-mount the appliance's /etc/resolv.conf

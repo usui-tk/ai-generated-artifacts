@@ -4754,3 +4754,36 @@ fired with its OL5-specific message on OL6: the production awscli path
 now ENSURES unzip from the repositories on OL6-8 (matrix-path parity)
 while OL5 keeps the assert-only ks-%packages contract, and the die
 message is major-aware.
+
+**First-contact record #10 (2026-07-27, run 9 — the first real OL5
+E2E boots, three summary-message defects, and the ks selinux
+hardcode):** the record-#9 generation registered and booted both legacy
+majors, sosreport-backed (full evidence: TESTING.md "Boot-E2E evidence
+note (2026-07-27)"). **The OL5 path is E2E-PROVEN**: `t2` (Xen) and
+`c5` (Nitro) both run the staged `2.6.39-400.297.3.el5uek` (the
+record-#8 invariant, live), `c5` has an NVMe root with `ethtool -i` =
+the self-built `ena 2.12.3g`, and growroot expanded 7 GB → the full
+~124 GiB EBS volume on both device-naming schemes. **OL6** booted `c5`
+and `c6i` on `4.1.12-124.48.6.el6uek` — the kernel CHECK 6 verified
+after the live two-kernel scenario — enforcing with zero AVC, SSM
+running, awscli 2.17.51. Defects found by the run-9 review and fixed
+same-day: (1) the **AMI-summary awscli gate omitted OL5** (a pre-
+record-#7 leftover): the summary printed "not installed (out of scope;
+OL5 uses the default package manager)" while the AMI name correctly
+carried `awscli2.17.51` — the gate now includes OL5; (2) the **AMI
+description and the ENA summary line said "DKMS" unconditionally** —
+both are now build-kind aware (plain make on OL5), completing the
+run-8 truthfulness sweep for the register-time strings; (3)
+**boot-relevant: the OL5 kickstart hardcoded `selinux --permissive`**
+(a leftover of the pre-2026-07-20 adjudication), so the enforcing
+adjudication never reached the image — on EL5 the anaconda `selinux`
+directive IS what writes /etc/selinux/config, and the OL5 path has no
+later provisioning-time application (upstream applies `${SELINUX}` in
+distr provision for OL6-10, which is why OL6 booted enforcing). The
+directive is now TEMPLATED from the adjudicated env at generation time
+(validated + hard-asserted; B-T4 revalidates the generated kickstart).
+Consequence for plan B: the enforcing measurement is still pending the
+NEXT boot generation — but the permissive boots logged the complete
+would-be-denial preview, and it is exactly two benign entries per
+instance (`ifconfig_t` and `restorecon_t` read/write on an `initrc_t`
+unix_dgram syslog socket) — a favorable signal for enforcing.

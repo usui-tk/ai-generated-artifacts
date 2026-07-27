@@ -671,7 +671,11 @@ load_env() {
     local _ena_name_sfx="" _ena_desc_sfx=" (pure OL; ENA self-build skipped)"
     if [[ "${ENA_DRIVER_BUILD}" -eq 1 ]]; then
       _ena_name_sfx="-ena${ENA_BUILD_VERSION:-}"
-      _ena_desc_sfx=" with self-built Amazon ENA ${ENA_BUILD_VERSION:-driver} (DKMS, AWS-optimized for Nitro)"
+      # Build-kind truthfulness (run-9 review): OL5 self-builds via plain
+      # make (no DKMS on EL5); OL6+ build via DKMS.
+      local _ena_bk="DKMS"
+      [[ "${OL_MAJOR_VERSION}" -eq 5 ]] && _ena_bk="plain make"
+      _ena_desc_sfx=" with self-built Amazon ENA ${ENA_BUILD_VERSION:-driver} (${_ena_bk}, AWS-optimized for Nitro)"
     fi
     # SSM Agent identity, folded into the AMI name/desc the same way. Default ON
     # for OL6-OL10; --skip-ssm-agent leaves it empty. SSM_AGENT_RESOLVED is a
@@ -4148,6 +4152,23 @@ chmod 755 /etc/init.d/ol-aws-growroot
 [ -e /etc/resolv.conf ] || : > /etc/resolv.conf
 EOF_OL5_KS
 
+    # SELinux directive from the adjudicated env (record #10, run-9 sosreport
+    # finding): the heredoc hardcoded `selinux --permissive` -- a leftover
+    # from the pre-2026-07-20 adjudication -- and silently overrode
+    # SELINUX=enforcing: on EL5, anaconda's `selinux` directive IS what
+    # writes /etc/selinux/config, and the OL5 path has no later
+    # provisioning-time application (upstream applies ${SELINUX} in
+    # distr provision for OL6-10; OL5's EL5-safe cleanup never did).
+    local _ol5_sel_lc
+    _ol5_sel_lc="$(printf '%s' "${SELINUX:-enforcing}" | tr '[:upper:]' '[:lower:]')"
+    case "${_ol5_sel_lc}" in
+      enforcing|permissive|disabled) ;;
+      *) die "SELINUX must be enforcing|permissive|disabled for the OL5 kickstart (got '${SELINUX}')" ;;
+    esac
+    sed -i -e "s/^selinux --permissive\$/selinux --${_ol5_sel_lc}/" "${ol5_slim_dir}/ol5-ks.cfg"
+    grep -q "^selinux --${_ol5_sel_lc}\$" "${ol5_slim_dir}/ol5-ks.cfg" \
+      || die "OL5 kickstart selinux templating failed (expected 'selinux --${_ol5_sel_lc}')"
+
     # ----- distr/ol5-slim/provision.sh (GUEST side; EL5 bash 3.2 / POSIX) -----
     cat > "${ol5_slim_dir}/provision.sh" <<'EOF_OL5_PROV'
 #!/usr/bin/env bash
@@ -5854,7 +5875,9 @@ phase9_register_ami() {
   # Mirror the AMI-description gate: the self-build hook is injected for
   # OL6-OL10 whenever ENA_DRIVER_BUILD=1 (--skip-ena-driver produces pure OL).
   if [[ "${ENA_DRIVER_BUILD}" -eq 1 ]]; then
-    ena_summary="self-built ${ENA_BUILD_VERSION:-driver} (DKMS, AWS-optimized)"
+    local ena_sum_bk="DKMS"
+    [[ "${OL_MAJOR_VERSION}" -eq 5 ]] && ena_sum_bk="plain make"
+    ena_summary="self-built ${ENA_BUILD_VERSION:-driver} (${ena_sum_bk}, AWS-optimized)"
   else
     ena_summary="stock in-box (pure OL AMI)"
   fi
@@ -5880,7 +5903,7 @@ phase9_register_ami() {
   local awscli_summary
   if [[ "${AWSCLI_INSTALL}" -ne 1 ]]; then
     awscli_summary="not installed (--skip-awscli)"
-  elif [[ "${OL_MAJOR_VERSION}" != "6" && "${OL_MAJOR_VERSION}" != "7" && "${OL_MAJOR_VERSION}" != "8" ]]; then
+  elif [[ "${OL_MAJOR_VERSION}" != "5" && "${OL_MAJOR_VERSION}" != "6" && "${OL_MAJOR_VERSION}" != "7" && "${OL_MAJOR_VERSION}" != "8" ]]; then
     awscli_summary="not installed (out of scope; OL${OL_MAJOR_VERSION} uses the default package manager)"
   elif [[ -n "${AWSCLI_RESOLVED}" ]]; then
     awscli_summary="v2 ${AWSCLI_RESOLVED} (installed)"

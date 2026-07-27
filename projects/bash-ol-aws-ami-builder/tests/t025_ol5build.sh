@@ -288,6 +288,9 @@ assert_match "${main}" 'default ON for OL5-OL8; --skip-awscli disables' "msg: aw
 assert_match "${main}" 'ena_bk="plain-make"' "msg: phase-6 ENA provenance labels are build-kind truthful on OL5 (plain make, no DKMS on EL5; run-8 log review)"
 assert_match "${main}" 'PATCH resolver-cleanup-erofs' "record #9: upstream provision-common resolver truncate is patched EROFS-tolerant (newer guestfs-tools RO-bind-mount resolv.conf)"
 assert_match "${main}" '\( : > /etc/resolv.conf \) 2>/dev/null' "record #9: the OL5 distr cleanup resolver truncate carries the same EROFS guard"
+assert_match "${main}" 'OL5 kickstart selinux templating failed' "record #10: the OL5 ks selinux directive is TEMPLATED from the adjudicated env (the hardcoded --permissive silently overrode SELINUX=enforcing)"
+assert_match "${main}" 'selinux --permissive\\\$/selinux --' "record #10: templating rewrites the heredoc default via anchored sed (anaconda's directive writes /etc/selinux/config on EL5)"
+assert_match "${main}" '"\$\{OL_MAJOR_VERSION\}" != "5" && "\$\{OL_MAJOR_VERSION\}" != "6"' "run-9: the awscli SUMMARY gate includes OL5 (the summary claimed not-installed while the AMI name carried awscli2.17.51)"
 assert_match "${s1}" 'rpm -q cloud-init' "s1: cloud-init install asserted"
 assert_match "${s1}" 'an EMPTY src' "s1: empty src dir tolerated (legitimate under --skip-ena-driver + --skip-awscli)"
 
