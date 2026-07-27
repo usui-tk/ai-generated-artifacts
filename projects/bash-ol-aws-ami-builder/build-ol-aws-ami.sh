@@ -1956,6 +1956,38 @@ phase3_clone_repository() {
     fi
   fi
 
+  # Resolver-cleanup EROFS tolerance patch (bin/provision-common.sh; ALL
+  # majors). Record #9 (2026-07-27, EC2-nested first contact): newer
+  # guestfs-tools (e.g. the Fedora 44 host) bind-mount the APPLIANCE's
+  # /etc/resolv.conf READ-ONLY over the guest's during virt-customize (that
+  # is precisely why in-guest DNS works during provisioning) -- so upstream's
+  # cleanup truncate `: > /etc/resolv.conf` dies with EROFS and takes the
+  # whole provisioning down (both OL5 and OL6 died on this exact line).
+  # Nothing is lost by tolerating it: under the bind-mount the guest file
+  # was never written (nothing to clean), on older hosts the truncate still
+  # runs, and build-image.sh independently ships the file clean via the
+  # guestfs-API-level `--truncate /etc/resolv.conf` argument, which is not
+  # subject to the chroot bind-mount.
+  local provision_common_sh="${WORK_REPO_DIR}/${OL_TOOLS_SUBDIR}/bin/provision-common.sh"
+  if [[ -f "${provision_common_sh}" ]]; then
+    if grep -Fq '[ol-aws-ami-builder PATCH resolver-cleanup-erofs]' "${provision_common_sh}"; then
+      log_info "  Resolver-cleanup EROFS patch already applied to ${provision_common_sh}"
+    elif grep -Eq '^  : > /etc/resolv\.conf$' "${provision_common_sh}"; then
+      log_info "Applying resolver-cleanup EROFS tolerance patch to upstream bin/provision-common.sh"
+      sed -i.resolver-erofs.bak \
+        -e 's|^  : > /etc/resolv\.conf$|  { : > /etc/resolv.conf; } 2>/dev/null \|\| common::echo_message "  [ol-aws-ami-builder PATCH resolver-cleanup-erofs] resolv.conf write skipped (read-only bind-mount; guestfs --truncate ships it clean)"|' \
+        "${provision_common_sh}"
+      if grep -Fq '[ol-aws-ami-builder PATCH resolver-cleanup-erofs]' "${provision_common_sh}"; then
+        log_info "  -> resolver-cleanup EROFS patch applied (backup at ${provision_common_sh}.resolver-erofs.bak)"
+      else
+        die "Failed to apply resolver-cleanup EROFS patch to ${provision_common_sh}"
+      fi
+    else
+      log_warn "  Upstream resolver-cleanup truncate not found in ${provision_common_sh}."
+      log_warn "  Assuming the upstream cleanup has been refactored; verify EROFS tolerance manually."
+    fi
+  fi
+
   # Serial-console non-interactive patch v2 (bin/build-image.sh; ALL majors).
   #
   # Record #3 (2026-07-20): upstream adds `--wait/--noautoconsole` ONLY in
@@ -4306,7 +4338,12 @@ distr::cleanup() {
   distr::write_build_info
 
   common::echo_message "Cleanup resolver files"
-  : > /etc/resolv.conf
+  # Record #9: newer guestfs-tools bind-mount the appliance resolv.conf
+  # READ-ONLY over the guest file during virt-customize; tolerate EROFS
+  # (the guest file was never written; build-image.sh --truncate ships it
+  # clean at the guestfs API level).
+  ( : > /etc/resolv.conf ) 2>/dev/null \
+    || common::echo_message "  resolv.conf write skipped (read-only bind-mount; guestfs --truncate ships it clean)"
   rm -f /etc/resolv.conf.* 2>/dev/null || true
 
   common::echo_message "Misc cleanup"

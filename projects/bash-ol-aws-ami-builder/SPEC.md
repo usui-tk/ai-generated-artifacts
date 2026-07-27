@@ -4717,3 +4717,40 @@ now covers both GRUB Legacy majors (`OL_MAJOR_VERSION -le 6`) — a pure
 validator extension; the proven production path is untouched. OL7-10
 (GRUB2/BLS, two E2E generations) are recorded as a separate future
 scope for boot-path validation.
+
+**First-contact record #9 (2026-07-27 — EC2 nested-virtualization host,
+Fedora 44 + current guestfs-tools; OL5 and OL6 both died on the same
+line):** the operator moved the build host to an EC2 nested-virt
+instance. Both majors completed provisioning and died at "Cleanup
+resolver files": `: > /etc/resolv.conf` → **EROFS**. Mechanism: newer
+guestfs-tools **bind-mount the appliance's /etc/resolv.conf READ-ONLY
+over the guest's** during virt-customize (this is also exactly why
+in-guest DNS worked during provisioning), so the cleanup truncate — in
+upstream `bin/provision-common.sh` for OL6-10 and mirrored in the OL5
+synthesized distr cleanup — fails and takes provisioning down. Fixes:
+a new upstream runtime patch (`[ol-aws-ami-builder PATCH
+resolver-cleanup-erofs]`, idempotency-guarded like the other patches)
+makes the truncate EROFS-tolerant, and the OL5 cleanup carries the same
+guard. Nothing is lost: under the bind-mount the guest file was never
+written, on older hosts the truncate still runs, and build-image.sh
+independently ships the file clean via the guestfs-API-level
+`--truncate /etc/resolv.conf` argument (not subject to the chroot
+bind-mount). Both guard forms were EROFS-simulated pre-landing (real RO
+remount, incl. under `set -e`) and the sed was applied to the real
+upstream file (unique match, parses).
+Secondary findings from the same run: (1) the host's libvirt NAT DNS
+was broken during **anaconda** (%post `yum install kernel-uek` could
+not resolve yum.oracle.com) while the SLIRP-networked virt-customize
+appliance resolved fine — on OL6 this recreated the record-#8
+two-kernel shape live (media UEK 4.1.12-124.16.4 vs provisioning-
+installed 124.48.6); no code change: provisioning's upstream-parity
+kernel install + remove_kernels self-heal it and CHECK 6 now validates
+the result (environment note: fixing the host's libvirt DNS is still
+recommended). OL5 is unaffected by guest DNS (fully host-staged), and
+this run proved the record-#8 grub ownership in the new environment
+(`build-info written (kernel 2.6.39-400.297.3.el5uek)`). (2) the OL6
+guest does not reliably carry `unzip` and the record-#7 pre-assert
+fired with its OL5-specific message on OL6: the production awscli path
+now ENSURES unzip from the repositories on OL6-8 (matrix-path parity)
+while OL5 keeps the assert-only ks-%packages contract, and the die
+message is major-aware.

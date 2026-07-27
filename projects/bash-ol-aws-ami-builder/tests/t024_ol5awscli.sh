@@ -135,5 +135,6 @@ assert_match "${inst}" "rpm -q --qf '%\{VERSION\}.n' glibc" "installer: glibc re
 assert_match "${inst}" 'sort -u | head -1' "installer: multilib duplicate versions collapse to one value"
 assert_match "${inst}" 'command -v unzip' "installer: unzip is pre-asserted before the bundle unpack (ISO minimal guest has no unzip; ks %packages supplies it)"
 assert_match "${inst}" 'kickstart %packages contract; see SPEC D.32 record #7' "installer: the unzip die message names the supplying contract"
+assert_match "${inst}" "yum -y install unzip.*failed .OL" "installer: OL6-8 production path ENSURES unzip from the repos (record #9: the guest does not reliably carry it); OL5 stays assert-only"
 
 t_done

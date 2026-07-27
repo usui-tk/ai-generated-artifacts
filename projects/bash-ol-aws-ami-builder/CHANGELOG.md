@@ -20,6 +20,35 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Fixed (2026-07-27 — record #9: EC2 nested-virt host first contact; resolver-cleanup EROFS + OL6 unzip)
+- **Fatal on both OL5 and OL6 (same line):** newer guestfs-tools (the
+  Fedora 44 EC2 nested host) bind-mount the appliance's /etc/resolv.conf
+  READ-ONLY over the guest's during virt-customize, so the cleanup
+  truncate `: > /etc/resolv.conf` dies with EROFS — in upstream
+  `bin/provision-common.sh` (OL6-10) and in the OL5 synthesized distr
+  cleanup. New upstream runtime patch `resolver-cleanup-erofs`
+  (idempotency-guarded; marker #14) + the same guard in the OL5
+  cleanup. Nothing lost: build-image.sh's guestfs-API-level
+  `--truncate /etc/resolv.conf` still ships the file clean (SPEC D.32
+  record #9; both guard forms EROFS-simulated pre-landing incl. set -e).
+- **OL6 awscli:** the guest does not reliably carry `unzip` and the
+  record-#7 pre-assert fired with its OL5 wording on OL6. The
+  production path now ENSURES unzip via the repositories on OL6-8
+  (matrix-path parity); OL5 keeps the assert-only ks-%packages
+  contract; the die message is major-aware.
+- **Environment notes (no code change):** the host's libvirt NAT DNS
+  was broken during anaconda (%post yum could not resolve) while the
+  SLIRP appliance resolved fine — on OL6 this recreated the record-#8
+  two-kernel shape live; provisioning's kernel install + remove_kernels
+  self-heal it and CHECK 6 validates the result. This run also proved
+  the record-#8 grub ownership on OL5 in the new environment
+  (build-info kernel = staged 297.3).
+- Tests: t025 161 -> 163 (EROFS-guard pins ×2), t024 30 -> 31
+  (ensure-unzip pin), t007 marker census 13 -> 14 (+1 auto per-marker
+  guard assert); suite baseline 800 -> **804**. TESTING.md counts +
+  rows and SPEC D.32 (record #9) in lock-step.
+
+
 ### Fixed (2026-07-21 — run-8 log review: message truthfulness on OL5)
 - The eighth build (first with 0015+0016) verified all record-#8 fixes
   on the real image: CHECK 1-6 PASS incl. **CHECK 6 boot-path = staged

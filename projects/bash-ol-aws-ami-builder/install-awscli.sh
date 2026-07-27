@@ -383,11 +383,21 @@ else
 fi
 
 stage "unzip bundle"
-# Pre-assert the tool (record #7: the ISO minimal OL5 guest has no unzip --
-# the ks %packages contract supplies it from the U11 media; the EPEL5
-# container clean-core observation did not transfer to the guest).
-command -v unzip >/dev/null 2>&1 \
-  || die "unpack-fail: 'unzip' is not installed (on OL5 it must come from the kickstart %packages contract; see SPEC D.32 record #7)"
+# Ensure the unpack tool, major-aware (record #7 + the EC2-nested first
+# contact, record #9):
+# - OL5: assert-only -- there are no reachable in-guest repositories; the ks
+#   %packages contract supplies unzip from the U11 media (SPEC D.32 record #7).
+# - OL6-8: the guest does NOT reliably carry unzip (the ISO %packages set has
+#   none, and no earlier step guarantees it) -- install it from the enabled
+#   repositories, exactly like the install-test matrix path does.
+if ! command -v unzip >/dev/null 2>&1; then
+  if [[ "${osmajor}" == "5" ]]; then
+    die "unpack-fail: 'unzip' is not installed (on OL5 it must come from the kickstart %packages contract; see SPEC D.32 record #7)"
+  fi
+  stage "installing unzip (bundle expansion)"
+  yum -y install unzip >/dev/null 2>&1 \
+    || die "unpack-fail: 'unzip' is not installed and 'yum -y install unzip' failed (OL${osmajor})"
+fi
 unzip -oq "${zipfile}" -d "${workdir}" || die "unpack-fail: could not unzip the AWS CLI v2 bundle"
 [[ -x "${workdir}/aws/install" ]] || die "unpack-fail: ${workdir}/aws/install missing after unzip"
 
