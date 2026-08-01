@@ -22,6 +22,37 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.15-r12.08] - 2026-08-02
+
+Tag: `catalog-classification-hardening` (the tag advances from
+`catalog-localization-hardening`). The classification filter stops
+being a single point of failure for unseen localized labels.
+
+### Fixed
+
+- **Structural fallback for unrecognized Classification labels**: the
+  Catalog localizes display labels independently of the Product and
+  package-identity columns, so a previously unseen localized
+  `Classification` string could make the strict row filter return
+  zero rows. When that happens the filter re-evaluates with
+  classification ignored and accepts a **single structurally
+  unambiguous** row — exact KB, architecture, title semantics, Product
+  and Product-reject rules stay mandatory — logging a caution with the
+  actual label. The alias table also gains a further Japanese
+  security-update variant. Script-only change: `data/*` and `schema/*`
+  are byte-identical to r12.06 (measured).
+
+### Changed
+
+- **T40**: release pin advanced to `update-wsi-2026.07.15-r12.08`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/28W/4I**
+on the committed tree — unchanged from r12.07; the declared series
+debt carries as-is per the no-fix-forward rule.
+
 ## [update-wsi-2026.07.15-r12.07] - 2026-08-02
 
 Tag: `catalog-localization-hardening` (the tag advances from

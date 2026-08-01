@@ -559,8 +559,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.15-r12.07'
-$Script:ScriptTag     = 'catalog-localization-hardening'
+$Script:ScriptVersion = 'update-wsi-2026.07.15-r12.08'
+$Script:ScriptTag     = 'catalog-classification-hardening'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -5101,7 +5101,8 @@ function Get-CatalogSemanticAliases {
             return [string[]]@(
                 'Security Updates','Sicherheitsupdates','Mises à jour de sécurité',
                 'Aggiornamenti della sicurezza','Actualizaciones de seguridad','Atualizações de segurança',
-                'セキュリティ更新プログラム','보안 업데이트','安全更新','安全性更新',
+                'セキュリティ更新プログラム','セキュリティ問題の修正プログラム',
+                '보안 업데이트','安全更新','安全性更新',
                 'Обновления для системы безопасности','Aktualizacje zabezpieczeń',
                 'Güvenlik Güncelleştirmeleri','Beveiligingsupdates'
             )
@@ -5154,7 +5155,8 @@ function Test-CatalogRowAgainstRule {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Row,
-        [Parameter(Mandatory)]$Rule
+        [Parameter(Mandatory)]$Rule,
+        [switch]$IgnoreClassification
     )
     $title = [string]$Row.title
     $products = [string]$Row.products
@@ -5175,7 +5177,7 @@ function Test-CatalogRowAgainstRule {
             if ($token -and $products -match [regex]::Escape([string]$token)) { return $false }
         }
     }
-    if ($Rule.Classification -and -not [string]::IsNullOrWhiteSpace($classification)) {
+    if (-not $IgnoreClassification -and $Rule.Classification -and -not [string]::IsNullOrWhiteSpace($classification)) {
         if (-not (Test-CatalogSemanticEquals -Text $classification -CanonicalToken ([string]$Rule.Classification))) { return $false }
     }
     return $true
@@ -5208,6 +5210,22 @@ function Get-CatalogRowsForResolvedPatch {
 
     $rule = Get-CatalogIdentityRule -Patch $Patch
     $filtered = @($rows | Where-Object { Test-CatalogRowAgainstRule -Row $_ -Rule $rule })
+
+    # Catalog display labels are localized independently of the Product and
+    # package identity columns. If a previously unseen localized
+    # Classification label causes the strict pass to return zero rows, accept
+    # a single structurally unambiguous row. Exact KB, architecture, title
+    # semantics, Product and Product-reject rules remain mandatory.
+    if ($filtered.Count -eq 0) {
+        $structural = @($rows | Where-Object {
+            Test-CatalogRowAgainstRule -Row $_ -Rule $rule -IgnoreClassification
+        })
+        if ($structural.Count -eq 1) {
+            $actualClass = [string]$structural[0].classification
+            Write-Caution ('Catalog Classification label was not recognized for {0}/{1}; accepting the unique structural match. Classification={2}' -f $rule.Type, $rule.KbId, $actualClass)
+            $filtered = $structural
+        }
+    }
     if ($filtered.Count -eq 0) { return @() }
 
     # Prefer the baseline's exact title when present.  Otherwise the complete
