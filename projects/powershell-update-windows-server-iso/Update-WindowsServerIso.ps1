@@ -559,8 +559,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.15-r12.06'
-$Script:ScriptTag     = 'release-validation-hardening'
+$Script:ScriptVersion = 'update-wsi-2026.07.15-r12.07'
+$Script:ScriptTag     = 'catalog-localization-hardening'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -5056,6 +5056,100 @@ function Get-CatalogIdentityRule {
     }
 }
 
+function Get-CatalogSemanticAliases {
+    <#
+    .SYNOPSIS
+        Returns localized Microsoft Update Catalog display aliases for a
+        canonical English title or classification token.
+    .DESCRIPTION
+        The Catalog search page can localize Title and Classification based on
+        the serving edge, cookies, or request locale. Product names, KB IDs,
+        Update IDs and file names are substantially more stable. These aliases
+        prevent a valid row from being rejected solely because the display
+        text is German, French, Japanese, or another supported locale.
+    #>
+    [OutputType([string[]])]
+    param([AllowEmptyString()][string]$Token)
+
+    switch ($Token.Trim()) {
+        'Cumulative Update' {
+            return [string[]]@(
+                'Cumulative Update','Kumulatives Update','Mise à jour cumulative',
+                'Aggiornamento cumulativo','Actualización acumulativa','Atualização cumulativa',
+                '累積更新プログラム','累積更新','누적 업데이트','累积更新',
+                'Накопительное обновление','Aktualizacja zbiorcza','Toplu Güncelleştirme',
+                'Cumulatieve update'
+            )
+        }
+        'Servicing Stack Update' {
+            return [string[]]@(
+                'Servicing Stack Update','Wartungsstapelupdate','Aktualisierung des Wartungsstapels',
+                'Mise à jour de la pile de maintenance','Aggiornamento dello stack di manutenzione',
+                'Actualización de la pila de mantenimiento','Atualização da pilha de manutenção',
+                'サービス スタック更新プログラム','서비스 스택 업데이트','服务堆栈更新',
+                'Обновление стека обслуживания'
+            )
+        }
+        'Dynamic Update' {
+            return [string[]]@(
+                'Dynamic Update','Dynamisches Update','Mise à jour dynamique',
+                'Aggiornamento dinamico','Actualización dinámica','Atualização dinâmica',
+                '動的更新プログラム','동적 업데이트','动态更新','Динамическое обновление'
+            )
+        }
+        'Security Updates' {
+            return [string[]]@(
+                'Security Updates','Sicherheitsupdates','Mises à jour de sécurité',
+                'Aggiornamenti della sicurezza','Actualizaciones de seguridad','Atualizações de segurança',
+                'セキュリティ更新プログラム','보안 업데이트','安全更新','安全性更新',
+                'Обновления для системы безопасности','Aktualizacje zabezpieczeń',
+                'Güvenlik Güncelleştirmeleri','Beveiligingsupdates'
+            )
+        }
+        'Critical Updates' {
+            return [string[]]@(
+                'Critical Updates','Kritische Updates','Mises à jour critiques',
+                'Aggiornamenti critici','Actualizaciones críticas','Atualizações críticas',
+                '重要な更新プログラム','중요 업데이트','关键更新','重大更新',
+                'Критические обновления','Aktualizacje krytyczne','Kritieke updates'
+            )
+        }
+        default { return [string[]]@($Token) }
+    }
+}
+
+function Test-CatalogSemanticContains {
+    [OutputType([bool])]
+    param(
+        [AllowEmptyString()][string]$Text,
+        [AllowEmptyString()][string]$CanonicalToken
+    )
+    if ([string]::IsNullOrWhiteSpace($CanonicalToken)) { return $true }
+    foreach ($alias in @(Get-CatalogSemanticAliases -Token $CanonicalToken)) {
+        if (-not [string]::IsNullOrWhiteSpace($alias) -and
+            $Text.IndexOf($alias, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Test-CatalogSemanticEquals {
+    [OutputType([bool])]
+    param(
+        [AllowEmptyString()][string]$Text,
+        [AllowEmptyString()][string]$CanonicalToken
+    )
+    if ([string]::IsNullOrWhiteSpace($CanonicalToken)) { return $true }
+    $actual = $Text.Trim()
+    foreach ($alias in @(Get-CatalogSemanticAliases -Token $CanonicalToken)) {
+        if ([string]::Equals($actual, $alias, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+    return $false
+}
+
 function Test-CatalogRowAgainstRule {
     [CmdletBinding()]
     param(
@@ -5069,7 +5163,7 @@ function Test-CatalogRowAgainstRule {
     if ($title -notmatch '(?i)x64' -or $title -match '(?i)arm64|x86-based') { return $false }
     if ($Rule.KbId -and $title -notmatch [regex]::Escape([string]$Rule.KbId)) { return $false }
     foreach ($token in @($Rule.TitleTokens)) {
-        if ($token -and $title -notmatch [regex]::Escape([string]$token)) { return $false }
+        if ($token -and -not (Test-CatalogSemanticContains -Text $title -CanonicalToken ([string]$token))) { return $false }
     }
     # Product/classification are authoritative when Catalog exposes the
     # columns.  If the site omits them, the title rules remain the fallback.
@@ -5082,7 +5176,7 @@ function Test-CatalogRowAgainstRule {
         }
     }
     if ($Rule.Classification -and -not [string]::IsNullOrWhiteSpace($classification)) {
-        if ($classification.Trim() -ne [string]$Rule.Classification) { return $false }
+        if (-not (Test-CatalogSemanticEquals -Text $classification -CanonicalToken ([string]$Rule.Classification))) { return $false }
     }
     return $true
 }

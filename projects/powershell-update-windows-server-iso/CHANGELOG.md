@@ -22,6 +22,39 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.15-r12.07] - 2026-08-02
+
+Tag: `catalog-localization-hardening` (the tag advances from
+`release-validation-hardening`). Catalog display-text
+localization stops rejecting valid rows.
+
+### Fixed
+
+- **Catalog semantic matching**: the Microsoft Update Catalog can
+  serve localized `Title` and `Classification` display strings
+  (German, French, Japanese and other locales) depending on the
+  serving edge and request context, while product names, KB IDs,
+  Update IDs and file names stay stable. Three new helpers
+  (`Get-CatalogSemanticAliases`, `Test-CatalogSemanticEquals`,
+  `Test-CatalogSemanticContains`) carry per-token alias tables for the
+  canonical English classification and title tokens, and the row
+  filters match against the alias set instead of the raw English
+  string — a valid row is no longer rejected solely because its
+  display text is localized. Script-only change: `data/*` and
+  `schema/*` are byte-identical to r12.06 (measured).
+
+### Changed
+
+- **T40**: release pin advanced to `update-wsi-2026.07.15-r12.07`.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/28W/4I**
+on the committed tree — the carried debt is joined by four findings in
+the new helpers (3× PSA6003 plural noun, 1× PSA7003: 282 non-ASCII
+characters inside the localized alias tables); committed verbatim per
+the no-fix-forward rule, draining post-series.
+
 ## [update-wsi-2026.07.15-r12.06] - 2026-08-02
 
 Tag: `release-validation-hardening` (continued). The monthly patch set
