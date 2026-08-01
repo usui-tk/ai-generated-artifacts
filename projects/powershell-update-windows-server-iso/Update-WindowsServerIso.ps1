@@ -597,8 +597,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.17-r12.13'
-$Script:ScriptTag     = 'measured-e2e-corrections'
+$Script:ScriptVersion = 'update-wsi-2026.07.18-r12.14'
+$Script:ScriptTag     = 'release-evidence-and-july-dotnet'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -8723,6 +8723,45 @@ function Test-PatchSetsShareAsset {
     return $false
 }
 
+function Get-AuxiliaryFreshnessAssessment {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param()
+    $baselineMonth = ''
+    if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline -and $Script:OsProfile.PatchBaseline.PSObject.Properties['BaselineId']) {
+        $baselineMonth = ([string]$Script:OsProfile.PatchBaseline.BaselineId -replace '-B$','')
+    }
+    $stale = New-Object System.Collections.Generic.List[object]
+    foreach ($p in @($Script:ResolvedPatches | Where-Object { $_.Kind -eq 'DotNet' })) {
+        $releaseMonth = ''
+        if ($p.PSObject.Properties['ReleaseDate'] -and $p.ReleaseDate) {
+            try { $releaseMonth = ([datetime]$p.ReleaseDate).ToString('yyyy-MM') } catch { $releaseMonth = ([string]$p.ReleaseDate).Substring(0,[Math]::Min(7,([string]$p.ReleaseDate).Length)) }
+        }
+        if ($baselineMonth -and $releaseMonth -and $releaseMonth -lt $baselineMonth) {
+            $stale.Add([pscustomobject]@{ Kind='DotNet'; KbId=[string]$p.KbId; ReleaseMonth=$releaseMonth; BaselineMonth=$baselineMonth }) | Out-Null
+        }
+    }
+    return [pscustomobject]@{
+        BaselineMonth = $baselineMonth
+        IsFresh = ($stale.Count -eq 0)
+        StaleItems = $stale.ToArray()
+    }
+}
+
+function Get-BootValidationAssessment {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param()
+    $marker = Join-Path $Script:MarkersDir 'P14.ok'
+    $performed = Test-Path -LiteralPath $marker
+    return [pscustomobject]@{
+        Performed = $performed
+        Eligible = $performed
+        Status = $(if ($performed) { 'Pass' } else { 'NotPerformed' })
+        Reason = $(if ($performed) { '' } else { 'Hyper-V or equivalent boot/install smoke test was not performed for this output ISO.' })
+    }
+}
+
 function Get-Pca2023CompliancePolicy {
     [CmdletBinding()]
     [OutputType([string])]
@@ -14825,20 +14864,36 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
 
         $policy = Get-Pca2023CompliancePolicy
         $compliance = Test-Pca2023PolicyCompliance -OutputCheck $outputCheck -Policy $policy
+        $freshness = Get-AuxiliaryFreshnessAssessment
+        $bootValidation = Get-BootValidationAssessment
+        $staticVerified = Test-Path -LiteralPath (Join-Path $Script:MarkersDir 'P11.ok')
+        $staticEligible = $staticVerified -and $compliance.ReleaseEligible -and $freshness.IsFresh
+        $reasons = New-Object System.Collections.Generic.List[string]
+        foreach ($reason in @($compliance.Reasons)) { if ($reason) { $reasons.Add([string]$reason) | Out-Null } }
+        foreach ($item in @($freshness.StaleItems)) {
+            $reasons.Add(('Stale {0} package {1}: release month {2} is older than baseline month {3}.' -f $item.Kind,$item.KbId,$item.ReleaseMonth,$item.BaselineMonth)) | Out-Null
+        }
+        if (-not $bootValidation.Eligible) { $reasons.Add($bootValidation.Reason) | Out-Null }
+        $releaseEligible = $staticEligible -and $bootValidation.Eligible
         $Script:ReleaseEligibility = [pscustomobject]@{
             BuildSucceeded=$true
-            StaticVerificationStatus=$(if (Test-Path -LiteralPath (Join-Path $Script:MarkersDir 'P11.ok')) { 'Pass' } else { 'Unknown' })
+            StaticVerificationStatus=$(if ($staticVerified) { 'Pass' } else { 'Unknown' })
             Pca2023Compliance=$(if ($compliance.ReleaseEligible) { 'Pass' } else { 'Fail' })
             Pca2023Policy=$policy
-            ReleaseEligible=$compliance.ReleaseEligible
-            Reasons=$compliance.Reasons
+            AuxiliaryFreshness=$(if ($freshness.IsFresh) { 'Pass' } else { 'Fail' })
+            StaticEligible=$staticEligible
+            BootTestStatus=$bootValidation.Status
+            BootTestEligible=$bootValidation.Eligible
+            ReleaseStatus=$(if ($releaseEligible) { 'ReleaseReady' } elseif ($staticEligible) { 'Candidate-BootTestRequired' } else { 'NotEligible' })
+            ReleaseEligible=$releaseEligible
+            Reasons=$reasons.ToArray()
         }
         $eligibilityPath=Join-Path $Script:LogsDir 'release_eligibility.json'
         $Script:ReleaseEligibility | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $eligibilityPath -Encoding UTF8
-        Write-Step ('PCA2023 compliance policy: {0}; ReleaseEligible={1}' -f $policy, $compliance.ReleaseEligible)
-        if (-not $compliance.ReleaseEligible) {
+        Write-Step ('PCA2023 policy: {0}; StaticEligible={1}; BootTest={2}; ReleaseEligible={3}' -f $policy, $staticEligible, $bootValidation.Status, $releaseEligible)
+        if (-not $staticEligible) {
             New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P12.failed') -Force | Out-Null
-            $Script:DeferredVerificationFailure = ('P12 PCA2023 compliance failed under policy {0}: {1}' -f $policy, ($compliance.Reasons -join '; '))
+            $Script:DeferredVerificationFailure = ('P12 static release evidence failed: {0}' -f (($reasons.ToArray()) -join '; '))
             Write-Fail $Script:DeferredVerificationFailure
         } else {
             New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P12.ok') -Force | Out-Null
@@ -14907,6 +14962,11 @@ function Invoke-ReportPhase13_FinalReport {
             Write-Step ('BuildSucceeded          : {0}' -f $Script:ReleaseEligibility.BuildSucceeded)
             Write-Step ('StaticVerificationStatus: {0}' -f $Script:ReleaseEligibility.StaticVerificationStatus)
             Write-Step ('Pca2023Compliance       : {0} ({1})' -f $Script:ReleaseEligibility.Pca2023Compliance, $Script:ReleaseEligibility.Pca2023Policy)
+            Write-Step ('AuxiliaryFreshness      : {0}' -f $Script:ReleaseEligibility.AuxiliaryFreshness)
+            Write-Step ('StaticEligible          : {0}' -f $Script:ReleaseEligibility.StaticEligible)
+            Write-Step ('BootTestStatus          : {0}' -f $Script:ReleaseEligibility.BootTestStatus)
+            Write-Step ('BootTestEligible        : {0}' -f $Script:ReleaseEligibility.BootTestEligible)
+            Write-Step ('ReleaseStatus           : {0}' -f $Script:ReleaseEligibility.ReleaseStatus)
             Write-Step ('ReleaseEligible         : {0}' -f $Script:ReleaseEligibility.ReleaseEligible)
             if ($Script:ReleaseEligibility.PSObject.Properties['HyperVValidation']) {
                 Write-Step ('HyperVValidation      : {0}' -f $Script:ReleaseEligibility.HyperVValidation)
@@ -16370,13 +16430,18 @@ function Invoke-VerifyPhase14_HyperVValidation {
         $path=Join-Path $Script:LogsDir 'P14_hyperv_validation.json'
         $result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $path -Encoding UTF8
         if (-not $result.Success) { throw ('P14 Hyper-V validation failed: {0}' -f ($result.Reasons -join '; ')) }
+        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P14.ok') -Force | Out-Null
         if ($Script:ReleaseEligibility) {
             $level = if ($result.Mode -eq 'Install') { 'InstallValidated' } else { 'BootEvidenceCaptured' }
             $Script:ReleaseEligibility | Add-Member -NotePropertyName HyperVValidation -NotePropertyValue $level -Force
+            $Script:ReleaseEligibility.BootTestStatus = 'Pass'
+            $Script:ReleaseEligibility.BootTestEligible = $true
+            $Script:ReleaseEligibility.ReleaseEligible = [bool]$Script:ReleaseEligibility.StaticEligible
+            $Script:ReleaseEligibility.ReleaseStatus = $(if ($Script:ReleaseEligibility.ReleaseEligible) { 'ReleaseReady' } else { 'NotEligible' })
+            $Script:ReleaseEligibility.Reasons = @($Script:ReleaseEligibility.Reasons | Where-Object { $_ -notlike 'Hyper-V or equivalent boot/install smoke test*' })
             $eligibilityPath=Join-Path $Script:LogsDir 'release_eligibility.json'
             $Script:ReleaseEligibility | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $eligibilityPath -Encoding UTF8
         }
-        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P14.ok') -Force | Out-Null
         Write-Ok ('P14 Hyper-V evidence written: {0}' -f $path)
     } finally { Stop-DebugTrace }
 }

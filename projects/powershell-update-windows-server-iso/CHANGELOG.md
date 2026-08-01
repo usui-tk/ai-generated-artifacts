@@ -22,6 +22,39 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.18-r12.14] - 2026-08-02
+
+Tag: `release-evidence-and-july-dotnet` (the tag advances; the version
+date moves to 2026.07.18). Release evidence gains two assessment
+decisions, and Server 2022's .NET line reaches the July CU.
+
+### Added
+
+- **Two assessment helpers**: `Get-AuxiliaryFreshnessAssessment`
+  (grades the auxiliary-package freshness state for the release
+  evidence) and `Get-BootValidationAssessment` (grades the boot
+  validation outcome), both returning closed records consumed by the
+  release evidence path.
+
+### Changed
+
+- **Server 2022 .NET line advances to the 2026-07 CU**: KB5087068
+  (2026-05, `State=Fallback`) is replaced by KB5101010 (2026-07,
+  `Classification: Security Updates`) declared as a **child of the
+  combined parent KB5102206 via `ParentKbId`** — the first shipped
+  line measured to use the parent/child resolution path. The
+  declaration-derived T43 tracks the line surface (153 → 150
+  assertions) with no edit (measured, matching the convergence-matrix
+  row).
+- **T40**: release pin advanced to `update-wsi-2026.07.18-r12.14`
+  with the measured tag and date.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **3E/35W/4I**
+on the committed tree — unchanged from r12.13; the declared series
+debt carries as-is per the no-fix-forward rule.
+
 ## [update-wsi-2026.07.17-r12.13] - 2026-08-02
 
 Tag: `measured-e2e-corrections` (the tag advances; the version date

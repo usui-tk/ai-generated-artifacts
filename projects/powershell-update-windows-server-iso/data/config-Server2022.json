@@ -439,29 +439,29 @@
         }
       },
       {
-        "PackageId": "Server2022-KB5087068-x64",
+        "PackageId": "Server2022-KB5101010-x64",
         "Kind": "DotNet",
-        "KbId": "KB5087068",
-        "ParentKbId": "KB5088862",
-        "UpdateId": "0ae6f8d8-5a5a-4551-a0cc-ca97524fc415",
+        "KbId": "KB5101010",
+        "ParentKbId": "KB5102206",
+        "UpdateId": null,
         "Revision": null,
-        "Title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8 for Microsoft server operating system version 21H2 for x64 (KB5087068)",
+        "Title": "2026-07 Cumulative Update for .NET Framework 3.5 and 4.8 for Microsoft server operating system version 21H2 for x64 (KB5101010)",
         "Products": [
           "Microsoft Server operating system-21H2"
         ],
-        "Classification": null,
+        "Classification": "Security Updates",
         "Architecture": "x64",
-        "ReleaseDate": "2026-05-12",
+        "ReleaseDate": "2026-07-14",
         "ReleaseType": "B",
-        "State": "Fallback",
-        "FileName": "windows10.0-kb5087068-x64-ndp48_e788771a4119e01a7840dd1c13a1e25b223be12a.msu",
-        "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/04/windows10.0-kb5087068-x64-ndp48_e788771a4119e01a7840dd1c13a1e25b223be12a.msu",
-        "Digest": "54h3GkEZ4Bp4QN0cE6HiWyI74So=",
+        "State": "Discovered",
+        "FileName": null,
+        "DownloadUrl": null,
+        "Digest": null,
         "Sha256": "",
         "SizeBytes": null,
         "ApplyOrder": 60,
         "InScope": {},
-        "Note": "Leaf asset for the default Server 2022 .NET Framework 4.8 media state.",
+        "Note": "2026-07 leaf security CU for the default Server 2022 .NET Framework 4.8 media state; exact Catalog asset is resolved at P04.",
         "Roles": [
           "DotNetLeaf"
         ],
@@ -479,11 +479,7 @@
         },
         "Dependencies": [],
         "Integrity": {
-          "Sha1": {
-            "Encoding": "base64",
-            "Value": "54h3GkEZ4Bp4QN0cE6HiWyI74So=",
-            "Hex": "e788771a4119e01a7840dd1c13a1e25b223be12a"
-          },
+          "Sha1": null,
           "Sha256": null,
           "SizeBytes": null,
           "AuthenticodeStatus": "NotTested"
@@ -494,31 +490,34 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/05-12-may-cumulative-update",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5087068"
+            "https://support.microsoft.com/help/5101010",
+            "https://support.microsoft.com/help/5102206",
+            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5101010"
           ],
-          "VerifiedAt": "2026-07-11T00:00:00+09:00",
-          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "VerifiedAt": "2026-07-18T00:00:00+09:00",
+          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
           "Notes": [
-            "Leaf asset for the default Server 2022 .NET Framework 4.8 media state.",
-            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
+            "July 14, 2026 security and cumulative reliability update for .NET Framework 3.5 and 4.8 on Windows Server 2022.",
+            "Exact Catalog asset identity is resolved and integrity-checked at P04."
           ]
         }
       },
       {
-        "PackageId": "Server2022-KB5087059-x64",
+        "PackageId": "Server2022-KB5101005-x64",
         "Kind": "DotNet",
-        "KbId": "KB5087059",
-        "ParentKbId": null,
+        "KbId": "KB5101005",
+        "ParentKbId": "KB5102206",
         "UpdateId": null,
         "Revision": null,
-        "Title": null,
-        "Products": null,
-        "Classification": null,
+        "Title": "2026-07 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Microsoft server operating system version 21H2 for x64 (KB5101005)",
+        "Products": [
+          "Microsoft Server operating system-21H2"
+        ],
+        "Classification": "Security Updates",
         "Architecture": "x64",
-        "ReleaseDate": "2026-05-12",
+        "ReleaseDate": "2026-07-14",
         "ReleaseType": "B",
-        "State": "Fallback",
+        "State": "Discovered",
         "FileName": null,
         "DownloadUrl": null,
         "Digest": null,
@@ -526,7 +525,7 @@
         "SizeBytes": null,
         "ApplyOrder": 60,
         "InScope": {},
-        "Note": "Alternative leaf asset when .NET Framework 4.8.1 is detected.",
+        "Note": "2026-07 leaf security CU selected when .NET Framework 4.8.1 is detected; exact Catalog asset is resolved at P04.",
         "Roles": [
           "DotNetLeaf"
         ],
@@ -555,14 +554,15 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/05-12-may-cumulative-update",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5087059"
+            "https://support.microsoft.com/help/5101005",
+            "https://support.microsoft.com/help/5102206",
+            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5101005"
           ],
-          "VerifiedAt": "2026-07-11T00:00:00+09:00",
-          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "VerifiedAt": "2026-07-18T00:00:00+09:00",
+          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
           "Notes": [
-            "Alternative leaf asset when .NET Framework 4.8.1 is detected.",
-            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
+            "July 14, 2026 security and cumulative reliability update for .NET Framework 3.5 and 4.8.1 on Windows Server 2022.",
+            "Exact Catalog asset identity is resolved and integrity-checked at P04."
           ]
         }
       },
