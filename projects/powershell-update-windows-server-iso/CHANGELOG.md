@@ -22,6 +22,35 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.15-r12.11] - 2026-08-02
+
+Tag: `resume-parameter-default-fix` (the tag advances). Runs without
+`-ResumeFromPhase` stop tripping over the parameter's own ValidateSet.
+
+### Fixed
+
+- **`-ResumeFromPhase` self-assignment trap**: assigning the unbound
+  validated parameter back to a script-scoped variable of the same
+  name triggered `ValidateSet` against the implicit empty string on
+  both Windows PowerShell 5.1 and PowerShell 7. The operator-facing
+  parameter stays untouched and only its normalized state is copied to
+  a separate, unconstrained internal variable
+  (`$Script:RequestedResumeFromPhase`), which the resume gates read.
+  Script-only change: `data/*` and `schema/*` are byte-identical to
+  r12.06 (measured); the UTF-8 BOM remains absent as delivered
+  (PSA7001 carries from r12.10).
+
+### Changed
+
+- **T40**: release pin advanced to `update-wsi-2026.07.15-r12.11`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/30W/4I**
+on the committed tree — unchanged from r12.10; the declared series
+debt carries as-is per the no-fix-forward rule.
+
 ## [update-wsi-2026.07.15-r12.10] - 2026-08-02
 
 Tag: `option-semantics-pwsh7-fix` (continued). Generic-collection

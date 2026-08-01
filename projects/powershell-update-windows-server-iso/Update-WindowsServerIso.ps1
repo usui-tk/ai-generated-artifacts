@@ -358,7 +358,12 @@ $Script:ReleaseEligibility        = $null
 $Script:ResetBaseOnCleanup        = -not [bool]$SkipResetBaseOnCleanup
 $Script:SkipExportCompress        = [bool]$SkipExportCompress
 $Script:UseDefenderExclusions     = [bool]$UseDefenderExclusions
-$Script:ResumeFromPhase           = $ResumeFromPhase
+# ResumeFromPhase is a validated script parameter. Assigning an unbound
+# validated parameter back to the same script-scoped variable triggers
+# ValidateSet against the implicit empty string in both Windows PowerShell
+# and PowerShell 7. Keep the operator-facing parameter untouched and copy
+# only its normalized state to a separate, unconstrained internal variable.
+$Script:RequestedResumeFromPhase  = if ($PSBoundParameters.ContainsKey('ResumeFromPhase')) { [string]$ResumeFromPhase } else { $null }
 
 # -----------------
 # Parameter validation
@@ -565,8 +570,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.15-r12.10'
-$Script:ScriptTag     = 'option-semantics-pwsh7-fix'
+$Script:ScriptVersion = 'update-wsi-2026.07.15-r12.11'
+$Script:ScriptTag     = 'resume-parameter-default-fix'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -16553,8 +16558,8 @@ try {
         $phaseList = @('P01')
     } elseif ($OnlyPhases -and $OnlyPhases.Count -gt 0) {
         $phaseList = $OnlyPhases
-    } elseif ($Script:ResumeFromPhase) {
-        if ($Script:ResumeFromPhase -eq 'P08') {
+    } elseif ($Script:RequestedResumeFromPhase) {
+        if ($Script:RequestedResumeFromPhase -eq 'P08') {
             $phaseList = [string[]]@('P01','P02','P08','P08S','P09','P10','P11','P12','P13')
         } else {
             $phaseList = [string[]]@('P01','P02','P09','P10','P11','P12','P13')
@@ -16568,9 +16573,9 @@ try {
     Enable-ManagedDefenderExclusion
 
     if ($phaseList.Count -gt 0) {
-        if ($Script:ResumeFromPhase) {
+        if ($Script:RequestedResumeFromPhase) {
             Invoke-PhaseRunner -PhaseIds @('P01','P02')
-            Initialize-ResumeBuildState -PhaseId $Script:ResumeFromPhase
+            Initialize-ResumeBuildState -PhaseId $Script:RequestedResumeFromPhase
             $remaining = @($phaseList | Where-Object { $_ -notin @('P01','P02') })
             if ($remaining.Count -gt 0) { Invoke-PhaseRunner -PhaseIds $remaining }
         } else {
