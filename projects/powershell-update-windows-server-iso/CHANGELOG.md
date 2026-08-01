@@ -22,6 +22,49 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.18-r12.15] - 2026-08-02
+
+Tag: `bound-release-evidence-and-july-auxiliaries` (the tag advances).
+Release evidence becomes a bound, indexed artifact set, and the July
+auxiliary lines land in every config.
+
+### Added
+
+- **Bound release-evidence layer**: the release evidence gains an
+  identity (`Get-ReleaseEvidenceIdentity`), a saved index
+  (`Save-ReleaseEvidenceIndex`, `Write-ReleaseEvidenceMarker`,
+  `Read-ReleaseJsonFile`), a resolved-patch evidence manifest
+  (`New-ResolvedPatchEvidenceManifest`), a static-verification
+  assessment, and structural boot-evidence validation
+  (`Test-BootEvidenceArtifacts` / `Test-BootEvidenceApproval`):
+  BootOnly evidence must declare `RequiresOperatorReview=true` and
+  carry screenshot integrity records verified by SHA-256.
+- **2026-07 auxiliary lines in all four configs**: the July
+  re-resolution reshapes the shipped line sets (new `Discovered`
+  auxiliary rows such as KB5101007 / KB5099548). The
+  declaration-derived T43 tracks the surface (150 → 123 assertions)
+  with no edit (measured, matching the convergence-matrix row).
+
+### Changed
+
+- **T39 revised (pin re-location, adjudicated)**: r12.15 re-locates
+  the VM-state honesty surface — Install success is graded from guest
+  evidence with an empty reasons list, BootOnly carries an enforced
+  "screenshots never directly produce ReleaseReady" reason and the
+  structural evidence validator above. The T39 honesty pin follows
+  the measured surface (the r12.04 pinned literals it supersedes were
+  comment/expression forms of the same concern); 17 assertions.
+- **T40**: release pin advanced to `update-wsi-2026.07.18-r12.15`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/36W/7I**
+on the committed tree — three findings join the debt (1× PSA2012
+positional `Save-CanonicalJsonFile` call, 1× PSA6003 plural noun, 3×
+PSA6007 missing `[OutputType]`, the latter as info); committed
+verbatim per the no-fix-forward rule, draining post-series.
+
 ## [update-wsi-2026.07.18-r12.14] - 2026-08-02
 
 Tag: `release-evidence-and-july-dotnet` (the tag advances; the version

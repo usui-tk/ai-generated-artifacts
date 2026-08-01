@@ -436,29 +436,29 @@
         }
       },
       {
-        "PackageId": "Server2019-KB5087061-x64",
+        "PackageId": "Server2019-KB5100989-x64",
         "Kind": "DotNet",
-        "KbId": "KB5087061",
-        "ParentKbId": "KB5088864",
-        "UpdateId": "a57cf2ba-286e-46dc-b15a-a0fc3ec5dbe2",
+        "KbId": "KB5100989",
+        "ParentKbId": "KB5102201",
+        "UpdateId": null,
         "Revision": null,
-        "Title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.7.2 for Windows Server 2019 for x64 (KB5087061)",
+        "Title": "2026-07 Cumulative Update for .NET Framework 3.5 and 4.7.2 for Windows Server 2019 for x64 (KB5100989)",
         "Products": [
           "Windows Server 2019"
         ],
-        "Classification": null,
+        "Classification": "Security Updates",
         "Architecture": "x64",
-        "ReleaseDate": "2026-05-12",
+        "ReleaseDate": "2026-07-14",
         "ReleaseType": "B",
-        "State": "Fallback",
-        "FileName": "windows10.0-kb5087061-x64_25b4ce6e32862a6288609b4471ff1cd8e07d8e3f.msu",
-        "DownloadUrl": "https://catalog.s.download.windowsupdate.com/d/msdownload/update/software/secu/2026/04/windows10.0-kb5087061-x64_25b4ce6e32862a6288609b4471ff1cd8e07d8e3f.msu",
-        "Digest": "JbTObjKGKmKIYJtEcf8c2OB9jj8=",
+        "State": "Discovered",
+        "FileName": null,
+        "DownloadUrl": null,
+        "Digest": null,
         "Sha256": "",
         "SizeBytes": null,
         "ApplyOrder": 60,
         "InScope": {},
-        "Note": "Leaf asset under the May 2026 .NET rollup.",
+        "Note": "2026-07 leaf security CU for the default Windows Server 2019 .NET Framework 4.7.2 media state; exact Catalog asset is resolved at P04.",
         "Roles": [
           "DotNetLeaf"
         ],
@@ -476,11 +476,7 @@
         },
         "Dependencies": [],
         "Integrity": {
-          "Sha1": {
-            "Encoding": "base64",
-            "Value": "JbTObjKGKmKIYJtEcf8c2OB9jj8=",
-            "Hex": "25b4ce6e32862a6288609b4471ff1cd8e07d8e3f"
-          },
+          "Sha1": null,
           "Sha256": null,
           "SizeBytes": null,
           "AuthenticodeStatus": "NotTested"
@@ -491,31 +487,36 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/05-12-may-cumulative-update",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5087061"
+            "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/07-14-july-cumulative-update",
+            "https://support.microsoft.com/help/KB5100989",
+            "https://support.microsoft.com/help/KB5102201",
+            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5100989",
+            "https://support.microsoft.com/en-us/servicing/os/azure-marketplace/windows-server/2026/windows-server-images-for-july-2026"
           ],
-          "VerifiedAt": "2026-07-11T00:00:00+09:00",
-          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "VerifiedAt": "2026-07-18T00:00:00+09:00",
+          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
           "Notes": [
-            "Leaf asset under the May 2026 .NET rollup.",
-            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
+            "2026-07 leaf security CU for the default Windows Server 2019 .NET Framework 4.7.2 media state; exact Catalog asset is resolved at P04.",
+            "Exact Catalog asset identity is resolved and integrity-checked at P04."
           ]
         }
       },
       {
-        "PackageId": "Server2019-KB5087066-x64",
+        "PackageId": "Server2019-KB5101008-x64",
         "Kind": "DotNet",
-        "KbId": "KB5087066",
-        "ParentKbId": null,
+        "KbId": "KB5101008",
+        "ParentKbId": "KB5102201",
         "UpdateId": null,
         "Revision": null,
-        "Title": null,
-        "Products": null,
-        "Classification": null,
+        "Title": "2026-07 Cumulative Update for .NET Framework 3.5 and 4.8 for Windows Server 2019 for x64 (KB5101008)",
+        "Products": [
+          "Windows Server 2019"
+        ],
+        "Classification": "Security Updates",
         "Architecture": "x64",
-        "ReleaseDate": "2026-05-12",
+        "ReleaseDate": "2026-07-14",
         "ReleaseType": "B",
-        "State": "Fallback",
+        "State": "Discovered",
         "FileName": null,
         "DownloadUrl": null,
         "Digest": null,
@@ -523,7 +524,7 @@
         "SizeBytes": null,
         "ApplyOrder": 60,
         "InScope": {},
-        "Note": "Alternative leaf asset when .NET Framework 4.8 is detected.",
+        "Note": "2026-07 leaf security CU selected when .NET Framework 4.8 is detected on Windows Server 2019; exact Catalog asset is resolved at P04.",
         "Roles": [
           "DotNetLeaf"
         ],
@@ -552,34 +553,37 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/05-12-may-cumulative-update",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5087066"
+            "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/07-14-july-cumulative-update",
+            "https://support.microsoft.com/help/KB5101008",
+            "https://support.microsoft.com/help/KB5102201",
+            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5101008",
+            "https://support.microsoft.com/en-us/servicing/os/azure-marketplace/windows-server/2026/windows-server-images-for-july-2026"
           ],
-          "VerifiedAt": "2026-07-11T00:00:00+09:00",
-          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "VerifiedAt": "2026-07-18T00:00:00+09:00",
+          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
           "Notes": [
-            "Alternative leaf asset when .NET Framework 4.8 is detected.",
-            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
+            "2026-07 leaf security CU selected when .NET Framework 4.8 is detected on Windows Server 2019; exact Catalog asset is resolved at P04.",
+            "Exact Catalog asset identity is resolved and integrity-checked at P04."
           ]
         }
       },
       {
-        "PackageId": "Server2019-KB5094153-x64",
+        "PackageId": "Server2019-KB5099549-x64",
         "Kind": "SafeOSDU",
-        "KbId": "KB5094153",
+        "KbId": "KB5099549",
         "ParentKbId": null,
         "UpdateId": null,
         "Revision": null,
-        "Title": null,
+        "Title": "2026-07 Safe OS Dynamic Update for Windows 10 version 1809 and Windows Server 2019 for x64-based Systems (KB5099549)",
         "Products": [
           "Windows 10 and later Dynamic Update",
           "Windows Safe OS Dynamic Update"
         ],
         "Classification": "Critical Updates",
         "Architecture": "x64",
-        "ReleaseDate": "2026-06-09",
+        "ReleaseDate": "2026-07-14",
         "ReleaseType": "DynamicUpdate",
-        "State": "Fallback",
+        "State": "Discovered",
         "FileName": null,
         "DownloadUrl": null,
         "Digest": null,
@@ -587,7 +591,7 @@
         "SizeBytes": null,
         "ApplyOrder": 40,
         "InScope": {},
-        "Note": "Safe OS Dynamic Update for Windows 10 version 1809 and Windows Server 2019.",
+        "Note": "July 2026 Safe OS Dynamic Update for Windows 10 version 1809 and Windows Server 2019.",
         "Roles": [
           "SafeOSDU"
         ],
@@ -613,15 +617,15 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://support.microsoft.com/en-us/topic/kb5094153-safe-os-dynamic-update-for-windows-10-version-1809-and-windows-server-2019-june-9-2026-e5e98b51-edd2-4417-ada4-4030e18de455",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5094153",
-            "https://support.microsoft.com/en-us/topic/windows-server-images-for-june-2026-7d8577d4-1f36-447b-bbbf-60b68a9f4a69"
+            "https://support.microsoft.com/help/KB5099549",
+            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5099549",
+            "https://support.microsoft.com/en-us/servicing/os/azure-marketplace/windows-server/2026/windows-server-images-for-july-2026"
           ],
-          "VerifiedAt": "2026-07-11T00:00:00+09:00",
-          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "VerifiedAt": "2026-07-18T00:00:00+09:00",
+          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
           "Notes": [
-            "Safe OS Dynamic Update for Windows 10 version 1809 and Windows Server 2019.",
-            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
+            "July 2026 Safe OS Dynamic Update for Windows 10 version 1809 and Windows Server 2019.",
+            "The July 2026 Server image inventory is the authoritative month-to-KB cross-check; exact Catalog asset identity is resolved and integrity-checked at P04."
           ]
         }
       },
@@ -648,7 +652,7 @@
         "SizeBytes": null,
         "ApplyOrder": 80,
         "InScope": {},
-        "Note": "Latest prior Setup Dynamic Update used by the June 2026 Server image set.",
+        "Note": "Latest prior Setup Dynamic Update used by the July 2026 Server image set.",
         "Roles": [
           "SetupDU"
         ],
@@ -676,13 +680,14 @@
           "SourceUrls": [
             "https://support.microsoft.com/en-us/topic/kb5068795-setup-dynamic-update-for-windows-10-version-1809-and-windows-server-2019-november-11-2025-feead7c8-6d0e-486f-8848-1e7042d601cb",
             "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5068795",
-            "https://support.microsoft.com/en-us/topic/windows-server-images-for-june-2026-7d8577d4-1f36-447b-bbbf-60b68a9f4a69"
+            "https://support.microsoft.com/en-us/servicing/os/azure-marketplace/windows-server/2026/windows-server-images-for-july-2026"
           ],
-          "VerifiedAt": "2026-07-11T00:00:00+09:00",
-          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "VerifiedAt": "2026-07-18T00:00:00+09:00",
+          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
           "Notes": [
-            "Latest prior Setup Dynamic Update used by the June 2026 Server image set.",
-            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
+            "Latest prior Setup Dynamic Update used by the July 2026 Server image set.",
+            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07.",
+            "The July 2026 Server image inventory confirms that this Setup DU remains current for this OS family."
           ]
         }
       }
@@ -791,12 +796,13 @@
     }
   },
   "_meta": {
-    "scriptVersion": "update-wsi-2026.07.14-r12.04",
-    "generatedAt": "2026-07-12T00:00:00Z",
+    "scriptVersion": "update-wsi-2026.07.18-r12.15",
+    "generatedAt": "2026-07-18T00:00:00Z",
     "isTemplate": false,
     "migrationFromSchema": "3.0",
     "compatibilityNote": "PatchModel and legacy flat package fields are retained for staged migration.",
-    "catalogCrossCheckManifest": "data/catalog-crosscheck-manifest.json"
+    "catalogCrossCheckManifest": "data/catalog-crosscheck-manifest.json",
+    "r1215CrossCheck": "2026-07 .NET and Safe OS DU cross-check against official Microsoft release notes and Server image inventory."
   },
   "PatchModel": "embedded-ssu",
   "Compatibility": {

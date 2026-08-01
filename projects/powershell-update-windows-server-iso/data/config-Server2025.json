@@ -495,29 +495,29 @@
         }
       },
       {
-        "PackageId": "Server2025-KB5087051-x64",
+        "PackageId": "Server2025-KB5100998-x64",
         "Kind": "DotNet",
-        "KbId": "KB5087051",
+        "KbId": "KB5100998",
         "ParentKbId": null,
-        "UpdateId": "d30126cf-e709-45b8-be5c-c102057423ad",
+        "UpdateId": null,
         "Revision": null,
-        "Title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Microsoft server operating system version 24H2 for x64 (KB5087051)",
+        "Title": "2026-07 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Microsoft server operating system version 24H2 for x64 (KB5100998)",
         "Products": [
           "Microsoft Server Operating System-24H2"
         ],
-        "Classification": null,
+        "Classification": "Security Updates",
         "Architecture": "x64",
-        "ReleaseDate": "2026-05-12",
+        "ReleaseDate": "2026-07-14",
         "ReleaseType": "B",
-        "State": "Fallback",
-        "FileName": "windows11.0-kb5087051-x64-ndp481_1b5e85a299767e6186f9c693037df973254662d9.msu",
-        "DownloadUrl": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/3e11ae04-442d-4988-8d96-979aa04e7de6/public/windows11.0-kb5087051-x64-ndp481_1b5e85a299767e6186f9c693037df973254662d9.msu",
-        "Digest": "G16Fopl2fmGG+caTA335cyVGYtk=",
-        "Sha256": "eHWDK0eVBl4W1vYUEyTIpQvcKYpBybBNTgtAbcVsg/o=",
+        "State": "Discovered",
+        "FileName": null,
+        "DownloadUrl": null,
+        "Digest": null,
+        "Sha256": "",
         "SizeBytes": null,
         "ApplyOrder": 60,
         "InScope": {},
-        "Note": "Server 2025 .NET Framework leaf asset.",
+        "Note": "2026-07 .NET Framework 3.5 and 4.8.1 security CU for Windows Server 2025; exact Catalog asset is resolved at P04.",
         "Roles": [
           "DotNetLeaf"
         ],
@@ -535,16 +535,8 @@
         },
         "Dependencies": [],
         "Integrity": {
-          "Sha1": {
-            "Encoding": "base64",
-            "Value": "G16Fopl2fmGG+caTA335cyVGYtk=",
-            "Hex": "1b5e85a299767e6186f9c693037df973254662d9"
-          },
-          "Sha256": {
-            "Encoding": "base64",
-            "Value": "eHWDK0eVBl4W1vYUEyTIpQvcKYpBybBNTgtAbcVsg/o=",
-            "Hex": "7875832b4795065e16d6f6141324c8a50bdc298a41c9b04d4e0b406dc56c83fa"
-          },
+          "Sha1": null,
+          "Sha256": null,
           "SizeBytes": null,
           "AuthenticodeStatus": "NotTested"
         },
@@ -554,42 +546,44 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/05-12-may-cumulative-update",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5087051"
+            "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/07-14-july-cumulative-update",
+            "https://support.microsoft.com/help/KB5100998",
+            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5100998",
+            "https://support.microsoft.com/en-us/servicing/os/azure-marketplace/windows-server/2026/windows-server-images-for-july-2026"
           ],
-          "VerifiedAt": "2026-07-11T00:00:00+09:00",
-          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "VerifiedAt": "2026-07-18T00:00:00+09:00",
+          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
           "Notes": [
-            "Server 2025 .NET Framework leaf asset.",
-            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
+            "2026-07 .NET Framework 3.5 and 4.8.1 security CU for Windows Server 2025; exact Catalog asset is resolved at P04.",
+            "Exact Catalog asset identity is resolved and integrity-checked at P04."
           ]
         }
       },
       {
-        "PackageId": "Server2025-KB5094150-x64",
+        "PackageId": "Server2025-KB5099546-x64",
         "Kind": "SafeOSDU",
-        "KbId": "KB5094150",
+        "KbId": "KB5099546",
         "ParentKbId": null,
-        "UpdateId": "ab3e6713-6c89-4db3-bad7-fc18903dfe7c",
+        "UpdateId": null,
         "Revision": null,
-        "Title": "2026-06 Safe OS Dynamic Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5094150)",
+        "Title": "2026-07 Safe OS Dynamic Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5099546)",
         "Products": [
-          "Windows Safe OS Dynamic Update",
-          "Windows 10 and later Dynamic Update"
+          "Windows 10 and later Dynamic Update",
+          "Windows Safe OS Dynamic Update"
         ],
         "Classification": "Critical Updates",
         "Architecture": "x64",
-        "ReleaseDate": "2026-06-09",
+        "ReleaseDate": "2026-07-14",
         "ReleaseType": "DynamicUpdate",
-        "State": "Fallback",
-        "FileName": "windows11.0-kb5094150-x64_89ccb9d87264b8e7d651a24951436069dd1d6eed.cab",
-        "DownloadUrl": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/bbb639ee-a802-4cbb-9058-e69216636070/public/windows11.0-kb5094150-x64_89ccb9d87264b8e7d651a24951436069dd1d6eed.cab",
-        "Digest": "icy52HJkuOfWUaJJUUNgad0dbu0=",
-        "Sha256": "8PImn7lOUvWeDTyOkx6MuNRE3xSN+hdVoCFPBPceWLA=",
+        "State": "Discovered",
+        "FileName": null,
+        "DownloadUrl": null,
+        "Digest": null,
+        "Sha256": "",
         "SizeBytes": null,
         "ApplyOrder": 40,
         "InScope": {},
-        "Note": "Resolved Safe OS Dynamic Update asset.",
+        "Note": "July 2026 Safe OS Dynamic Update for Windows Server 2025 / Microsoft server operating system version 24H2.",
         "Roles": [
           "SafeOSDU"
         ],
@@ -604,16 +598,8 @@
         },
         "Dependencies": [],
         "Integrity": {
-          "Sha1": {
-            "Encoding": "base64",
-            "Value": "icy52HJkuOfWUaJJUUNgad0dbu0=",
-            "Hex": "89ccb9d87264b8e7d651a24951436069dd1d6eed"
-          },
-          "Sha256": {
-            "Encoding": "base64",
-            "Value": "8PImn7lOUvWeDTyOkx6MuNRE3xSN+hdVoCFPBPceWLA=",
-            "Hex": "f0f2269fb94e52f59e0d3c8e931e8cb8d444df148dfa1755a0214f04f71e58b0"
-          },
+          "Sha1": null,
+          "Sha256": null,
           "SizeBytes": null,
           "AuthenticodeStatus": "NotTested"
         },
@@ -623,14 +609,15 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://support.microsoft.com/en-us/topic/kb5094150-safe-os-dynamic-update-for-windows-server-2025-june-9-2026-616a5b9d-a8fd-42b4-a393-b213110667ee",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5094150"
+            "https://support.microsoft.com/help/KB5099546",
+            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5099546",
+            "https://support.microsoft.com/en-us/servicing/os/azure-marketplace/windows-server/2026/windows-server-images-for-july-2026"
           ],
-          "VerifiedAt": "2026-07-11T00:00:00+09:00",
-          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "VerifiedAt": "2026-07-18T00:00:00+09:00",
+          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
           "Notes": [
-            "Resolved Safe OS Dynamic Update asset.",
-            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
+            "July 2026 Safe OS Dynamic Update for Windows Server 2025 / Microsoft server operating system version 24H2.",
+            "The July 2026 Server image inventory is the authoritative month-to-KB cross-check; exact Catalog asset identity is resolved and integrity-checked at P04."
           ]
         }
       },
@@ -692,13 +679,15 @@
           ],
           "SourceUrls": [
             "https://support.microsoft.com/en-us/topic/kb5095966-setup-dynamic-update-for-windows-server-2025-june-9-2026-28732970-9804-483f-963c-94088060f2ed",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5095966"
+            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5095966",
+            "https://support.microsoft.com/en-us/servicing/os/azure-marketplace/windows-server/2026/windows-server-images-for-july-2026"
           ],
-          "VerifiedAt": "2026-07-11T00:00:00+09:00",
-          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "VerifiedAt": "2026-07-18T00:00:00+09:00",
+          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
           "Notes": [
             "Resolved Setup Dynamic Update asset.",
-            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
+            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07.",
+            "The July 2026 Server image inventory confirms that this Setup DU remains current for this OS family."
           ]
         }
       }
@@ -817,12 +806,13 @@
     }
   },
   "_meta": {
-    "scriptVersion": "update-wsi-2026.07.14-r12.04",
-    "generatedAt": "2026-07-11T00:00:00Z",
+    "scriptVersion": "update-wsi-2026.07.18-r12.15",
+    "generatedAt": "2026-07-18T00:00:00Z",
     "isTemplate": false,
     "migrationFromSchema": "3.0",
     "compatibilityNote": "PatchModel and legacy flat package fields are retained for staged migration.",
-    "catalogCrossCheckManifest": "data/catalog-crosscheck-manifest.json"
+    "catalogCrossCheckManifest": "data/catalog-crosscheck-manifest.json",
+    "r1215CrossCheck": "2026-07 .NET and Safe OS DU cross-check against official Microsoft release notes and Server image inventory."
   },
   "PatchModel": "uup-checkpoint",
   "Compatibility": {

@@ -349,7 +349,16 @@ param(
     # evaluation install, and collects build / WinRE / Secure Boot evidence
     # through PowerShell Direct.
     [ValidateSet('BootOnly','Install')]
-    [string]   $HyperVValidationMode = 'BootOnly'
+    [string]   $HyperVValidationMode = 'BootOnly',
+
+    # Standalone -Action BootTest can validate an ISO moved from its original
+    # output directory. The SHA-256 must still match the P11/P12 evidence index.
+    [string]   $BootTestIsoPath,
+
+    # BootOnly screenshots are evidence capture, not release approval. Supply
+    # an operator-controlled JSON approval file on a subsequent BootTest
+    # invocation to promote the same identity-bound evidence to ReleaseReady.
+    [string]   $BootEvidenceApprovalPath
 )
 
 # Propagate the new PCA2023 switches into Script scope so Phase
@@ -363,7 +372,10 @@ $Script:Pca2023OnlyMode           = [bool]$Pca2023OnlyMode
 $Script:Pca2023ScriptPath         = $Pca2023ScriptPath
 $Script:RunHyperVValidation       = [bool]$RunHyperVValidation
 $Script:HyperVValidationMode      = $HyperVValidationMode
+$Script:BootTestIsoPath           = $BootTestIsoPath
+$Script:BootEvidenceApprovalPath  = $BootEvidenceApprovalPath
 $Script:ReleaseEligibility        = $null
+$Script:RunId                     = ([guid]::NewGuid().Guid)
 $Script:ResetBaseOnCleanup        = -not [bool]$SkipResetBaseOnCleanup
 $Script:SkipExportCompress        = [bool]$SkipExportCompress
 $Script:UseDefenderExclusions     = [bool]$UseDefenderExclusions
@@ -388,6 +400,12 @@ if ($EnvironmentInfoOnly -and $SkipEnvCheck) {
 }
 if ($Action -eq 'BootTest' -and $SyntheticTestMode) {
     throw 'BootTest requires Hyper-V and is incompatible with -SyntheticTestMode.'
+}
+if ($BootEvidenceApprovalPath -and $Action -ne 'BootTest') {
+    throw '-BootEvidenceApprovalPath is supported only with -Action BootTest.'
+}
+if ($BootEvidenceApprovalPath -and $HyperVValidationMode -ne 'BootOnly') {
+    throw '-BootEvidenceApprovalPath is valid only with -HyperVValidationMode BootOnly.'
 }
 if ($PSBoundParameters.ContainsKey('OnlyPhases') -and -not $OnlyPhases) {
     throw '-OnlyPhases was specified but the array is empty.'
@@ -597,8 +615,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.18-r12.14'
-$Script:ScriptTag     = 'release-evidence-and-july-dotnet'
+$Script:ScriptVersion = 'update-wsi-2026.07.18-r12.15'
+$Script:ScriptTag     = 'bound-release-evidence-and-july-auxiliaries'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -8723,43 +8741,329 @@ function Test-PatchSetsShareAsset {
     return $false
 }
 
+function Get-FileSha256OrEmpty {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([AllowNull()][string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
+    return ((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant())
+}
+
+function Read-ReleaseJsonFile {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    return (Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-CanonicalJson)
+}
+
+function New-ResolvedPatchEvidenceManifest {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param()
+    $items = New-Object System.Collections.Generic.List[object]
+    foreach ($p in @($Script:ResolvedPatches | Sort-Object -Property @('Kind','KbId','PackageId'))) {
+        $localPath = if ($p.PSObject.Properties['LocalPath']) { [string]$p.LocalPath } else { '' }
+        $integritySha = ''
+        if ($p.PSObject.Properties['Integrity'] -and $p.Integrity -and $p.Integrity.PSObject.Properties['Sha256'] -and $p.Integrity.Sha256) {
+            if ($p.Integrity.Sha256 -is [string]) { $integritySha = [string]$p.Integrity.Sha256 }
+            elseif ($p.Integrity.Sha256.PSObject.Properties['Hex']) { $integritySha = [string]$p.Integrity.Sha256.Hex }
+            elseif ($p.Integrity.Sha256.PSObject.Properties['Value']) { $integritySha = [string]$p.Integrity.Sha256.Value }
+        }
+        $items.Add([pscustomobject][ordered]@{
+            PackageId=[string]$p.PackageId; Kind=[string]$p.Kind; KbId=[string]$p.KbId
+            ParentKbId=$(if ($p.PSObject.Properties['ParentKbId']) { [string]$p.ParentKbId } else { '' })
+            UpdateId=$(if ($p.PSObject.Properties['UpdateId']) { [string]$p.UpdateId } else { '' })
+            Revision=$(if ($p.PSObject.Properties['Revision']) { [string]$p.Revision } else { '' })
+            ReleaseDate=$(if ($p.PSObject.Properties['ReleaseDate']) { [string]$p.ReleaseDate } else { '' })
+            FileName=$(if ($p.PSObject.Properties['FileName']) { [string]$p.FileName } else { '' })
+            SizeBytes=$(if ($p.PSObject.Properties['SizeBytes'] -and $null -ne $p.SizeBytes) { [long]$p.SizeBytes } else { $null })
+            DeclaredSha256=$integritySha
+            LocalAssetSha256=(Get-FileSha256OrEmpty -Path $localPath)
+        }) | Out-Null
+    }
+    return [pscustomobject][ordered]@{
+        SchemaVersion='release-patch-manifest/1.0'
+        RunId=$Script:RunId
+        OsKey=[string]$Script:OsVersion
+        OsLanguage=[string]$Script:OsLanguage
+        BaselineId=$(if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline) { [string]$Script:OsProfile.PatchBaseline.BaselineId } else { '' })
+        CreatedAtUtc=([datetime]::UtcNow.ToString('o'))
+        Patches=$items.ToArray()
+    }
+}
+
+function Get-ReleaseEvidenceIdentity {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([string]$OutputIsoPath=$Script:OutputIsoPath)
+    if ([string]::IsNullOrWhiteSpace($OutputIsoPath) -or -not (Test-Path -LiteralPath $OutputIsoPath -PathType Leaf)) {
+        throw 'Release evidence identity cannot be created because the output ISO is missing.'
+    }
+    $configPath = Get-OsConfigPath -OsKey $Script:OsVersion
+    $manifestPath = Join-Path $Script:LogsDir 'resolved_patch_manifest.json'
+    return [pscustomobject][ordered]@{
+        SchemaVersion='release-evidence-identity/1.0'
+        RunId=[string]$Script:RunId
+        OsKey=[string]$Script:OsVersion
+        OsLanguage=[string]$Script:OsLanguage
+        BaselineId=$(if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline) { [string]$Script:OsProfile.PatchBaseline.BaselineId } else { '' })
+        OutputIsoPath=[System.IO.Path]::GetFullPath($OutputIsoPath)
+        OutputIsoSha256=(Get-FileSha256OrEmpty -Path $OutputIsoPath)
+        ScriptSha256=(Get-FileSha256OrEmpty -Path $PSCommandPath)
+        ConfigPath=$configPath
+        ConfigSha256=(Get-FileSha256OrEmpty -Path $configPath)
+        ResolvedPatchManifestPath=$manifestPath
+        ResolvedPatchManifestSha256=(Get-FileSha256OrEmpty -Path $manifestPath)
+    }
+}
+
+function Test-ReleaseEvidenceIdentity {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)]$Expected,
+        [Parameter(Mandatory)]$Actual
+    )
+    $mismatches = New-Object System.Collections.Generic.List[string]
+    foreach ($field in @('RunId','OsKey','OsLanguage','BaselineId','OutputIsoSha256','ScriptSha256','ConfigSha256','ResolvedPatchManifestSha256')) {
+        $e = if ($Expected.PSObject.Properties[$field]) { [string]$Expected.$field } else { '' }
+        $a = if ($Actual.PSObject.Properties[$field]) { [string]$Actual.$field } else { '' }
+        if ([string]::IsNullOrWhiteSpace($e) -or [string]::IsNullOrWhiteSpace($a) -or $e -ne $a) {
+            $mismatches.Add(('{0}: expected="{1}" actual="{2}"' -f $field,$e,$a)) | Out-Null
+        }
+    }
+    return [pscustomobject]@{ Match=($mismatches.Count -eq 0); Mismatches=$mismatches.ToArray() }
+}
+
+function Write-ReleaseEvidenceMarker {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)]$Identity,
+        [Parameter(Mandatory)][string]$EvidencePath,
+        [string]$Status='Pass',
+        [string]$ApprovalPath=''
+    )
+    $markerPath = Join-Path $Script:MarkersDir $Name
+    $marker = [pscustomobject][ordered]@{
+        SchemaVersion='release-evidence-marker/1.0'
+        Phase=[System.IO.Path]::GetFileNameWithoutExtension($Name)
+        Status=$Status
+        CreatedAtUtc=([datetime]::UtcNow.ToString('o'))
+        Identity=$Identity
+        EvidencePath=$EvidencePath
+        EvidenceSha256=(Get-FileSha256OrEmpty -Path $EvidencePath)
+        ApprovalPath=$ApprovalPath
+        ApprovalSha256=(Get-FileSha256OrEmpty -Path $ApprovalPath)
+    }
+    Save-CanonicalJsonFile -InputObject $marker -Path $markerPath -Depth 12
+    return $marker
+}
+
+function Get-StaticVerificationAssessment {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param()
+    $markerPath = Join-Path $Script:MarkersDir 'P11.ok'
+    $evidencePath = Join-Path $Script:LogsDir 'P11_static_verification.json'
+    $marker = Read-ReleaseJsonFile -Path $markerPath
+    $evidence = Read-ReleaseJsonFile -Path $evidencePath
+    if (-not $marker -or -not $evidence) {
+        return [pscustomobject]@{ Eligible=$false; Status='Unknown'; Reason='P11 identity-bound static verification evidence is missing.' }
+    }
+    try { $current = Get-ReleaseEvidenceIdentity } catch {
+        return [pscustomobject]@{ Eligible=$false; Status='Fail'; Reason=$_.Exception.Message }
+    }
+    $identityCheck = Test-ReleaseEvidenceIdentity -Expected $marker.Identity -Actual $current
+    $hashOk = ([string]$marker.EvidenceSha256 -eq (Get-FileSha256OrEmpty -Path $evidencePath))
+    $pass = $identityCheck.Match -and $hashOk -and ([string]$evidence.Status -eq 'Pass')
+    $reason = if ($pass) { '' } elseif (-not $identityCheck.Match) { 'P11 evidence identity mismatch: ' + ($identityCheck.Mismatches -join '; ') } elseif (-not $hashOk) { 'P11 evidence file hash does not match P11.ok.' } else { 'P11 static verification status is not Pass.' }
+    return [pscustomobject]@{ Eligible=$pass; Status=$(if ($pass){'Pass'}else{'Fail'}); Reason=$reason }
+}
+
 function Get-AuxiliaryFreshnessAssessment {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param()
+    $issues = New-Object System.Collections.Generic.List[object]
     $baselineMonth = ''
     if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline -and $Script:OsProfile.PatchBaseline.PSObject.Properties['BaselineId']) {
-        $baselineMonth = ([string]$Script:OsProfile.PatchBaseline.BaselineId -replace '-B$','')
+        $rawBaseline = [string]$Script:OsProfile.PatchBaseline.BaselineId
+        if ($rawBaseline -match '^(\d{4}-\d{2})(?:-B)?$') { $baselineMonth = $Matches[1] }
+        else { $issues.Add([pscustomobject]@{Kind='Baseline';KbId='';ReleaseMonth='';BaselineMonth='';Issue='BaselineId is missing or malformed.'}) | Out-Null }
+    } else {
+        $issues.Add([pscustomobject]@{Kind='Baseline';KbId='';ReleaseMonth='';BaselineMonth='';Issue='PatchBaseline.BaselineId is unavailable.'}) | Out-Null
     }
-    $stale = New-Object System.Collections.Generic.List[object]
-    foreach ($p in @($Script:ResolvedPatches | Where-Object { $_.Kind -eq 'DotNet' })) {
+    $dotNet = @($Script:ResolvedPatches | Where-Object { $_.Kind -eq 'DotNet' })
+    if ($dotNet.Count -eq 0) {
+        $issues.Add([pscustomobject]@{Kind='DotNet';KbId='';ReleaseMonth='';BaselineMonth=$baselineMonth;Issue='No resolved .NET package was available for freshness assessment.'}) | Out-Null
+    }
+    foreach ($p in $dotNet) {
         $releaseMonth = ''
         if ($p.PSObject.Properties['ReleaseDate'] -and $p.ReleaseDate) {
-            try { $releaseMonth = ([datetime]$p.ReleaseDate).ToString('yyyy-MM') } catch { $releaseMonth = ([string]$p.ReleaseDate).Substring(0,[Math]::Min(7,([string]$p.ReleaseDate).Length)) }
+            $parsed = [datetime]::MinValue
+            if ([datetime]::TryParse([string]$p.ReleaseDate,[ref]$parsed)) { $releaseMonth = $parsed.ToString('yyyy-MM') }
         }
-        if ($baselineMonth -and $releaseMonth -and $releaseMonth -lt $baselineMonth) {
-            $stale.Add([pscustomobject]@{ Kind='DotNet'; KbId=[string]$p.KbId; ReleaseMonth=$releaseMonth; BaselineMonth=$baselineMonth }) | Out-Null
+        if ([string]::IsNullOrWhiteSpace($releaseMonth)) {
+            $issues.Add([pscustomobject]@{Kind='DotNet';KbId=[string]$p.KbId;ReleaseMonth='';BaselineMonth=$baselineMonth;Issue='ReleaseDate is missing or invalid.'}) | Out-Null
+        } elseif ($baselineMonth -and $releaseMonth -lt $baselineMonth) {
+            $issues.Add([pscustomobject]@{Kind='DotNet';KbId=[string]$p.KbId;ReleaseMonth=$releaseMonth;BaselineMonth=$baselineMonth;Issue='Release month is older than the OS baseline month.'}) | Out-Null
         }
     }
+    $status = if ($issues.Count -eq 0) { 'Fresh' } elseif (@($issues | Where-Object { $_.ReleaseMonth -and $_.BaselineMonth -and $_.ReleaseMonth -lt $_.BaselineMonth }).Count -gt 0) { 'Stale' } else { 'Unknown' }
     return [pscustomobject]@{
-        BaselineMonth = $baselineMonth
-        IsFresh = ($stale.Count -eq 0)
-        StaleItems = $stale.ToArray()
+        BaselineMonth=$baselineMonth
+        Status=$status
+        IsFresh=($status -eq 'Fresh')
+        Issues=$issues.ToArray()
+        StaleItems=@($issues | Where-Object { $_.ReleaseMonth -and $_.BaselineMonth -and $_.ReleaseMonth -lt $_.BaselineMonth })
     }
+}
+
+function Test-BootEvidenceArtifacts {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)]$Evidence)
+    $issues = New-Object System.Collections.Generic.List[string]
+    $mode = if ($Evidence.PSObject.Properties['Mode']) { [string]$Evidence.Mode } else { '' }
+    if (-not ($Evidence.PSObject.Properties['Success']) -or -not [bool]$Evidence.Success) {
+        $issues.Add('P14 evidence does not report Success=true.') | Out-Null
+    }
+    if ($mode -eq 'BootOnly') {
+        if (-not ($Evidence.PSObject.Properties['RequiresOperatorReview']) -or -not [bool]$Evidence.RequiresOperatorReview) {
+            $issues.Add('BootOnly evidence must declare RequiresOperatorReview=true.') | Out-Null
+        }
+        $screens = @()
+        if ($Evidence.PSObject.Properties['ScreenshotEvidence']) { $screens = @($Evidence.ScreenshotEvidence) }
+        if ($screens.Count -eq 0) {
+            $issues.Add('BootOnly evidence has no screenshot integrity records.') | Out-Null
+        }
+        foreach ($screen in $screens) {
+            $path = if ($screen.PSObject.Properties['Path']) { [string]$screen.Path } else { '' }
+            $expectedSha = if ($screen.PSObject.Properties['Sha256']) { [string]$screen.Sha256 } else { '' }
+            if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) {
+                $issues.Add(('BootOnly screenshot is missing: {0}' -f $path)) | Out-Null
+                continue
+            }
+            $actualSha = Get-FileSha256OrEmpty -Path $path
+            if ([string]::IsNullOrWhiteSpace($expectedSha) -or $expectedSha -ne $actualSha) {
+                $issues.Add(('BootOnly screenshot SHA256 mismatch: {0}' -f $path)) | Out-Null
+            }
+        }
+    } elseif ($mode -eq 'Install') {
+        if (-not ($Evidence.PSObject.Properties['GuestEvidence']) -or -not $Evidence.GuestEvidence) {
+            $issues.Add('Install validation evidence has no guest evidence.') | Out-Null
+        }
+    } else {
+        $issues.Add(('Unknown P14 evidence mode: {0}' -f $mode)) | Out-Null
+    }
+    return [pscustomobject]@{ Valid=($issues.Count -eq 0); Issues=$issues.ToArray() }
 }
 
 function Get-BootValidationAssessment {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param()
-    $marker = Join-Path $Script:MarkersDir 'P14.ok'
-    $performed = Test-Path -LiteralPath $marker
-    return [pscustomobject]@{
-        Performed = $performed
-        Eligible = $performed
-        Status = $(if ($performed) { 'Pass' } else { 'NotPerformed' })
-        Reason = $(if ($performed) { '' } else { 'Hyper-V or equivalent boot/install smoke test was not performed for this output ISO.' })
+    $markerPath = Join-Path $Script:MarkersDir 'P14.ok'
+    $evidencePath = Join-Path $Script:LogsDir 'P14_hyperv_validation.json'
+    $marker = Read-ReleaseJsonFile -Path $markerPath
+    $evidence = Read-ReleaseJsonFile -Path $evidencePath
+    if (-not $marker -or -not $evidence) {
+        return [pscustomobject]@{ Performed=[bool]$evidence; Eligible=$false; Status=$(if($evidence){'ReviewRequired'}else{'NotPerformed'}); Reason=$(if($evidence){'Boot evidence exists but has not been approved or InstallValidated.'}else{'Hyper-V or equivalent boot/install validation was not performed for this output ISO.'}) }
     }
+    try { $current = Get-ReleaseEvidenceIdentity } catch {
+        return [pscustomobject]@{ Performed=$true; Eligible=$false; Status='Fail'; Reason=$_.Exception.Message }
+    }
+    $identityCheck = Test-ReleaseEvidenceIdentity -Expected $marker.Identity -Actual $current
+    $hashOk = ([string]$marker.EvidenceSha256 -eq (Get-FileSha256OrEmpty -Path $evidencePath))
+    $artifactCheck = Test-BootEvidenceArtifacts -Evidence $evidence
+    $approvalRequired = ([string]$evidence.Mode -eq 'BootOnly')
+    $approvalHashOk = $true
+    if ($approvalRequired) {
+        $approvalPath = if ($marker.PSObject.Properties['ApprovalPath']) { [string]$marker.ApprovalPath } else { '' }
+        $approvalHash = if ($marker.PSObject.Properties['ApprovalSha256']) { [string]$marker.ApprovalSha256 } else { '' }
+        $approvalHashOk = (-not [string]::IsNullOrWhiteSpace($approvalPath)) -and `
+            (Test-Path -LiteralPath $approvalPath -PathType Leaf) -and `
+            (-not [string]::IsNullOrWhiteSpace($approvalHash)) -and `
+            ($approvalHash -eq (Get-FileSha256OrEmpty -Path $approvalPath))
+    }
+    $eligible = $identityCheck.Match -and $hashOk -and $artifactCheck.Valid -and $approvalHashOk -and ([string]$marker.Status -eq 'Pass')
+    $reason = if ($eligible) { '' } `
+        elseif (-not $identityCheck.Match) { 'P14 evidence identity mismatch: ' + ($identityCheck.Mismatches -join '; ') } `
+        elseif (-not $hashOk) { 'P14 evidence file hash does not match P14.ok.' } `
+        elseif (-not $artifactCheck.Valid) { 'P14 evidence artifact validation failed: ' + ($artifactCheck.Issues -join '; ') } `
+        elseif (-not $approvalHashOk) { 'BootOnly approval evidence is missing or its SHA256 does not match P14.ok.' } `
+        else { 'P14 evidence is not approved.' }
+    return [pscustomobject]@{ Performed=$true; Eligible=$eligible; Status=$(if($eligible){'Pass'}else{'Fail'}); Reason=$reason }
+}
+
+function Save-ReleaseEvidenceIndex {
+    [CmdletBinding()]
+    param()
+    $identity = Get-ReleaseEvidenceIdentity
+    $index = [pscustomobject][ordered]@{
+        SchemaVersion='release-evidence-index/1.0'
+        UpdatedAtUtc=([datetime]::UtcNow.ToString('o'))
+        Identity=$identity
+        ReleaseEligibility=$Script:ReleaseEligibility
+        Evidence=[pscustomobject][ordered]@{
+            P11=(Join-Path $Script:LogsDir 'P11_static_verification.json')
+            P12=(Join-Path $Script:LogsDir 'P12_release_assessment.json')
+            P14=(Join-Path $Script:LogsDir 'P14_hyperv_validation.json')
+        }
+    }
+    Save-CanonicalJsonFile -InputObject $index -Path (Join-Path $Script:LogsDir 'release_evidence_index.json') -Depth 16
+    return $index
+}
+
+function Initialize-BootTestState {
+    [CmdletBinding()]
+    param()
+    $indexPath = Join-Path $Script:LogsDir 'release_evidence_index.json'
+    $index = Read-ReleaseJsonFile -Path $indexPath
+    if (-not $index -or -not $index.Identity) {
+        throw ('Standalone BootTest requires identity-bound P11/P12 evidence: {0}' -f $indexPath)
+    }
+    $Script:RunId = [string]$index.Identity.RunId
+    $Script:OsVersion = [string]$index.Identity.OsKey
+    $Script:OsLanguage = [string]$index.Identity.OsLanguage
+    $Script:OsProfile = Get-ConfigProfile -OsKey $Script:OsVersion -OsLang $Script:OsLanguage
+    $candidate = if ($Script:BootTestIsoPath) { Resolve-RelativeToScript $Script:BootTestIsoPath } else { [string]$index.Identity.OutputIsoPath }
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { throw ('BootTest ISO not found: {0}' -f $candidate) }
+    $Script:OutputIsoPath = $candidate
+    $Script:ReleaseEligibility = $index.ReleaseEligibility
+    $current = Get-ReleaseEvidenceIdentity -OutputIsoPath $candidate
+    $match = Test-ReleaseEvidenceIdentity -Expected $index.Identity -Actual $current
+    if (-not $match.Match) { throw ('BootTest evidence identity mismatch: {0}' -f ($match.Mismatches -join '; ')) }
+}
+
+function Test-BootEvidenceApproval {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$ApprovalPath,
+        [Parameter(Mandatory)][string]$EvidencePath,
+        [Parameter(Mandatory)]$Identity
+    )
+    $approval = Read-ReleaseJsonFile -Path $ApprovalPath
+    if (-not $approval) { return [pscustomobject]@{Valid=$false;Reason='Approval file is missing or invalid JSON.';Approval=$null} }
+    $issues = New-Object System.Collections.Generic.List[string]
+    if ([string]$approval.SchemaVersion -ne 'P14-boot-approval-request/1.0') { $issues.Add('SchemaVersion must be P14-boot-approval-request/1.0.') | Out-Null }
+    if ([string]$approval.Decision -ne 'Approve') { $issues.Add('Decision must be Approve.') | Out-Null }
+    if ([string]$approval.RunId -ne [string]$Identity.RunId) { $issues.Add('RunId does not match.') | Out-Null }
+    if ([string]$approval.OutputIsoSha256 -ne [string]$Identity.OutputIsoSha256) { $issues.Add('OutputIsoSha256 does not match.') | Out-Null }
+    $evidenceSha = Get-FileSha256OrEmpty -Path $EvidencePath
+    if ([string]$approval.P14EvidenceSha256 -ne $evidenceSha) { $issues.Add('P14EvidenceSha256 does not match.') | Out-Null }
+    if ([string]::IsNullOrWhiteSpace([string]$approval.ApprovedBy)) { $issues.Add('ApprovedBy is required.') | Out-Null }
+    if ([string]::IsNullOrWhiteSpace([string]$approval.ApprovedAtUtc)) {
+        $issues.Add('ApprovedAtUtc is required.') | Out-Null
+    } else {
+        $approvedAt = [datetime]::MinValue
+        if (-not [datetime]::TryParse([string]$approval.ApprovedAtUtc,[ref]$approvedAt)) {
+            $issues.Add('ApprovedAtUtc is not a valid date/time.') | Out-Null
+        }
+    }
+    return [pscustomobject]@{Valid=($issues.Count -eq 0);Reason=($issues -join ' ');Approval=$approval}
 }
 
 function Get-Pca2023CompliancePolicy {
@@ -14712,12 +15016,29 @@ function Invoke-VerifyPhase11_StaticVerify {
         $rows | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
         Write-Ok ('Wrote: {0}' -f $csvPath)
 
-        $failed = $rows | Where-Object { $_.Status -eq 'Fail' }
+        $failed = @($rows | Where-Object { $_.Status -eq 'Fail' })
         if ($failed.Count -gt 0) {
             throw ('P11 verification failed: {0} hard failures.' -f $failed.Count)
         }
 
-        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P11.ok') -Force | Out-Null
+        $patchManifestPath = Join-Path $Script:LogsDir 'resolved_patch_manifest.json'
+        Save-CanonicalJsonFile -InputObject (New-ResolvedPatchEvidenceManifest) -Path $patchManifestPath -Depth 16
+        $identity = Get-ReleaseEvidenceIdentity
+        $p11EvidencePath = Join-Path $Script:LogsDir 'P11_static_verification.json'
+        $p11Evidence = [pscustomobject][ordered]@{
+            SchemaVersion='P11-static-verification/1.0'
+            Status='Pass'
+            CreatedAtUtc=([datetime]::UtcNow.ToString('o'))
+            Identity=$identity
+            VerificationCsvPath=$csvPath
+            VerificationCsvSha256=(Get-FileSha256OrEmpty -Path $csvPath)
+            PostInspectionPath=(Join-Path $Script:LogsDir 'inspection_post.json')
+            PostInspectionSha256=(Get-FileSha256OrEmpty -Path (Join-Path $Script:LogsDir 'inspection_post.json'))
+            RowCount=@($rows).Count
+            FailureCount=0
+        }
+        Save-CanonicalJsonFile -InputObject $p11Evidence -Path $p11EvidencePath -Depth 16
+        Write-ReleaseEvidenceMarker -Name 'P11.ok' -Identity $identity -EvidencePath $p11EvidencePath -Status 'Pass' | Out-Null
     } finally {
         Stop-DebugTrace
     }
@@ -14865,38 +15186,56 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
         $policy = Get-Pca2023CompliancePolicy
         $compliance = Test-Pca2023PolicyCompliance -OutputCheck $outputCheck -Policy $policy
         $freshness = Get-AuxiliaryFreshnessAssessment
+        $staticVerification = Get-StaticVerificationAssessment
         $bootValidation = Get-BootValidationAssessment
-        $staticVerified = Test-Path -LiteralPath (Join-Path $Script:MarkersDir 'P11.ok')
-        $staticEligible = $staticVerified -and $compliance.ReleaseEligible -and $freshness.IsFresh
+        $staticEligible = $staticVerification.Eligible -and $compliance.ReleaseEligible -and $freshness.IsFresh
         $reasons = New-Object System.Collections.Generic.List[string]
+        if (-not $staticVerification.Eligible -and $staticVerification.Reason) { $reasons.Add([string]$staticVerification.Reason) | Out-Null }
         foreach ($reason in @($compliance.Reasons)) { if ($reason) { $reasons.Add([string]$reason) | Out-Null } }
-        foreach ($item in @($freshness.StaleItems)) {
-            $reasons.Add(('Stale {0} package {1}: release month {2} is older than baseline month {3}.' -f $item.Kind,$item.KbId,$item.ReleaseMonth,$item.BaselineMonth)) | Out-Null
+        foreach ($item in @($freshness.Issues)) {
+            $reasons.Add(('{0} freshness {1} {2}: {3} (release={4}; baseline={5}).' -f $freshness.Status,$item.Kind,$item.KbId,$item.Issue,$item.ReleaseMonth,$item.BaselineMonth)) | Out-Null
         }
-        if (-not $bootValidation.Eligible) { $reasons.Add($bootValidation.Reason) | Out-Null }
+        if (-not $bootValidation.Eligible -and $bootValidation.Reason) { $reasons.Add($bootValidation.Reason) | Out-Null }
         $releaseEligible = $staticEligible -and $bootValidation.Eligible
-        $Script:ReleaseEligibility = [pscustomobject]@{
+        $releaseStatus = if ($releaseEligible) { 'ReleaseReady' } elseif ($staticEligible -and $bootValidation.Status -eq 'ReviewRequired') { 'BootEvidenceReviewRequired' } elseif ($staticEligible) { 'Candidate-BootTestRequired' } else { 'NotEligible' }
+        $Script:ReleaseEligibility = [pscustomobject][ordered]@{
+            SchemaVersion='release-eligibility/1.1'
+            RunId=$Script:RunId
             BuildSucceeded=$true
-            StaticVerificationStatus=$(if ($staticVerified) { 'Pass' } else { 'Unknown' })
+            StaticVerificationStatus=$staticVerification.Status
             Pca2023Compliance=$(if ($compliance.ReleaseEligible) { 'Pass' } else { 'Fail' })
             Pca2023Policy=$policy
-            AuxiliaryFreshness=$(if ($freshness.IsFresh) { 'Pass' } else { 'Fail' })
+            AuxiliaryFreshness=$freshness.Status
             StaticEligible=$staticEligible
             BootTestStatus=$bootValidation.Status
             BootTestEligible=$bootValidation.Eligible
-            ReleaseStatus=$(if ($releaseEligible) { 'ReleaseReady' } elseif ($staticEligible) { 'Candidate-BootTestRequired' } else { 'NotEligible' })
+            ReleaseStatus=$releaseStatus
             ReleaseEligible=$releaseEligible
             Reasons=$reasons.ToArray()
         }
+        $identity = Get-ReleaseEvidenceIdentity
+        $assessmentPath = Join-Path $Script:LogsDir 'P12_release_assessment.json'
+        $assessment = [pscustomobject][ordered]@{
+            SchemaVersion='P12-release-assessment/1.0'
+            CreatedAtUtc=([datetime]::UtcNow.ToString('o'))
+            Identity=$identity
+            StaticVerification=$staticVerification
+            Pca2023Compliance=$compliance
+            AuxiliaryFreshness=$freshness
+            BootValidation=$bootValidation
+            ReleaseEligibility=$Script:ReleaseEligibility
+        }
+        Save-CanonicalJsonFile -InputObject $assessment -Path $assessmentPath -Depth 18
         $eligibilityPath=Join-Path $Script:LogsDir 'release_eligibility.json'
-        $Script:ReleaseEligibility | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $eligibilityPath -Encoding UTF8
+        Save-CanonicalJsonFile -InputObject $Script:ReleaseEligibility -Path $eligibilityPath -Depth 12
+        Save-ReleaseEvidenceIndex | Out-Null
         Write-Step ('PCA2023 policy: {0}; StaticEligible={1}; BootTest={2}; ReleaseEligible={3}' -f $policy, $staticEligible, $bootValidation.Status, $releaseEligible)
         if (-not $staticEligible) {
-            New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P12.failed') -Force | Out-Null
+            Write-ReleaseEvidenceMarker -Name 'P12.failed' -Identity $identity -EvidencePath $assessmentPath -Status 'Fail' | Out-Null
             $Script:DeferredVerificationFailure = ('P12 static release evidence failed: {0}' -f (($reasons.ToArray()) -join '; '))
             Write-Fail $Script:DeferredVerificationFailure
         } else {
-            New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P12.ok') -Force | Out-Null
+            Write-ReleaseEvidenceMarker -Name 'P12.ok' -Identity $identity -EvidencePath $assessmentPath -Status 'Pass' | Out-Null
         }
     } finally {
         Stop-DebugTrace
@@ -16426,29 +16765,86 @@ function Invoke-VerifyPhase14_HyperVValidation {
     param()
     Start-DebugTrace -Context 'Invoke-VerifyPhase14_HyperVValidation' -PhaseId 'P14'
     try {
-        $result=Invoke-HyperVBootTest -Mode $Script:HyperVValidationMode
-        $path=Join-Path $Script:LogsDir 'P14_hyperv_validation.json'
-        $result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $path -Encoding UTF8
-        if (-not $result.Success) { throw ('P14 Hyper-V validation failed: {0}' -f ($result.Reasons -join '; ')) }
-        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P14.ok') -Force | Out-Null
-        if ($Script:ReleaseEligibility) {
-            $level = if ($result.Mode -eq 'Install') { 'InstallValidated' } else { 'BootEvidenceCaptured' }
-            $Script:ReleaseEligibility | Add-Member -NotePropertyName HyperVValidation -NotePropertyValue $level -Force
-            $Script:ReleaseEligibility.BootTestStatus = 'Pass'
-            $Script:ReleaseEligibility.BootTestEligible = $true
-            $Script:ReleaseEligibility.ReleaseEligible = [bool]$Script:ReleaseEligibility.StaticEligible
-            $Script:ReleaseEligibility.ReleaseStatus = $(if ($Script:ReleaseEligibility.ReleaseEligible) { 'ReleaseReady' } else { 'NotEligible' })
-            $Script:ReleaseEligibility.Reasons = @($Script:ReleaseEligibility.Reasons | Where-Object { $_ -notlike 'Hyper-V or equivalent boot/install smoke test*' })
-            $eligibilityPath=Join-Path $Script:LogsDir 'release_eligibility.json'
-            $Script:ReleaseEligibility | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $eligibilityPath -Encoding UTF8
+        if ($Action -eq 'BootTest' -or -not $Script:ReleaseEligibility -or -not $Script:OutputIsoPath) {
+            Initialize-BootTestState
         }
-        Write-Ok ('P14 Hyper-V evidence written: {0}' -f $path)
+        $identity = Get-ReleaseEvidenceIdentity
+        $path = Join-Path $Script:LogsDir 'P14_hyperv_validation.json'
+
+        # Approval is a second, explicit operation over an already captured
+        # BootOnly evidence file. It never reruns or silently replaces evidence.
+        if ($Script:BootEvidenceApprovalPath) {
+            $approvalPath = Resolve-RelativeToScript $Script:BootEvidenceApprovalPath
+            $existing = Read-ReleaseJsonFile -Path $path
+            if (-not $existing -or [string]$existing.Mode -ne 'BootOnly' -or -not $existing.Identity) {
+                throw 'Boot evidence approval requires an existing identity-bound BootOnly P14_hyperv_validation.json.'
+            }
+            $existingIdentity = Test-ReleaseEvidenceIdentity -Expected $existing.Identity -Actual $identity
+            if (-not $existingIdentity.Match) { throw ('Boot evidence identity mismatch: {0}' -f ($existingIdentity.Mismatches -join '; ')) }
+            $artifactCheck = Test-BootEvidenceArtifacts -Evidence $existing
+            if (-not $artifactCheck.Valid) { throw ('Boot evidence artifacts are not approvable: {0}' -f ($artifactCheck.Issues -join '; ')) }
+            $approval = Test-BootEvidenceApproval -ApprovalPath $approvalPath -EvidencePath $path -Identity $identity
+            if (-not $approval.Valid) { throw ('Boot evidence approval rejected: {0}' -f $approval.Reason) }
+            $approvalEvidencePath = Join-Path $Script:LogsDir 'P14_boot_evidence_approval.json'
+            Save-CanonicalJsonFile -InputObject ([pscustomobject][ordered]@{
+                SchemaVersion='P14-boot-approval/1.0'; Identity=$identity
+                Approval=$approval.Approval; ApprovedEvidencePath=$path
+                ApprovedEvidenceSha256=(Get-FileSha256OrEmpty -Path $path)
+            }) -Path $approvalEvidencePath -Depth 14
+            Write-ReleaseEvidenceMarker -Name 'P14.ok' -Identity $identity -EvidencePath $path -Status 'Pass' -ApprovalPath $approvalEvidencePath | Out-Null
+            Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P14.review-required') -Force -ErrorAction SilentlyContinue
+            $Script:ReleaseEligibility | Add-Member -NotePropertyName HyperVValidation -NotePropertyValue 'BootEvidenceApproved' -Force
+            $Script:ReleaseEligibility.BootTestStatus='Pass'
+            $Script:ReleaseEligibility.BootTestEligible=$true
+            $Script:ReleaseEligibility.ReleaseEligible=[bool]$Script:ReleaseEligibility.StaticEligible
+            $Script:ReleaseEligibility.ReleaseStatus=$(if($Script:ReleaseEligibility.ReleaseEligible){'ReleaseReady'}else{'NotEligible'})
+            $Script:ReleaseEligibility.Reasons=@($Script:ReleaseEligibility.Reasons | Where-Object { $_ -notlike '*boot/install validation*' -and $_ -notlike '*Boot evidence*' })
+            Save-CanonicalJsonFile -InputObject $Script:ReleaseEligibility -Path (Join-Path $Script:LogsDir 'release_eligibility.json') -Depth 12
+            Save-ReleaseEvidenceIndex | Out-Null
+            Write-Ok ('P14 BootOnly evidence approved: {0}' -f $approvalEvidencePath)
+            return
+        }
+
+        $result=Invoke-HyperVBootTest -Mode $Script:HyperVValidationMode
+        $result | Add-Member -NotePropertyName Identity -NotePropertyValue $identity -Force
+        $screenEvidence = @($result.Screenshots | ForEach-Object {
+            [pscustomobject]@{Path=[string]$_;Sha256=(Get-FileSha256OrEmpty -Path ([string]$_))}
+        })
+        $result | Add-Member -NotePropertyName ScreenshotEvidence -NotePropertyValue $screenEvidence -Force
+        Save-CanonicalJsonFile -InputObject $result -Path $path -Depth 16
+        if (-not $result.Success) { throw ('P14 Hyper-V validation failed: {0}' -f ($result.Reasons -join '; ')) }
+
+        if ($result.Mode -eq 'BootOnly') {
+            Write-ReleaseEvidenceMarker -Name 'P14.review-required' -Identity $identity -EvidencePath $path -Status 'ReviewRequired' | Out-Null
+            Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P14.ok') -Force -ErrorAction SilentlyContinue
+            if ($Script:ReleaseEligibility) {
+                $Script:ReleaseEligibility | Add-Member -NotePropertyName HyperVValidation -NotePropertyValue 'BootEvidenceCaptured' -Force
+                $Script:ReleaseEligibility.BootTestStatus='ReviewRequired'
+                $Script:ReleaseEligibility.BootTestEligible=$false
+                $Script:ReleaseEligibility.ReleaseEligible=$false
+                $Script:ReleaseEligibility.ReleaseStatus=$(if($Script:ReleaseEligibility.StaticEligible){'BootEvidenceReviewRequired'}else{'NotEligible'})
+                $Script:ReleaseEligibility.Reasons=@($Script:ReleaseEligibility.Reasons | Where-Object { $_ -notlike '*boot/install validation*' }) + @('BootOnly screenshots require explicit operator approval before release.')
+            }
+            Write-Caution ('P14 BootOnly evidence captured but not release-approved: {0}' -f $path)
+        } else {
+            Write-ReleaseEvidenceMarker -Name 'P14.ok' -Identity $identity -EvidencePath $path -Status 'Pass' | Out-Null
+            Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P14.review-required') -Force -ErrorAction SilentlyContinue
+            if ($Script:ReleaseEligibility) {
+                $Script:ReleaseEligibility | Add-Member -NotePropertyName HyperVValidation -NotePropertyValue 'InstallValidated' -Force
+                $Script:ReleaseEligibility.BootTestStatus='Pass'
+                $Script:ReleaseEligibility.BootTestEligible=$true
+                $Script:ReleaseEligibility.ReleaseEligible=[bool]$Script:ReleaseEligibility.StaticEligible
+                $Script:ReleaseEligibility.ReleaseStatus=$(if($Script:ReleaseEligibility.ReleaseEligible){'ReleaseReady'}else{'NotEligible'})
+                $Script:ReleaseEligibility.Reasons=@($Script:ReleaseEligibility.Reasons | Where-Object { $_ -notlike '*boot/install validation*' -and $_ -notlike '*BootOnly screenshots*' })
+            }
+            Write-Ok ('P14 Install validation passed: {0}' -f $path)
+        }
+        if ($Script:ReleaseEligibility) {
+            Save-CanonicalJsonFile -InputObject $Script:ReleaseEligibility -Path (Join-Path $Script:LogsDir 'release_eligibility.json') -Depth 12
+            Save-ReleaseEvidenceIndex | Out-Null
+        }
     } finally { Stop-DebugTrace }
 }
-
-# ============================================================
-# BootTest action (Hyper-V)
-# ============================================================
 
 function Convert-Rgb565ThumbnailToBmp {
     <#
@@ -16484,13 +16880,23 @@ function Convert-Rgb565ThumbnailToBmp {
     return $ms.ToArray()
 }
 
+function New-RandomValidationPassword {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+    $bytes = New-Object byte[] 18
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
+    return ('P14!' + [Convert]::ToBase64String($bytes))
+}
+
 function Invoke-HyperVBootTest {
     <#
     .SYNOPSIS
         P14 worker. BootOnly captures Gen2 MicrosoftWindows Secure Boot
-        console thumbnails for operator review. Install performs an
-        unattended evaluation installation and collects guest evidence
-        with PowerShell Direct.
+        console thumbnails for explicit operator review. Install performs an
+        unattended evaluation installation and strictly validates build,
+        edition, Secure Boot, WinRE, pending packages and pending reboot state.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -16498,19 +16904,23 @@ function Invoke-HyperVBootTest {
 
     Write-SubSection ('Hyper-V validation ({0}; Gen2 MicrosoftWindows Secure Boot)' -f $Mode)
     if (-not $Script:OutputIsoPath -or -not (Test-Path -LiteralPath $Script:OutputIsoPath)) {
-        throw 'No output ISO is available to Hyper-V validation.'
+        throw 'No identity-validated output ISO is available to Hyper-V validation.'
     }
     $vmName = ('UpdateWsi_P14_' + (Get-Date -Format 'yyyyMMddHHmmss'))
-    $vmDir  = Join-Path $Script:WorkRoot 'hyperv-validation'
+    $validationRoot = Join-Path $Script:WorkRoot 'hyperv-validation'
+    $vmDir = Join-Path $validationRoot $vmName
     New-Item -ItemType Directory -Path $vmDir -Force | Out-Null
     $vhdPath = Join-Path $vmDir ($vmName + '.vhdx')
     $answerIso = $null
-    $guestPassword = 'P@ssw0rd-r1204!'
+    $answerDir = $null
+    $guestPassword = New-RandomValidationPassword
     $shots = New-Object System.Collections.Generic.List[string]
     $reasons = New-Object System.Collections.Generic.List[string]
     $guestEvidence = $null
     $state = 'Unknown'
     $created = $false
+    $expectedBuild = if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline) { [string]$Script:OsProfile.PatchBaseline.TargetBuildAfterUpdate } else { '' }
+    $expectedEdition = if ($Script:OsProfile -and $Script:OsProfile.PSObject.Properties['Edition']) { [string]$Script:OsProfile.Edition } else { '' }
 
     try {
         Set-DebugStep -Step 'create-vm'
@@ -16603,30 +17013,61 @@ function Invoke-HyperVBootTest {
                         $cv=Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
                         $secure=$false; try { $secure=Confirm-SecureBootUEFI } catch { $secure=$false }
                         $reagent=(reagentc.exe /info | Out-String)
-                        [pscustomobject]@{ Build=('{0}.{1}' -f $cv.CurrentBuildNumber,$cv.UBR); Edition=$cv.EditionID; SecureBoot=$secure; WinReInfo=$reagent; Timestamp=(Get-Date).ToString('o') }
+                        $winReEnabled=($LASTEXITCODE -eq 0) -and ($reagent -match '(?im)Windows RE status\s*:\s*Enabled|Windows RE の状態\s*:\s*有効')
+                        $pendingPackages=@(Get-WindowsPackage -Online -ErrorAction SilentlyContinue | Where-Object { $_.PackageState -eq 'InstallPending' }).Count
+                        $pendingReboot=(Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') -or (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired')
+                        [pscustomobject]@{
+                            Build=('{0}.{1}' -f $cv.CurrentBuildNumber,$cv.UBR)
+                            Edition=$cv.EditionID
+                            SecureBoot=$secure
+                            WinReEnabled=$winReEnabled
+                            WinReInfo=$reagent
+                            PendingPackageCount=[int]$pendingPackages
+                            PendingReboot=[bool]$pendingReboot
+                            Timestamp=(Get-Date).ToString('o')
+                        }
                     }
                 } catch { $guestEvidence=$null }
             }
-            if (-not $guestEvidence) { $reasons.Add('Unattended installation did not become reachable through PowerShell Direct within the validation window.') | Out-Null }
-            elseif (-not $guestEvidence.SecureBoot) { $reasons.Add('Installed guest reported Secure Boot disabled.') | Out-Null }
+            if (-not $guestEvidence) {
+                $reasons.Add('Unattended installation did not become reachable through PowerShell Direct within the validation window.') | Out-Null
+            } else {
+                $buildPass=$false
+                if ([string]::IsNullOrWhiteSpace($expectedBuild)) { $reasons.Add('Expected TargetBuildAfterUpdate is unavailable.') | Out-Null }
+                else { try { $buildPass=([version]$guestEvidence.Build -ge [version]$expectedBuild) } catch { $buildPass=$false } }
+                if (-not $buildPass) { $reasons.Add(('Installed build {0} is below expected build {1}.' -f $guestEvidence.Build,$expectedBuild)) | Out-Null }
+                if ($expectedEdition -and ([string]$guestEvidence.Edition -notlike ('*' + $expectedEdition + '*'))) { $reasons.Add(('Installed edition {0} does not match expected edition {1}.' -f $guestEvidence.Edition,$expectedEdition)) | Out-Null }
+                if (-not $guestEvidence.SecureBoot) { $reasons.Add('Installed guest reported Secure Boot disabled.') | Out-Null }
+                if (-not $guestEvidence.WinReEnabled) { $reasons.Add('Installed guest did not report Windows RE enabled.') | Out-Null }
+                if ([int]$guestEvidence.PendingPackageCount -ne 0) { $reasons.Add(('Installed guest has {0} InstallPending packages.' -f $guestEvidence.PendingPackageCount)) | Out-Null }
+                if ([bool]$guestEvidence.PendingReboot) { $reasons.Add('Installed guest has a pending reboot condition.') | Out-Null }
+            }
         } elseif ($shots.Count -eq 0) {
             $reasons.Add('No console screenshots were captured.') | Out-Null
         } else {
-            $reasons.Add('BootOnly evidence requires operator review; screenshots alone are not InstallValidated evidence.') | Out-Null
+            $reasons.Add('BootOnly evidence requires explicit operator approval; screenshots never directly produce ReleaseReady.') | Out-Null
         }
 
-        $success = if ($Mode -eq 'Install') { [bool]($guestEvidence -and $guestEvidence.SecureBoot) } else { $shots.Count -gt 0 }
-        return [pscustomobject]@{
+        $success = if ($Mode -eq 'Install') { [bool]($guestEvidence -and $reasons.Count -eq 0) } else { $shots.Count -gt 0 }
+        return [pscustomobject][ordered]@{
+            SchemaVersion='P14-hyperv-validation/1.1'
             Success=$success; Mode=$Mode; VmName=$vmName; VmState=$state
+            OutputIsoPath=$Script:OutputIsoPath
+            OutputIsoSha256=(Get-FileSha256OrEmpty -Path $Script:OutputIsoPath)
+            ExpectedBuild=$expectedBuild; ExpectedEdition=$expectedEdition
             Screenshots=$shots.ToArray(); GuestEvidence=$guestEvidence
             RequiresOperatorReview=($Mode -eq 'BootOnly'); Reasons=$reasons.ToArray()
         }
     } finally {
+        $guestPassword=$null
         if ($created) {
             try { Stop-VM -Name $vmName -TurnOff -Force -ErrorAction SilentlyContinue | Out-Null } catch { $null=$_ }
             try { Remove-VM -Name $vmName -Force -ErrorAction SilentlyContinue | Out-Null } catch { $null=$_ }
         }
+        if ($answerIso -and (Test-Path -LiteralPath $answerIso)) { Remove-Item -LiteralPath $answerIso -Force -ErrorAction SilentlyContinue }
+        if ($answerDir -and (Test-Path -LiteralPath $answerDir)) { Remove-Item -LiteralPath $answerDir -Recurse -Force -ErrorAction SilentlyContinue }
         if (Test-Path -LiteralPath $vhdPath) { Remove-Item -LiteralPath $vhdPath -Force -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $vmDir) { Remove-Item -LiteralPath $vmDir -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
 

@@ -238,19 +238,20 @@
       ],
       "InboxFrameworkServicing": "ServicedByWindowsLCU",
       "DoNotAddAsStandaloneKb": [
-        "KB5087537"
+        "KB5099535"
       ],
       "StandaloneRuntimePackages": [
         {
           "Runtime": "4.8",
-          "KbId": "KB5087065",
+          "KbId": "KB5101007",
           "Condition": "IfRuntimeDetectedPerInstallIndex"
         }
       ],
       "EvidenceUrls": [
-        "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/05-12-may-cumulative-update",
-        "https://support.microsoft.com/kb/5087537",
-        "https://support.microsoft.com/kb/5087065"
+        "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/07-14-july-cumulative-update",
+        "https://support.microsoft.com/help/5099535",
+        "https://support.microsoft.com/help/5101007",
+        "https://support.microsoft.com/en-us/servicing/os/azure-marketplace/windows-server/2026/windows-server-images-for-july-2026"
       ]
     }
   },
@@ -517,19 +518,21 @@
         }
       },
       {
-        "PackageId": "Server2016-KB5087065-x64",
+        "PackageId": "Server2016-KB5101007-x64",
         "Kind": "DotNet",
-        "KbId": "KB5087065",
+        "KbId": "KB5101007",
         "ParentKbId": null,
         "UpdateId": null,
         "Revision": null,
-        "Title": null,
-        "Products": null,
-        "Classification": null,
+        "Title": "2026-07 Cumulative Update for .NET Framework 4.8 for Windows Server 2016 for x64 (KB5101007)",
+        "Products": [
+          "Windows Server 2016"
+        ],
+        "Classification": "Security Updates",
         "Architecture": "x64",
-        "ReleaseDate": "2026-05-12",
+        "ReleaseDate": "2026-07-14",
         "ReleaseType": "B",
-        "State": "Fallback",
+        "State": "Discovered",
         "FileName": null,
         "DownloadUrl": null,
         "Digest": null,
@@ -537,7 +540,7 @@
         "SizeBytes": null,
         "ApplyOrder": 60,
         "InScope": {},
-        "Note": "Leaf KB candidate when .NET Framework 4.8 is present.",
+        "Note": "2026-07 standalone .NET Framework 4.8 security CU for Windows Server 2016; exact Catalog asset is resolved at P04.",
         "Roles": [
           "DotNetLeaf"
         ],
@@ -565,34 +568,36 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/05-12-may-cumulative-update",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5087065"
+            "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/07-14-july-cumulative-update",
+            "https://support.microsoft.com/help/KB5101007",
+            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5101007",
+            "https://support.microsoft.com/en-us/servicing/os/azure-marketplace/windows-server/2026/windows-server-images-for-july-2026"
           ],
-          "VerifiedAt": "2026-07-11T00:00:00+09:00",
-          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "VerifiedAt": "2026-07-18T00:00:00+09:00",
+          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
           "Notes": [
-            "Leaf KB candidate when .NET Framework 4.8 is present.",
-            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
+            "2026-07 standalone .NET Framework 4.8 security CU for Windows Server 2016; exact Catalog asset is resolved at P04.",
+            "Exact Catalog asset identity is resolved and integrity-checked at P04."
           ]
         }
       },
       {
-        "PackageId": "Server2016-KB5094152-x64",
+        "PackageId": "Server2016-KB5099548-x64",
         "Kind": "SafeOSDU",
-        "KbId": "KB5094152",
+        "KbId": "KB5099548",
         "ParentKbId": null,
         "UpdateId": null,
         "Revision": null,
-        "Title": null,
+        "Title": "2026-07 Safe OS Dynamic Update for Windows 10 version 1607 and Windows Server 2016 for x64-based Systems (KB5099548)",
         "Products": [
           "Windows 10 and later Dynamic Update",
           "Windows Safe OS Dynamic Update"
         ],
         "Classification": "Critical Updates",
         "Architecture": "x64",
-        "ReleaseDate": "2026-06-09",
+        "ReleaseDate": "2026-07-14",
         "ReleaseType": "DynamicUpdate",
-        "State": "Fallback",
+        "State": "Discovered",
         "FileName": null,
         "DownloadUrl": null,
         "Digest": null,
@@ -600,7 +605,7 @@
         "SizeBytes": null,
         "ApplyOrder": 40,
         "InScope": {},
-        "Note": "Safe OS Dynamic Update for Windows 10 version 1607 and Windows Server 2016.",
+        "Note": "July 2026 Safe OS Dynamic Update for Windows 10 version 1607 and Windows Server 2016.",
         "Roles": [
           "SafeOSDU"
         ],
@@ -626,15 +631,15 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://support.microsoft.com/en-us/topic/kb5094152-safe-os-dynamic-update-for-windows-10-version-1607-and-windows-server-2016-june-9-2026-36c75423-3161-45b9-b202-ba4a65947bca",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5094152",
-            "https://support.microsoft.com/en-us/topic/windows-server-images-for-june-2026-7d8577d4-1f36-447b-bbbf-60b68a9f4a69"
+            "https://support.microsoft.com/help/KB5099548",
+            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5099548",
+            "https://support.microsoft.com/en-us/servicing/os/azure-marketplace/windows-server/2026/windows-server-images-for-july-2026"
           ],
-          "VerifiedAt": "2026-07-11T00:00:00+09:00",
-          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "VerifiedAt": "2026-07-18T00:00:00+09:00",
+          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
           "Notes": [
-            "Safe OS Dynamic Update for Windows 10 version 1607 and Windows Server 2016.",
-            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
+            "July 2026 Safe OS Dynamic Update for Windows 10 version 1607 and Windows Server 2016.",
+            "The July 2026 Server image inventory is the authoritative month-to-KB cross-check; exact Catalog asset identity is resolved and integrity-checked at P04."
           ]
         }
       },
@@ -661,7 +666,7 @@
         "SizeBytes": null,
         "ApplyOrder": 80,
         "InScope": {},
-        "Note": "Latest prior Setup Dynamic Update used by the June 2026 Server image set.",
+        "Note": "Latest prior Setup Dynamic Update used by the July 2026 Server image set.",
         "Roles": [
           "SetupDU"
         ],
@@ -689,13 +694,14 @@
           "SourceUrls": [
             "https://support.microsoft.com/en-us/topic/kb5068794-setup-dynamic-update-for-windows-10-version-1607-and-windows-server-2016-november-11-2025-4d2587fc-1661-420f-a46d-5a88b0b52358",
             "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5068794",
-            "https://support.microsoft.com/en-us/topic/windows-server-images-for-june-2026-7d8577d4-1f36-447b-bbbf-60b68a9f4a69"
+            "https://support.microsoft.com/en-us/servicing/os/azure-marketplace/windows-server/2026/windows-server-images-for-july-2026"
           ],
-          "VerifiedAt": "2026-07-11T00:00:00+09:00",
-          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "VerifiedAt": "2026-07-18T00:00:00+09:00",
+          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
           "Notes": [
-            "Latest prior Setup Dynamic Update used by the June 2026 Server image set.",
-            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
+            "Latest prior Setup Dynamic Update used by the July 2026 Server image set.",
+            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07.",
+            "The July 2026 Server image inventory confirms that this Setup DU remains current for this OS family."
           ]
         }
       }
@@ -805,12 +811,13 @@
     }
   },
   "_meta": {
-    "scriptVersion": "update-wsi-2026.07.14-r12.04",
-    "generatedAt": "2026-07-12T09:00:00Z",
+    "scriptVersion": "update-wsi-2026.07.18-r12.15",
+    "generatedAt": "2026-07-18T00:00:00Z",
     "isTemplate": false,
     "migrationFromSchema": "3.0",
     "compatibilityNote": "PatchModel and legacy flat package fields are retained for staged migration.",
-    "catalogCrossCheckManifest": "data/catalog-crosscheck-manifest.json"
+    "catalogCrossCheckManifest": "data/catalog-crosscheck-manifest.json",
+    "r1215CrossCheck": "2026-07 .NET and Safe OS DU cross-check against official Microsoft release notes and Server image inventory."
   },
   "PatchModel": "separate-ssu",
   "Compatibility": {
