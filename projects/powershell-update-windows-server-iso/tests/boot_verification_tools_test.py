@@ -198,8 +198,15 @@ def main() -> int:
         and not third_party_used.search(main_code),
         "template pin failed", passed, failed)
     passed, failed = check(
-        "both the harness and the main BootTest state that VM State is NOT a boot verdict",
-        "NOT a verdict" in harness and "NOT a boot verdict" in main_code,
+        "VM state is never a boot verdict: harness states it; main enforces it structurally (r12.04)",
+        # Harness keeps the explicit disclaimer; since r12.04 the main
+        # BootTest expresses the same honesty STRUCTURALLY -- Success is
+        # derived from guest evidence (Install) or forces operator review
+        # (BootOnly), never from the recorded VmState.
+        "NOT a verdict" in harness
+        and "RequiresOperatorReview=($Mode -eq 'BootOnly')" in main_code
+        and "screenshots alone are not InstallValidated evidence" in main_code
+        and "[bool]($guestEvidence -and $guestEvidence.SecureBoot)" in main_code,
         "honesty pin failed", passed, failed)
     readme = (TOOLS / "README.md").read_text(encoding="utf-8")
     passed, failed = check(

@@ -41,7 +41,7 @@
             (Opus 4.7 era; baseline revision r01 on 2026-05-24).
 
 .DESCRIPTION_PHASES
-    Phases (P01..P13):
+    Phases (P01..P14):
       P01 : Initialize        (Setup ) PowerShell env, admin, ADK, disk, Hyper-V
       P02 : ResolveInputs     (Setup ) ISO/patch source resolution, Schema 3/4
                                        Config JSON, role-based apply plan
@@ -57,9 +57,12 @@
       P11 : StaticVerify      (Verify) Mount output ISO, confirm KB packages
                                        are present
       P13 : FinalReport       (Report) End-of-run summary + ISO hash + log
-                                       paths
+                                       paths + release eligibility
+      P14 : HyperVValidation  (Verify) Optional Gen2 Secure Boot smoke boot
+                                       or unattended installation validation
 
-    Optional out-of-band action: BootTest (Hyper-V VM smoke test, P10 equiv).
+    BootTest maps to P14. PrepareBuildVerify includes P14 only with
+    -RunHyperVValidation; All includes it by default.
 
 .PARAMETER Action
     One of: Prepare / Build / Verify / PrepareBuildVerify / BootTest / All /
@@ -290,13 +293,10 @@ param(
     # shipped (PCA2011-signed) boot manager and skip P10 entirely.
     [switch]   $SkipPca2023BootManager,
 
-    # When set, P10 ConvertPca2023BootManager still runs against Server
-    # 2025 output ISOs (default-skipped because Server 2025 certified
-    # server platforms already include the 2023 certs in firmware per
-    # Microsoft; the boot-manager conversion is documented as not
-    # required). P10 now runs by default, but the Server 2025 gate is
-    # kept: conversion on 2025 requires this switch (and no
-    # -SkipPca2023BootManager). Advanced use.
+    # Advanced override for Server 2025. The normal decision is now driven
+    # by data/Pca2023.CompliancePolicy. RequirePca2023 may invoke P10
+    # automatically; this switch forces the conversion attempt even when
+    # the configured policy would otherwise permit audit-only/legacy media.
     [switch]   $ForcePca2023OnServer2025,
 
     # When set, the script enters a special mode that takes an existing
@@ -313,7 +313,18 @@ param(
     # invoked as a child PowerShell with -MediaPath / -TargetType ISO /
     # -ISOPath arguments, and its output JSON is parsed back into the
     # Pca2023 snapshot.
-    [string]   $Pca2023ScriptPath
+    [string]   $Pca2023ScriptPath,
+
+    # Optional P14. PrepareBuildVerify runs P14 only when this switch is set.
+    # -Action BootTest and -Action All run P14 regardless of this switch.
+    [switch]   $RunHyperVValidation,
+
+    # BootOnly captures console thumbnails for operator adjudication.
+    # Install creates an Autounattend answer ISO, performs an unattended
+    # evaluation install, and collects build / WinRE / Secure Boot evidence
+    # through PowerShell Direct.
+    [ValidateSet('BootOnly','Install')]
+    [string]   $HyperVValidationMode = 'BootOnly'
 )
 
 # Propagate the new PCA2023 switches into Script scope so Phase
@@ -325,6 +336,9 @@ $Script:SkipPca2023BootManager    = [bool]$SkipPca2023BootManager
 $Script:ForcePca2023OnServer2025  = [bool]$ForcePca2023OnServer2025
 $Script:Pca2023OnlyMode           = [bool]$Pca2023OnlyMode
 $Script:Pca2023ScriptPath         = $Pca2023ScriptPath
+$Script:RunHyperVValidation       = [bool]$RunHyperVValidation
+$Script:HyperVValidationMode      = $HyperVValidationMode
+$Script:ReleaseEligibility        = $null
 $Script:ResetBaseOnCleanup        = -not [bool]$SkipResetBaseOnCleanup
 $Script:SkipExportCompress        = [bool]$SkipExportCompress
 $Script:UseDefenderExclusions     = [bool]$UseDefenderExclusions
@@ -528,8 +542,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.12-r12.03'
-$Script:ScriptTag     = 'e2e-log-fixes'
+$Script:ScriptVersion = 'update-wsi-2026.07.14-r12.04'
+$Script:ScriptTag     = 'release-validation-hardening'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -577,6 +591,7 @@ $Script:PhaseRegistry = @(
     [pscustomobject]@{ Id='P11';   Name='StaticVerify';              Group='Verify'; Func='Invoke-VerifyPhase11_StaticVerify' }
     [pscustomobject]@{ Id='P12';   Name='VerifyPca2023Readiness';    Group='Verify'; Func='Invoke-VerifyPhase12_VerifyPca2023Readiness' }
     [pscustomobject]@{ Id='P13';   Name='FinalReport';               Group='Report'; Func='Invoke-ReportPhase13_FinalReport' }
+    [pscustomobject]@{ Id='P14';   Name='HyperVValidation';          Group='Verify'; Func='Invoke-VerifyPhase14_HyperVValidation' }
     [pscustomobject]@{ Id='A00';   Name='RebuildDataset';           Group='Admin';  Func='Invoke-AdminPhaseA00_RebuildDataset' }
     [pscustomobject]@{ Id='A01';   Name='RefreshAllBaselines';       Group='Admin';  Func='Invoke-AdminPhaseA01_RefreshAllBaselines' }
     [pscustomobject]@{ Id='A02';   Name='DumpFieldClassification';   Group='Admin';  Func='Invoke-AdminPhaseA02_DumpFieldClassification' }
@@ -6277,6 +6292,8 @@ function Add-WindowsPackageWithRetry {
 
     try {
         Invoke-DismCmdlet -CommandName 'Add-WindowsPackage' -Parameters (@{ Path = $MountPath; PackagePath = $PackagePath; ErrorAction = 'Stop' } + $extraArg) | Out-Null
+        $logPathUsed = if ($extraArg.ContainsKey('LogPath')) { [string]$extraArg['LogPath'] } else { '' }
+        Write-DismLogClassificationEvidence -LogPath $logPathUsed -OperationStatus 'Ok' -Context ([System.IO.Path]::GetFileName($PackagePath)) | Out-Null
         return 'Ok'
     } catch {
         $m = [string]$_.Exception.Message
@@ -6297,6 +6314,8 @@ function Add-WindowsPackageWithRetry {
             Write-Caution ('0x800f0a13: Modules Installer transient error; retrying after 10s...')
             Start-Sleep -Seconds 10
             Invoke-DismCmdlet -CommandName 'Add-WindowsPackage' -Parameters (@{ Path = $MountPath; PackagePath = $PackagePath; ErrorAction = 'Stop' } + $extraArg) | Out-Null
+            $logPathUsed = if ($extraArg.ContainsKey('LogPath')) { [string]$extraArg['LogPath'] } else { '' }
+            Write-DismLogClassificationEvidence -LogPath $logPathUsed -OperationStatus 'OkAfterRetry' -Context ([System.IO.Path]::GetFileName($PackagePath)) | Out-Null
             return 'OkAfterRetry'
         }
         # All other errors propagate (0x800f0922, 0xC1420127, etc.)
@@ -8462,6 +8481,152 @@ function Get-PatchesForRole {
     })
 }
 
+
+function Test-PatchSetsShareAsset {
+    <# True when the two role sets contain the same KB/package asset. #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [AllowEmptyCollection()][array]$First,
+        [AllowEmptyCollection()][array]$Second
+    )
+    foreach ($a in @($First)) {
+        foreach ($b in @($Second)) {
+            if (-not $a -or -not $b) { continue }
+            $aId = if ($a.PSObject.Properties['PackageId'] -and $a.PackageId) { [string]$a.PackageId } else { '' }
+            $bId = if ($b.PSObject.Properties['PackageId'] -and $b.PackageId) { [string]$b.PackageId } else { '' }
+            if ($aId -and $bId -and $aId -eq $bId) { return $true }
+            if ($a.KbId -and $b.KbId -and ([string]$a.KbId -eq [string]$b.KbId)) { return $true }
+            if ($a.LocalPath -and $b.LocalPath -and ([string]$a.LocalPath -eq [string]$b.LocalPath)) { return $true }
+        }
+    }
+    return $false
+}
+
+function Get-Pca2023CompliancePolicy {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+    $policy = ''
+    if ($Script:OsProfile -and $Script:OsProfile.PSObject.Properties['Pca2023'] -and
+        $Script:OsProfile.Pca2023 -and $Script:OsProfile.Pca2023.PSObject.Properties['CompliancePolicy']) {
+        $policy = [string]$Script:OsProfile.Pca2023.CompliancePolicy
+    }
+    if ([string]::IsNullOrWhiteSpace($policy)) {
+        $policy = if ($Script:OsVersion -eq 'Server2025') { 'AuditOnly' } else { 'RequirePca2023' }
+    }
+    if ($policy -notin @('RequirePca2023','AllowLegacyPca2011','AuditOnly')) {
+        throw ("Unknown Pca2023.CompliancePolicy '{0}'." -f $policy)
+    }
+    return $policy
+}
+
+function Test-Pca2023PolicyCompliance {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)]$OutputCheck,
+        [Parameter(Mandatory)][ValidateSet('RequirePca2023','AllowLegacyPca2011','AuditOnly')][string]$Policy
+    )
+    $reasons = New-Object System.Collections.Generic.List[string]
+    $eligible = $true
+    if (-not $OutputCheck -or -not $OutputCheck.Available) {
+        $eligible = $false
+        $reasons.Add('PCA2023 output inspection was unavailable.') | Out-Null
+    } elseif ($Policy -eq 'RequirePca2023') {
+        $critical = @($OutputCheck.TargetChecks | Where-Object { $_.Label -like 'Target #1*' }) | Select-Object -First 1
+        $efisys   = @($OutputCheck.TargetChecks | Where-Object { $_.Label -like 'Target #3*' }) | Select-Object -First 1
+        if (-not $critical -or -not $critical.IsPca2023) {
+            $eligible = $false; $reasons.Add('UEFI critical-path boot manager is not PCA2023-signed.') | Out-Null
+        }
+        if (-not $efisys -or $efisys.Status -eq 'Fail') {
+            $eligible = $false; $reasons.Add('PCA2023 efisys_ex.bin media payload is missing or invalid.') | Out-Null
+        }
+        if ($OutputCheck.OverallStatus -in @('Fail','Warning','Unknown')) {
+            $eligible = $false; $reasons.Add(('Output readiness status is {0}.' -f $OutputCheck.OverallStatus)) | Out-Null
+        }
+    } elseif ($Policy -eq 'AllowLegacyPca2011') {
+        $critical = @($OutputCheck.TargetChecks | Where-Object { $_.Label -like 'Target #1*' }) | Select-Object -First 1
+        if (-not $critical -or ($critical.ActualSignature -notin @('PCA2011','PCA2023'))) {
+            $eligible = $false; $reasons.Add('UEFI critical-path boot manager is missing or has an unknown signer.') | Out-Null
+        }
+    } else {
+        # AuditOnly records the result without blocking output creation.
+        $eligible = $true
+        if ($OutputCheck.OverallStatus -ne 'Pass') {
+            $reasons.Add(('Audit-only policy accepted readiness status {0}; not production approval.' -f $OutputCheck.OverallStatus)) | Out-Null
+        }
+    }
+    return [pscustomobject]@{
+        Policy          = $Policy
+        ReleaseEligible = $eligible
+        OverallStatus   = $(if ($OutputCheck) { $OutputCheck.OverallStatus } else { 'Unknown' })
+        Reasons         = $reasons.ToArray()
+    }
+}
+
+function Get-DismLogClassification {
+    <# Classify the final operation outcome separately from recoverable CSI noise. #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [AllowEmptyString()][string]$LogPath,
+        [AllowEmptyString()][string]$OperationStatus = 'Ok'
+    )
+    $text = ''
+    if ($LogPath -and (Test-Path -LiteralPath $LogPath)) {
+        try { $text = Get-Content -LiteralPath $LogPath -Raw -ErrorAction Stop } catch { $text = '' }
+    }
+    $classes = New-Object System.Collections.Generic.List[string]
+    if ($OperationStatus -eq 'NotApplicable' -or $text -match '0x800f081e|not applicable') { $classes.Add('PackageNotApplicable') | Out-Null }
+    if ($text -match 'restart required|reboot required') { $classes.Add('RebootRequired') | Out-Null }
+    if ($text -match 'pending.xml|pending operation|Install Pending') { $classes.Add('PendingOperation') | Out-Null }
+    if ($text -match '(?im)^.*\bwarning\b.*$') { $classes.Add('ProviderWarning') | Out-Null }
+    $completed = ($OperationStatus -in @('Ok','OkAfterRetry','WinReServicingStackKnownIssue','NotApplicable')) -or ($text -match 'The operation completed successfully')
+    $hasErrorToken = $text -match '(?im)\b(error|failed)\b|0x8[0-9a-f]{7}'
+    if ($completed -and $hasErrorToken) { $classes.Add('RecoveredInternalError') | Out-Null }
+    if (-not $completed -or $OperationStatus -eq 'Fail') { $classes.Add('TerminalOperationFailure') | Out-Null }
+    if ($classes.Count -eq 0) { $classes.Add('CleanSuccess') | Out-Null }
+    return [pscustomobject]@{
+        LogPath          = $LogPath
+        OperationStatus  = $OperationStatus
+        Classifications  = $classes.ToArray()
+        TerminalFailure  = (@($classes.ToArray()) -contains 'TerminalOperationFailure')
+    }
+}
+
+function Write-DismLogClassificationEvidence {
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$LogPath, [AllowEmptyString()][string]$OperationStatus='Ok', [string]$Context='')
+    $ev = Get-DismLogClassification -LogPath $LogPath -OperationStatus $OperationStatus
+    if ($Script:LogsDir) {
+        $path = Join-Path $Script:LogsDir 'dism_outcomes.jsonl'
+        [pscustomobject]@{ Timestamp=(Get-Date).ToString('o'); Context=$Context; Evidence=$ev } |
+            ConvertTo-Json -Depth 5 -Compress | Add-Content -LiteralPath $path -Encoding UTF8
+    }
+    if ($ev.TerminalFailure) { throw ('DISM terminal failure classified for {0}; see {1}' -f $Context, $LogPath) }
+    return $ev
+}
+
+function Get-SetupDuFileManifest {
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param([Parameter(Mandatory)][string]$Root, [string]$DestinationRoot='')
+    $rows = New-Object System.Collections.Generic.List[object]
+    foreach ($file in @(Get-ChildItem -LiteralPath $Root -File -Recurse -ErrorAction Stop)) {
+        $rel = $file.FullName.Substring($Root.Length).TrimStart('\\','/')
+        $dest = if ($DestinationRoot) { Join-Path $DestinationRoot $rel } else { '' }
+        $ver = $null
+        try { $ver = $file.VersionInfo.FileVersion } catch { $null = $_ }
+        $rows.Add([pscustomobject]@{
+            RelativePath=$rel; SourcePath=$file.FullName; DestinationPath=$dest
+            SizeBytes=$file.Length; Sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLower()
+            FileVersion=$ver
+        }) | Out-Null
+    }
+    return $rows.ToArray()
+}
+
 function Build-InstallApplySequence {
     <#
     .SYNOPSIS
@@ -8487,7 +8652,11 @@ function Build-InstallApplySequence {
     $seq.Add([pscustomobject]@{ Name='I0.SourcePrerequisite'; Description='Source-media prerequisite, conditionally injected'; Patches=$prereq; RequiresRemount=$false }) | Out-Null
     $seq.Add([pscustomobject]@{ Name='I1.ServicingStack'; Description='Standalone SSU or combined-LCU servicing-stack carrier'; Patches=$stack; RequiresRemount=$false }) | Out-Null
     $seq.Add([pscustomobject]@{ Name='I2.LanguageFodOptional'; Description='Language/FOD/optional-component payloads'; Patches=$lp; RequiresRemount=$false }) | Out-Null
-    $seq.Add([pscustomobject]@{ Name='I3.FinalLCU'; Description='Final cumulative update after language/component changes'; Patches=$lcu; RequiresRemount=$false }) | Out-Null
+    $sameCombinedAsset = (Test-PatchSetsShareAsset -First $stack -Second $lcu)
+    $needsFinalLcu = (-not $sameCombinedAsset) -or ($lp.Count -gt 0) -or ($dyn.Count -gt 0)
+    $finalLcuSet = if ($needsFinalLcu) { $lcu } else { @() }
+    $finalLcuReason = if ($needsFinalLcu) { 'Final cumulative update after language/component changes' } else { 'Skipped: combined LCU already applied and no intervening language/FOD/component changes occurred' }
+    $seq.Add([pscustomobject]@{ Name='I3.FinalLCU'; Description=$finalLcuReason; Patches=$finalLcuSet; RequiresRemount=$false; DuplicateApplySuppressed=(-not $needsFinalLcu) }) | Out-Null
     $seq.Add([pscustomobject]@{ Name='I4.DynamicUpdate.Component'; Description='Component-store Dynamic Update'; Patches=$dyn; RequiresRemount=$false }) | Out-Null
     $seq.Add([pscustomobject]@{ Name='I5.Cleanup'; Description='DISM /Cleanup-Image before .NET'; Patches=@(); RequiresRemount=$false; IsCleanupMarker=$true }) | Out-Null
     $seq.Add([pscustomobject]@{ Name='I6.DotNet'; Description='.NET Framework cumulative leaf selected for the mounted index'; Patches=$dotnet; RequiresRemount=$false }) | Out-Null
@@ -8508,7 +8677,10 @@ function Build-BootApplySequence {
     $seq.Add([pscustomobject]@{ Name='B0.SourcePrerequisite'; Description='Source-media prerequisite, conditionally injected'; Patches=$prereq; RequiresRemount=$false }) | Out-Null
     $seq.Add([pscustomobject]@{ Name='B1.ServicingStack'; Description='Standalone SSU or combined-LCU servicing-stack carrier'; Patches=$stack; RequiresRemount=$false }) | Out-Null
     $seq.Add([pscustomobject]@{ Name='B2.LanguagePack'; Description='WinPE language pack'; Patches=$lp; RequiresRemount=$false }) | Out-Null
-    $seq.Add([pscustomobject]@{ Name='B3.FinalLCU'; Description='Final cumulative update'; Patches=$lcu; RequiresRemount=$false }) | Out-Null
+    $sameCombinedAsset = (Test-PatchSetsShareAsset -First $stack -Second $lcu)
+    $needsFinalLcu = (-not $sameCombinedAsset) -or ($lp.Count -gt 0)
+    $finalLcuSet = if ($needsFinalLcu) { $lcu } else { @() }
+    $seq.Add([pscustomobject]@{ Name='B3.FinalLCU'; Description=$(if ($needsFinalLcu) { 'Final cumulative update' } else { 'Skipped: combined LCU already applied and no intervening WinPE language changes occurred' }); Patches=$finalLcuSet; RequiresRemount=$false; DuplicateApplySuppressed=(-not $needsFinalLcu) }) | Out-Null
     $seq.Add([pscustomobject]@{ Name='B4.Cleanup'; Description='Cleanup + export'; Patches=@(); RequiresRemount=$false; IsCleanupMarker=$true }) | Out-Null
     return $seq.ToArray()
 }
@@ -9314,6 +9486,8 @@ function Get-WimIndexInspection {
         WinRePresent  = $null
         WinReSizeBytes = $null
         WinReSha256   = $null
+        DotNetRelease  = 0
+        DotNetVersion  = 'Unknown'
         UEFICA2023Status = $null
         UEFICA2023Error  = $null
         AvailableUpdates = $null
@@ -9342,6 +9516,9 @@ function Get-WimIndexInspection {
 
         $src = Get-WimBuildSources -MountPath $MountDir
         $rec.PackageNames = @($src.PackageNames)
+        $offlineState = Get-OfflineWindowsState -MountPath $MountDir
+        $rec.DotNetRelease = $offlineState.DotNetRelease
+        $rec.DotNetVersion = $offlineState.DotNetVersion
         switch ($OsKey) {
             'Server2016' { $rec.Evidence = Resolve-LcuEvidence_Server2016 -PackageNames $src.PackageNames -RegistryBuild $src.RegistryBuild -KernelBuild $src.KernelBuild }
             'Server2019' { $rec.Evidence = Resolve-LcuEvidence_Server2019 -PackageNames $src.PackageNames -RegistryBuild $src.RegistryBuild -KernelBuild $src.KernelBuild }
@@ -10654,7 +10831,7 @@ function Get-Pca2023ReadinessSnapshot {
 
     # Add Server2025-specific advisory
     if ($OsKey -eq 'Server2025') {
-        $reasons.Add('NOTE: Server 2025 certified server platforms include the 2023 certificates in firmware. P10 (default-on elsewhere) still skips this OS unless -ForcePca2023OnServer2025 is set.') | Out-Null
+        $reasons.Add('NOTE: Server 2025 is evaluated against Pca2023.CompliancePolicy, but automatic conversion is not attempted because Microsoft''s documented conversion workflow does not list Server 2025. Use the force switch only as an approved experiment.') | Out-Null
     }
 
     [pscustomobject]@{
@@ -11201,7 +11378,7 @@ function Invoke-SetupPhase01_Initialize {
         }
 
         # Step 5: Hyper-V (BootTest only)
-        if ($Action -in @('BootTest','All')) {
+        if (($Action -in @('BootTest','All')) -or $Script:RunHyperVValidation) {
             Set-DebugStep -Step 'hyperv-check'
             Write-SubSection 'Step 5: Hyper-V availability'
             try {
@@ -12739,15 +12916,33 @@ function Invoke-BuildPhase09_AssembleIso {
                 New-Item -ItemType Directory -Path $tmpExtract -Force | Out-Null
                 & expand.exe -F:* $p.LocalPath $tmpExtract | Out-Null
                 if ($LASTEXITCODE -eq 0) {
+                    $setupDestRoot = Join-Path $Script:ExtractedDir 'sources'
+                    $sourceManifest = @(Get-SetupDuFileManifest -Root $tmpExtract -DestinationRoot $setupDestRoot)
                     # -Path (not -LiteralPath) is required when the
                     # source contains a wildcard. -LiteralPath would
                     # look for a file literally named '*' and fail
                     # with 'Cannot find path'.
                     Copy-Item -Path (Join-Path $tmpExtract '*') `
-                        -Destination (Join-Path $Script:ExtractedDir 'sources') -Recurse -Force
-                    Write-Ok ('Overlay applied: {0}' -f $p.KbId)
+                        -Destination $setupDestRoot -Recurse -Force
+                    $overlayRecords = New-Object System.Collections.Generic.List[object]
+                    foreach ($mr in $sourceManifest) {
+                        $destPresent = Test-Path -LiteralPath $mr.DestinationPath
+                        $destHash = if ($destPresent) { (Get-FileHash -LiteralPath $mr.DestinationPath -Algorithm SHA256).Hash.ToLower() } else { $null }
+                        $isSetupBinary = ([System.IO.Path]::GetFileName($mr.RelativePath) -in @('setup.exe','setuphost.exe'))
+                        $overlayRecords.Add([pscustomobject]@{
+                            KbId=$p.KbId; RelativePath=$mr.RelativePath; DestinationPath=$mr.DestinationPath
+                            SourceSizeBytes=$mr.SizeBytes; SourceSha256=$mr.Sha256; SourceFileVersion=$mr.FileVersion
+                            DestinationPresent=$destPresent; DestinationSha256AfterOverlay=$destHash
+                            MatchAfterOverlay=($destPresent -and $destHash -eq $mr.Sha256)
+                            OverriddenByBootWim=$isSetupBinary
+                        }) | Out-Null
+                    }
+                    $setupEvidencePath = Join-Path $Script:LogsDir 'setupdu_overlay_manifest.json'
+                    [pscustomobject]@{ Schema='setupdu-overlay/1'; Timestamp=(Get-Date).ToString('o'); OsKey=$Script:OsVersion; KbId=$p.KbId; Records=$overlayRecords.ToArray() } |
+                        ConvertTo-Json -Depth 7 | Set-Content -LiteralPath $setupEvidencePath -Encoding UTF8
+                    Write-Ok ('Overlay applied: {0}; evidence: {1}' -f $p.KbId, $setupEvidencePath)
                 } else {
-                    Write-Caution ('expand.exe failed for {0}; skipping overlay.' -f $p.KbId)
+                    throw ('expand.exe failed for required Setup DU {0} with exit code {1}.' -f $p.KbId,$LASTEXITCODE)
                 }
             }
         } else {
@@ -12822,9 +13017,11 @@ function Invoke-BuildPhase09_AssembleIso {
 # -SkipPca2023BootManager). The PCA2011 signing CA expired 2026-06,
 # so leaving the shipped PCA2011-signed boot manager is now the
 # exception (older firmware without the 2023 certs), not the norm.
-# Server 2025 specifically still requires -ForcePca2023OnServer2025
-# (certified 2025 platforms carry the 2023 certs in firmware; the
-# conversion is documented as not required there).
+# Server 2025 is audit/gate-only by default because Microsoft's documented
+# Make2023BootableMedia workflow does not currently list Server 2025 as a
+# supported conversion target. Conversion therefore requires the explicit
+# -ForcePca2023OnServer2025 experimental override; RequirePca2023 still
+# blocks release eligibility when the resulting media is not compliant.
 #
 # Group classification note: P10 lives inside the Build group as
 # a Build-group OPTIONAL phase (the only Build-group phase that
@@ -12875,10 +13072,11 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
         Set-DebugStep -Step 'gate-Server2025'
         $osKey = if ($Script:OsProfile) { $Script:OsProfile.OsKey } else { $null }
         Write-Step ('OsKey: {0}' -f $osKey)
+        $pcaPolicyForGate = Get-Pca2023CompliancePolicy
         if ($osKey -eq 'Server2025' -and -not $Script:ForcePca2023OnServer2025) {
-            Write-Step ('Skipped: OsKey={0}. Server 2025 firmware already includes 2023 certs.' -f $osKey)
-            Write-Step '         Pass -ForcePca2023OnServer2025 to override (advanced use only).'
-            Set-Content -LiteralPath (Join-Path $Script:MarkersDir 'P10.skipped') -Value 'skipped-by-policy: Server2025 default (use -ForcePca2023OnServer2025 to convert)' -Encoding UTF8
+            Write-Step ('Skipped: OsKey={0}; Microsoft conversion workflow is not documented for Server 2025 (policy={1}).' -f $osKey,$pcaPolicyForGate)
+            Write-Step '         Use -ForcePca2023OnServer2025 only for an explicitly approved experimental conversion.'
+            Set-Content -LiteralPath (Join-Path $Script:MarkersDir 'P10.skipped') -Value ('skipped-by-policy: Server2025 documented-conversion boundary; policy=' + $pcaPolicyForGate) -Encoding UTF8
             return
         }
 
@@ -13143,9 +13341,15 @@ function Test-LcuTargetApplied {
         }
     }
     $measStr = if ($measured) { [string]$measured } else { '(none)' }
-    $evKbSet = @($Evidence.KbIdsAtBuild) -join ','
-    $evKbStr = if ($evKbSet) { $evKbSet } elseif ($Evidence.LcuKbId) { [string]$Evidence.LcuKbId } else { '(none)' }
-    $notes = ('OsKey={0}; measured build={1}; TargetBuildAfterUpdate={2}; evidence KB={3}' -f `
+    $evKbSet = @($Evidence.KbIdsAtBuild)
+    if ($OsKey -eq 'Server2016' -and ($evKbSet -contains $ExpectedKbId)) {
+        $otherKb = @($evKbSet | Where-Object { $_ -ne $ExpectedKbId }) -join ','
+        $evKbStr = if ($otherKb) { ('{0} (expected LCU; co-versioned packages: {1})' -f $ExpectedKbId, $otherKb) } else { $ExpectedKbId }
+    } else {
+        $joinedKb = $evKbSet -join ','
+        $evKbStr = if ($joinedKb) { $joinedKb } elseif ($Evidence.LcuKbId) { [string]$Evidence.LcuKbId } else { '(none)' }
+    }
+    $notes = ('OsKey={0}; measured build={1}; TargetBuildAfterUpdate={2}; evidence KB={3}; registry/kernel are authoritative for OS build, servicing-stack package revisions are separate evidence' -f `
         $OsKey, $measStr, $(if ($ExpectedBuild) { $ExpectedBuild } else { '(none)' }), $evKbStr)
     if ($indeterminate) {
         return [pscustomobject]@{
@@ -13165,6 +13369,68 @@ function Test-LcuTargetApplied {
         Status   = $(if ($applied) { 'Pass' } else { 'Fail' })
         Notes    = $notes
     }
+}
+
+
+function Get-WinRePostServicingEvidence {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$InstallWim,
+        [Parameter(Mandatory)][int[]]$Indexes,
+        [Parameter(Mandatory)][string]$OsKey,
+        [AllowEmptyString()][string]$ExpectedBuild,
+        [AllowEmptyString()][string]$ExpectedSafeOsKb,
+        [Parameter(Mandatory)][string]$WorkRoot,
+        [Parameter(Mandatory)][string]$LogDir
+    )
+    $records = New-Object System.Collections.Generic.List[object]
+    $extractMount = Join-Path $WorkRoot 'work\verify_winre_parent'
+    $winreMount   = Join-Path $WorkRoot 'work\verify_winre_mount'
+    $tempWinre    = Join-Path $WorkRoot 'work\verify_winre.wim'
+    foreach ($idx in $Indexes) {
+        $parentMounted = $false
+        try {
+            if (Test-Path -LiteralPath $extractMount) { Remove-Item -LiteralPath $extractMount -Recurse -Force -ErrorAction SilentlyContinue }
+            New-Item -ItemType Directory -Path $extractMount -Force | Out-Null
+            Invoke-DismCmdlet -CommandName 'Mount-WindowsImage' -Parameters @{ ImagePath=$InstallWim; Index=$idx; Path=$extractMount; ReadOnly=$true; ErrorAction='Stop'; LogPath=(Join-Path $LogDir ('verify_winre_parent_idx{0}.log' -f $idx)) } | Out-Null
+            $parentMounted=$true
+            $src = Join-Path $extractMount 'Windows\System32\Recovery\Winre.wim'
+            if (-not (Test-Path -LiteralPath $src)) { throw ('WinRE missing in install.wim index {0}' -f $idx) }
+            Copy-Item -LiteralPath $src -Destination $tempWinre -Force
+            $hash=(Get-FileHash -LiteralPath $tempWinre -Algorithm SHA256).Hash.ToLower()
+            $records.Add([pscustomobject]@{ Index=$idx; Present=$true; Sha256=$hash; ErrorMessage=$null }) | Out-Null
+        } catch {
+            $records.Add([pscustomobject]@{ Index=$idx; Present=$false; Sha256=$null; ErrorMessage=$_.Exception.Message }) | Out-Null
+        } finally {
+            if ($parentMounted) { try { Invoke-DismCmdlet -CommandName 'Dismount-WindowsImage' -Parameters @{ Path=$extractMount; Discard=$true; ErrorAction='Stop' } | Out-Null } catch { $null=$_ } }
+        }
+    }
+    $validHashes=@($records | Where-Object { $_.Present -and $_.Sha256 } | ForEach-Object { $_.Sha256 } | Sort-Object -Unique)
+    $deep=$null
+    if ($validHashes.Count -eq 1 -and (Test-Path -LiteralPath $tempWinre)) {
+        $mounted=$false
+        try {
+            if (Test-Path -LiteralPath $winreMount) { Remove-Item -LiteralPath $winreMount -Recurse -Force -ErrorAction SilentlyContinue }
+            New-Item -ItemType Directory -Path $winreMount -Force | Out-Null
+            Invoke-DismCmdlet -CommandName 'Mount-WindowsImage' -Parameters @{ ImagePath=$tempWinre; Index=1; Path=$winreMount; ReadOnly=$true; ErrorAction='Stop'; LogPath=(Join-Path $LogDir 'verify_winre_deep_mount.log') } | Out-Null
+            $mounted=$true
+            $src=Get-WimBuildSources -MountPath $winreMount
+            $packages=@(Invoke-DismCmdlet -CommandName 'Get-WindowsPackage' -Parameters @{ Path=$winreMount; ErrorAction='Stop' })
+            $pending=@($packages | Where-Object { ([string]$_.PackageState) -match 'Pending' } | ForEach-Object { [string]$_.PackageName })
+            $kbMatches=@($src.PackageNames | Where-Object { $ExpectedSafeOsKb -and ([string]$_ -match [regex]::Escape($ExpectedSafeOsKb)) })
+            $ev = switch ($OsKey) {
+                'Server2016' { Resolve-LcuEvidence_Server2016 -PackageNames $src.PackageNames -RegistryBuild $src.RegistryBuild -KernelBuild $src.KernelBuild }
+                'Server2019' { Resolve-LcuEvidence_Server2019 -PackageNames $src.PackageNames -RegistryBuild $src.RegistryBuild -KernelBuild $src.KernelBuild }
+                'Server2022' { Resolve-LcuEvidence_Server2022 -PackageNames $src.PackageNames -RegistryBuild $src.RegistryBuild -KernelBuild $src.KernelBuild }
+                'Server2025' { Resolve-LcuEvidence_Server2025 -PackageNames $src.PackageNames -RegistryBuild $src.RegistryBuild -KernelBuild $src.KernelBuild }
+            }
+            $deep=[pscustomobject]@{ Build=$ev.Build; RegistryBuild=$src.RegistryBuild; KernelBuild=$src.KernelBuild; ExpectedBuild=$ExpectedBuild; SafeOsKb=$ExpectedSafeOsKb; SafeOsKbPackageMatches=$kbMatches; PendingPackages=$pending; PackageNames=@($src.PackageNames) }
+        } finally {
+            if ($mounted) { try { Invoke-DismCmdlet -CommandName 'Dismount-WindowsImage' -Parameters @{ Path=$winreMount; Discard=$true; ErrorAction='Stop' } | Out-Null } catch { $null=$_ } }
+        }
+    }
+    return [pscustomobject]@{ Indexes=$records.ToArray(); UniqueHashes=$validHashes; AllHashesEqual=($records.Count -eq $Indexes.Count -and @($records.ToArray() | Where-Object { -not $_.Present }).Count -eq 0 -and $validHashes.Count -eq 1); DeepInspection=$deep }
 }
 
 function Invoke-VerifyPhase11_StaticVerify {
@@ -13253,6 +13519,23 @@ function Invoke-VerifyPhase11_StaticVerify {
             Write-Step ('boot.wim present   : {0}' -f $hasBoot)
             Write-Step ('setup.exe present  : {0}' -f $hasSetup)
 
+            $setupManifestPath = Join-Path $Script:LogsDir 'setupdu_overlay_manifest.json'
+            if (Test-Path -LiteralPath $setupManifestPath) {
+                $setupManifest = Get-Content -LiteralPath $setupManifestPath -Raw | ConvertFrom-Json
+                $setupFailures=0; $setupChecked=0
+                foreach ($mrec in @($setupManifest.Records)) {
+                    if ($mrec.OverriddenByBootWim) { continue }
+                    $setupChecked++
+                    $isoDest=Join-Path $mountedDrive ('sources\' + ([string]$mrec.RelativePath))
+                    if (-not (Test-Path -LiteralPath $isoDest)) { $setupFailures++; continue }
+                    $isoHash=(Get-FileHash -LiteralPath $isoDest -Algorithm SHA256).Hash.ToLower()
+                    if ($isoHash -ne [string]$mrec.SourceSha256) { $setupFailures++ }
+                }
+                Add-VRow -Check 'SetupDuFinalManifest' -Expected ('all ' + $setupChecked + ' non-overridden files present and matching') -Actual $(if ($setupFailures -eq 0) { 'match' } else { ($setupFailures.ToString() + ' mismatch/missing') }) -Status $(if ($setupFailures -eq 0) { 'Pass' } else { 'Fail' }) -Notes $setupManifestPath
+            } elseif (@($Script:ResolvedPatches | Where-Object { $_.PatchType -eq 'SetupDU' }).Count -gt 0) {
+                Add-VRow -Check 'SetupDuFinalManifest' -Expected 'evidence present' -Actual 'missing' -Status 'Fail' -Notes $setupManifestPath
+            }
+
             if ($hasInst -and -not $Script:SyntheticTestMode) {
                 # Content-identity proof: the deep inspection below runs
                 # over the EXTRACTED tree (DISM cannot mount a WIM living
@@ -13308,6 +13591,60 @@ function Invoke-VerifyPhase11_StaticVerify {
             } else {
                 Add-VRow -Check 'PostInspection' -Expected 'available' -Actual 'available' `
                     -Status 'Pass' -Notes ('install idx: {0}; boot idx: {1}' -f @($postInsp.InstallWim.Indexes).Count, @($postInsp.BootWim.Indexes).Count)
+
+                $pbLcuAll = @($Script:OsProfile.PatchBaseline.Lines | Where-Object { $_.Kind -eq 'LCU' -and $_.KbId })
+                $expectedLcuKbAll = if ($pbLcuAll.Count -gt 0) { [string]$pbLcuAll[0].KbId } else { '' }
+                $expectedBuildAll = [string]$Script:OsProfile.PatchBaseline.TargetBuildAfterUpdate
+                foreach ($irec in @($postInsp.InstallWim.Indexes)) {
+                    if (-not $irec -or $irec.ErrorMessage) {
+                        Add-VRow -Check ('InstallIndex_' + $(if ($irec) { $irec.Index } else { 'unknown' })) -Expected 'inspectable' -Actual 'error' -Status 'Fail' -Notes $(if ($irec) { $irec.ErrorMessage } else { 'missing record' })
+                        continue
+                    }
+                    $ir = Test-LcuTargetApplied -OsKey $Script:OsVersion -ExpectedKbId $expectedLcuKbAll -ExpectedBuild $expectedBuildAll -Evidence $irec.Evidence
+                    Add-VRow -Check ('InstallIndex' + $irec.Index + '_LcuTargetApplied') -Expected $ir.Expected -Actual $ir.Actual -Status $ir.Status -Notes $ir.Notes
+                    $matchingDotNet=@($Script:ResolvedPatches | Where-Object { $_.PatchType -eq 'DotNet' -and (Test-DotNetRuntimeSelector -Selector $_.RuntimeSelector -OfflineState ([pscustomobject]@{ DotNetVersion=$irec.DotNetVersion })) })
+                    if ($matchingDotNet.Count -gt 0) {
+                        $dnev=Get-DotNetRollupEvidence -PackageNames @($irec.PackageNames)
+                        Add-VRow -Check ('InstallIndex' + $irec.Index + '_DotNetRollup') -Expected ('Present for runtime ' + $irec.DotNetVersion) -Actual $(if ($dnev.Present) { $dnev.PackageName } else { 'Absent' }) -Status $(if ($dnev.Present) { 'Pass' } else { 'Fail' }) -Notes ('matching leaf KBs: ' + (($matchingDotNet | ForEach-Object { $_.KbId }) -join ','))
+                    }
+                }
+                $bootPolicyForVerify=Resolve-BootWimLcuPolicyValue -RawValue $Script:OsProfile.BootWimLcuPolicy
+                if ($bootPolicyForVerify -eq 'enabled') {
+                    foreach ($brec in @($postInsp.BootWim.Indexes)) {
+                        if (-not $brec -or $brec.ErrorMessage) {
+                            Add-VRow -Check ('BootIndex_' + $(if ($brec) { $brec.Index } else { 'unknown' })) -Expected 'inspectable' -Actual 'error' -Status 'Fail' -Notes $(if ($brec) { $brec.ErrorMessage } else { 'missing record' })
+                            continue
+                        }
+                        $br=Test-LcuTargetApplied -OsKey $Script:OsVersion -ExpectedKbId $expectedLcuKbAll -ExpectedBuild $expectedBuildAll -Evidence $brec.Evidence
+                        Add-VRow -Check ('BootIndex' + $brec.Index + '_LcuTargetApplied') -Expected $br.Expected -Actual $br.Actual -Status $br.Status -Notes $br.Notes
+                    }
+                }
+
+                $safeLine=@($Script:ResolvedPatches | Where-Object { $_.PatchType -eq 'SafeOSDU' }) | Select-Object -First 1
+                $installIndexesForWinRe=@($postInsp.InstallWim.Indexes | Where-Object { -not $_.ErrorMessage } | ForEach-Object { [int]$_.Index })
+                $winreEv=Get-WinRePostServicingEvidence -InstallWim (Join-Path $Script:ExtractedDir 'sources\install.wim') -Indexes $installIndexesForWinRe -OsKey $Script:OsVersion -ExpectedBuild $expectedBuildAll -ExpectedSafeOsKb $(if ($safeLine) { [string]$safeLine.KbId } else { '' }) -WorkRoot $Script:WorkRoot -LogDir $Script:LogsDir
+                $winrePath=Join-Path $Script:LogsDir 'winre_post_verification.json'
+                $winreEv | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath $winrePath -Encoding UTF8
+                Add-VRow -Check 'WinReHashesEqualAllInstallIndexes' -Expected 'True' -Actual ([string]$winreEv.AllHashesEqual) -Status $(if ($winreEv.AllHashesEqual) { 'Pass' } else { 'Fail' }) -Notes $winrePath
+                if ($winreEv.DeepInspection) {
+                    $wrMeasured=ConvertFrom-InspectionBuildValue -Value $winreEv.DeepInspection.Build
+                    $wrExpected=ConvertTo-TwoPartBuild -BuildString $expectedBuildAll
+                    $wrPass=($wrMeasured -and $wrExpected -and $wrMeasured -ge $wrExpected)
+                    Add-VRow -Check 'WinReBuildTarget' -Expected ('>= ' + $expectedBuildAll) -Actual $(if ($wrMeasured) { [string]$wrMeasured } else { '(none)' }) -Status $(if ($wrPass) { 'Pass' } else { 'Fail' }) -Notes ('SafeOS=' + $(if ($safeLine) { $safeLine.KbId } else { 'none' }))
+                    $pendingCount=@($winreEv.DeepInspection.PendingPackages).Count
+                    Add-VRow -Check 'WinRePendingPackages' -Expected '0' -Actual ([string]$pendingCount) -Status $(if ($pendingCount -eq 0) { 'Pass' } else { 'Fail' }) -Notes ((@($winreEv.DeepInspection.PendingPackages)) -join ';')
+                    if ($safeLine) {
+                        $identityMatches=@($winreEv.DeepInspection.SafeOsKbPackageMatches).Count
+                        $safePass=($wrPass -and $pendingCount -eq 0)
+                        Add-VRow -Check 'WinReSafeOsDuEvidence' -Expected ([string]$safeLine.KbId) `
+                            -Actual $(if ($identityMatches -gt 0) { ($identityMatches.ToString() + ' KB-named package identity match(es)') } else { 'target WinRE build reached; package identity is not KB-named' }) `
+                            -Status $(if ($safePass) { 'Pass' } else { 'Fail' }) `
+                            -Notes ('build=' + $(if ($wrMeasured) { [string]$wrMeasured } else { '(none)' }) + '; evidence=' + $winrePath)
+                    }
+                } else {
+                    Add-VRow -Check 'WinReDeepInspection' -Expected 'available' -Actual 'unavailable' -Status 'Fail' -Notes $winrePath
+                }
+
                 $primaryRec = @($postInsp.InstallWim.Indexes) | Select-Object -First 1
                 if ($primaryRec -and -not $primaryRec.ErrorMessage) {
                     $pkgNames = @($primaryRec.PackageNames)
@@ -13328,7 +13665,16 @@ function Invoke-VerifyPhase11_StaticVerify {
                     if ($Script:OsVersion -eq 'Server2016') {
                         # 2016 alone carries KB ids in package names -- the
                         # presence rows are real signal there and stay.
-                        $expectedKbList = @($Script:ResolvedPatches | Where-Object { $_.KbId -ne 'Unknown' } | ForEach-Object { $_.KbId })
+                        # Only package kinds that are expected to materialize as
+                        # install.wim packages are checked here. SafeOSDU belongs
+                        # to WinRE, SetupDU belongs to media\sources, and a .NET
+                        # leaf is checked separately only when its runtime selector
+                        # matches the inspected index.
+                        $expectedKbList = @($Script:ResolvedPatches | Where-Object {
+                            $_.KbId -ne 'Unknown' -and
+                            $_.PatchType -in @('SSU','LCU','BridgeLcu','Checkpoint') -and
+                            ((Get-PatchTargets -Patch $_) -contains 'Install')
+                        } | ForEach-Object { $_.KbId } | Sort-Object -Unique)
                         foreach ($kb in $expectedKbList) {
                             $found = $false
                             foreach ($pn in $pkgNames) {
@@ -13337,24 +13683,32 @@ function Invoke-VerifyPhase11_StaticVerify {
                             }
                             if ($found) { $st = 'Pass'; $actualStr = 'Present' }
                             else        { $st = 'Warn'; $actualStr = 'Absent' }
-                            Add-VRow -Check ('Kb_' + $kb) -Expected 'Present' `
+                            Add-VRow -Check ('Kb_' + $kb) -Expected 'Present when package identity exposes KB' `
                                 -Actual $actualStr -Status $st `
-                                -Notes ('install.wim idx ' + $primaryRec.Index + '; Server2016 packages are KB-named')
+                                -Notes ('install.wim idx ' + $primaryRec.Index + '; scoped to Install-targeted OS servicing packages')
                         }
                     }
 
-                    $dotNetExpected = @($Script:ResolvedPatches | Where-Object { $_.PatchType -eq 'DotNet' })
+                    $primaryRuntime = [pscustomobject]@{ DotNetVersion=$primaryRec.DotNetVersion }
+                    $dotNetExpected = @($Script:ResolvedPatches | Where-Object {
+                        $_.PatchType -eq 'DotNet' -and
+                        (Test-DotNetRuntimeSelector -Selector $_.RuntimeSelector -OfflineState $primaryRuntime)
+                    })
                     if ($dotNetExpected.Count -ge 1) {
                         $dotNetEv = Get-DotNetRollupEvidence -PackageNames $pkgNames
                         if ($dotNetEv.Present) {
-                            Add-VRow -Check 'DotNetRollupApplied' -Expected 'Present' `
+                            Add-VRow -Check 'DotNetRollupApplied' -Expected ('Present for runtime ' + $primaryRec.DotNetVersion) `
                                 -Actual 'Present' -Status 'Pass' `
-                                -Notes ('install.wim idx ' + $primaryRec.Index + '; ' + $dotNetEv.PackageName + ' (version ' + $dotNetEv.Version + '); NOTE: .NET cumulative package names carry no KB id')
+                                -Notes ('install.wim idx ' + $primaryRec.Index + '; ' + $dotNetEv.PackageName + ' (version ' + $dotNetEv.Version + '); matching leaf KBs=' + (($dotNetExpected | ForEach-Object { $_.KbId }) -join ','))
                         } else {
-                            Add-VRow -Check 'DotNetRollupApplied' -Expected 'Present' `
-                                -Actual 'Absent' -Status 'Warn' `
-                                -Notes ('install.wim idx ' + $primaryRec.Index + '; a DotNet Line was resolved but no Package_for_DotNetRollup* package is visible; P07 apply status is the authoritative failure signal')
+                            Add-VRow -Check 'DotNetRollupApplied' -Expected ('Present for runtime ' + $primaryRec.DotNetVersion) `
+                                -Actual 'Absent' -Status 'Fail' `
+                                -Notes ('install.wim idx ' + $primaryRec.Index + '; runtime-matching .NET leaf was applied but no Package_for_DotNetRollup* package is visible')
                         }
+                    } else {
+                        Add-VRow -Check 'DotNetRollupApplied' -Expected 'not applicable to detected runtime' `
+                            -Actual ([string]$primaryRec.DotNetVersion) -Status 'Pass' `
+                            -Notes ('install.wim idx ' + $primaryRec.Index + '; no configured .NET leaf matches this runtime')
                     }
                     # TargetBuildAfterUpdate hard check [DECIDED 2026-07-02,
                     # user]: per-OS evidence comparator. Runs only
@@ -13589,7 +13943,26 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
         Set-Content -LiteralPath $mdPath -Value ($mdLines -join "`n") -Encoding UTF8 -Force
         Write-Step ('Snapshot Markdown: {0}' -f $mdPath)
 
-        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P12.ok') -Force | Out-Null
+        $policy = Get-Pca2023CompliancePolicy
+        $compliance = Test-Pca2023PolicyCompliance -OutputCheck $outputCheck -Policy $policy
+        $Script:ReleaseEligibility = [pscustomobject]@{
+            BuildSucceeded=$true
+            StaticVerificationStatus=$(if (Test-Path -LiteralPath (Join-Path $Script:MarkersDir 'P11.ok')) { 'Pass' } else { 'Unknown' })
+            Pca2023Compliance=$(if ($compliance.ReleaseEligible) { 'Pass' } else { 'Fail' })
+            Pca2023Policy=$policy
+            ReleaseEligible=$compliance.ReleaseEligible
+            Reasons=$compliance.Reasons
+        }
+        $eligibilityPath=Join-Path $Script:LogsDir 'release_eligibility.json'
+        $Script:ReleaseEligibility | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $eligibilityPath -Encoding UTF8
+        Write-Step ('PCA2023 compliance policy: {0}; ReleaseEligible={1}' -f $policy, $compliance.ReleaseEligible)
+        if (-not $compliance.ReleaseEligible) {
+            New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P12.failed') -Force | Out-Null
+            $Script:DeferredVerificationFailure = ('P12 PCA2023 compliance failed under policy {0}: {1}' -f $policy, ($compliance.Reasons -join '; '))
+            Write-Fail $Script:DeferredVerificationFailure
+        } else {
+            New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P12.ok') -Force | Out-Null
+        }
     } finally {
         Stop-DebugTrace
     }
@@ -13649,6 +14022,18 @@ function Invoke-ReportPhase13_FinalReport {
             }
         }
 
+        if ($Script:ReleaseEligibility) {
+            Write-SubSection 'Release Eligibility'
+            Write-Step ('BuildSucceeded          : {0}' -f $Script:ReleaseEligibility.BuildSucceeded)
+            Write-Step ('StaticVerificationStatus: {0}' -f $Script:ReleaseEligibility.StaticVerificationStatus)
+            Write-Step ('Pca2023Compliance       : {0} ({1})' -f $Script:ReleaseEligibility.Pca2023Compliance, $Script:ReleaseEligibility.Pca2023Policy)
+            Write-Step ('ReleaseEligible         : {0}' -f $Script:ReleaseEligibility.ReleaseEligible)
+            if ($Script:ReleaseEligibility.PSObject.Properties['HyperVValidation']) {
+                Write-Step ('HyperVValidation      : {0}' -f $Script:ReleaseEligibility.HyperVValidation)
+            }
+            foreach ($reason in @($Script:ReleaseEligibility.Reasons)) { Write-Step ('  - {0}' -f $reason) }
+        }
+
         # ---- Media inspection diff + observe-first cross-checks ----
         # Requires both artifacts of the same run: P06 wrote
         # inspection_pre.json, P11 wrote inspection_post.json.
@@ -13704,6 +14089,10 @@ function Invoke-ReportPhase13_FinalReport {
             }
         }
 
+        if ($Script:DeferredVerificationFailure) {
+            New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P13.failed') -Force | Out-Null
+            throw $Script:DeferredVerificationFailure
+        }
         New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P13.ok') -Force | Out-Null
     } finally {
         Stop-DebugTrace
@@ -14844,6 +15233,7 @@ function Get-PhaseListByAction {
     } else {
         [string[]]@('P01','P02','P03','P04','P05','P06','P07','P08','P08S','P09','P10','P11','P12','P13')
     }
+    if ($Script:RunHyperVValidation -and -not $Script:SyntheticTestMode) { $standardFull = [string[]]@(@($standardFull | Where-Object { $_ -ne 'P13' }) + @('P14','P13')) }
     $standardPrepare = if ($Script:SyntheticTestMode) {
         [string[]]@('P01','P02','P03','P04')
     } else {
@@ -14855,8 +15245,8 @@ function Get-PhaseListByAction {
         'Build'                   { return [string[]]@('P07','P08','P08S','P09','P10') }
         'Verify'                  { return [string[]]@('P11','P12','P13') }
         'PrepareBuildVerify'      { return $standardFull }
-        'All'                     { return $standardFull }
-        'BootTest'                { return [string[]]@() }
+        'All'                     { if ($standardFull -contains 'P14') { return $standardFull }; return [string[]]@(@($standardFull | Where-Object { $_ -ne 'P13' }) + @('P14','P13')) }
+        'BootTest'                { return [string[]]@('P14') }
         'Cleanup'                 { return [string[]]@() }
         'ListPhases'              { return [string[]]@() }
         'GenerateManifest'        { return [string[]]@('P01','P02','P03') }
@@ -14989,6 +15379,30 @@ function Invoke-CleanupAction {
     }
 }
 
+
+# ============================================================
+# Phase P14: optional Hyper-V validation
+# ============================================================
+function Invoke-VerifyPhase14_HyperVValidation {
+    [CmdletBinding()]
+    param()
+    Start-DebugTrace -Context 'Invoke-VerifyPhase14_HyperVValidation' -PhaseId 'P14'
+    try {
+        $result=Invoke-HyperVBootTest -Mode $Script:HyperVValidationMode
+        $path=Join-Path $Script:LogsDir 'P14_hyperv_validation.json'
+        $result | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $path -Encoding UTF8
+        if (-not $result.Success) { throw ('P14 Hyper-V validation failed: {0}' -f ($result.Reasons -join '; ')) }
+        if ($Script:ReleaseEligibility) {
+            $level = if ($result.Mode -eq 'Install') { 'InstallValidated' } else { 'BootEvidenceCaptured' }
+            $Script:ReleaseEligibility | Add-Member -NotePropertyName HyperVValidation -NotePropertyValue $level -Force
+            $eligibilityPath=Join-Path $Script:LogsDir 'release_eligibility.json'
+            $Script:ReleaseEligibility | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $eligibilityPath -Encoding UTF8
+        }
+        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P14.ok') -Force | Out-Null
+        Write-Ok ('P14 Hyper-V evidence written: {0}' -f $path)
+    } finally { Stop-DebugTrace }
+}
+
 # ============================================================
 # BootTest action (Hyper-V)
 # ============================================================
@@ -15030,88 +15444,149 @@ function Convert-Rgb565ThumbnailToBmp {
 function Invoke-HyperVBootTest {
     <#
     .SYNOPSIS
-        Smoke-boot the output ISO on a Gen2 Secure Boot VM and save
-        console screenshots for OPERATOR review.
-
-        Rebuilt (r11.67) after two measured defects in the original:
-        1. It selected SecureBootTemplate MicrosoftUEFICertificateAuthority
-           (the third-party UEFI CA template); Windows media must be
-           verified against the MicrosoftWindows template.
-        2. It graded 'VM State = Running after 60s' as a pass. A VM
-           sits at a firmware Secure Boot failure screen in the
-           Running state, so that check passes on boot FAILURES too.
-           State is now reported as context only; the verdict is the
-           operator's, from the saved screenshots.
-
-        The full test matrix (revoked-firmware rig, negative control,
-        unattended install + evidence collection) lives in
-        tools/boot-verification/ -- this action is only the quick
-        default-firmware smoke pass.
+        P14 worker. BootOnly captures Gen2 MicrosoftWindows Secure Boot
+        console thumbnails for operator review. Install performs an
+        unattended evaluation installation and collects guest evidence
+        with PowerShell Direct.
     #>
-    Write-SubSection 'Hyper-V BootTest (default Secure Boot firmware; screenshots for operator review)'
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([ValidateSet('BootOnly','Install')][string]$Mode='BootOnly')
+
+    Write-SubSection ('Hyper-V validation ({0}; Gen2 MicrosoftWindows Secure Boot)' -f $Mode)
     if (-not $Script:OutputIsoPath -or -not (Test-Path -LiteralPath $Script:OutputIsoPath)) {
-        throw 'No output ISO is available to BootTest.'
+        throw 'No output ISO is available to Hyper-V validation.'
     }
-    $vmName = ('UpdateWsi_BootTest_' + (Get-Date -Format 'yyyyMMddHHmmss'))
-    $vmDir  = Join-Path $Script:WorkRoot 'boottest'
-    if (-not (Test-Path -LiteralPath $vmDir)) {
-        New-Item -ItemType Directory -Path $vmDir -Force | Out-Null
-    }
+    $vmName = ('UpdateWsi_P14_' + (Get-Date -Format 'yyyyMMddHHmmss'))
+    $vmDir  = Join-Path $Script:WorkRoot 'hyperv-validation'
+    New-Item -ItemType Directory -Path $vmDir -Force | Out-Null
     $vhdPath = Join-Path $vmDir ($vmName + '.vhdx')
-
-    Set-DebugStep -Step 'create-vm'
-    New-VHD -Path $vhdPath -SizeBytes 64GB -Dynamic | Out-Null
-    New-VM -Name $vmName -Generation 2 -MemoryStartupBytes 4GB -VHDPath $vhdPath -Path $vmDir | Out-Null
-    Set-VMProcessor -VMName $vmName -Count 2 | Out-Null
-    Add-VMDvdDrive -VMName $vmName -Path $Script:OutputIsoPath | Out-Null
-    $dvd = Get-VMDvdDrive -VMName $vmName
-    Set-VMFirmware -VMName $vmName -FirstBootDevice $dvd -EnableSecureBoot On -SecureBootTemplate MicrosoftWindows | Out-Null
-    Get-VMNetworkAdapter -VMName $vmName | Remove-VMNetworkAdapter | Out-Null
-
-    Set-DebugStep -Step 'boot-and-observe'
-    Start-VM -Name $vmName | Out-Null
+    $answerIso = $null
+    $guestPassword = 'P@ssw0rd-r1204!'
     $shots = New-Object System.Collections.Generic.List[string]
-    $t0 = Get-Date
-    foreach ($sec in @(30, 90, 180)) {
-        $wait = $sec - [int](New-TimeSpan -Start $t0 -End (Get-Date)).TotalSeconds
-        if ($wait -gt 0) { Start-Sleep -Seconds $wait }
-        try {
-            $ns = 'root\virtualization\v2'
-            $vm = Get-CimInstance -Namespace $ns -ClassName Msvm_ComputerSystem -Filter ("ElementName='{0}'" -f $vmName)
-            $svc = Get-CimInstance -Namespace $ns -ClassName Msvm_VirtualSystemManagementService
-            $r = Invoke-CimMethod -InputObject $svc -MethodName GetVirtualSystemThumbnailImage -Arguments @{
-                HeightPixels = [uint16]480; WidthPixels = [uint16]640; TargetSystem = $vm
-            }
-            if ($r -and $r.ReturnValue -eq 0 -and $r.ImageData) {
-                $bmp = Convert-Rgb565ThumbnailToBmp -PixelData ([byte[]]$r.ImageData) -Width 640 -Height 480
-                $shotPath = Join-Path $Script:LogsDir ('boottest_console_{0}s.bmp' -f $sec)
-                [System.IO.File]::WriteAllBytes($shotPath, $bmp)
-                $shots.Add($shotPath) | Out-Null
-                Write-Step ('Console screenshot at {0}s: {1}' -f $sec, $shotPath)
-            } else {
-                Write-Caution ('Console screenshot at {0}s unavailable.' -f $sec)
-            }
-        } catch {
-            Write-Caution ('Console screenshot at {0}s failed: {1}' -f $sec, $_.Exception.Message)
+    $reasons = New-Object System.Collections.Generic.List[string]
+    $guestEvidence = $null
+    $state = 'Unknown'
+    $created = $false
+
+    try {
+        Set-DebugStep -Step 'create-vm'
+        New-VHD -Path $vhdPath -SizeBytes 64GB -Dynamic | Out-Null
+        New-VM -Name $vmName -Generation 2 -MemoryStartupBytes 4GB -VHDPath $vhdPath -Path $vmDir | Out-Null
+        $created = $true
+        Set-VMProcessor -VMName $vmName -Count 2 | Out-Null
+        Add-VMDvdDrive -VMName $vmName -Path $Script:OutputIsoPath | Out-Null
+        $dvd = Get-VMDvdDrive -VMName $vmName | Select-Object -First 1
+
+        if ($Mode -eq 'Install') {
+            $answerDir = Join-Path $vmDir 'answer'
+            New-Item -ItemType Directory -Path $answerDir -Force | Out-Null
+            $answerXml = Join-Path $answerDir 'Autounattend.xml'
+            $imageIndex = if ($Script:OsProfile -and $Script:OsProfile.InstallWimIndex) { [int]$Script:OsProfile.InstallWimIndex } else { 4 }
+            $lang = if ($Script:OsLanguage) { [string]$Script:OsLanguage } else { 'en-us' }
+            $xml = @"
+<?xml version="1.0" encoding="utf-8"?>
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+  <settings pass="windowsPE">
+    <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <SetupUILanguage><UILanguage>$lang</UILanguage></SetupUILanguage>
+      <InputLocale>$lang</InputLocale><SystemLocale>$lang</SystemLocale><UILanguage>$lang</UILanguage><UserLocale>$lang</UserLocale>
+    </component>
+    <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <DiskConfiguration><Disk wcm:action="add"><DiskID>0</DiskID><WillWipeDisk>true</WillWipeDisk>
+        <CreatePartitions>
+          <CreatePartition wcm:action="add"><Order>1</Order><Type>EFI</Type><Size>260</Size></CreatePartition>
+          <CreatePartition wcm:action="add"><Order>2</Order><Type>MSR</Type><Size>16</Size></CreatePartition>
+          <CreatePartition wcm:action="add"><Order>3</Order><Type>Primary</Type><Extend>true</Extend></CreatePartition>
+        </CreatePartitions>
+        <ModifyPartitions>
+          <ModifyPartition wcm:action="add"><Order>1</Order><PartitionID>1</PartitionID><Format>FAT32</Format><Label>System</Label></ModifyPartition>
+          <ModifyPartition wcm:action="add"><Order>2</Order><PartitionID>3</PartitionID><Format>NTFS</Format><Label>Windows</Label><Letter>C</Letter></ModifyPartition>
+        </ModifyPartitions>
+      </Disk></DiskConfiguration>
+      <ImageInstall><OSImage><InstallFrom><MetaData wcm:action="add"><Key>/IMAGE/INDEX</Key><Value>$imageIndex</Value></MetaData></InstallFrom><InstallTo><DiskID>0</DiskID><PartitionID>3</PartitionID></InstallTo></OSImage></ImageInstall>
+      <UserData><AcceptEula>true</AcceptEula></UserData>
+    </component>
+  </settings>
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <OOBE><HideEULAPage>true</HideEULAPage><ProtectYourPC>3</ProtectYourPC></OOBE>
+      <UserAccounts><AdministratorPassword><Value>$guestPassword</Value><PlainText>true</PlainText></AdministratorPassword></UserAccounts>
+    </component>
+  </settings>
+</unattend>
+"@
+            Set-Content -LiteralPath $answerXml -Value $xml -Encoding UTF8
+            $answerIso = Join-Path $vmDir 'answer.iso'
+            $p14Oscdimg = Resolve-OscdimgPath
+            if (-not $p14Oscdimg) { throw 'oscdimg.exe is required to create the P14 answer ISO.' }
+            & $p14Oscdimg -n -m $answerDir $answerIso | Out-Null
+            if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $answerIso)) { throw 'Could not create Hyper-V answer ISO.' }
+            Add-VMDvdDrive -VMName $vmName -Path $answerIso | Out-Null
         }
-    }
-    $state = (Get-VM -Name $vmName).State
-    Write-Step ('VM state after 180s: {0} (context only -- Running is NOT a boot verdict; a VM sits at a Secure Boot failure screen in the Running state)' -f $state)
 
-    Set-DebugStep -Step 'cleanup-vm'
-    try { Stop-VM -Name $vmName -TurnOff -Force | Out-Null } catch { $null = $_ }
-    Remove-VM -Name $vmName -Force | Out-Null
-    if (Test-Path -LiteralPath $vhdPath) {
-        Remove-Item -LiteralPath $vhdPath -Force -ErrorAction SilentlyContinue
-    }
+        Set-VMFirmware -VMName $vmName -FirstBootDevice $dvd -EnableSecureBoot On -SecureBootTemplate MicrosoftWindows | Out-Null
+        Get-VMNetworkAdapter -VMName $vmName | Remove-VMNetworkAdapter | Out-Null
+        Start-VM -Name $vmName | Out-Null
 
-    if ($shots.Count -gt 0) {
-        Write-Ok ('BootTest observation complete: {0} screenshot(s) saved. OPERATOR VERDICT REQUIRED: Setup UI = boot OK; firmware/Secure Boot error screen = boot failure.' -f $shots.Count)
-        Write-Step 'For the full Secure Boot matrix (revoked-firmware rig, negative control, unattended install + evidence), see tools/boot-verification/README.md.'
-    } else {
-        throw 'BootTest could not capture any console screenshot; no boot observation was recorded.'
+        Set-DebugStep -Step 'boot-and-observe'
+        $t0 = Get-Date
+        foreach ($sec in @(30,90,180)) {
+            $wait = $sec - [int](New-TimeSpan -Start $t0 -End (Get-Date)).TotalSeconds
+            if ($wait -gt 0) { Start-Sleep -Seconds $wait }
+            try {
+                $ns='root\virtualization\v2'
+                $vm=Get-CimInstance -Namespace $ns -ClassName Msvm_ComputerSystem -Filter ("ElementName='{0}'" -f $vmName)
+                $svc=Get-CimInstance -Namespace $ns -ClassName Msvm_VirtualSystemManagementService
+                $r=Invoke-CimMethod -InputObject $svc -MethodName GetVirtualSystemThumbnailImage -Arguments @{ HeightPixels=[uint16]480; WidthPixels=[uint16]640; TargetSystem=$vm }
+                if ($r -and $r.ReturnValue -eq 0 -and $r.ImageData) {
+                    $bmp=Convert-Rgb565ThumbnailToBmp -PixelData ([byte[]]$r.ImageData) -Width 640 -Height 480
+                    $shotPath=Join-Path $Script:LogsDir ('P14_console_{0}s.bmp' -f $sec)
+                    [System.IO.File]::WriteAllBytes($shotPath,$bmp); $shots.Add($shotPath) | Out-Null
+                    Write-Step ('Console screenshot at {0}s: {1}' -f $sec,$shotPath)
+                }
+            } catch { Write-Caution ('Console screenshot at {0}s failed: {1}' -f $sec,$_.Exception.Message) }
+        }
+        $state=[string](Get-VM -Name $vmName).State
+
+        if ($Mode -eq 'Install') {
+            Set-DebugStep -Step 'wait-for-install'
+            $cred=New-Object System.Management.Automation.PSCredential('Administrator',(ConvertTo-SecureString $guestPassword -AsPlainText -Force))
+            $deadline=(Get-Date).AddMinutes(60)
+            while ((Get-Date) -lt $deadline -and -not $guestEvidence) {
+                Start-Sleep -Seconds 30
+                try {
+                    $guestEvidence=Invoke-Command -VMName $vmName -Credential $cred -ErrorAction Stop -ScriptBlock {
+                        $cv=Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+                        $secure=$false; try { $secure=Confirm-SecureBootUEFI } catch { $secure=$false }
+                        $reagent=(reagentc.exe /info | Out-String)
+                        [pscustomobject]@{ Build=('{0}.{1}' -f $cv.CurrentBuildNumber,$cv.UBR); Edition=$cv.EditionID; SecureBoot=$secure; WinReInfo=$reagent; Timestamp=(Get-Date).ToString('o') }
+                    }
+                } catch { $guestEvidence=$null }
+            }
+            if (-not $guestEvidence) { $reasons.Add('Unattended installation did not become reachable through PowerShell Direct within the validation window.') | Out-Null }
+            elseif (-not $guestEvidence.SecureBoot) { $reasons.Add('Installed guest reported Secure Boot disabled.') | Out-Null }
+        } elseif ($shots.Count -eq 0) {
+            $reasons.Add('No console screenshots were captured.') | Out-Null
+        } else {
+            $reasons.Add('BootOnly evidence requires operator review; screenshots alone are not InstallValidated evidence.') | Out-Null
+        }
+
+        $success = if ($Mode -eq 'Install') { [bool]($guestEvidence -and $guestEvidence.SecureBoot) } else { $shots.Count -gt 0 }
+        return [pscustomobject]@{
+            Success=$success; Mode=$Mode; VmName=$vmName; VmState=$state
+            Screenshots=$shots.ToArray(); GuestEvidence=$guestEvidence
+            RequiresOperatorReview=($Mode -eq 'BootOnly'); Reasons=$reasons.ToArray()
+        }
+    } finally {
+        if ($created) {
+            try { Stop-VM -Name $vmName -TurnOff -Force -ErrorAction SilentlyContinue | Out-Null } catch { $null=$_ }
+            try { Remove-VM -Name $vmName -Force -ErrorAction SilentlyContinue | Out-Null } catch { $null=$_ }
+        }
+        if (Test-Path -LiteralPath $vhdPath) { Remove-Item -LiteralPath $vhdPath -Force -ErrorAction SilentlyContinue }
     }
 }
+
 function Show-EntryBanner {
     $line = '=' * 72
     Write-Host ''
@@ -15378,15 +15853,6 @@ try {
 
     if ($phaseList.Count -gt 0) {
         Invoke-PhaseRunner -PhaseIds $phaseList
-    }
-
-    if ($Action -in @('BootTest','All')) {
-        try {
-            Invoke-HyperVBootTest
-        } catch {
-            Write-Fail ('BootTest failed: {0}' -f $_.Exception.Message)
-            $Script:ExitCode = 1
-        }
     }
 
     if ($Action -eq 'GenerateManifest') {

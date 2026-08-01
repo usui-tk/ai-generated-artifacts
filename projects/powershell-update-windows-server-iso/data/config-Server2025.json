@@ -734,7 +734,8 @@
     "NotesSource": [
       "https://techcommunity.microsoft.com/blog/windowsservernewsandbestpractices/windows-server-secure-boot-playbook-for-certificates-expiring-in-2026/4495789"
     ],
-    "Notes": "Do not force the Server 2016/2019/2022 media-conversion path onto Server 2025 without an explicit advanced override."
+    "Notes": "Do not force the Server 2016/2019/2022 media-conversion path onto Server 2025 without an explicit advanced override.",
+    "CompliancePolicy": "RequirePca2023"
   },
   "AutoRefreshPolicy": {
     "Mode": "OnNewPatchTuesday",
@@ -764,7 +765,12 @@
     "RequireE5BeforeApproval": true,
     "FailOnBootWimServicingFailure": true,
     "VerifyAllInstallIndexesContainSameWinRe": true,
-    "RejectAmbiguousCatalogResults": true
+    "RejectAmbiguousCatalogResults": true,
+    "FailOnPca2023ComplianceFailure": true,
+    "VerifyAllInstallIndexes": true,
+    "VerifyWinRePackageState": true,
+    "VerifySetupDuManifest": true,
+    "SuppressRedundantCombinedLcuReapply": true
   },
   "LanguageSpecific": {
     "en-us": {
@@ -803,7 +809,7 @@
     }
   },
   "_meta": {
-    "scriptVersion": "update-wsi-2026.07.12-r12.03",
+    "scriptVersion": "update-wsi-2026.07.14-r12.04",
     "generatedAt": "2026-07-11T00:00:00Z",
     "isTemplate": false,
     "migrationFromSchema": "3.0",

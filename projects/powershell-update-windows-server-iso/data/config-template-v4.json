@@ -606,7 +606,8 @@
       "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f",
       "https://github.com/microsoft/secureboot_objects/blob/main/scripts/windows/Make2023BootableMedia.ps1"
     ],
-    "Notes": "Use readiness checks for required EFI_EX files before invoking the Microsoft conversion workflow."
+    "Notes": "Use readiness checks for required EFI_EX files before invoking the Microsoft conversion workflow.",
+    "CompliancePolicy": "RequirePca2023"
   },
   "AutoRefreshPolicy": {
     "Mode": "OnNewPatchTuesday",
@@ -636,7 +637,12 @@
     "RequireE5BeforeApproval": true,
     "FailOnBootWimServicingFailure": true,
     "VerifyAllInstallIndexesContainSameWinRe": true,
-    "RejectAmbiguousCatalogResults": true
+    "RejectAmbiguousCatalogResults": true,
+    "FailOnPca2023ComplianceFailure": true,
+    "VerifyAllInstallIndexes": true,
+    "VerifyWinRePackageState": true,
+    "VerifySetupDuManifest": true,
+    "SuppressRedundantCombinedLcuReapply": true
   },
   "LanguageSpecific": {
     "en-us": {
@@ -658,7 +664,7 @@
     }
   },
   "_meta": {
-    "scriptVersion": "proposed-v4-model",
+    "scriptVersion": "update-wsi-2026.07.14-r12.04",
     "generatedAt": "2026-07-11T00:00:00Z",
     "isTemplate": true,
     "migrationFromSchema": "3.0",

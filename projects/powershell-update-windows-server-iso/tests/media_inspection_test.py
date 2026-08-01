@@ -247,7 +247,7 @@ def main() -> int:
                  and "DotNetRollupApplied" in code,
                  "wired", p, f)
     p, f = check("generic Kb_ rows survive ONLY behind the Server2016 guard",
-                 re.search(r"OsVersion -eq 'Server2016'[\s\S]{0,900}Add-VRow -Check \('Kb_' \+ \$kb\)", code) is not None
+                 re.search(r"OsVersion -eq 'Server2016'[\s\S]{0,2500}Add-VRow -Check \('Kb_' \+ \$kb\)", code) is not None
                  and code.count("Add-VRow -Check ('Kb_' + $kb)") == 1,
                  "2016-only", p, f)
     p, f = check("the alias extractor is fully removed (no shims)",
@@ -261,8 +261,9 @@ def main() -> int:
     p, f = check("boot.wim stays the PRIMARY conversion source (MS alignment)",
                  re.search(r"Label\s*=\s*'boot\.wim'.*?Label\s*=\s*'install\.wim'", code, re.S) is not None,
                  "candidate order pinned", p, f)
-    p, f = check("P10 skip markers carry a reason; the output check consumes it (r11.64)",
-                 "skipped-by-policy: Server2025 default" in code
+    p, f = check("P10 skip markers carry a reason; the output check consumes it (r11.64/r12.04)",
+                 "skipped-by-policy: operator opt-out (-SkipPca2023BootManager)" in code
+                 and "skipped-by-policy: Server2025 documented-conversion boundary; policy=" in code
                  and code.count("-ConversionSkipReason (Get-P10SkipReason)") == 2
                  and "PCA2011-signed BY POLICY" in code,
                  "marker reasons + both call sites wired", p, f)

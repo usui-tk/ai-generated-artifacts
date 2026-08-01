@@ -22,6 +22,74 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.14-r12.04] - 2026-08-02
+
+Tag: `release-validation-hardening`. The release gate becomes explicit:
+what must be *proven* before an ISO is release-eligible is declared per
+config and enforced by an expanded P11 plus a read-only P12 and a final
+P13 report.
+
+### Added
+
+- **Five `ValidationPolicy` flags** in every config and the v4
+  template: `FailOnPca2023ComplianceFailure`,
+  `SuppressRedundantCombinedLcuReapply`, `VerifyAllInstallIndexes`,
+  `VerifySetupDuManifest`, `VerifyWinRePackageState`. The
+  declaration-derived T42 reads the flag set from the config under
+  test and adapted without an edit (measured).
+- **P11 evidence expansion**: per-index install.wim
+  `TargetBuildAfterUpdate` verification, enabled boot.wim index build
+  verification, per-index runtime-matched .NET rollup state, embedded
+  WinRE presence/byte-identity plus build and pending-package count,
+  SafeOS DU evidence, a Setup DU final file manifest, and final-ISO
+  WIM hashes equal to the serviced extracted WIMs — persisted as new
+  `logs/` artifacts (winre_post_verification.json,
+  setupdu_overlay_manifest.json, P11_verification.csv,
+  inspection_post.json, dism_outcomes.jsonl).
+
+### Changed
+
+- **boot.wim servicing stance hardened**: Server 2019 moves to
+  `enabled` (an index that does not reach the configured target build
+  now fails P11); Server 2022's `tolerate` is removed from the shipped
+  profile. The declaration lives in `ValidationPolicy` /
+  `Common.BootWimUpdateModel`; the retained-legacy
+  `Common.BootWimLcuPolicy` mirrors it (SPEC §B.15.4 / T34 record).
+- **Server 2025 PCA policy**: the shipped profile declares
+  `Pca2023.CompliancePolicy=RequirePca2023`; because automatic 2025
+  conversion is intentionally outside Microsoft's documented
+  conversion boundary, a PCA2011-only result is retained for
+  diagnosis but is not release-eligible, and the run ends non-zero
+  after P13 writes the final report. The P10 skip marker now records
+  this stance (`skipped-by-policy: Server2025 documented-conversion
+  boundary; policy=...` / operator opt-out), replacing the old
+  "Server2025 default" skip reason.
+- **Combined-LCU reapply suppression**: on combined SSU/LCU
+  generations one asset may carry both `ServicingStackCarrier` and
+  `FinalLCU` roles; if no language pack / FOD / optional component /
+  DU changed the mounted image in between, the second application is
+  suppressed (declared by `SuppressRedundantCombinedLcuReapply`).
+- **T38** (media inspection): the Server2016-only `Kb_` guard pin
+  widens its match window — the guard itself survives verbatim but
+  the guarded block grew with the P11 census; the P10 skip-marker pin
+  follows the new marker reasons. 31 assertions.
+- **T39** (boot-verification tool set): the "VM state is NOT a boot
+  verdict" honesty pin becomes structural — since r12.04 the main
+  BootTest derives `Success` from guest evidence (Install) or forces
+  operator review (BootOnly), never from the recorded `VmState`; the
+  harness keeps the explicit disclaimer. 17 assertions.
+- **T40** release pin advanced to `update-wsi-2026.07.14-r12.04`.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA
+**2E/18W/4I** on the committed tree — the two errors are PSA2010
+undefined-function calls in the snapshot (`Get-PatchTargets`,
+`Resolve-OscdimgPath`), latent defects committed verbatim per the
+no-fix-forward rule and declared here as series debt; they drain in
+the post-series conformance release. D-contract totals unchanged from
+r12.03 (140/30/150/64/112; T45 NOT-YET).
+
 ## [update-wsi-2026.07.12-r12.03] - 2026-08-01
 
 Tag: `e2e-log-fixes` (continued). Catalog cross-check pass over all
