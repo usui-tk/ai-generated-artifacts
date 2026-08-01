@@ -105,13 +105,19 @@
     to the current month's Patch Tuesday..
 
 .PARAMETER SkipDynamicPatchRefresh
-    Skip the P03 RefreshPatchBaseline phase even if the baseline is
-    stale. Useful for offline or air-gapped runs..
+    Skip only the P03 full baseline refresh. P04 may still resolve the
+    configured monthly auxiliary selectors (.NET / Safe OS DU / Setup DU)
+    when DiscoveryPolicy.ResolveMonthlyAuxiliariesAtFetch is enabled.
+    This is the recommended switch when the OS LCU/SSU anchors are already
+    pinned to a reviewed month but runtime-specific auxiliary packages must
+    still be selected for that month.
 
 .PARAMETER UseBaselineOnly
-    Use PatchBaseline.Patches strictly as-is, never scrape, never
-    refresh. Equivalent to -SkipDynamicPatchRefresh plus a guarantee
-    that no Catalog access occurs..
+    Pin the configured PatchBaseline KB identities and roles exactly as-is.
+    Disables both P03 baseline discovery and P04 monthly auxiliary replacement.
+    P04 may still resolve the current DownloadDialog URL/file identity for an
+    already-configured KB whose asset URL is missing; it never substitutes a
+    different KB. Pre-stage every configured asset to avoid Catalog access.
 
 .PARAMETER Mode
     Only meaningful with -Action RefreshAllBaselines. One of:
@@ -210,12 +216,12 @@
     .\Update-WindowsServerIso.ps1 `
         -Action PrepareBuildVerify `
         -OsVersion Server2016 -OsLanguage ja-jp `
-        -UseBaselineOnly `
+        -SkipDynamicPatchRefresh `
         -WorkRoot 'D:\UpdateWsi'
-    Server 2016 ja-jp build, dry-run mode (no -Execute). On hosts
-    that do not yet have Windows ADK Deployment Tools installed, P01 will
-    download and silently install OptionId.DeploymentTools before continuing.
-    Add -Execute on a subsequent run to perform the real ISO assembly.
+    Server 2016 ja-jp build, dry-run mode (no -Execute). The reviewed OS
+    LCU/SSU anchors stay pinned while P04 selects the applicable monthly
+    .NET / Safe OS DU / Setup DU packages. Add -Execute on a subsequent run
+    to perform the real ISO assembly.
 #>
 
 [CmdletBinding()]
@@ -559,8 +565,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.15-r12.08'
-$Script:ScriptTag     = 'catalog-classification-hardening'
+$Script:ScriptVersion = 'update-wsi-2026.07.15-r12.09'
+$Script:ScriptTag     = 'option-semantics-pwsh7-fix'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -5246,9 +5252,10 @@ function Resolve-ResolvedPatchAssetFromCatalog {
         Mutate one runtime ResolvedPatch with the current Catalog URL/file
         identity for its already-selected KB.
     .NOTES
-        Safe under -UseBaselineOnly: the KB is never changed. If the baseline
-        contains an expected SHA-1/SHA-256, the normal integrity gate still
-        validates the downloaded file.
+        Safe under -UseBaselineOnly: the KB is never changed. In strict
+        baseline mode a configured asset is resolved only when its URL/file
+        identity is missing; existing expected hashes are not silently
+        refreshed.
     #>
     [CmdletBinding()]
     [OutputType([bool])]
@@ -5312,7 +5319,7 @@ function Resolve-ResolvedPatchAssetFromCatalog {
     if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline -and $Script:OsProfile.PatchBaseline.PSObject.Properties['Status']) {
         $baselineStatus = [string]$Script:OsProfile.PatchBaseline.Status
     }
-    $allowIdentityRefresh = $baselineStatus -in @('', 'ResearchCandidate', 'Discovered', 'Resolved')
+    $allowIdentityRefresh = ($baselineStatus -in @('', 'ResearchCandidate', 'Discovered', 'Resolved')) -and -not [bool]$Script:UseBaselineOnly
     $hashes = @{}
     if ($Patch.PSObject.Properties['ExpectedHashes'] -and $Patch.ExpectedHashes) {
         foreach ($key in $Patch.ExpectedHashes.Keys) { $hashes[$key] = $Patch.ExpectedHashes[$key] }
@@ -12187,9 +12194,60 @@ function Resolve-DotNetMonthlySelectorLines {
     return @($lines.ToArray())
 }
 
+function Get-PatchRefreshDecision {
+    <#
+    .SYNOPSIS
+        Return the effective P03/P04 refresh behaviour for the selected
+        command-line switches and baseline state.
+    .DESCRIPTION
+        This pure helper is also exercised through -Action TestHarness under
+        Windows PowerShell 5.1 and PowerShell 7 so option semantics cannot
+        silently diverge again.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [bool]$UseBaselineOnly,
+        [bool]$SkipDynamicPatchRefresh,
+        [bool]$AutoDetectLatestPatches,
+        [bool]$ConfigResolveMonthlyAuxiliariesAtFetch,
+        [AllowEmptyString()][string]$BaselineStatus = ''
+    )
+    $mutable = $BaselineStatus -in @('', 'ResearchCandidate', 'Discovered', 'Resolved')
+    $mode = 'FreshnessControlled'
+    $refreshBaseline = $true
+    $refreshMonthly = $mutable -and $ConfigResolveMonthlyAuxiliariesAtFetch
+    $exactAssetPolicy = $(if ($mutable) { 'RefreshAllMutableAssets' } else { 'MissingAssetOnly' })
+
+    if ($UseBaselineOnly) {
+        $mode = 'BaselineOnly'
+        $refreshBaseline = $false
+        $refreshMonthly = $false
+        $exactAssetPolicy = 'ConfiguredIdentityMissingAssetOnly'
+    } elseif ($AutoDetectLatestPatches) {
+        $mode = 'ForceRefresh'
+        $refreshBaseline = $true
+    } elseif ($SkipDynamicPatchRefresh) {
+        $mode = 'PinnedOsBaselineWithMonthlyAuxiliaries'
+        $refreshBaseline = $false
+    }
+
+    return [pscustomobject][ordered]@{
+        Mode = $mode
+        RefreshBaseline = [bool]$refreshBaseline
+        ResolveMonthlyAuxiliariesAtFetch = [bool]$refreshMonthly
+        ExactCatalogAssetPolicy = $exactAssetPolicy
+        BaselineMutable = [bool]$mutable
+    }
+}
+
 function Update-MonthlyAuxiliaryResolvedPatchesAtFetch {
     [CmdletBinding()]
     param()
+    if ([bool]$Script:UseBaselineOnly) {
+        Write-Skip 'P04 monthly auxiliary refresh skipped: -UseBaselineOnly pins configured KB identities.'
+        return
+    }
     $policy = $null
     if ($Script:OsProfile -and $Script:OsProfile.PSObject.Properties['DiscoveryPolicy']) { $policy = $Script:OsProfile.DiscoveryPolicy }
     if (-not $policy -or -not $policy.PSObject.Properties['ResolveMonthlyAuxiliariesAtFetch'] -or -not [bool]$policy.ResolveMonthlyAuxiliariesAtFetch) { return }
@@ -12198,28 +12256,43 @@ function Update-MonthlyAuxiliaryResolvedPatchesAtFetch {
     Write-SubSection ('Step 0A: Resolve monthly auxiliary packages for {0}' -f $month)
     $osShort = $Script:OsVersion -replace '^Server',''
     $modelMap = @{ Server2016='separate-ssu'; Server2019='embedded-ssu'; Server2022='embedded-ssu-du'; Server2025='uup-checkpoint' }
-    $freshConfigLines = New-Object System.Collections.Generic.List[object]
+
+    # Use ordinary PowerShell arrays here.  Windows PowerShell 5.1 and pwsh
+    # 7.6 bind Generic.List[object] differently inside @(...), which caused
+    # "Argument types do not match" at the conversion loop in r12.08.
+    $freshConfigLines = @()
     if ($Script:OsVersion -eq 'Server2016') {
         $rawSsu = Resolve-Ssu2016 -BaselineMonth $month
-        foreach ($x in @(ConvertTo-ConfigLines -OsResolved ([pscustomobject]@{os=$Script:OsVersion;lines=@($rawSsu)}) -PatchModel $modelMap[$Script:OsVersion])) { $freshConfigLines.Add($x) | Out-Null }
+        $convertedSsu = @(ConvertTo-ConfigLines -OsResolved ([pscustomobject]@{os=$Script:OsVersion;lines=@($rawSsu)}) -PatchModel $modelMap[$Script:OsVersion])
+        foreach ($x in $convertedSsu) { $freshConfigLines += ,$x }
     }
-    foreach ($rawDu in @((Resolve-SafeOsDu -OsKey $osShort -BaselineMonth $month),(Resolve-SetupDu -OsKey $osShort -BaselineMonth $month))) {
-        foreach ($x in @(ConvertTo-ConfigLines -OsResolved ([pscustomobject]@{os=$Script:OsVersion;lines=@($rawDu)}) -PatchModel $modelMap[$Script:OsVersion])) { $freshConfigLines.Add($x) | Out-Null }
+    $duResults = @(
+        (Resolve-SafeOsDu -OsKey $osShort -BaselineMonth $month)
+        (Resolve-SetupDu -OsKey $osShort -BaselineMonth $month)
+    )
+    foreach ($rawDu in $duResults) {
+        $convertedDu = @(ConvertTo-ConfigLines -OsResolved ([pscustomobject]@{os=$Script:OsVersion;lines=@($rawDu)}) -PatchModel $modelMap[$Script:OsVersion])
+        foreach ($x in $convertedDu) { $freshConfigLines += ,$x }
     }
-    foreach ($x in @(Resolve-DotNetMonthlySelectorLines -OsVersion $Script:OsVersion -BaselineMonth $month)) { $freshConfigLines.Add($x) | Out-Null }
+    $dotNetLines = @(Resolve-DotNetMonthlySelectorLines -OsVersion $Script:OsVersion -BaselineMonth $month)
+    foreach ($x in $dotNetLines) { $freshConfigLines += ,$x }
 
-    $kept = New-Object System.Collections.Generic.List[object]
+    $kept = @()
     foreach ($p in @($Script:ResolvedPatches)) {
         $roles = @(Get-PatchRoles -Patch $p)
         $t = Get-PatchEntryType -Patch $p
         $isSourcePrereq = $roles -contains 'SourcePrerequisite'
-        if ($isSourcePrereq -or $t -in @('LCU','Checkpoint','BridgeLcu')) { $kept.Add($p) | Out-Null }
+        if ($isSourcePrereq -or $t -in @('LCU','Checkpoint','BridgeLcu')) { $kept += ,$p }
     }
-    foreach ($line in @($freshConfigLines)) { $kept.Add((ConvertTo-ResolvedPatchFromBaselineLine -Line $line)) | Out-Null }
-    $Script:ResolvedPatches = @(Merge-ResolvedPatchDuplicates -Patches @($kept.ToArray() | Sort-Object ApplyOrder,KbId))
+    foreach ($line in $freshConfigLines) {
+        $resolvedLine = ConvertTo-ResolvedPatchFromBaselineLine -Line $line
+        $kept += ,$resolvedLine
+    }
+    $sortedPatches = @($kept | Sort-Object ApplyOrder,KbId)
+    $Script:ResolvedPatches = @(Merge-ResolvedPatchDuplicates -Patches $sortedPatches)
     $Script:PatchPlan = Build-PatchPlan -Patches $Script:ResolvedPatches
     $evidencePath = Join-Path $Script:LogsDir 'P04_monthly_auxiliary_selection.json'
-    $freshConfigLines.ToArray() | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $evidencePath -Encoding UTF8
+    @($freshConfigLines) | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $evidencePath -Encoding UTF8
     Write-Ok ('Monthly auxiliary selection written: {0}' -f $evidencePath)
 }
 
@@ -12246,27 +12319,45 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
         }
 
         # Step 0: perform a complete exact-KB Catalog preflight before
-        # downloading the multi-GB source ISO.  Research candidates are
-        # mutable, so every package is rehydrated from its stable identity
-        # (OS + Kind + KB + x64). Frozen/Approved baselines retain their
-        # recorded identity and are only refreshed when an asset is missing.
+        # downloading the multi-GB source ISO. Mutable research candidates
+        # normally refresh every exact-KB asset. -UseBaselineOnly pins KB
+        # identities and refreshes only assets whose URL/file identity is
+        # missing. Frozen/Approved baselines follow the same missing-only rule.
         Write-SubSection 'Step 0: Cross-check all exact-KB Catalog assets'
         Set-DebugStep -Step 'patch-asset-crosscheck'
         $baselineStatus = ''
         if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline -and $Script:OsProfile.PatchBaseline.PSObject.Properties['Status']) {
             $baselineStatus = [string]$Script:OsProfile.PatchBaseline.Status
         }
-        $candidateMutable = $baselineStatus -in @('', 'ResearchCandidate', 'Discovered', 'Resolved')
-        if ($candidateMutable) {
-            Update-MonthlyAuxiliaryResolvedPatchesAtFetch
+        $configResolveAux = $false
+        if ($Script:OsProfile -and $Script:OsProfile.PSObject.Properties['DiscoveryPolicy'] -and
+            $Script:OsProfile.DiscoveryPolicy -and
+            $Script:OsProfile.DiscoveryPolicy.PSObject.Properties['ResolveMonthlyAuxiliariesAtFetch']) {
+            $configResolveAux = [bool]$Script:OsProfile.DiscoveryPolicy.ResolveMonthlyAuxiliariesAtFetch
         }
+        $refreshDecision = Get-PatchRefreshDecision `
+            -UseBaselineOnly ([bool]$Script:UseBaselineOnly) `
+            -SkipDynamicPatchRefresh ([bool]$Script:SkipDynamicPatchRefresh) `
+            -AutoDetectLatestPatches ([bool]$Script:AutoDetectLatestPatches) `
+            -ConfigResolveMonthlyAuxiliariesAtFetch $configResolveAux `
+            -BaselineStatus $baselineStatus
+        Write-Step ('Effective patch refresh mode: {0}; monthly auxiliaries={1}; exact assets={2}' -f
+            $refreshDecision.Mode, $refreshDecision.ResolveMonthlyAuxiliariesAtFetch, $refreshDecision.ExactCatalogAssetPolicy)
+        if ($refreshDecision.ResolveMonthlyAuxiliariesAtFetch) {
+            Update-MonthlyAuxiliaryResolvedPatchesAtFetch
+        } else {
+            Write-Skip ('P04 monthly auxiliary replacement disabled by effective mode: {0}.' -f $refreshDecision.Mode)
+        }
+        $refreshAllMutableAssets = $refreshDecision.ExactCatalogAssetPolicy -eq 'RefreshAllMutableAssets'
         foreach ($p in @($Script:ResolvedPatches)) {
             if (-not $p -or [string]::IsNullOrWhiteSpace([string]$p.KbId)) { continue }
             $type = Get-PatchEntryType -Patch $p
             $isMetadataOnly = ($p.PSObject.Properties['IsMetadataOnly'] -and $p.IsMetadataOnly)
-            if ($candidateMutable -or $isMetadataOnly) {
+            $sourceMissing = [string]::IsNullOrWhiteSpace([string]$p.Source)
+            $needsAssetResolution = $isMetadataOnly -or $sourceMissing
+            if ($refreshAllMutableAssets -or $needsAssetResolution) {
                 Write-Step ('Catalog cross-check: {0}/{1} on {2}' -f $type, $p.KbId, $Script:OsVersion)
-                $null = Resolve-ResolvedPatchAssetFromCatalog -Patch $p -Force -RefreshCache
+                $null = Resolve-ResolvedPatchAssetFromCatalog -Patch $p -Force -RefreshCache:$refreshAllMutableAssets
                 $probe = Test-RemotePatchUrlStatus -Uri ([string]$p.Source)
                 if ($probe.State -eq 'Missing') {
                     throw ('Catalog returned a missing content URL (HTTP {0}) for {1}/{2}: {3}' -f $probe.StatusCode, $type, $p.KbId, $p.Source)
@@ -15890,6 +15981,24 @@ function Invoke-PhaseRunner {
             & $cmd
             Write-PhaseFooter -Id $entry.Id -Status 'done'
         } catch {
+            # The phase function's finally block may already have closed its
+            # trace frame with the default success outcome before this runner
+            # receives the re-thrown exception. Correct the authoritative
+            # per-phase registry and append an explicit failure event so raw
+            # debugtrace.jsonl cannot misleadingly end with success only.
+            if ($Script:DebugTracePhaseRegistry.ContainsKey($entry.Id)) {
+                $phaseReg = $Script:DebugTracePhaseRegistry[$entry.Id]
+                $phaseReg.Outcome = 'failure'
+                $phaseReg.EndedAt = Get-Date
+                $phaseReg.FailureRef = [string]$_.Exception.Message
+            }
+            _DebugTrace_WriteJsonlLine ([pscustomobject]@{
+                ts = _DebugTrace_Now
+                kind = 'phase.outcome'
+                phase = $entry.Id
+                outcome = 'failure'
+                msg = [string]$_.Exception.Message
+            })
             Write-PhaseFooter -Id $entry.Id -Status 'failed'
             Add-ErrorJsonlEntry -Phase $entry.Id -Kind 'failure' -Properties @{
                 exType = $_.Exception.GetType().FullName

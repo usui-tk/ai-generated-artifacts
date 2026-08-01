@@ -22,6 +22,40 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.15-r12.09] - 2026-08-02
+
+Tag: `option-semantics-pwsh7-fix` (the tag advances). The P03/P04
+refresh switches get one declared decision point, testable on both
+PowerShell editions.
+
+### Fixed
+
+- **Refresh-option semantics centralised**: the interaction of
+  `-UseBaselineOnly`, `-SkipDynamicPatchRefresh` and
+  `-AutoDetectLatestPatches` with the baseline state is now decided in
+  one pure helper, `Get-PatchRefreshDecision`, returning a closed
+  record (`Mode` = `FreshnessControlled` | `BaselineOnly` |
+  `ForceRefresh` | `PinnedOsBaselineWithMonthlyAuxiliaries`, plus the
+  refresh flags, the exact-Catalog-asset policy and baseline
+  mutability). `-UseBaselineOnly` now also suppresses monthly-auxiliary
+  resolution and identity refresh. The helper is exercised through
+  `-Action TestHarness` under both Windows PowerShell 5.1 and
+  PowerShell 7 so the two editions' option semantics cannot silently
+  diverge again. Script-only change: `data/*` and `schema/*` are
+  byte-identical to r12.06 (measured).
+
+### Changed
+
+- **T40**: release pin advanced to `update-wsi-2026.07.15-r12.09`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/29W/4I**
+on the committed tree — one finding joins the carried debt (1×
+PSAP0005 revision-anchored comment in the new helper); committed
+verbatim per the no-fix-forward rule, draining post-series.
+
 ## [update-wsi-2026.07.15-r12.08] - 2026-08-02
 
 Tag: `catalog-classification-hardening` (the tag advances from
