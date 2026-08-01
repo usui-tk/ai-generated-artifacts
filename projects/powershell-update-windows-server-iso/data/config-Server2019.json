@@ -26,7 +26,8 @@
     "WinReDistributionPolicy": "ServiceOnceCopyToAllInstallIndexes",
     "BootWimFailurePolicy": "UnsupportedByPinnedSourceMedia",
     "_VerifiedDate": "2026-07-11T00:00:00+09:00",
-    "_VerifiedBy": "research:data-model-v4"
+    "_VerifiedBy": "research:data-model-v4",
+    "BootWimPackageMode": "ExpandedCab"
   },
   "ServicingModel": {
     "MonthlyServicingStyle": "CombinedSSULCU",

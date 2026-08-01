@@ -22,6 +22,58 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.15-r12.05] - 2026-08-02
+
+Tag: `release-validation-hardening` (continued). Closes the four
+measured r12.04 E2E failures (2026-07-14 runs) and adds phase-resume.
+
+### Added
+
+- **`Common.BootWimPackageMode`** (declared per OS; schema enum
+  `DirectMsu` | `ExpandedCab`): Server 2019 moves to `ExpandedCab` —
+  the measured answer to `0x80070032`, raised while the outer LCU MSU
+  processed its embedded unattend data against boot.wim. Expanded
+  mode extracts the MSU once, inspects MUM identities/content,
+  excludes WSUS/express/metadata CABs, and applies servicing-stack
+  payloads before RollupFix payloads. Other generations stay
+  `DirectMsu`.
+- **`-ResumeFromPhase P08` / `P09`**: safely reuse an existing
+  WorkRoot after validation (the measured 2016/2022/2025 runs resume
+  at P09; 2019 restores boot.wim and resumes at P08). P08S writes an
+  explicit marker; r12.04 JSON evidence is accepted as a one-time
+  legacy resume source.
+
+### Fixed
+
+- **Windows PowerShell 5.1 `TrimStart` type mismatch** (stopped
+  2016/2022/2025 in P09): `Get-SetupDuFileManifest` now uses an
+  explicit separator `char[]`, full-path boundary checks and
+  traversal rejection.
+- **Failed-mount durability**: P07/P08 use transaction backups — a
+  failed mount is discarded and the original WIM restored (a strict
+  P08 failure no longer saves a partially serviced boot.wim); WinRE
+  distribution likewise discards an index that fails copy/hash
+  validation.
+- **DISM evidence classification**: based on the explicit operation
+  result plus the current session tail; child-package CBS noise no
+  longer promotes `PackageNotApplicable` / `ProviderWarning` /
+  `RecoveredInternalError` over a successful top-level operation.
+
+### Changed
+
+- **T40**: the P08S pipeline-wiring pin follows the measured
+  structure — four phase lists now carry `P08 → P08S → P09` (the two
+  standard pipelines, the Build action, and the new ResumeFromPhase
+  list); release pin advanced to `update-wsi-2026.07.15-r12.05`.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/20W/4I**
+on the committed tree — declared series debt: the two r12.04 PSA2010
+undefined-function calls persist and two PSA2012 positional-call
+findings against `Save-CanonicalJsonFile` join them; committed
+verbatim per the no-fix-forward rule, draining post-series.
+
 ## [update-wsi-2026.07.14-r12.04] - 2026-08-02
 
 Tag: `release-validation-hardening`. The release gate becomes explicit:

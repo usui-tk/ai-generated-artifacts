@@ -137,10 +137,10 @@ def main() -> int:
         "P08S registered between P08 and P09 (Build group)",
         bool(reg), "registry order pin failed", passed, failed)
     lists_ok = (
-        code.count("'P08','P08S','P09'") == 3  # two standardFull variants + Build action
+        code.count("'P08','P08S','P09'") == 4  # two standardFull variants + Build action + the r12.05 ResumeFromPhase list
     )
     passed, failed = check(
-        "P08S wired into both standard pipelines and the Build action (3 lists)",
+        "P08S wired into the standard pipelines, the Build action and the ResumeFromPhase list (4 lists, r12.05)",
         lists_ok, f"count={code.count(chr(39) + 'P08' + chr(39) + ',' + chr(39) + 'P08S' + chr(39))}", passed, failed)
 
     print("=== 5. Structure pins: explicit-sync contract ===")
@@ -182,8 +182,8 @@ def main() -> int:
         "SetupBinarySync_" in code and "-Actual 'MISMATCH' -Status 'Fail'" in code,
         "P11 pin failed", passed, failed)
     passed, failed = check(
-        "version bumped to r12.04 release-validation-hardening",
-        "update-wsi-2026.07.14-r12.04" in code and "'release-validation-hardening'" in code,
+        "version bumped to r12.05 release-validation-hardening",
+        "update-wsi-2026.07.15-r12.05" in code and "'release-validation-hardening'" in code,
         "bump pin failed", passed, failed)
 
     print(f"\n  Summary: {passed} passed, {failed} failed, {passed + failed} total")

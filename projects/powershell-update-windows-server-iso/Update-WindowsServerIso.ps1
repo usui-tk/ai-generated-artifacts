@@ -75,6 +75,13 @@
 .PARAMETER OnlyPhases
     Array of phase IDs (e.g. 'P04','P07') to run. Overrides -Action.
 
+.PARAMETER ResumeFromPhase
+    Resume a previously interrupted build from P08 or P09. The script runs
+    P01/P02 to reconstruct runtime state, validates the existing WorkRoot,
+    restores boot.wim before P08 when required, and then continues through
+    the remaining build/verification phases without re-downloading or
+    re-servicing install.wim.
+
 .PARAMETER OsVersion
     One of: Server2016 / Server2019 / Server2022 / Server2025.
 
@@ -218,6 +225,9 @@ param(
 
     [string[]] $OnlyPhases,
 
+    [ValidateSet('P08','P09')]
+    [string]   $ResumeFromPhase,
+
     [ValidateSet('Server2016','Server2019','Server2022','Server2025')]
     [string]   $OsVersion,
 
@@ -342,6 +352,7 @@ $Script:ReleaseEligibility        = $null
 $Script:ResetBaseOnCleanup        = -not [bool]$SkipResetBaseOnCleanup
 $Script:SkipExportCompress        = [bool]$SkipExportCompress
 $Script:UseDefenderExclusions     = [bool]$UseDefenderExclusions
+$Script:ResumeFromPhase           = $ResumeFromPhase
 
 # -----------------
 # Parameter validation
@@ -359,6 +370,12 @@ if ($Action -eq 'BootTest' -and $SyntheticTestMode) {
 }
 if ($PSBoundParameters.ContainsKey('OnlyPhases') -and -not $OnlyPhases) {
     throw '-OnlyPhases was specified but the array is empty.'
+}
+if ($ResumeFromPhase -and $OnlyPhases) {
+    throw '-ResumeFromPhase and -OnlyPhases are mutually exclusive.'
+}
+if ($ResumeFromPhase -and $Action -notin @('Build','PrepareBuildVerify')) {
+    throw '-ResumeFromPhase is supported only with -Action Build or PrepareBuildVerify.'
 }
 
 # ---- mutual exclusivity / format validation (P03 / P06 params) ----
@@ -542,7 +559,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.14-r12.04'
+$Script:ScriptVersion = 'update-wsi-2026.07.15-r12.05'
 $Script:ScriptTag     = 'release-validation-hardening'
 $Script:ScriptHash    = '(unknown)'
 try {
@@ -6608,6 +6625,7 @@ function Copy-ServicedWinReToInstallIndexes {
         $index = if ($img.PSObject.Properties['ImageIndex']) { [int]$img.ImageIndex } else { [int]$img }
         Write-Step ('Distributing serviced WinRE to install.wim index {0}.' -f $index)
         Invoke-WimMountSafe -ImagePath $InstallWim -Index $index -Path $Script:MountInstallDir -LogDir $Script:LogsDir | Out-Null
+        $copySucceeded = $false
         try {
             $destination = Join-Path $Script:MountInstallDir 'Windows\System32\Recovery\Winre.wim'
             $parent = Split-Path -Parent $destination
@@ -6617,8 +6635,9 @@ function Copy-ServicedWinReToInstallIndexes {
             if ($actualHash -ne $expectedHash) {
                 throw ('WinRE copy verification failed for install.wim index {0}: expected {1}, actual {2}' -f $index, $expectedHash, $actualHash)
             }
+            $copySucceeded = $true
         } finally {
-            Invoke-WimDismountSafe -Path $Script:MountInstallDir -LogDir $Script:LogsDir
+            Invoke-WimDismountSafe -Path $Script:MountInstallDir -Discard:(-not $copySucceeded) -LogDir $Script:LogsDir
         }
     }
 }
@@ -8566,7 +8585,7 @@ function Test-Pca2023PolicyCompliance {
 }
 
 function Get-DismLogClassification {
-    <# Classify the final operation outcome separately from recoverable CSI noise. #>
+    <# Classify the final operation result; do not promote benign CBS child-package noise. #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param(
@@ -8577,15 +8596,36 @@ function Get-DismLogClassification {
     if ($LogPath -and (Test-Path -LiteralPath $LogPath)) {
         try { $text = Get-Content -LiteralPath $LogPath -Raw -ErrorAction Stop } catch { $text = '' }
     }
+
+    # Restrict textual adjudication to the tail of the current DISM session.
+    # CBS logs routinely contain child-package warnings and recoverable HRESULTs
+    # even when the top-level Add-WindowsPackage operation succeeds.
+    $tail = $text
+    if ($tail.Length -gt 131072) { $tail = $tail.Substring($tail.Length - 131072) }
     $classes = New-Object System.Collections.Generic.List[string]
-    if ($OperationStatus -eq 'NotApplicable' -or $text -match '0x800f081e|not applicable') { $classes.Add('PackageNotApplicable') | Out-Null }
-    if ($text -match 'restart required|reboot required') { $classes.Add('RebootRequired') | Out-Null }
-    if ($text -match 'pending.xml|pending operation|Install Pending') { $classes.Add('PendingOperation') | Out-Null }
-    if ($text -match '(?im)^.*\bwarning\b.*$') { $classes.Add('ProviderWarning') | Out-Null }
-    $completed = ($OperationStatus -in @('Ok','OkAfterRetry','WinReServicingStackKnownIssue','NotApplicable')) -or ($text -match 'The operation completed successfully')
-    $hasErrorToken = $text -match '(?im)\b(error|failed)\b|0x8[0-9a-f]{7}'
-    if ($completed -and $hasErrorToken) { $classes.Add('RecoveredInternalError') | Out-Null }
-    if (-not $completed -or $OperationStatus -eq 'Fail') { $classes.Add('TerminalOperationFailure') | Out-Null }
+    $successStatus = $OperationStatus -in @('Ok','OkAfterRetry','WinReServicingStackKnownIssue')
+    $notApplicableStatus = $OperationStatus -eq 'NotApplicable'
+    $terminalStatus = $OperationStatus -eq 'Fail'
+
+    if ($notApplicableStatus) { $classes.Add('PackageNotApplicable') | Out-Null }
+    if ($tail -match '(?im)restart required|reboot required|reboot is required') { $classes.Add('RebootRequired') | Out-Null }
+    if ($tail -match '(?im)pending operation|Install Pending|pending\.xml') { $classes.Add('PendingOperation') | Out-Null }
+
+    $topLevelFailure = $terminalStatus -or
+        ($tail -match '(?im)DISM Package Manager:.*Error in operation|Add-WindowsPackage.*failed|The operation failed|HRESULT\s*=\s*0x8[0-9a-f]{7}')
+    $topLevelSuccess = $successStatus -or ($tail -match '(?im)The operation completed successfully\.')
+
+    if ($topLevelFailure -and -not $topLevelSuccess) {
+        $classes.Add('TerminalOperationFailure') | Out-Null
+    } elseif ($topLevelSuccess) {
+        # Record provider warnings only when the final session tail explicitly
+        # reports a warning outside CSI/CBS component chatter.
+        if ($tail -match '(?im)^(?!.*\b(?:CSI|CBS)\b).*\bWarning\b.*$') {
+            $classes.Add('ProviderWarning') | Out-Null
+        }
+        if ($OperationStatus -eq 'OkAfterRetry') { $classes.Add('RecoveredInternalError') | Out-Null }
+    }
+
     if ($classes.Count -eq 0) { $classes.Add('CleanSuccess') | Out-Null }
     return [pscustomobject]@{
         LogPath          = $LogPath
@@ -8612,19 +8652,145 @@ function Get-SetupDuFileManifest {
     [CmdletBinding()]
     [OutputType([object[]])]
     param([Parameter(Mandatory)][string]$Root, [string]$DestinationRoot='')
+
+    if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
+        throw ('Setup DU manifest root does not exist or is not a directory: {0}' -f $Root)
+    }
+
+    $trimChars = [char[]]@(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    )
+    $normalizedRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd($trimChars)
+    $rootPrefix = $normalizedRoot + [System.IO.Path]::DirectorySeparatorChar
     $rows = New-Object System.Collections.Generic.List[object]
-    foreach ($file in @(Get-ChildItem -LiteralPath $Root -File -Recurse -ErrorAction Stop)) {
-        $rel = $file.FullName.Substring($Root.Length).TrimStart('\\','/')
+
+    foreach ($file in @(Get-ChildItem -LiteralPath $normalizedRoot -File -Recurse -ErrorAction Stop)) {
+        $fullPath = [System.IO.Path]::GetFullPath($file.FullName)
+        if (-not $fullPath.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw ('Setup DU manifest file escaped the declared root: {0}' -f $fullPath)
+        }
+        $rel = $fullPath.Substring($normalizedRoot.Length).TrimStart($trimChars)
+        if ([string]::IsNullOrWhiteSpace($rel) -or $rel -match '(^|[\\/])\.\.([\\/]|$)') {
+            throw ('Unsafe Setup DU relative path generated from {0}: {1}' -f $fullPath, $rel)
+        }
         $dest = if ($DestinationRoot) { Join-Path $DestinationRoot $rel } else { '' }
         $ver = $null
         try { $ver = $file.VersionInfo.FileVersion } catch { $null = $_ }
         $rows.Add([pscustomobject]@{
-            RelativePath=$rel; SourcePath=$file.FullName; DestinationPath=$dest
-            SizeBytes=$file.Length; Sha256=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLower()
+            RelativePath=$rel; SourcePath=$fullPath; DestinationPath=$dest
+            SizeBytes=$file.Length; Sha256=(Get-FileHash -LiteralPath $fullPath -Algorithm SHA256).Hash.ToLower()
             FileVersion=$ver
         }) | Out-Null
     }
     return $rows.ToArray()
+}
+
+function Get-BootWimPackageMode {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+    $mode = ''
+    if ($Script:OsProfile -and $Script:OsProfile.PSObject.Properties['Common'] -and
+        $Script:OsProfile.Common -and $Script:OsProfile.Common.PSObject.Properties['BootWimPackageMode']) {
+        $mode = [string]$Script:OsProfile.Common.BootWimPackageMode
+    }
+    if ([string]::IsNullOrWhiteSpace($mode)) {
+        $mode = if ($Script:OsVersion -eq 'Server2019') { 'ExpandedCab' } else { 'DirectMsu' }
+    }
+    if ($mode -notin @('DirectMsu','ExpandedCab')) {
+        throw ('Unsupported Common.BootWimPackageMode: {0}' -f $mode)
+    }
+    return $mode
+}
+
+function Get-ExpandedMsuCabPlan {
+    <# Expand an MSU once and select only package-bearing CAB payloads. #>
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param(
+        [Parameter(Mandatory)][string]$MsuPath,
+        [Parameter(Mandatory)][string]$KbId,
+        [string]$ExpansionRoot = ''
+    )
+    if (-not (Test-Path -LiteralPath $MsuPath -PathType Leaf)) { throw ('MSU not found: {0}' -f $MsuPath) }
+    if ([System.IO.Path]::GetExtension($MsuPath) -ine '.msu') { throw ('Expanded CAB mode requires an MSU: {0}' -f $MsuPath) }
+
+    if ([string]::IsNullOrWhiteSpace($ExpansionRoot)) {
+        $ExpansionRoot = if ($Script:TempDir) { $Script:TempDir } else { [System.IO.Path]::GetTempPath() }
+    }
+    $safeName = ([System.IO.Path]::GetFileNameWithoutExtension($MsuPath) -replace '[^A-Za-z0-9._-]','_')
+    $expandRoot = Join-Path $ExpansionRoot ('expanded-msu\' + $safeName)
+    $payloadRoot = Join-Path $expandRoot 'payload'
+    $manifestPath = Join-Path $expandRoot 'cab-plan.json'
+    if (-not (Test-Path -LiteralPath $manifestPath)) {
+        if (Test-Path -LiteralPath $expandRoot) { Remove-Item -LiteralPath $expandRoot -Recurse -Force }
+        New-Item -ItemType Directory -Path $payloadRoot -Force | Out-Null
+        Write-Step ('    Expanding MSU payload: {0}' -f [System.IO.Path]::GetFileName($MsuPath))
+        & expand.exe -F:* $MsuPath $payloadRoot | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw ('expand.exe failed for {0} with exit code {1}.' -f $MsuPath,$LASTEXITCODE) }
+
+        $plan = New-Object System.Collections.Generic.List[object]
+        foreach ($cab in @(Get-ChildItem -LiteralPath $payloadRoot -File -Recurse -Filter '*.cab' -ErrorAction Stop)) {
+            if ($cab.Name -match '(?i)wsusscan|express|delta|metadata') { continue }
+            $mumRoot = Join-Path $expandRoot ('mum-' + [Guid]::NewGuid().Guid)
+            New-Item -ItemType Directory -Path $mumRoot -Force | Out-Null
+            try {
+                & expand.exe -F:*.mum $cab.FullName $mumRoot | Out-Null
+                $mums = @(Get-ChildItem -LiteralPath $mumRoot -File -Recurse -Filter '*.mum' -ErrorAction SilentlyContinue)
+                $mumNames = @($mums | ForEach-Object { $_.Name })
+                $mumContent = @($mums | ForEach-Object {
+                    try { Get-Content -LiteralPath $_.FullName -Raw -ErrorAction Stop } catch { '' }
+                }) -join "`n"
+                $joined = (($mumNames -join ';') + "`n" + $mumContent)
+                $role = 'Unknown'
+                $order = 90
+                $hasSsu = $joined -match '(?i)ServicingStack'
+                $hasLcu = $joined -match '(?i)RollupFix'
+                if ($hasSsu -and $hasLcu) { $role='Combined'; $order=20 }
+                elseif ($hasSsu) { $role='ServicingStack'; $order=10 }
+                elseif ($hasLcu) { $role='RollupFix'; $order=30 }
+                elseif ($cab.Name -match [regex]::Escape($KbId)) { $role='UpdatePayload'; $order=40 }
+                if ($role -ne 'Unknown') {
+                    $plan.Add([pscustomobject]@{ CabPath=$cab.FullName; FileName=$cab.Name; Role=$role; Order=$order; MumFiles=$mumNames }) | Out-Null
+                }
+            } finally {
+                Remove-Item -LiteralPath $mumRoot -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+        if ($plan.Count -eq 0) {
+            foreach ($cab in @(Get-ChildItem -LiteralPath $payloadRoot -File -Recurse -Filter '*.cab' | Where-Object { $_.Name -match [regex]::Escape($KbId) -and $_.Name -notmatch '(?i)wsusscan' })) {
+                $plan.Add([pscustomobject]@{ CabPath=$cab.FullName; FileName=$cab.Name; Role='UpdatePayload'; Order=40; MumFiles=@() }) | Out-Null
+            }
+        }
+        if ($plan.Count -eq 0) { throw ('No package-bearing CAB payload was found in {0}.' -f $MsuPath) }
+        $ordered = @($plan.ToArray() | Sort-Object Order,FileName)
+        Save-CanonicalJsonFile -InputObject $ordered -Path $manifestPath -Depth 8
+    }
+    return @((Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json))
+}
+
+function Add-WindowsPackageFromExpandedMsu {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$MountPath,
+        [Parameter(Mandatory)][string]$MsuPath,
+        [Parameter(Mandatory)][string]$KbId,
+        [string]$LogDir
+    )
+    $plan = @(Get-ExpandedMsuCabPlan -MsuPath $MsuPath -KbId $KbId)
+    $statuses = New-Object System.Collections.Generic.List[string]
+    foreach ($entry in $plan) {
+        Write-Step ('      Expanded MSU CAB [{0}]: {1}' -f $entry.Role, $entry.FileName)
+        $st = Add-WindowsPackageWithRetry -MountPath $MountPath -PackagePath ([string]$entry.CabPath) -LogDir $LogDir
+        $statuses.Add($st) | Out-Null
+    }
+    if (@($statuses.ToArray() | Where-Object { $_ -eq 'OkAfterRetry' }).Count -gt 0) { return 'OkAfterRetry' }
+    if (@($statuses.ToArray() | Where-Object { $_ -notin @('Ok','NotApplicable') }).Count -gt 0) {
+        throw ('Expanded MSU CAB application did not complete cleanly for {0}: {1}' -f $KbId, ($statuses.ToArray() -join ','))
+    }
+    return 'Ok'
 }
 
 function Build-InstallApplySequence {
@@ -9095,9 +9261,20 @@ function Invoke-PatchSubPhase {
                 ((Test-PatchHasRole -Patch $p -Role 'ServicingStackCarrier') -or
                  (Test-PatchHasRole -Patch $p -Role 'SourcePrerequisite'))
             )
-            $status = Add-WindowsPackageWithRetry -MountPath $MountPath `
-                -PackagePath $pkgPath -LogDir $Script:LogsDir `
-                -AllowWinReCombinedLcuKnownError:$allowWinReKnownError
+            $useExpandedMsu = (
+                $ImageLabel -like 'boot.wim:*' -and
+                (Get-BootWimPackageMode) -eq 'ExpandedCab' -and
+                $type -eq 'LCU' -and
+                [System.IO.Path]::GetExtension($pkgPath) -ieq '.msu'
+            )
+            if ($useExpandedMsu) {
+                Write-Step ('      Server 2019 boot.wim: using expanded CAB mode to bypass MSU Unattend processing.')
+                $status = Add-WindowsPackageFromExpandedMsu -MountPath $MountPath -MsuPath $pkgPath -KbId $kb -LogDir $Script:LogsDir
+            } else {
+                $status = Add-WindowsPackageWithRetry -MountPath $MountPath `
+                    -PackagePath $pkgPath -LogDir $Script:LogsDir `
+                    -AllowWinReCombinedLcuKnownError:$allowWinReKnownError
+            }
             Write-Ok ('      status={0}' -f $status)
         } catch {
             $errMsg = $_.Exception.Message
@@ -12277,6 +12454,8 @@ function Invoke-BuildPhase07_PatchInstallWim {
         Emits P05_patch_inventory.csv.
     #>
     Start-DebugTrace -Context 'Invoke-BuildPhase07_PatchInstallWim' -PhaseId 'P07'
+    $p07Succeeded = $false
+    $p07Backup = ''
     try {
         if (-not $Script:OsProfile.EnableInstallWimUpdate) {
             Write-Skip 'EnableInstallWimUpdate is false in profile; skipping P07.'
@@ -12294,6 +12473,16 @@ function Invoke-BuildPhase07_PatchInstallWim {
         # Sandbox-mode safety: require -Execute for write operations
         if (-not $Script:Execute -and -not $Script:SyntheticTestMode) {
             Write-Caution 'Running in Sandbox mode (no -Execute). Will list intended actions only.'
+        } elseif ($Script:Execute -and -not $Script:SyntheticTestMode) {
+            $backupDir = Join-Path $Script:StateDir 'p07-backup'
+            New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+            $p07Backup = Join-Path $backupDir 'install.wim.pre-p07'
+            $p07BackupPart = $p07Backup + '.part'
+            Write-Step ('Creating P07 transaction backup: {0}' -f $p07Backup)
+            Remove-Item -LiteralPath $p07BackupPart -Force -ErrorAction SilentlyContinue
+            Copy-Item -LiteralPath $installWim -Destination $p07BackupPart -Force
+            Move-Item -LiteralPath $p07BackupPart -Destination $p07Backup -Force
+            Set-Content -LiteralPath ($p07Backup + '.sha256') -Value ((Get-FileHash -LiteralPath $p07Backup -Algorithm SHA256).Hash.ToLower()) -Encoding ASCII
         }
 
         $patches = Get-PatchListForInstallWim
@@ -12352,6 +12541,7 @@ function Invoke-BuildPhase07_PatchInstallWim {
             Set-DebugStep -Step ('mount-install-pass1-idx-' + $img.ImageIndex)
             Invoke-WimMountSafe -ImagePath $installWim -Index $img.ImageIndex `
                 -Path $Script:MountInstallDir -LogDir $Script:LogsDir | Out-Null
+            $pass1Succeeded = $false
             try {
                 # Pre-apply dependency closure check on the first-pass mount.
                 # Combine all first-pass patches into the check.
@@ -12390,9 +12580,10 @@ function Invoke-BuildPhase07_PatchInstallWim {
                         }) | Out-Null
                     }
                 }
+                $pass1Succeeded = $true
             } finally {
                 Set-DebugStep -Step ('dismount-install-pass1-idx-' + $img.ImageIndex)
-                Invoke-WimDismountSafe -Path $Script:MountInstallDir -LogDir $Script:LogsDir
+                Invoke-WimDismountSafe -Path $Script:MountInstallDir -Discard:(-not $pass1Succeeded) -LogDir $Script:LogsDir
             }
 
             # Second-pass: LCU re-apply when LP was actually injected.
@@ -12403,6 +12594,7 @@ function Invoke-BuildPhase07_PatchInstallWim {
                 Set-DebugStep -Step ('mount-install-pass2-idx-' + $img.ImageIndex)
                 Invoke-WimMountSafe -ImagePath $installWim -Index $img.ImageIndex `
                     -Path $Script:MountInstallDir -LogDir $Script:LogsDir | Out-Null
+                $pass2Succeeded = $false
                 try {
                     foreach ($sp in $secondPassSubPhases) {
                         $spRows = Invoke-PatchSubPhase -SubPhase $sp -MountPath $Script:MountInstallDir -ImageLabel ($imgLabel + ':pass2')
@@ -12419,9 +12611,10 @@ function Invoke-BuildPhase07_PatchInstallWim {
                     }
                     Set-DebugStep -Step ('cleanup-install-pass2-idx-' + $img.ImageIndex)
                     Invoke-DismCleanup -MountPath $Script:MountInstallDir
+                    $pass2Succeeded = $true
                 } finally {
                     Set-DebugStep -Step ('dismount-install-pass2-idx-' + $img.ImageIndex)
-                    Invoke-WimDismountSafe -Path $Script:MountInstallDir -LogDir $Script:LogsDir
+                    Invoke-WimDismountSafe -Path $Script:MountInstallDir -Discard:(-not $pass2Succeeded) -LogDir $Script:LogsDir
                 }
             }
         }
@@ -12442,7 +12635,13 @@ function Invoke-BuildPhase07_PatchInstallWim {
         Write-Ok ('Wrote: {0}' -f $csvPath)
 
         New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P07.ok') -Force | Out-Null
+        $p07Succeeded = $true
     } finally {
+        if ($p07Backup -and -not $p07Succeeded -and (Test-Path -LiteralPath $p07Backup)) {
+            Write-Caution 'P07 failed; restoring install.wim from the transaction backup.'
+            Copy-Item -LiteralPath $p07Backup -Destination (Join-Path $Script:ExtractedDir 'sources\install.wim') -Force
+            Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P07.ok') -Force -ErrorAction SilentlyContinue
+        }
         Stop-DebugTrace
     }
 }
@@ -12470,6 +12669,9 @@ function Invoke-BuildPhase08_PatchBootWim {
                       LCU-serviceability (2022) without losing the run.
     #>
     Start-DebugTrace -Context 'Invoke-BuildPhase08_PatchBootWim' -PhaseId 'P08'
+    $p08Succeeded = $false
+    $p08BootBackup = ''
+    $p08InstallBackup = ''
     try {
         $bootPolicy = Resolve-BootWimLcuPolicyValue -RawValue $Script:OsProfile.BootWimLcuPolicy
         Write-Step ('boot.wim LCU policy: {0}' -f $bootPolicy)
@@ -12485,6 +12687,27 @@ function Invoke-BuildPhase08_PatchBootWim {
         if (-not $Script:Execute -and -not $Script:SyntheticTestMode) {
             Write-Caution 'Running in Sandbox mode (no -Execute); skipping boot.wim modifications.'
             return
+        }
+
+        if ($Script:Execute -and -not $Script:SyntheticTestMode) {
+            $backupDir = Join-Path $Script:StateDir 'p08-backup'
+            New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+            $p08BootBackup = Join-Path $backupDir 'boot.wim.pre-p08'
+            $p08InstallBackup = Join-Path $backupDir 'install.wim.pre-p08'
+            $installForBackup = Join-Path $Script:ExtractedDir 'sources\install.wim'
+            Write-Step 'Creating P08 transaction backups for boot.wim and install.wim.'
+            $bootPart = $p08BootBackup + '.part'
+            $installPart = $p08InstallBackup + '.part'
+            Remove-Item -LiteralPath $bootPart,$installPart -Force -ErrorAction SilentlyContinue
+            Copy-Item -LiteralPath $bootWim -Destination $bootPart -Force
+            Copy-Item -LiteralPath $installForBackup -Destination $installPart -Force
+            Move-Item -LiteralPath $bootPart -Destination $p08BootBackup -Force
+            Move-Item -LiteralPath $installPart -Destination $p08InstallBackup -Force
+            Save-CanonicalJsonFile -InputObject ([pscustomobject]@{
+                Timestamp=(Get-Date).ToString('o')
+                BootWimSha256=(Get-FileHash -LiteralPath $p08BootBackup -Algorithm SHA256).Hash.ToLower()
+                InstallWimSha256=(Get-FileHash -LiteralPath $p08InstallBackup -Algorithm SHA256).Hash.ToLower()
+            }) -Path (Join-Path $backupDir 'backup-manifest.json') -Depth 4
         }
 
         # The patch plan is shared state for BOTH the boot.wim loop
@@ -12519,6 +12742,7 @@ function Invoke-BuildPhase08_PatchBootWim {
 
             Invoke-WimMountSafe -ImagePath $bootWim -Index $idx `
                 -Path $mountDir -LogDir $Script:LogsDir | Out-Null
+            $idxSucceeded = $false
             $idxFailed = $false
             try {
                 try {
@@ -12537,6 +12761,7 @@ function Invoke-BuildPhase08_PatchBootWim {
                         }
                         Invoke-PatchSubPhase -SubPhase $sp -MountPath $mountDir -ImageLabel $imgLabel | Out-Null
                     }
+                    $idxSucceeded = $true
                 } catch {
                     if ($bootPolicy -ne 'tolerate') { throw }
                     # tolerate: downgrade to Caution, discard this index's
@@ -12551,7 +12776,7 @@ function Invoke-BuildPhase08_PatchBootWim {
                     }
                 }
             } finally {
-                if ($idxFailed) {
+                if ($idxFailed -or -not $idxSucceeded) {
                     Invoke-WimDismountSafe -Path $mountDir -Discard -LogDir $Script:LogsDir
                 } else {
                     Invoke-WimDismountSafe -Path $mountDir -LogDir $Script:LogsDir
@@ -12588,6 +12813,7 @@ function Invoke-BuildPhase08_PatchBootWim {
                 }
 
                 Invoke-WimMountSafe -ImagePath $winReWork -Index 1 -Path $Script:MountWinReDir -LogDir $Script:LogsDir | Out-Null
+                $winReSucceeded = $false
                 try {
                     $allWinRePatches = @($winReSequence | Where-Object {
                         -not ($_.PSObject.Properties['IsCleanupMarker'] -and $_.IsCleanupMarker)
@@ -12600,8 +12826,9 @@ function Invoke-BuildPhase08_PatchBootWim {
                         }
                         Invoke-PatchSubPhase -SubPhase $sp -MountPath $Script:MountWinReDir -ImageLabel 'winre.wim' | Out-Null
                     }
+                    $winReSucceeded = $true
                 } finally {
-                    Invoke-WimDismountSafe -Path $Script:MountWinReDir -LogDir $Script:LogsDir
+                    Invoke-WimDismountSafe -Path $Script:MountWinReDir -Discard:(-not $winReSucceeded) -LogDir $Script:LogsDir
                 }
                 Export-WinReRecoveryCompressed -WinRePath $winReWork
                 Copy-ServicedWinReToInstallIndexes -InstallWim $installWim -ServicedWinRe $winReWork -Indexes $targets
@@ -12610,7 +12837,17 @@ function Invoke-BuildPhase08_PatchBootWim {
         }
 
         New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P08.ok') -Force | Out-Null
+        $p08Succeeded = $true
     } finally {
+        if (-not $p08Succeeded -and $p08BootBackup -and (Test-Path -LiteralPath $p08BootBackup)) {
+            Write-Caution 'P08 failed; restoring boot.wim and install.wim from transaction backups.'
+            Copy-Item -LiteralPath $p08BootBackup -Destination (Join-Path $Script:ExtractedDir 'sources\boot.wim') -Force
+            if ($p08InstallBackup -and (Test-Path -LiteralPath $p08InstallBackup)) {
+                Copy-Item -LiteralPath $p08InstallBackup -Destination (Join-Path $Script:ExtractedDir 'sources\install.wim') -Force
+            }
+            Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P08.ok') -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P08S.ok') -Force -ErrorAction SilentlyContinue
+        }
         Stop-DebugTrace
     }
 }
@@ -12879,6 +13116,7 @@ function Invoke-BuildPhase08S_SyncSetupBinaries { # psa-disable-line PSA6003 -- 
             Records        = $records.ToArray()
         } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
         Write-Ok ('Setup-binary sync evidence written: {0} / {1}' -f $csvPath, $jsonPath)
+        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P08S.ok') -Force | Out-Null
     } finally {
         Stop-DebugTrace
     }
@@ -15199,6 +15437,86 @@ function Show-RefreshSnapshotsSummary {
     Write-Host ''
 }
 
+function Restore-BootWimFromSourceIso {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$DestinationPath)
+    if (-not (Test-Path -LiteralPath $Script:IsoLocalPath -PathType Leaf)) {
+        throw ('Source ISO required to restore boot.wim is missing: {0}' -f $Script:IsoLocalPath)
+    }
+    $img = Mount-DiskImage -ImagePath $Script:IsoLocalPath -StorageType ISO -PassThru -ErrorAction Stop
+    try {
+        Start-Sleep -Seconds 1
+        $vol = $img | Get-Volume
+        if (-not $vol.DriveLetter) { throw 'Mounted source ISO has no drive letter.' }
+        $src = ($vol.DriveLetter + ':\sources\boot.wim')
+        if (-not (Test-Path -LiteralPath $src)) { throw ('Source ISO boot.wim missing: {0}' -f $src) }
+        Copy-Item -LiteralPath $src -Destination $DestinationPath -Force
+    } finally {
+        Dismount-DiskImage -ImagePath $Script:IsoLocalPath -ErrorAction SilentlyContinue | Out-Null
+    }
+}
+
+function Initialize-ResumeBuildState {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][ValidateSet('P08','P09')][string]$PhaseId)
+    Write-SubSection ('Resume validation: {0}' -f $PhaseId)
+    $mounted = @(Invoke-DismCmdlet -CommandName 'Get-WindowsImage' -Parameters @{ Mounted=$true; ErrorAction='SilentlyContinue' })
+    if ($mounted.Count -gt 0) { throw 'Resume refused: one or more WIM images are currently mounted. Run DISM /Cleanup-Wim first.' }
+
+    $installWim = Join-Path $Script:ExtractedDir 'sources\install.wim'
+    $bootWim = Join-Path $Script:ExtractedDir 'sources\boot.wim'
+    foreach ($required in @($installWim,$bootWim)) {
+        if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw ('Resume prerequisite missing: {0}' -f $required) }
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $Script:MarkersDir 'P07.ok'))) { throw 'Resume refused: P07.ok is missing.' }
+
+    if ($PhaseId -eq 'P08') {
+        $stateBackup = Join-Path $Script:StateDir 'p08-backup\boot.wim.pre-p08'
+        if (Test-Path -LiteralPath $stateBackup) {
+            Write-Step 'Restoring boot.wim from the P08 transaction backup.'
+            Copy-Item -LiteralPath $stateBackup -Destination $bootWim -Force
+        } else {
+            Write-Step 'No P08 backup exists; restoring boot.wim from the source ISO.'
+            Restore-BootWimFromSourceIso -DestinationPath $bootWim
+        }
+        Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P08.ok') -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P08S.ok') -Force -ErrorAction SilentlyContinue
+    } else {
+        if (-not (Test-Path -LiteralPath (Join-Path $Script:MarkersDir 'P08.ok'))) {
+            throw 'Resume refused: P08.ok is missing.'
+        }
+        $syncEvidence = Join-Path $Script:LogsDir 'setup_binaries_sync.json'
+        if (-not (Test-Path -LiteralPath $syncEvidence)) {
+            throw 'Resume refused: setup_binaries_sync.json is missing.'
+        }
+        $p08sMarker = Join-Path $Script:MarkersDir 'P08S.ok'
+        if (-not (Test-Path -LiteralPath $p08sMarker)) {
+            # r12.04 wrote the authoritative JSON evidence but did not create
+            # a P08S marker. Accept that measured legacy state once and
+            # normalize it for all subsequent resumes.
+            Write-Caution 'P08S.ok is absent, but setup_binaries_sync.json exists; accepting r12.04 legacy evidence and creating the marker.'
+            New-Item -ItemType File -Path $p08sMarker -Force | Out-Null
+        }
+    }
+
+    $Script:WimIndexInventory = @(
+        @(Invoke-DismCmdlet -CommandName 'Get-WindowsImage' -Parameters @{ ImagePath=$installWim }) | ForEach-Object {
+            [pscustomobject]@{ Wim='install.wim'; ImageIndex=$_.ImageIndex; ImageName=$_.ImageName; ImageSize=$_.ImageSize }
+        }
+        @(Invoke-DismCmdlet -CommandName 'Get-WindowsImage' -Parameters @{ ImagePath=$bootWim }) | ForEach-Object {
+            [pscustomobject]@{ Wim='boot.wim'; ImageIndex=$_.ImageIndex; ImageName=$_.ImageName; ImageSize=$_.ImageSize }
+        }
+    )
+    $evPath = Join-Path $Script:LogsDir ('resume-{0}.json' -f $PhaseId.ToLower())
+    Save-CanonicalJsonFile -InputObject ([pscustomobject]@{
+        Timestamp=(Get-Date).ToString('o'); ResumeFrom=$PhaseId; OsVersion=$Script:OsVersion
+        InstallWimSha256=(Get-FileHash -LiteralPath $installWim -Algorithm SHA256).Hash.ToLower()
+        BootWimSha256=(Get-FileHash -LiteralPath $bootWim -Algorithm SHA256).Hash.ToLower()
+        Inventory=$Script:WimIndexInventory
+    }) -Path $evPath -Depth 8
+    Write-Ok ('Resume state validated: {0}' -f $evPath)
+}
+
 # ============================================================
 # Phase dispatcher and Action resolver
 # ============================================================
@@ -15843,6 +16161,12 @@ try {
         $phaseList = @('P01')
     } elseif ($OnlyPhases -and $OnlyPhases.Count -gt 0) {
         $phaseList = $OnlyPhases
+    } elseif ($Script:ResumeFromPhase) {
+        if ($Script:ResumeFromPhase -eq 'P08') {
+            $phaseList = [string[]]@('P01','P02','P08','P08S','P09','P10','P11','P12','P13')
+        } else {
+            $phaseList = [string[]]@('P01','P02','P09','P10','P11','P12','P13')
+        }
     } else {
         $phaseList = Get-PhaseListByAction -ActionName $Action
     }
@@ -15852,7 +16176,14 @@ try {
     Enable-ManagedDefenderExclusion
 
     if ($phaseList.Count -gt 0) {
-        Invoke-PhaseRunner -PhaseIds $phaseList
+        if ($Script:ResumeFromPhase) {
+            Invoke-PhaseRunner -PhaseIds @('P01','P02')
+            Initialize-ResumeBuildState -PhaseId $Script:ResumeFromPhase
+            $remaining = @($phaseList | Where-Object { $_ -notin @('P01','P02') })
+            if ($remaining.Count -gt 0) { Invoke-PhaseRunner -PhaseIds $remaining }
+        } else {
+            Invoke-PhaseRunner -PhaseIds $phaseList
+        }
     }
 
     if ($Action -eq 'GenerateManifest') {
