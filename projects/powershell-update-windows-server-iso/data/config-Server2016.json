@@ -226,6 +226,31 @@
           "Condition": "Required"
         }
       ]
+    },
+    "DotNetPolicyDetails": {
+      "InboxFrameworkVersions": [
+        "3.5",
+        "4.6.2",
+        "4.7",
+        "4.7.1",
+        "4.7.2"
+      ],
+      "InboxFrameworkServicing": "ServicedByWindowsLCU",
+      "DoNotAddAsStandaloneKb": [
+        "KB5087537"
+      ],
+      "StandaloneRuntimePackages": [
+        {
+          "Runtime": "4.8",
+          "KbId": "KB5087065",
+          "Condition": "IfRuntimeDetectedPerInstallIndex"
+        }
+      ],
+      "EvidenceUrls": [
+        "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/05-12-may-cumulative-update",
+        "https://support.microsoft.com/kb/5087537",
+        "https://support.microsoft.com/kb/5087065"
+      ]
     }
   },
   "DiscoveryPolicy": {
@@ -490,66 +515,6 @@
         }
       },
       {
-        "PackageId": "Server2016-KB5087537-x64",
-        "Kind": "DotNet",
-        "KbId": "KB5087537",
-        "ParentKbId": null,
-        "UpdateId": null,
-        "Revision": null,
-        "Title": null,
-        "Products": null,
-        "Classification": null,
-        "Architecture": "x64",
-        "ReleaseDate": "2026-05-12",
-        "ReleaseType": "B",
-        "State": "Discovered",
-        "FileName": null,
-        "DownloadUrl": null,
-        "Digest": null,
-        "Sha256": "",
-        "SizeBytes": null,
-        "ApplyOrder": 60,
-        "InScope": {},
-        "Note": "Leaf KB candidate for in-media .NET 3.5 and 4.6.2 through 4.7.2.",
-        "Roles": [
-          "DotNetLeaf"
-        ],
-        "TargetsByRole": {
-          "DotNetLeaf": [
-            "Install"
-          ]
-        },
-        "RuntimeSelector": {
-          "NetFx3": "PresentOrEnabled",
-          "NetFx4ReleaseRange": "4.6.2-4.7.2"
-        },
-        "Applicability": {
-          "Mode": "IfRuntimeDetectedPerInstallIndex"
-        },
-        "Dependencies": [],
-        "Integrity": {
-          "Sha1": null,
-          "Sha256": null,
-          "SizeBytes": null,
-          "AuthenticodeStatus": "NotTested"
-        },
-        "Evidence": {
-          "Levels": [
-            "E1",
-            "E2"
-          ],
-          "SourceUrls": [
-            "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/05-12-may-cumulative-update",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5087537"
-          ],
-          "VerifiedAt": "2026-07-11T00:00:00+09:00",
-          "VerifiedBy": "research:ChatGPT-2026-07-11",
-          "Notes": [
-            "Leaf KB candidate for in-media .NET 3.5 and 4.6.2 through 4.7.2."
-          ]
-        }
-      },
-      {
         "PackageId": "Server2016-KB5087065-x64",
         "Kind": "DotNet",
         "KbId": "KB5087065",
@@ -747,8 +712,8 @@
       ],
       "ApprovalRequiredForBuild": true
     },
-    "LastVerifiedDate": "2026-07-11T00:00:00+09:00",
-    "LastVerifiedBy": "research:data-model-v4",
+    "LastVerifiedDate": "2026-07-12T18:00:00+09:00",
+    "LastVerifiedBy": "e2e-correction:r12.02",
     "PatchTuesdayOfBaseline": "2026-06-09"
   },
   "Pca2023": {
@@ -829,11 +794,12 @@
     }
   },
   "_meta": {
-    "scriptVersion": "proposed-v4-model",
-    "generatedAt": "2026-07-11T00:00:00Z",
+    "scriptVersion": "update-wsi-2026.07.12-r12.03",
+    "generatedAt": "2026-07-12T09:00:00Z",
     "isTemplate": false,
     "migrationFromSchema": "3.0",
-    "compatibilityNote": "PatchModel and legacy flat package fields are retained for staged migration."
+    "compatibilityNote": "PatchModel and legacy flat package fields are retained for staged migration.",
+    "catalogCrossCheckManifest": "data/catalog-crosscheck-manifest.json"
   },
   "PatchModel": "separate-ssu",
   "Compatibility": {

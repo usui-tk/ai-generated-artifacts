@@ -22,6 +22,60 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.12-r12.03] - 2026-08-01
+
+Tag: `e2e-log-fixes` (continued). Catalog cross-check pass over all
+four generations: not just "the KB exists", but the x64 Catalog row,
+title, Product, Classification, DownloadDialog file set and CDN
+reachability are made verifiable expectations.
+
+> **Note on r12.02.** Revision r12.02 was permanently lost
+> (user-deleted) and is not fabricated here; this revision's diff
+> subsumes it. The commit sequence therefore goes r12.01 → r12.03 by
+> design, and the sparse numbering is the honest record.
+
+### Added
+
+- **`data/catalog-crosscheck-manifest.json`** — a per-OS, per-Kind
+  table of Catalog expectations (required title tokens, required
+  Product tokens, Classification, file extension) for every baseline
+  KB, referenced from each config's `_meta.catalogCrossCheckManifest`.
+  This makes the cross-check machine-consumable: the same expectations
+  drive the P04 pre-fetch verification and the Windows-side
+  `tests/Test-CatalogAllOs.ps1` reachability probe (HEAD or 1-byte
+  Range GET).
+- **`ServicingModel.DotNetPolicyDetails`** (Server 2016): declares the
+  in-box vs standalone .NET stance measured in the cross-check — the
+  in-box .NET is updated by the OS LCU; KB5087537 is NOT applied as a
+  separate MSU; the only standalone candidate is the .NET 4.8
+  KB5087065. The 2016 .NET line gains a
+  `RuntimeSelector.NetFx4Release` guard so the standalone MSU is only
+  applied when the image's runtime matches.
+
+### Changed
+
+- **Per-generation Catalog aliasing**: Server 2022 and 2025 rows are
+  matched under their full server product tokens (their Catalog title
+  and Product spellings differ from the client rows and from each
+  other); SafeOS DU vs Setup DU on 2016/2019/2022 share a title shape
+  and are discriminated by the Product column; the Server 2025 target
+  LCU's DownloadDialog is verified to contain both the checkpoint and
+  the target file.
+- **Server 2019 KB5094123**: the previously pinned CDN URL (measured
+  HTTP 404) is removed from the config; the asset is re-resolved
+  KB-based at run time under the r12.01 exact-KB mechanism.
+- **`Lines[]` role targeting refined** (2016): SafeOS DU / Setup DU
+  lines carry explicit `TargetsByRole` entries.
+- **T40** release pin advanced to `update-wsi-2026.07.12-r12.03`.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. Declaration-derived
+contract totals move with the declaration exactly as the convergence
+matrix records for this revision (T41 140, T42 30, T43 150, T44 64,
+T46 112; T45 NOT-YET). PSA 0E/17W/3I on the committed tree (declared
+series debt).
+
 ## [update-wsi-2026.07.12-r12.01] - 2026-08-01
 
 Tag: `e2e-log-fixes`. Fixes derived from the 2026-07-12 E2E runs on a

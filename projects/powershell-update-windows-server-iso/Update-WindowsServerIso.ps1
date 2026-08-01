@@ -528,7 +528,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.12-r12.01'
+$Script:ScriptVersion = 'update-wsi-2026.07.12-r12.03'
 $Script:ScriptTag     = 'e2e-log-fixes'
 $Script:ScriptHash    = '(unknown)'
 try {
@@ -4722,6 +4722,18 @@ function Invoke-CatalogPost {
 }
 
 function Search-Catalog {
+    <#
+    .SYNOPSIS
+        Search Microsoft Update Catalog and return normalized rows.
+    .DESCRIPTION
+        Catalog has used at least two result-page anchor shapes:
+          * id="<GUID>_link"
+          * onclick="goToDetails(\"<GUID>\")"
+        r12.01 only parsed the first shape.  The 2026-07-12 Server 2016
+        run proved that this can return zero rows even though Catalog
+        visibly contains the requested update.  r12.02+ parses both
+        shapes and merges them by UpdateId.
+    #>
     param(
         [string]$Query,
         [switch]$RefreshCache
@@ -4734,27 +4746,102 @@ function Search-Catalog {
     }
     $html = Get-CatalogText ($script:CatSearchUrl + '?q=' + [uri]::EscapeDataString($Query)) $tag
     $guid = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
-    $rx = [regex]::new("id=['""]($guid)_link['""][^>]*>(.*?)</a>", 'Singleline,IgnoreCase')
-    $rows = @()
-    foreach ($m in $rx.Matches($html)) {
+    $byUid = @{}
+
+    # Shape A: GUID_link anchor.  Accept both quote styles.
+    $linkRx = [regex]::new(
+        ('id\s*=\s*["''](' + $guid + ')_link["''][^>]*>(.*?)</a>'),
+        'Singleline,IgnoreCase'
+    )
+    foreach ($m in $linkRx.Matches($html)) {
         $uid = $m.Groups[1].Value
-        $title = Convert-HtmlToText $m.Groups[2].Value
+        $byUid[$uid] = [pscustomobject]@{
+            uid = $uid
+            title = (Convert-HtmlToText $m.Groups[2].Value)
+            products = ''
+            classification = ''
+            lastUpdated = ''
+            version = ''
+            sizeText = ''
+            sizeBytes = $null
+            parser = 'guid-link'
+        }
+    }
+
+    # Shape B: goToDetails("GUID") onclick. This is the long-lived
+    # Catalog markup and is also used by Get-UpdateIdFromCatalog.
+    $detailsRx = [regex]::new(
+        ('<a[^>]*onclick\s*=\s*(["'']?)goToDetails\(\s*["''](' + $guid + ')["'']\s*\)\s*;?\s*\1[^>]*>(.*?)</a>'),
+        'Singleline,IgnoreCase'
+    )
+    foreach ($m in $detailsRx.Matches($html)) {
+        $uid = $m.Groups[2].Value
+        $title = Convert-HtmlToText $m.Groups[3].Value
+        if (-not $byUid.ContainsKey($uid)) {
+            $byUid[$uid] = [pscustomobject]@{
+                uid = $uid
+                title = $title
+                products = ''
+                classification = ''
+                lastUpdated = ''
+                version = ''
+                sizeText = ''
+                sizeBytes = $null
+                parser = 'goToDetails'
+            }
+        } elseif (-not $byUid[$uid].title -and $title) {
+            $byUid[$uid].title = $title
+        }
+    }
+
+    # Enrich cells when Catalog exposes the legacy GUID_Cn_Rm ids.
+    foreach ($uid in @($byUid.Keys)) {
+        $row = $byUid[$uid]
         $cells = @{}
         for ($col = 0; $col -le 7; $col++) {
-            $crx = [regex]::new(('id="' + [regex]::Escape($uid) + '_C' + $col + '_R\d+"[^>]*>(.*?)</td>'), 'Singleline,IgnoreCase')
+            $crx = [regex]::new(
+                ('id\s*=\s*["'']' + [regex]::Escape($uid) + '_C' + $col + '_R\d+["''][^>]*>(.*?)</td>'),
+                'Singleline,IgnoreCase'
+            )
             $cm = $crx.Match($html)
             if ($cm.Success) { $cells[$col] = Convert-HtmlToText $cm.Groups[1].Value } else { $cells[$col] = '' }
         }
-        $size = $null
-        $smb = [regex]::Match($cells[6], '(\d{4,})')
-        if ($smb.Success) { $size = [long]$smb.Groups[1].Value }
-        $titleOut = if ($title) { $title } else { $cells[1] }
-        $rows += [pscustomobject]@{
-            uid = $uid; title = $titleOut; products = $cells[2]; classification = $cells[3]
-            lastUpdated = $cells[4]; version = $cells[5]; sizeText = $cells[6]; sizeBytes = $size
+        # Different Catalog revisions have shifted the visible title
+        # column. Never replace an anchor title with a blank cell.
+        if (-not $row.title) {
+            foreach ($candidateCol in @(1, 0)) {
+                if ($cells[$candidateCol]) { $row.title = $cells[$candidateCol]; break }
+            }
+        }
+        # Products/classification are normally C2/C3. These are
+        # optional because exact-KB title matching remains authoritative.
+        $row.products = $cells[2]
+        $row.classification = $cells[3]
+        $row.lastUpdated = $cells[4]
+        $row.version = $cells[5]
+        $row.sizeText = $cells[6]
+        $smb = [regex]::Match([string]$cells[6], '(\d{4,})')
+        if ($smb.Success) { $row.sizeBytes = [long]$smb.Groups[1].Value }
+    }
+
+    # Last-resort fallback to the older, separately tested parser.
+    if ($byUid.Count -eq 0) {
+        foreach ($item in @(Get-UpdateIdFromCatalog -KbId $Query)) {
+            $byUid[[string]$item.UpdateId] = [pscustomobject]@{
+                uid = [string]$item.UpdateId
+                title = [string]$item.Title
+                products = ''
+                classification = ''
+                lastUpdated = ''
+                version = ''
+                sizeText = ''
+                sizeBytes = $null
+                parser = 'legacy-goToDetails'
+            }
         }
     }
-    return , $rows
+
+    return @($byUid.Values | Sort-Object title, uid)
 }
 
 function Resolve-CatalogDownload {
@@ -4770,25 +4857,202 @@ function Resolve-CatalogDownload {
     }
     $html = Invoke-CatalogPost $script:CatDownloadUrl $body $tag
     $files = @{}
-    $rx = [regex]::new("files\[(\d+)\]\.(\w+)\s*=\s*'([^']*)'")
-    foreach ($m in $rx.Matches($html)) {
+
+    # Response shape A: files[N].field = 'value'
+    $rxA = [regex]::new("files\[(\d+)\]\.(\w+)\s*=\s*'([^']*)'", 'IgnoreCase')
+    foreach ($m in $rxA.Matches($html)) {
         $i = [int]$m.Groups[1].Value; $field = $m.Groups[2].Value; $val = $m.Groups[3].Value
         if (-not $files.ContainsKey($i)) { $files[$i] = @{} }
         $files[$i][$field] = $val
     }
-    $out = @()
+
+    # Response shape B: downloadInformation[N].files[M].field
+    $rxB = [regex]::new("downloadInformation\[\d+\]\.files\[(\d+)\]\.(\w+)\s*=\s*'([^']*)'", 'IgnoreCase')
+    foreach ($m in $rxB.Matches($html)) {
+        $i = [int]$m.Groups[1].Value; $field = $m.Groups[2].Value; $val = $m.Groups[3].Value
+        if (-not $files.ContainsKey($i)) { $files[$i] = @{} }
+        $files[$i][$field] = $val
+    }
+
+    $out = New-Object System.Collections.Generic.List[object]
     foreach ($i in ($files.Keys | Sort-Object)) {
         $f = $files[$i]
-        $out += [pscustomobject]@{
-            idx = $i
-            fileName = $(if ($f.ContainsKey('fileName')) { $f['fileName'] } else { '' })
-            url      = $(if ($f.ContainsKey('url'))      { $f['url'] }      else { '' })
-            digest   = $(if ($f.ContainsKey('digest'))   { $f['digest'] }   else { '' })
-            sha256   = $(if ($f.ContainsKey('sha256'))   { $f['sha256'] }   else { '' })
-            enTitle  = $(if ($f.ContainsKey('enTitle'))  { $f['enTitle'] }  else { '' })
+        $url = $(if ($f.ContainsKey('url')) { [string]$f['url'] } else { '' })
+        $fileName = $(if ($f.ContainsKey('fileName')) { [string]$f['fileName'] } else { '' })
+        if (-not $fileName -and $url) {
+            try { $fileName = [System.IO.Path]::GetFileName(([uri]$url).AbsolutePath) } catch { $fileName = '' }
+        }
+        if ($url) {
+            $out.Add([pscustomobject]@{
+                idx = $i
+                fileName = $fileName
+                url      = $url
+                digest   = $(if ($f.ContainsKey('digest')) { $f['digest'] } else { '' })
+                sha256   = $(if ($f.ContainsKey('sha256')) { $f['sha256'] } else { '' })
+                enTitle  = $(if ($f.ContainsKey('enTitle')) { $f['enTitle'] } else { '' })
+                parser   = 'DownloadDialog'
+            }) | Out-Null
         }
     }
-    return , $out
+
+    # Last-resort fallback uses the older DownloadDialog parser, which
+    # derives FileName from each URL. Hashes are calculated after download.
+    if ($out.Count -eq 0) {
+        foreach ($legacy in @(Get-DownloadLinkFromCatalog -UpdateId $Uid)) {
+            $out.Add([pscustomobject]@{
+                idx = $out.Count
+                fileName = [string]$legacy.FileName
+                url      = [string]$legacy.Url
+                digest   = ''
+                sha256   = ''
+                enTitle  = ''
+                parser   = 'legacy-downloadInformation'
+            }) | Out-Null
+        }
+    }
+    return @($out.ToArray())
+}
+
+function Get-CatalogIdentityRule {
+    <#
+    .SYNOPSIS
+        Return OS- and role-specific Microsoft Update Catalog identity rules.
+    .DESCRIPTION
+        Product display names and title wording aren't identical for Server
+        2022/2025.  For example, Catalog uses product
+        "Microsoft Server operating system-21H2" while the title contains
+        "Microsoft server operating system version 21H2".  Keeping these as
+        separate aliases avoids ambiguous selection when one result page
+        contains multiple x64 server generations (KB5030216/KB5043080).
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Patch)
+
+    $type = Get-PatchEntryType -Patch $Patch
+    $kb = [string]$Patch.KbId
+    $osTitle = switch ($Script:OsVersion) {
+        'Server2016' { 'Windows Server 2016' }
+        'Server2019' { 'Windows Server 2019' }
+        'Server2022' { 'Microsoft server operating system version 21H2' }
+        'Server2025' { 'Microsoft server operating system version 24H2' }
+        default      { '' }
+    }
+    $osProduct = switch ($Script:OsVersion) {
+        'Server2016' { 'Windows Server 2016' }
+        'Server2019' { 'Windows Server 2019' }
+        'Server2022' { 'Microsoft Server operating system-21H2' }
+        'Server2025' { 'Microsoft Server Operating System-24H2' }
+        default      { '' }
+    }
+    $duTitle = switch ($Script:OsVersion) {
+        'Server2016' { 'Windows 10 Version 1607' }
+        'Server2019' { 'Windows 10 Version 1809' }
+        'Server2022' { 'Microsoft server operating system version 21H2' }
+        'Server2025' { 'Microsoft server operating system version 24H2' }
+        default      { '' }
+    }
+
+    $titleTokens = New-Object System.Collections.Generic.List[string]
+    $productTokens = New-Object System.Collections.Generic.List[string]
+    $productReject = New-Object System.Collections.Generic.List[string]
+    $classification = ''
+
+    switch ($type) {
+        'SafeOSDU' {
+            if ($duTitle) { $titleTokens.Add($duTitle) }
+            $titleTokens.Add('Dynamic Update')
+            $productTokens.Add('Windows Safe OS Dynamic Update')
+            $classification = 'Critical Updates'
+        }
+        'SetupDU' {
+            if ($duTitle) { $titleTokens.Add($duTitle) }
+            $titleTokens.Add('Dynamic Update')
+            $productTokens.Add('Windows 10 and later Dynamic Update')
+            $productReject.Add('Windows Safe OS Dynamic Update')
+            $classification = 'Critical Updates'
+        }
+        'DotNet' {
+            if ($osTitle) { $titleTokens.Add($osTitle) }
+            $titleTokens.Add('.NET Framework')
+            if ($osProduct) { $productTokens.Add($osProduct) }
+            $classification = 'Security Updates'
+        }
+        'LCU' {
+            if ($osTitle) { $titleTokens.Add($osTitle) }
+            $titleTokens.Add('Cumulative Update')
+            if ($osProduct) { $productTokens.Add($osProduct) }
+            $classification = 'Security Updates'
+        }
+        'BridgeLcu' {
+            if ($osTitle) { $titleTokens.Add($osTitle) }
+            $titleTokens.Add('Cumulative Update')
+            if ($osProduct) { $productTokens.Add($osProduct) }
+            $classification = 'Security Updates'
+        }
+        'Checkpoint' {
+            if ($osTitle) { $titleTokens.Add($osTitle) }
+            $titleTokens.Add('Cumulative Update')
+            if ($osProduct) { $productTokens.Add($osProduct) }
+            $classification = 'Security Updates'
+        }
+        'SSU' {
+            if ($osTitle) { $titleTokens.Add($osTitle) }
+            if ($kb -eq 'KB4132216') {
+                # Microsoft classifies this legacy prerequisite as a generic
+                # Critical Update, not as a title containing "Servicing Stack".
+                $titleTokens.Add('Update')
+                $classification = 'Critical Updates'
+            } else {
+                $titleTokens.Add('Servicing Stack Update')
+                $classification = 'Security Updates'
+            }
+            if ($osProduct) { $productTokens.Add($osProduct) }
+        }
+        default {
+            if ($osTitle) { $titleTokens.Add($osTitle) }
+            if ($osProduct) { $productTokens.Add($osProduct) }
+        }
+    }
+
+    return [pscustomobject]@{
+        Type = $type
+        KbId = $kb
+        TitleTokens = @($titleTokens.ToArray())
+        ProductTokens = @($productTokens.ToArray())
+        ProductRejectTokens = @($productReject.ToArray())
+        Classification = $classification
+    }
+}
+
+function Test-CatalogRowAgainstRule {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Row,
+        [Parameter(Mandatory)]$Rule
+    )
+    $title = [string]$Row.title
+    $products = [string]$Row.products
+    $classification = [string]$Row.classification
+
+    if ($title -notmatch '(?i)x64' -or $title -match '(?i)arm64|x86-based') { return $false }
+    if ($Rule.KbId -and $title -notmatch [regex]::Escape([string]$Rule.KbId)) { return $false }
+    foreach ($token in @($Rule.TitleTokens)) {
+        if ($token -and $title -notmatch [regex]::Escape([string]$token)) { return $false }
+    }
+    # Product/classification are authoritative when Catalog exposes the
+    # columns.  If the site omits them, the title rules remain the fallback.
+    if (-not [string]::IsNullOrWhiteSpace($products)) {
+        foreach ($token in @($Rule.ProductTokens)) {
+            if ($token -and $products -notmatch [regex]::Escape([string]$token)) { return $false }
+        }
+        foreach ($token in @($Rule.ProductRejectTokens)) {
+            if ($token -and $products -match [regex]::Escape([string]$token)) { return $false }
+        }
+    }
+    if ($Rule.Classification -and -not [string]::IsNullOrWhiteSpace($classification)) {
+        if ($classification.Trim() -ne [string]$Rule.Classification) { return $false }
+    }
+    return $true
 }
 
 function Get-CatalogRowsForResolvedPatch {
@@ -4798,10 +5062,11 @@ function Get-CatalogRowsForResolvedPatch {
         Microsoft Update Catalog row. This does not select a newer KB; it only
         rehydrates the distributable asset (UpdateId/file URL/hash).
     .DESCRIPTION
-        Direct download URLs are not durable configuration identifiers. The
-        2026-07-12 Server 2019 E2E proved that a syntactically valid, committed
-        URL can return HTTP 404 while the KB remains present in Catalog. This
-        function therefore treats KbId + OS + package role as the stable key.
+        Direct download URLs are not durable configuration identifiers.  Row
+        selection validates KB, architecture, OS-specific title wording,
+        Product and Classification.  Server 2022/2025 title aliases are kept
+        separate from Product aliases so multi-generation KBs remain
+        unambiguous even when one Catalog column is absent.
     #>
     [CmdletBinding()]
     [OutputType([object[]])]
@@ -4812,65 +5077,22 @@ function Get-CatalogRowsForResolvedPatch {
 
     $kb = [string]$Patch.KbId
     if ([string]::IsNullOrWhiteSpace($kb)) { return @() }
-    $type = Get-PatchEntryType -Patch $Patch
     $rows = @(Search-Catalog -Query $kb -RefreshCache:$RefreshCache)
     if ($rows.Count -eq 0) { return @() }
 
-    $osProduct = switch ($Script:OsVersion) {
-        'Server2016' { 'Windows Server 2016' }
-        'Server2019' { 'Windows Server 2019' }
-        'Server2022' { 'Microsoft Server operating system-21H2' }
-        'Server2025' { 'Microsoft Server Operating System-24H2' }
-        default      { '' }
-    }
-    $duToken = switch ($Script:OsVersion) {
-        'Server2016' { 'Version 1607' }
-        'Server2019' { 'Version 1809' }
-        'Server2022' { '21H2' }
-        'Server2025' { '24H2' }
-        default      { '' }
-    }
-
-    $x64 = @($rows | Where-Object {
-        $t = [string]$_.title
-        $t -match '(?i)x64' -and $t -notmatch '(?i)arm64|x86-based'
-    })
-    if ($x64.Count -eq 0) { return @() }
-
-    $filtered = switch ($type) {
-        'SafeOSDU' {
-            @($x64 | Where-Object {
-                ([string]$_.products -match '(?i)Safe OS Dynamic Update') -and
-                (-not $duToken -or [string]$_.title -match [regex]::Escape($duToken))
-            })
-        }
-        'SetupDU' {
-            @($x64 | Where-Object {
-                ([string]$_.products -match '(?i)Dynamic Update') -and
-                ([string]$_.products -notmatch '(?i)Safe OS Dynamic Update') -and
-                ([string]$_.title -notmatch '(?i)Cumulative Update') -and
-                (-not $duToken -or [string]$_.title -match [regex]::Escape($duToken))
-            })
-        }
-        default {
-            @($x64 | Where-Object {
-                (-not $osProduct) -or
-                ([string]$_.products -match [regex]::Escape($osProduct)) -or
-                ([string]$_.title -match [regex]::Escape($osProduct))
-            })
-        }
-    }
+    $rule = Get-CatalogIdentityRule -Patch $Patch
+    $filtered = @($rows | Where-Object { Test-CatalogRowAgainstRule -Row $_ -Rule $rule })
     if ($filtered.Count -eq 0) { return @() }
 
-    # Prefer the baseline's exact title when present, then a Server product row.
+    # Prefer the baseline's exact title when present.  Otherwise the complete
+    # identity rule above must leave exactly one candidate; returning all
+    # matches lets the caller produce a useful ambiguity failure.
     $baselineTitle = ''
     if ($Patch.PSObject.Properties['Title']) { $baselineTitle = [string]$Patch.Title }
     if ($baselineTitle) {
         $exact = @($filtered | Where-Object { ([string]$_.title).Trim() -eq $baselineTitle.Trim() })
         if ($exact.Count -eq 1) { return $exact }
     }
-    $serverRows = @($filtered | Where-Object { [string]$_.products -match '(?i)Server' })
-    if ($serverRows.Count -eq 1) { return $serverRows }
     return @($filtered | Sort-Object lastUpdated, version -Descending)
 }
 
@@ -4906,6 +5128,9 @@ function Resolve-ResolvedPatchAssetFromCatalog {
         throw ('Microsoft Update Catalog result is ambiguous for {0}/{1} on {2}: {3}' -f $type, $kb, $Script:OsVersion, $titles)
     }
     $row = $rows[0]
+    $parserName = ''
+    if ($row.PSObject.Properties['parser']) { $parserName = [string]$row.parser }
+    Write-Step ('Catalog row resolved: {0}/{1} UpdateId={2} parser={3} title={4}' -f $type, $kb, $row.uid, $parserName, $row.title)
     $files = @(Resolve-CatalogDownload -Uid ([string]$row.uid) -RefreshCache:$RefreshCache)
     if ($files.Count -eq 0) {
         throw ('Catalog DownloadDialog returned no files for {0}/{1} (UpdateId {2}).' -f $type, $kb, $row.uid)
@@ -4928,6 +5153,9 @@ function Resolve-ResolvedPatchAssetFromCatalog {
         throw ('Catalog file selection is ambiguous for {0}/{1}: {2}' -f $type, $kb, $names)
     }
     $file = $preferred[0]
+    $fileParser = ''
+    if ($file.PSObject.Properties['parser']) { $fileParser = [string]$file.parser }
+    Write-Step ('Catalog file resolved: {0} parser={1} urlHost={2}' -f $file.fileName, $fileParser, ([uri]$file.url).Host)
 
     $Patch.Source = [string]$file.url
     $Patch.LocalPath = Get-PatchLocalPath -Kind $type -FileName ([string]$file.fileName)
@@ -11354,6 +11582,46 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
     }
 }
 
+function Test-RemotePatchUrlStatus {
+    <#
+    .SYNOPSIS
+        Probe a configured patch URL without downloading the complete asset.
+    .DESCRIPTION
+        Returns Reachable, Missing, or Unknown. Some Windows Update CDN nodes
+        reject HEAD, so a one-byte ranged GET is used as the fallback before
+        declaring the result inconclusive.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Uri)
+    try {
+        $r = Invoke-WebRequest -Uri $Uri -Method Head -UserAgent $script:CatUA `
+            -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
+        return [pscustomobject]@{ State = 'Reachable'; StatusCode = [int]$r.StatusCode; Message = 'HEAD' }
+    } catch {
+        $status = $null
+        try {
+            if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+                $status = [int]$_.Exception.Response.StatusCode
+            }
+        } catch { $status = $null }
+        try {
+            $r = Invoke-WebRequest -Uri $Uri -Method Get -UserAgent $script:CatUA `
+                -Headers @{ Range = 'bytes=0-0' } -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
+            return [pscustomobject]@{ State = 'Reachable'; StatusCode = [int]$r.StatusCode; Message = 'Range GET fallback' }
+        } catch {
+            try {
+                if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
+                    $status = [int]$_.Exception.Response.StatusCode
+                }
+            } catch { }
+            if ($status -in @(404, 410)) {
+                return [pscustomobject]@{ State = 'Missing'; StatusCode = $status; Message = $_.Exception.Message }
+            }
+            return [pscustomobject]@{ State = 'Unknown'; StatusCode = $status; Message = $_.Exception.Message }
+        }
+    }
+}
+
 # ============================================================
 # Phase P04: Fetch assets (Fetch group)
 # ============================================================
@@ -11376,22 +11644,60 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
             return
         }
 
-        # Step 0: rehydrate patch assets from exact Catalog KBs.
-        # ResearchCandidate baselines are intentionally allowed to carry KB-only
-        # entries. Even resolved direct URLs are canonicalized here because the
-        # Server 2019 E2E measured HTTP 404 for a committed LCU URL.
-        Write-SubSection 'Step 0: Resolve exact-KB patch assets'
-        Set-DebugStep -Step 'patch-asset-resolve'
+        # Step 0: perform a complete exact-KB Catalog preflight before
+        # downloading the multi-GB source ISO.  Research candidates are
+        # mutable, so every package is rehydrated from its stable identity
+        # (OS + Kind + KB + x64). Frozen/Approved baselines retain their
+        # recorded identity and are only refreshed when an asset is missing.
+        Write-SubSection 'Step 0: Cross-check all exact-KB Catalog assets'
+        Set-DebugStep -Step 'patch-asset-crosscheck'
+        $baselineStatus = ''
+        if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline -and $Script:OsProfile.PatchBaseline.PSObject.Properties['Status']) {
+            $baselineStatus = [string]$Script:OsProfile.PatchBaseline.Status
+        }
+        $candidateMutable = $baselineStatus -in @('', 'ResearchCandidate', 'Discovered', 'Resolved')
         foreach ($p in @($Script:ResolvedPatches)) {
             if (-not $p -or [string]::IsNullOrWhiteSpace([string]$p.KbId)) { continue }
-            $forceResolve = ($p.PSObject.Properties['IsMetadataOnly'] -and $p.IsMetadataOnly)
-            if ($Script:OsProfile.PatchBaseline -and [string]$Script:OsProfile.PatchBaseline.Status -eq 'ResearchCandidate') {
-                $forceResolve = $true
-            }
-            if ($forceResolve) {
+            $type = Get-PatchEntryType -Patch $p
+            $isMetadataOnly = ($p.PSObject.Properties['IsMetadataOnly'] -and $p.IsMetadataOnly)
+            if ($candidateMutable -or $isMetadataOnly) {
+                Write-Step ('Catalog cross-check: {0}/{1} on {2}' -f $type, $p.KbId, $Script:OsVersion)
                 $null = Resolve-ResolvedPatchAssetFromCatalog -Patch $p -Force -RefreshCache
+                $probe = Test-RemotePatchUrlStatus -Uri ([string]$p.Source)
+                if ($probe.State -eq 'Missing') {
+                    throw ('Catalog returned a missing content URL (HTTP {0}) for {1}/{2}: {3}' -f $probe.StatusCode, $type, $p.KbId, $p.Source)
+                }
+                if ($probe.State -eq 'Unknown') {
+                    Write-Caution ('Catalog content probe was inconclusive for {0}/{1}; download retry and integrity validation remain authoritative. {2}' -f $type, $p.KbId, $probe.Message)
+                } else {
+                    Write-Ok ('Catalog content URL reachable: {0}/{1} ({2} HTTP {3})' -f $type, $p.KbId, $probe.Message, $probe.StatusCode)
+                }
+                continue
+            }
+            if ([string]$p.Source -match '^https?://') {
+                $probe = Test-RemotePatchUrlStatus -Uri ([string]$p.Source)
+                if ($probe.State -eq 'Missing') {
+                    throw ('Frozen baseline URL returned HTTP {0} for {1}/{2}. Create and validate a new candidate; the frozen identity will not be mutated.' -f $probe.StatusCode, $type, $p.KbId)
+                } elseif ($probe.State -eq 'Unknown') {
+                    Write-Step ('Frozen URL preflight inconclusive for {0}/{1}; download integrity remains authoritative. {2}' -f $type, $p.KbId, $probe.Message)
+                }
             }
         }
+        $catalogEvidence = @($Script:ResolvedPatches | ForEach-Object {
+            [pscustomobject]@{
+                OsKey = $Script:OsVersion
+                Kind = (Get-PatchEntryType -Patch $_)
+                KbId = [string]$_.KbId
+                UpdateId = $(if ($_.PSObject.Properties['UpdateId']) { [string]$_.UpdateId } else { '' })
+                Title = $(if ($_.PSObject.Properties['Title']) { [string]$_.Title } else { '' })
+                Source = [string]$_.Source
+                FileName = [System.IO.Path]::GetFileName([string]$_.LocalPath)
+                MetadataOnly = [bool]($_.PSObject.Properties['IsMetadataOnly'] -and $_.IsMetadataOnly)
+            }
+        })
+        $catalogEvidencePath = Join-Path $Script:LogsDir 'P04_catalog_crosscheck.json'
+        $catalogEvidence | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $catalogEvidencePath -Encoding UTF8
+        Write-Ok ('Catalog cross-check evidence written: {0}' -f $catalogEvidencePath)
         $Script:PatchPlan = Build-PatchPlan -Patches $Script:ResolvedPatches
 
         # Step 1: ISO download

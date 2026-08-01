@@ -1,0 +1,456 @@
+{
+  "Schema": "catalog-crosscheck/1.0",
+  "BaselineId": "2026-06-B",
+  "GeneratedAt": "2026-07-12T00:00:00+09:00",
+  "CatalogSearchBase": "https://www.catalog.update.microsoft.com/Search.aspx?q=",
+  "Cases": [
+    {
+      "OsKey": "Server2016",
+      "KbId": "KB4132216",
+      "Kind": "SourcePrerequisite",
+      "Required": true,
+      "TitleMustContain": [
+        "Windows Server 2016",
+        "Update"
+      ],
+      "ProductMustContain": [
+        "Windows Server 2016"
+      ],
+      "ProductMustNotContain": [],
+      "Classification": "Critical Updates",
+      "Architecture": "x64",
+      "FileExtension": ".msu",
+      "ExpectedCompanionKbs": [],
+      "Note": "Legacy source-media prerequisite; title is generic Update, not SSU."
+    },
+    {
+      "OsKey": "Server2016",
+      "KbId": "KB5094141",
+      "Kind": "SSU",
+      "Required": true,
+      "TitleMustContain": [
+        "Windows Server 2016",
+        "Servicing Stack Update"
+      ],
+      "ProductMustContain": [
+        "Windows Server 2016"
+      ],
+      "ProductMustNotContain": [],
+      "Classification": "Security Updates",
+      "Architecture": "x64",
+      "FileExtension": ".msu",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    },
+    {
+      "OsKey": "Server2016",
+      "KbId": "KB5094122",
+      "Kind": "LCU",
+      "Required": true,
+      "TitleMustContain": [
+        "Windows Server 2016",
+        "Cumulative Update"
+      ],
+      "ProductMustContain": [
+        "Windows Server 2016"
+      ],
+      "ProductMustNotContain": [],
+      "Classification": "Security Updates",
+      "Architecture": "x64",
+      "FileExtension": ".msu",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    },
+    {
+      "OsKey": "Server2016",
+      "KbId": "KB5087065",
+      "Kind": "DotNet",
+      "Required": false,
+      "TitleMustContain": [
+        ".NET Framework 4.8",
+        "Windows Server 2016"
+      ],
+      "ProductMustContain": [
+        "Windows Server 2016"
+      ],
+      "ProductMustNotContain": [],
+      "Classification": "Security Updates",
+      "Architecture": "x64",
+      "FileExtension": ".msu",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    },
+    {
+      "OsKey": "Server2016",
+      "KbId": "KB5094152",
+      "Kind": "SafeOSDU",
+      "Required": true,
+      "TitleMustContain": [
+        "Windows 10 Version 1607",
+        "Dynamic Update"
+      ],
+      "ProductMustContain": [
+        "Windows Safe OS Dynamic Update"
+      ],
+      "ProductMustNotContain": [],
+      "Classification": "Critical Updates",
+      "Architecture": "x64",
+      "FileExtension": ".cab",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    },
+    {
+      "OsKey": "Server2016",
+      "KbId": "KB5068794",
+      "Kind": "SetupDU",
+      "Required": true,
+      "TitleMustContain": [
+        "Windows 10 Version 1607",
+        "Dynamic Update"
+      ],
+      "ProductMustContain": [
+        "Windows 10 and later Dynamic Update"
+      ],
+      "ProductMustNotContain": [
+        "Windows Safe OS Dynamic Update"
+      ],
+      "Classification": "Critical Updates",
+      "Architecture": "x64",
+      "FileExtension": ".cab",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    },
+    {
+      "OsKey": "Server2019",
+      "KbId": "KB5005112",
+      "Kind": "SourcePrerequisite",
+      "Required": true,
+      "TitleMustContain": [
+        "Windows Server 2019",
+        "Servicing Stack Update"
+      ],
+      "ProductMustContain": [
+        "Windows Server 2019"
+      ],
+      "ProductMustNotContain": [],
+      "Classification": "Security Updates",
+      "Architecture": "x64",
+      "FileExtension": ".msu",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    },
+    {
+      "OsKey": "Server2019",
+      "KbId": "KB5094123",
+      "Kind": "LCU",
+      "Required": true,
+      "TitleMustContain": [
+        "Windows Server 2019",
+        "Cumulative Update"
+      ],
+      "ProductMustContain": [
+        "Windows Server 2019"
+      ],
+      "ProductMustNotContain": [],
+      "Classification": "Security Updates",
+      "Architecture": "x64",
+      "FileExtension": ".msu",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    },
+    {
+      "OsKey": "Server2019",
+      "KbId": "KB5087061",
+      "Kind": "DotNet",
+      "Required": true,
+      "TitleMustContain": [
+        ".NET Framework 3.5 and 4.7.2",
+        "Windows Server 2019"
+      ],
+      "ProductMustContain": [
+        "Windows Server 2019"
+      ],
+      "ProductMustNotContain": [],
+      "Classification": "Security Updates",
+      "Architecture": "x64",
+      "FileExtension": ".msu",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    },
+    {
+      "OsKey": "Server2019",
+      "KbId": "KB5087066",
+      "Kind": "DotNet",
+      "Required": false,
+      "TitleMustContain": [
+        ".NET Framework 3.5 and 4.8",
+        "Windows Server 2019"
+      ],
+      "ProductMustContain": [
+        "Windows Server 2019"
+      ],
+      "ProductMustNotContain": [],
+      "Classification": "Security Updates",
+      "Architecture": "x64",
+      "FileExtension": ".msu",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    },
+    {
+      "OsKey": "Server2019",
+      "KbId": "KB5094153",
+      "Kind": "SafeOSDU",
+      "Required": true,
+      "TitleMustContain": [
+        "Windows 10 Version 1809",
+        "Dynamic Update"
+      ],
+      "ProductMustContain": [
+        "Windows Safe OS Dynamic Update"
+      ],
+      "ProductMustNotContain": [],
+      "Classification": "Critical Updates",
+      "Architecture": "x64",
+      "FileExtension": ".cab",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    },
+    {
+      "OsKey": "Server2019",
+      "KbId": "KB5068795",
+      "Kind": "SetupDU",
+      "Required": true,
+      "TitleMustContain": [
+        "Windows 10 Version 1809",
+        "Dynamic Update"
+      ],
+      "ProductMustContain": [
+        "Windows 10 and later Dynamic Update"
+      ],
+      "ProductMustNotContain": [
+        "Windows Safe OS Dynamic Update"
+      ],
+      "Classification": "Critical Updates",
+      "Architecture": "x64",
+      "FileExtension": ".cab",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    },
+    {
+      "OsKey": "Server2022",
+      "KbId": "KB5030216",
+      "Kind": "SourcePrerequisite",
+      "Required": true,
+      "TitleMustContain": [
+        "Microsoft server operating system version 21H2",
+        "Cumulative Update"
+      ],
+      "ProductMustContain": [
+        "Microsoft Server operating system-21H2"
+      ],
+      "ProductMustNotContain": [],
+      "Classification": "Security Updates",
+      "Architecture": "x64",
+      "FileExtension": ".msu",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    },
+    {
+      "OsKey": "Server2022",
+      "KbId": "KB5094128",
+      "Kind": "LCU",
+      "Required": true,
+      "TitleMustContain": [
+        "Microsoft server operating system version 21H2",
+        "Cumulative Update"
+      ],
+      "ProductMustContain": [
+        "Microsoft Server operating system-21H2"
+      ],
+      "ProductMustNotContain": [],
+      "Classification": "Security Updates",
+      "Architecture": "x64",
+      "FileExtension": ".msu",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    },
+    {
+      "OsKey": "Server2022",
+      "KbId": "KB5087068",
+      "Kind": "DotNet",
+      "Required": true,
+      "TitleMustContain": [
+        ".NET Framework 3.5 and 4.8",
+        "Microsoft server operating system version 21H2"
+      ],
+      "ProductMustContain": [
+        "Microsoft Server operating system-21H2"
+      ],
+      "ProductMustNotContain": [],
+      "Classification": "Security Updates",
+      "Architecture": "x64",
+      "FileExtension": ".msu",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    },
+    {
+      "OsKey": "Server2022",
+      "KbId": "KB5087059",
+      "Kind": "DotNet",
+      "Required": false,
+      "TitleMustContain": [
+        ".NET Framework 3.5 and 4.8.1",
+        "Microsoft server operating system version 21H2"
+      ],
+      "ProductMustContain": [
+        "Microsoft Server operating system-21H2"
+      ],
+      "ProductMustNotContain": [],
+      "Classification": "Security Updates",
+      "Architecture": "x64",
+      "FileExtension": ".msu",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    },
+    {
+      "OsKey": "Server2022",
+      "KbId": "KB5094157",
+      "Kind": "SafeOSDU",
+      "Required": true,
+      "TitleMustContain": [
+        "Microsoft server operating system version 21H2",
+        "Dynamic Update"
+      ],
+      "ProductMustContain": [
+        "Windows Safe OS Dynamic Update"
+      ],
+      "ProductMustNotContain": [],
+      "Classification": "Critical Updates",
+      "Architecture": "x64",
+      "FileExtension": ".cab",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    },
+    {
+      "OsKey": "Server2022",
+      "KbId": "KB5079518",
+      "Kind": "SetupDU",
+      "Required": true,
+      "TitleMustContain": [
+        "Microsoft server operating system version 21H2",
+        "Dynamic Update"
+      ],
+      "ProductMustContain": [
+        "Windows 10 and later Dynamic Update"
+      ],
+      "ProductMustNotContain": [
+        "Windows Safe OS Dynamic Update"
+      ],
+      "Classification": "Critical Updates",
+      "Architecture": "x64",
+      "FileExtension": ".cab",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    },
+    {
+      "OsKey": "Server2025",
+      "KbId": "KB5043080",
+      "Kind": "Checkpoint",
+      "Required": true,
+      "TitleMustContain": [
+        "Microsoft server operating system version 24H2",
+        "Cumulative Update"
+      ],
+      "ProductMustContain": [
+        "Microsoft Server Operating System-24H2"
+      ],
+      "ProductMustNotContain": [],
+      "Classification": "Security Updates",
+      "Architecture": "x64",
+      "FileExtension": ".msu",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    },
+    {
+      "OsKey": "Server2025",
+      "KbId": "KB5094125",
+      "Kind": "LCU",
+      "Required": true,
+      "TitleMustContain": [
+        "Microsoft server operating system version 24H2",
+        "Cumulative Update"
+      ],
+      "ProductMustContain": [
+        "Microsoft Server Operating System-24H2"
+      ],
+      "ProductMustNotContain": [],
+      "Classification": "Security Updates",
+      "Architecture": "x64",
+      "FileExtension": ".msu",
+      "ExpectedCompanionKbs": [
+        "KB5043080",
+        "KB5094125"
+      ],
+      "Note": "Target LCU DownloadDialog should expose required checkpoint(s) and target LCU."
+    },
+    {
+      "OsKey": "Server2025",
+      "KbId": "KB5087051",
+      "Kind": "DotNet",
+      "Required": true,
+      "TitleMustContain": [
+        ".NET Framework 3.5 and 4.8.1",
+        "Microsoft server operating system version 24H2"
+      ],
+      "ProductMustContain": [
+        "Microsoft Server Operating System-24H2"
+      ],
+      "ProductMustNotContain": [],
+      "Classification": "Security Updates",
+      "Architecture": "x64",
+      "FileExtension": ".msu",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    },
+    {
+      "OsKey": "Server2025",
+      "KbId": "KB5094150",
+      "Kind": "SafeOSDU",
+      "Required": true,
+      "TitleMustContain": [
+        "Microsoft server operating system version 24H2",
+        "Safe OS Dynamic Update"
+      ],
+      "ProductMustContain": [
+        "Windows Safe OS Dynamic Update"
+      ],
+      "ProductMustNotContain": [],
+      "Classification": "Critical Updates",
+      "Architecture": "x64",
+      "FileExtension": ".cab",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    },
+    {
+      "OsKey": "Server2025",
+      "KbId": "KB5095966",
+      "Kind": "SetupDU",
+      "Required": true,
+      "TitleMustContain": [
+        "Microsoft server operating system version 24H2",
+        "Setup Dynamic Update"
+      ],
+      "ProductMustContain": [
+        "Windows 10 and later Dynamic Update"
+      ],
+      "ProductMustNotContain": [
+        "Windows Safe OS Dynamic Update"
+      ],
+      "Classification": "Critical Updates",
+      "Architecture": "x64",
+      "FileExtension": ".cab",
+      "ExpectedCompanionKbs": [],
+      "Note": null
+    }
+  ]
+}

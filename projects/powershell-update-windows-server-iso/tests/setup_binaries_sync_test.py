@@ -182,8 +182,8 @@ def main() -> int:
         "SetupBinarySync_" in code and "-Actual 'MISMATCH' -Status 'Fail'" in code,
         "P11 pin failed", passed, failed)
     passed, failed = check(
-        "version bumped to r12.01 e2e-log-fixes",
-        "update-wsi-2026.07.12-r12.01" in code and "'e2e-log-fixes'" in code,
+        "version bumped to r12.03 e2e-log-fixes",
+        "update-wsi-2026.07.12-r12.03" in code and "'e2e-log-fixes'" in code,
         "bump pin failed", passed, failed)
 
     print(f"\n  Summary: {passed} passed, {failed} failed, {passed + failed} total")

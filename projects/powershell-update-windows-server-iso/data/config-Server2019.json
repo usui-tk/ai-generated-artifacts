@@ -364,7 +364,7 @@
         "Kind": "LCU",
         "KbId": "KB5094123",
         "ParentKbId": null,
-        "UpdateId": "786110c1-2c99-4c75-aab1-841c9347d87b",
+        "UpdateId": null,
         "Revision": null,
         "Title": "2026-06 Cumulative Update for Windows Server 2019 for x64-based Systems (KB5094123)",
         "Products": [
@@ -374,17 +374,17 @@
         "Architecture": "x64",
         "ReleaseDate": "2026-06-09",
         "ReleaseType": "B",
-        "State": "Resolved",
-        "FileName": "windows10.0-kb5094123-x64_150ef9e518c1e534d2d255a558c4d2bdefe54073.msu",
-        "DownloadUrl": "https://catalog.s.download.windowsupdate.com/d/msdownload/update/software/secu/2026/06/windows10.0-kb5094123-x64_150ef9e518c1e534d2d255a558c4d2bdefe54073.msu",
-        "Digest": "FQ755RjB5TTS0lWlWMTSve/lQHM=",
+        "State": "Discovered",
+        "FileName": null,
+        "DownloadUrl": null,
+        "Digest": null,
         "Sha256": "",
         "SizeBytes": null,
         "ApplyOrder": 20,
         "InScope": {
           "build": "17763.8880"
         },
-        "Note": "The same combined LCU asset is reused as servicing-stack carrier and final LCU.",
+        "Note": "Stable identity is Server2019 + LCU + KB5094123 + x64; resolve current Catalog file before download.",
         "Roles": [
           "ServicingStackCarrier",
           "FinalLCU"
@@ -406,11 +406,7 @@
         },
         "Dependencies": [],
         "Integrity": {
-          "Sha1": {
-            "Encoding": "base64",
-            "Value": "FQ755RjB5TTS0lWlWMTSve/lQHM=",
-            "Hex": "150ef9e518c1e534d2d255a558c4d2bdefe54073"
-          },
+          "Sha1": null,
           "Sha256": null,
           "SizeBytes": null,
           "AuthenticodeStatus": "NotTested"
@@ -427,7 +423,8 @@
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
           "Notes": [
-            "The same combined LCU asset is reused as servicing-stack carrier and final LCU."
+            "The same combined LCU asset is reused as servicing-stack carrier and final LCU.",
+            "The r12.00 committed CDN URL returned HTTP 404 on 2026-07-12. Resolve the exact KB from Catalog during candidate preflight."
           ]
         }
       },
@@ -777,11 +774,12 @@
     }
   },
   "_meta": {
-    "scriptVersion": "proposed-v4-model",
-    "generatedAt": "2026-07-11T00:00:00Z",
+    "scriptVersion": "update-wsi-2026.07.12-r12.03",
+    "generatedAt": "2026-07-12T00:00:00Z",
     "isTemplate": false,
     "migrationFromSchema": "3.0",
-    "compatibilityNote": "PatchModel and legacy flat package fields are retained for staged migration."
+    "compatibilityNote": "PatchModel and legacy flat package fields are retained for staged migration.",
+    "catalogCrossCheckManifest": "data/catalog-crosscheck-manifest.json"
   },
   "PatchModel": "embedded-ssu",
   "Compatibility": {
