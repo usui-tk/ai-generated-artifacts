@@ -22,6 +22,41 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.18-r12.16] - 2026-08-02
+
+Tag: `catalog-language-and-workspace-containment` (the tag advances).
+Catalog requests pin their language at the source, and run outputs are
+contained inside the WorkRoot.
+
+### Fixed
+
+- **Catalog request language pinned**: every Catalog request now
+  carries declared headers via `Get-CatalogRequestHeaders`
+  (`Accept-Language: en-US,en;q=0.9`, no-cache), with a declared
+  display-language policy (`en-us|ja-jp`). This removes the
+  serving-edge locale non-determinism at its source; the r12.07/08
+  semantic-alias matcher becomes the second line while the strict
+  matcher stays the fail-closed boundary, and the alias tables shrink
+  accordingly (non-ASCII characters in the script drop from 303 to
+  103, measured).
+- **Workspace containment**: `Resolve-PathWithinRoot` constrains
+  operator-supplied paths to resolve inside the WorkRoot (traversal
+  rejected), and `Start-RunTranscript` starts the run transcript
+  through the contained path. Script-only change: `data/*` and
+  `schema/*` are byte-identical to r12.15 (measured).
+
+### Changed
+
+- **T40**: release pin advanced to `update-wsi-2026.07.18-r12.16`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/38W/7I**
+on the committed tree — two findings join the debt (1× PSA6003 plural
+noun, 1× PSAP0005 revision-anchored comment); committed verbatim per
+the no-fix-forward rule, draining post-series.
+
 ## [update-wsi-2026.07.18-r12.15] - 2026-08-02
 
 Tag: `bound-release-evidence-and-july-auxiliaries` (the tag advances).

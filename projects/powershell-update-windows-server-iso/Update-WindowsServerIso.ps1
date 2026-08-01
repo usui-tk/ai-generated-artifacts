@@ -147,11 +147,13 @@
     Configs are refreshed via -Action RefreshAllBaselines.
 
 .PARAMETER WorkRoot
-    Workspace root. Default: C:\Temp\Workspace_UpdateWsi.
-    Strong recommendation: -WorkRoot D:\UpdateWsi on data-drive hosts.
+    Workspace root. Default: <script-root>\Workspace_UpdateWsi.
+    Strong recommendation: use a dedicated NTFS data-drive directory for each OS.
 
 .PARAMETER OutputDir
-    Output ISO directory. Default: <WorkRoot>\output.
+    Compatibility override for the output ISO subdirectory. The resolved path
+    MUST remain inside WorkRoot. Relative values resolve against WorkRoot.
+    Default: <WorkRoot>\output.
 
 .PARAMETER OnlyInstallWimIndexes
     Comma-separated index list (e.g. '2,4') to limit install.wim updates.
@@ -166,10 +168,12 @@
     Tamper Protection off; any other or unknown state -> skipped. Default off.
 
 .PARAMETER CleanWorkRoot
-    Delete WorkRoot before starting (preserves the output directory).
+    Delete the existing WorkRoot before starting. Because all artifacts are
+    workspace-contained, previous logs and output ISOs are also removed.
 
 .PARAMETER LogFile
-    Start-Transcript path for the entire run.
+    Start-Transcript path for the entire run. The resolved path MUST remain
+    inside WorkRoot. Relative values resolve against WorkRoot.
 
 .PARAMETER DryRun
     Run Setup/Fetch/Plan only; Build/Verify are SKIPPED.
@@ -520,10 +524,10 @@ Set-TlsSecurityProtocol
 # ============================================================
 # Path resolution (relative to the script, not the caller's CWD)
 # ============================================================
-# Resolve $Script:ScriptRoot once, then make every relative path
-# (-WorkRoot, -OutputDir, -LogFile) absolute against it. This guarantees
-# that running the script from any folder always lands in the same
-# workspace.
+# Resolve $Script:ScriptRoot once. WorkRoot itself is resolved against the
+# script root. Artifact paths (-OutputDir and -LogFile) are then resolved
+# against WorkRoot and rejected when they escape it. This preserves the
+# single-workspace artifact contract regardless of the caller's CWD.
 $Script:ScriptRoot = $PSScriptRoot
 if ([string]::IsNullOrEmpty($Script:ScriptRoot)) {
     if ($MyInvocation.MyCommand.Path) {
@@ -545,6 +549,40 @@ function Resolve-RelativeToScript {
 }
 # <<< CANONICAL unit_id=pwsh.helper.resolve-relativetoscript <<<
 
+function Resolve-PathWithinRoot {
+    <#
+    .SYNOPSIS
+        Resolve an artifact path and enforce that it remains inside a root.
+    .DESCRIPTION
+        Relative values resolve against Root, not the script directory or the
+        caller's current directory. Path traversal and absolute paths outside
+        Root are rejected before any directory is created.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)] [string]$Path,
+        [Parameter(Mandatory)] [string]$Root,
+        [Parameter(Mandatory)] [string]$ParameterName
+    )
+
+    $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd([char[]]@('\','/'))
+    $candidateInput = $Path
+    if (-not [System.IO.Path]::IsPathRooted($candidateInput)) {
+        $candidateInput = Join-Path $rootFull $candidateInput
+    }
+    $candidateFull = [System.IO.Path]::GetFullPath($candidateInput).TrimEnd([char[]]@('\','/'))
+    $rootPrefix = $rootFull + [System.IO.Path]::DirectorySeparatorChar
+    $inside = (
+        [string]::Equals($candidateFull, $rootFull, [System.StringComparison]::OrdinalIgnoreCase) -or
+        $candidateFull.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)
+    )
+    if (-not $inside) {
+        throw ('{0} must resolve inside WorkRoot. WorkRoot={1}; resolved={2}' -f $ParameterName, $rootFull, $candidateFull)
+    }
+    return $candidateFull
+}
+
 # -----------------
 # Workspace tree resolution
 # -----------------
@@ -553,12 +591,18 @@ function Resolve-RelativeToScript {
 # -WorkRoot override re-bases the whole tree (used heavily on CI where
 # only D: has enough free space).
 
-$Script:WorkRoot   = Resolve-RelativeToScript $WorkRoot
+$Script:WorkRoot = Resolve-RelativeToScript $WorkRoot
 
 if ([string]::IsNullOrEmpty($OutputDir)) {
     $Script:OutputDir = Join-Path $Script:WorkRoot 'output'
 } else {
-    $Script:OutputDir = Resolve-RelativeToScript $OutputDir
+    $Script:OutputDir = Resolve-PathWithinRoot -Path $OutputDir -Root $Script:WorkRoot -ParameterName '-OutputDir'
+}
+
+if ([string]::IsNullOrEmpty($LogFile)) {
+    $Script:LogFile = ''
+} else {
+    $Script:LogFile = Resolve-PathWithinRoot -Path $LogFile -Root $Script:WorkRoot -ParameterName '-LogFile'
 }
 
 $Script:SourceDir         = Join-Path $Script:WorkRoot 'source'
@@ -615,8 +659,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.18-r12.15'
-$Script:ScriptTag     = 'bound-release-evidence-and-july-auxiliaries'
+$Script:ScriptVersion = 'update-wsi-2026.07.18-r12.16'
+$Script:ScriptTag     = 'catalog-language-and-workspace-containment'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -4560,7 +4604,7 @@ function Get-UpdateIdFromCatalog {
         [int]$MaxRetries = 3
     )
     $searchUri = 'https://www.catalog.update.microsoft.com/Search.aspx?q=' + [uri]::EscapeDataString($KbId)
-    $headers = @{ 'User-Agent' = 'Mozilla/5.0 (compatible; UpdateWsi/r02)' }
+    $headers = Get-CatalogRequestHeaders
     $resp = $null
     $attempt = 0
     while ($attempt -lt $MaxRetries -and -not $resp) {
@@ -4613,7 +4657,7 @@ function Get-DownloadLinkFromCatalog {
     $uri = 'https://www.catalog.update.microsoft.com/DownloadDialog.aspx'
     $postJson = @{ size = 0; UpdateID = $UpdateId; UpdateIDInfo = $UpdateId } | ConvertTo-Json -Compress
     $body = @{ UpdateIDs = '[' + $postJson + ']' }
-    $headers = @{ 'User-Agent' = 'Mozilla/5.0 (compatible; UpdateWsi/r02)' }
+    $headers = Get-CatalogRequestHeaders
     $resp = $null
     $attempt = 0
     while ($attempt -lt $MaxRetries -and -not $resp) {
@@ -4751,6 +4795,13 @@ function Select-CanonicalPatchFile {
 # Constants
 # ============================================================================
 $script:CatUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+# Catalog transport is intentionally pinned to English. Japanese and English
+# display metadata are accepted by the identity matcher; every other locale is
+# rejected. Pinning the request avoids edge-selected German/Chinese responses,
+# while the strict matcher remains the fail-closed enforcement boundary.
+$script:CatRequestLocale = 'en-US'
+$script:CatAcceptLanguage = 'en-US,en;q=0.9'
+$script:CatDisplayLanguagePolicy = 'en-us|ja-jp'
 $script:CatSearchUrl   = 'https://www.catalog.update.microsoft.com/Search.aspx'
 $script:CatDownloadUrl = 'https://www.catalog.update.microsoft.com/DownloadDialog.aspx'
 $script:CatScopedUrl   = 'https://www.catalog.update.microsoft.com/ScopedViewInline.aspx'
@@ -4777,6 +4828,17 @@ $script:CatKnownDuDigest = @{ '2022' = 'w+5dA+5b36FoRspRo6sXEHEmC5Q=' }
 
 # ============================================================================
 
+function Get-CatalogRequestHeaders {
+    [OutputType([hashtable])]
+    param()
+    return @{
+        'User-Agent'      = $script:CatUA
+        'Accept-Language' = $script:CatAcceptLanguage
+        'Cache-Control'   = 'no-cache'
+        'Pragma'          = 'no-cache'
+    }
+}
+
 # ============================================================================
 function Convert-HtmlToText {
     param([string]$s)
@@ -4789,9 +4851,10 @@ function Convert-HtmlToText {
 
 function Get-CatalogText {
     param([string]$Url, [string]$Tag)
+    if (-not (Test-Path -LiteralPath $script:CatCache)) { New-Item -ItemType Directory -Path $script:CatCache -Force | Out-Null }
     $p = Join-Path $script:CatCache $Tag
     if (Test-Path $p) { return (Get-Content -LiteralPath $p -Raw) }
-    $r = Invoke-WebRequest -Uri $Url -UserAgent $script:CatUA -UseBasicParsing -TimeoutSec 60
+    $r = Invoke-WebRequest -Uri $Url -Headers (Get-CatalogRequestHeaders) -UseBasicParsing -TimeoutSec 60
     $r.Content | Set-Content -LiteralPath $p -Encoding UTF8 -NoNewline
     Start-Sleep -Milliseconds 600
     return $r.Content
@@ -4799,11 +4862,12 @@ function Get-CatalogText {
 
 function Invoke-CatalogPost {
     param([string]$Url, [string]$Body, [string]$Tag)
+    if (-not (Test-Path -LiteralPath $script:CatCache)) { New-Item -ItemType Directory -Path $script:CatCache -Force | Out-Null }
     $p = Join-Path $script:CatCache $Tag
     if (Test-Path $p) { return (Get-Content -LiteralPath $p -Raw) }
     $r = Invoke-WebRequest -Uri $Url -Method Post -Body $Body `
         -ContentType 'application/x-www-form-urlencoded' `
-        -UserAgent $script:CatUA -UseBasicParsing -TimeoutSec 60
+        -Headers (Get-CatalogRequestHeaders) -UseBasicParsing -TimeoutSec 60
     $r.Content | Set-Content -LiteralPath $p -Encoding UTF8 -NoNewline
     Start-Sleep -Milliseconds 600
     return $r.Content
@@ -4828,7 +4892,7 @@ function Search-Catalog {
     )
     $slug = [regex]::Replace($Query, '[^A-Za-z0-9]+', '_')
     if ($slug.Length -gt 60) { $slug = $slug.Substring(0, 60) }
-    $tag = "search.$slug.html"
+    $tag = "search.$slug.en-us.r1216.html"
     if ($RefreshCache) {
         Remove-Item -LiteralPath (Join-Path $script:CatCache $tag) -Force -ErrorAction SilentlyContinue
     }
@@ -4939,7 +5003,7 @@ function Resolve-CatalogDownload {
     )
     $body = 'updateIDs=[{"size":0,"languages":"","uidInfo":"' + $Uid + '","updateID":"' + $Uid + '"}]' +
             '&updateIDsBlockedForImport=&wsusApiPresent=&contentImport=&sku=&serverName=&ssl=&portNumber=&version='
-    $tag = "dl.$($Uid.Substring(0,8)).html"
+    $tag = "dl.$($Uid.Substring(0,8)).en-us.r1216.html"
     if ($RefreshCache) {
         Remove-Item -LiteralPath (Join-Path $script:CatCache $tag) -Force -ErrorAction SilentlyContinue
     }
@@ -5115,61 +5179,34 @@ function Get-CatalogIdentityRule {
 function Get-CatalogSemanticAliases {
     <#
     .SYNOPSIS
-        Returns localized Microsoft Update Catalog display aliases for a
-        canonical English title or classification token.
+        Returns only the approved English and Japanese Catalog display aliases.
     .DESCRIPTION
-        The Catalog search page can localize Title and Classification based on
-        the serving edge, cookies, or request locale. Product names, KB IDs,
-        Update IDs and file names are substantially more stable. These aliases
-        prevent a valid row from being rejected solely because the display
-        text is German, French, Japanese, or another supported locale.
+        Catalog Title and Classification are localized display metadata. The
+        project policy permits only en-us and ja-jp metadata. Unknown labels and
+        every other locale fail closed; package identity is never accepted by a
+        classification-ignoring structural fallback.
     #>
     [OutputType([string[]])]
     param([AllowEmptyString()][string]$Token)
 
     switch ($Token.Trim()) {
         'Cumulative Update' {
-            return [string[]]@(
-                'Cumulative Update','Kumulatives Update','Mise à jour cumulative',
-                'Aggiornamento cumulativo','Actualización acumulativa','Atualização cumulativa',
-                '累積更新プログラム','累積更新','누적 업데이트','累积更新',
-                'Накопительное обновление','Aktualizacja zbiorcza','Toplu Güncelleştirme',
-                'Cumulatieve update'
-            )
+            return [string[]]@('Cumulative Update','累積更新プログラム','累積更新')
         }
         'Servicing Stack Update' {
-            return [string[]]@(
-                'Servicing Stack Update','Wartungsstapelupdate','Aktualisierung des Wartungsstapels',
-                'Mise à jour de la pile de maintenance','Aggiornamento dello stack di manutenzione',
-                'Actualización de la pila de mantenimiento','Atualização da pilha de manutenção',
-                'サービス スタック更新プログラム','서비스 스택 업데이트','服务堆栈更新',
-                'Обновление стека обслуживания'
-            )
+            return [string[]]@('Servicing Stack Update','サービス スタック更新プログラム','サービススタック更新プログラム')
         }
         'Dynamic Update' {
-            return [string[]]@(
-                'Dynamic Update','Dynamisches Update','Mise à jour dynamique',
-                'Aggiornamento dinamico','Actualización dinámica','Atualização dinâmica',
-                '動的更新プログラム','동적 업데이트','动态更新','Динамическое обновление'
-            )
+            return [string[]]@('Dynamic Update','動的更新プログラム')
         }
         'Security Updates' {
-            return [string[]]@(
-                'Security Updates','Sicherheitsupdates','Mises à jour de sécurité',
-                'Aggiornamenti della sicurezza','Actualizaciones de seguridad','Atualizações de segurança',
-                'セキュリティ更新プログラム','セキュリティ問題の修正プログラム',
-                '보안 업데이트','安全更新','安全性更新',
-                'Обновления для системы безопасности','Aktualizacje zabezpieczeń',
-                'Güvenlik Güncelleştirmeleri','Beveiligingsupdates'
-            )
+            return [string[]]@('Security Updates','セキュリティ更新プログラム','セキュリティ問題の修正プログラム')
         }
         'Critical Updates' {
-            return [string[]]@(
-                'Critical Updates','Kritische Updates','Mises à jour critiques',
-                'Aggiornamenti critici','Actualizaciones críticas','Atualizações críticas',
-                '重要な更新プログラム','중요 업데이트','关键更新','重大更新',
-                'Критические обновления','Aktualizacje krytyczne','Kritieke updates'
-            )
+            return [string[]]@('Critical Updates','重要な更新プログラム')
+        }
+        'Update' {
+            return [string[]]@('Update','更新プログラム')
         }
         default { return [string[]]@($Token) }
     }
@@ -5211,8 +5248,7 @@ function Test-CatalogRowAgainstRule {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Row,
-        [Parameter(Mandatory)]$Rule,
-        [switch]$IgnoreClassification
+        [Parameter(Mandatory)]$Rule
     )
     $title = [string]$Row.title
     $products = [string]$Row.products
@@ -5223,8 +5259,6 @@ function Test-CatalogRowAgainstRule {
     foreach ($token in @($Rule.TitleTokens)) {
         if ($token -and -not (Test-CatalogSemanticContains -Text $title -CanonicalToken ([string]$token))) { return $false }
     }
-    # Product/classification are authoritative when Catalog exposes the
-    # columns.  If the site omits them, the title rules remain the fallback.
     if (-not [string]::IsNullOrWhiteSpace($products)) {
         foreach ($token in @($Rule.ProductTokens)) {
             if ($token -and $products -notmatch [regex]::Escape([string]$token)) { return $false }
@@ -5233,7 +5267,8 @@ function Test-CatalogRowAgainstRule {
             if ($token -and $products -match [regex]::Escape([string]$token)) { return $false }
         }
     }
-    if (-not $IgnoreClassification -and $Rule.Classification -and -not [string]::IsNullOrWhiteSpace($classification)) {
+    if ($Rule.Classification) {
+        if ([string]::IsNullOrWhiteSpace($classification)) { return $false }
         if (-not (Test-CatalogSemanticEquals -Text $classification -CanonicalToken ([string]$Rule.Classification))) { return $false }
     }
     return $true
@@ -5267,22 +5302,17 @@ function Get-CatalogRowsForResolvedPatch {
     $rule = Get-CatalogIdentityRule -Patch $Patch
     $filtered = @($rows | Where-Object { Test-CatalogRowAgainstRule -Row $_ -Rule $rule })
 
-    # Catalog display labels are localized independently of the Product and
-    # package identity columns. If a previously unseen localized
-    # Classification label causes the strict pass to return zero rows, accept
-    # a single structurally unambiguous row. Exact KB, architecture, title
-    # semantics, Product and Product-reject rules remain mandatory.
+    # Fail closed. Exact KB/file identity is not sufficient when Catalog's
+    # human-readable metadata is outside the approved en-us/ja-jp policy.
+    # The r12.08 unique-structural fallback is intentionally removed because it
+    # accepted a Chinese Server 2016 row during the 2026-07-18 E2E run.
     if ($filtered.Count -eq 0) {
-        $structural = @($rows | Where-Object {
-            Test-CatalogRowAgainstRule -Row $_ -Rule $rule -IgnoreClassification
-        })
-        if ($structural.Count -eq 1) {
-            $actualClass = [string]$structural[0].classification
-            Write-Caution ('Catalog Classification label was not recognized for {0}/{1}; accepting the unique structural match. Classification={2}' -f $rule.Type, $rule.KbId, $actualClass)
-            $filtered = $structural
-        }
+        $observed = @($rows | ForEach-Object {
+            '[title={0}; classification={1}; products={2}; updateId={3}]' -f $_.title, $_.classification, $_.products, $_.uid
+        }) -join ' | '
+        throw ('Microsoft Update Catalog returned no {0}/{1} row satisfying display-language policy {2}. Observed: {3}' -f
+            $rule.Type, $rule.KbId, $script:CatDisplayLanguagePolicy, $observed)
     }
-    if ($filtered.Count -eq 0) { return @() }
 
     # Prefer the baseline's exact title when present.  Otherwise the complete
     # identity rule above must leave exactly one candidate; returning all
@@ -5361,7 +5391,8 @@ function Resolve-ResolvedPatchAssetFromCatalog {
     $row = $rows[0]
     $parserName = ''
     if ($row.PSObject.Properties['parser']) { $parserName = [string]$row.parser }
-    Write-Step ('Catalog row resolved: {0}/{1} UpdateId={2} parser={3} title={4}' -f $type, $kb, $row.uid, $parserName, $row.title)
+    Write-Step ('Catalog row resolved: {0}/{1} UpdateId={2} parser={3} classification={4} products={5} title={6}' -f
+        $type, $kb, $row.uid, $parserName, $row.classification, $row.products, $row.title)
     $files = @(Resolve-CatalogDownload -Uid ([string]$row.uid) -RefreshCache:$RefreshCache)
     if ($files.Count -eq 0) {
         throw ('Catalog DownloadDialog returned no files for {0}/{1} (UpdateId {2}).' -f $type, $kb, $row.uid)
@@ -5438,7 +5469,22 @@ function Resolve-ResolvedPatchAssetFromCatalog {
     } else {
         $Patch.Title = [string]$row.title
     }
-    Write-Ok ('Catalog asset resolved: {0}/{1} -> {2} (UpdateId {3})' -f $type, $kb, $file.fileName, $row.uid)
+    if (-not $Patch.PSObject.Properties['CatalogClassification']) {
+        $Patch | Add-Member -NotePropertyName CatalogClassification -NotePropertyValue ([string]$row.classification)
+    } else {
+        $Patch.CatalogClassification = [string]$row.classification
+    }
+    if (-not $Patch.PSObject.Properties['CatalogProducts']) {
+        $Patch | Add-Member -NotePropertyName CatalogProducts -NotePropertyValue ([string]$row.products)
+    } else {
+        $Patch.CatalogProducts = [string]$row.products
+    }
+    if (-not $Patch.PSObject.Properties['CatalogDisplayLanguagePolicy']) {
+        $Patch | Add-Member -NotePropertyName CatalogDisplayLanguagePolicy -NotePropertyValue $script:CatDisplayLanguagePolicy
+    } else {
+        $Patch.CatalogDisplayLanguagePolicy = $script:CatDisplayLanguagePolicy
+    }
+    Write-Ok ('Catalog asset resolved: {0}/{1} -> {2} (UpdateId {3}; metadata policy {4})' -f $type, $kb, $file.fileName, $row.uid, $script:CatDisplayLanguagePolicy)
     return $true
 }
 
@@ -12887,6 +12933,8 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
             -PatchRefreshMode ([string]$Script:EffectivePatchRefreshMode)
         Write-Step ('Effective patch refresh mode: {0}; monthly auxiliaries={1}; exact assets={2}' -f
             $refreshDecision.Mode, $refreshDecision.ResolveMonthlyAuxiliariesAtFetch, $refreshDecision.ExactCatalogAssetPolicy)
+        Write-Step ('Catalog metadata policy: requestLocale={0}; allowedDisplayLanguages={1}; classificationFallback=disabled' -f
+            $script:CatRequestLocale, $script:CatDisplayLanguagePolicy)
         if ($refreshDecision.ResolveMonthlyAuxiliariesAtFetch) {
             Update-MonthlyAuxiliaryResolvedPatchesAtFetch
         } else {
@@ -12929,6 +12977,10 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
                 KbId = [string]$_.KbId
                 UpdateId = $(if ($_.PSObject.Properties['UpdateId']) { [string]$_.UpdateId } else { '' })
                 Title = $(if ($_.PSObject.Properties['Title']) { [string]$_.Title } else { '' })
+                CatalogClassification = $(if ($_.PSObject.Properties['CatalogClassification']) { [string]$_.CatalogClassification } else { '' })
+                CatalogProducts = $(if ($_.PSObject.Properties['CatalogProducts']) { [string]$_.CatalogProducts } else { '' })
+                CatalogDisplayLanguagePolicy = $script:CatDisplayLanguagePolicy
+                CatalogRequestLocale = $script:CatRequestLocale
                 Source = [string]$_.Source
                 FileName = [System.IO.Path]::GetFileName([string]$_.LocalPath)
                 MetadataOnly = [bool]($_.PSObject.Properties['IsMetadataOnly'] -and $_.IsMetadataOnly)
@@ -17090,14 +17142,15 @@ function Show-EntryBanner {
 # Main entrypoint
 # ============================================================
 
-# Optional -LogFile transcript.
-# $Script:TranscriptStarted is set to $true on a successful
-# Start-Transcript call so the script-end finally block can decide
-# whether to call Stop-Transcript. Without this flag we cannot tell
-# whether transcript started successfully vs. failed silently.
+# Optional -LogFile transcript. Transcript creation is deliberately delayed
+# until after -CleanWorkRoot has completed and the workspace directories have
+# been recreated. This prevents a workspace-contained transcript from being
+# deleted immediately after Start-Transcript.
 $Script:TranscriptStarted = $false
-if ($Script:LogFile) {
-    $Script:LogFile = Resolve-RelativeToScript $Script:LogFile
+function Start-RunTranscript {
+    [CmdletBinding()]
+    param()
+    if (-not $Script:LogFile -or $Script:TranscriptStarted) { return }
     $logParent = [System.IO.Path]::GetDirectoryName($Script:LogFile)
     if (-not (Test-Path -LiteralPath $logParent)) {
         New-Item -ItemType Directory -Path $logParent -Force | Out-Null
@@ -17106,12 +17159,6 @@ if ($Script:LogFile) {
         # psa-disable-next-line PSA3005 -- Start-Transcript has no -LiteralPath parameter; -Path is the only option in PS 5.1/7
         Start-Transcript -Path $Script:LogFile -Append -Force | Out-Null
         $Script:TranscriptStarted = $true
-        # Register-EngineEvent PowerShell.Exiting fires only when the
-        # PowerShell host process exits (e.g. .\script.ps1 invoked from
-        # cmd.exe or a non-interactive shell). When the script is run
-        # interactively the host stays alive, so we ALSO call
-        # Stop-Transcript explicitly in the script-end finally block;
-        # see the finally guard near the script tail.
         Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
             try { Stop-Transcript | Out-Null } catch { $null = $_ }
         } | Out-Null
@@ -17193,10 +17240,9 @@ if ($Action -eq 'TestHarness') {
     exit 0
 }
 
-Show-EntryBanner
-
 # Quick branch for actions that do not need workspace init
 if ($Action -eq 'ListPhases') {
+    Show-EntryBanner
     Show-PhaseList
     exit 0
 }
@@ -17213,11 +17259,20 @@ if ($Pca2023OnlyMode) {
     if (-not (Test-Path -LiteralPath $IsoPath)) {
         throw ('-IsoPath does not exist: {0}' -f $IsoPath)
     }
+    if ($Script:CleanWorkRoot -and (Test-Path -LiteralPath $Script:WorkRoot)) {
+        if (Test-DangerousPath -Path $Script:WorkRoot) {
+            throw ('Refusing to clean dangerous path: {0}' -f $Script:WorkRoot)
+        }
+        Remove-Item -LiteralPath $Script:WorkRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Initialize-RuntimeDirectories -Directory @($Script:WorkRoot, $Script:LogsDir)
+    Start-RunTranscript
+    Show-EntryBanner
     Write-Step ('Pca2023OnlyMode: inspecting {0}' -f $IsoPath)
 
     # Mount ISO and copy to a scratch dir (we need write access to
     # mount the contained WIMs).
-    $scratch = Join-Path ([System.IO.Path]::GetTempPath()) ('updwsi_pca2023only_{0}' -f ([System.Diagnostics.Process]::GetCurrentProcess().Id))
+    $scratch = Join-Path $Script:WorkRoot ('pca2023-only\run-{0}' -f ([System.Diagnostics.Process]::GetCurrentProcess().Id))
     if (-not (Test-Path -LiteralPath $scratch)) {
         New-Item -ItemType Directory -Path $scratch -Force | Out-Null
     }
@@ -17255,6 +17310,10 @@ if ($Pca2023OnlyMode) {
         if ($img) {
             try { Dismount-DiskImage -ImagePath $IsoPath -ErrorAction SilentlyContinue | Out-Null } catch { $null = $_ }
         }
+    }
+    if ($Script:TranscriptStarted) {
+        try { Stop-Transcript | Out-Null } catch { $null = $_ }
+        $Script:TranscriptStarted = $false
     }
     exit 0
 }
@@ -17297,7 +17356,9 @@ if ($Script:CleanWorkRoot -and (Test-Path -LiteralPath $Script:WorkRoot)) {
     Remove-Item -LiteralPath $Script:WorkRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Initialize-RuntimeDirectories -Directory @($Script:WorkRoot, $Script:OutputDir, $Script:SourceDir, $Script:IsoSourceDir, $Script:ExtractedDir, $Script:PatchesDir, $Script:ManifestsDir, (Join-Path $Script:WorkRoot 'work'), $Script:TempDir, $Script:ScratchDir, $Script:LogsDir, $Script:DiagDir, $Script:MarkersDir, $Script:StateDir)
+Initialize-RuntimeDirectories -Directory @($Script:WorkRoot, $Script:OutputDir, $Script:SourceDir, $Script:IsoSourceDir, $Script:ExtractedDir, $Script:PatchesDir, $Script:ManifestsDir, (Join-Path $Script:WorkRoot 'work'), $Script:TempDir, $Script:ScratchDir, $Script:LogsDir, $Script:DiagDir, $Script:MarkersDir, $Script:StateDir, $script:CatCache)
+Start-RunTranscript
+Show-EntryBanner
 
 # Activate debug trace JSONL file output
 try {
