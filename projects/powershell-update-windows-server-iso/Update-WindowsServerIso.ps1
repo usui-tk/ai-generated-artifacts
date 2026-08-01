@@ -570,8 +570,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.15-r12.11'
-$Script:ScriptTag     = 'resume-parameter-default-fix'
+$Script:ScriptVersion = 'update-wsi-2026.07.15-r12.12'
+$Script:ScriptTag     = 'july-asset-integrity-fix'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -5251,6 +5251,35 @@ function Get-CatalogRowsForResolvedPatch {
     return @($filtered | Sort-Object lastUpdated, version -Descending)
 }
 
+function Get-CatalogIdentityRefreshDecision {
+    <#
+    .SYNOPSIS
+        Decide whether Catalog transport/file identity may be rehydrated for
+        an already-selected KB.
+    .DESCRIPTION
+        -UseBaselineOnly pins the selected KB set and disables monthly
+        replacement. It does not turn a ResearchCandidate into an immutable
+        release. ResearchCandidate/Discovered/Resolved baselines may refresh
+        missing or stale Catalog file identity in memory. Frozen/Approved
+        baselines remain immutable and fail on any digest change.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [AllowEmptyString()][string]$BaselineStatus = '',
+        [bool]$UseBaselineOnly
+    )
+    $status = $BaselineStatus.Trim()
+    $mutable = $status -in @('', 'ResearchCandidate', 'Discovered', 'Resolved')
+    return [pscustomobject][ordered]@{
+        BaselineStatus       = $status
+        UseBaselineOnly      = [bool]$UseBaselineOnly
+        KbIdentityPinned     = [bool]$UseBaselineOnly
+        AllowIdentityRefresh = [bool]$mutable
+        Mode                 = $(if ($mutable) { 'MutableCandidateAssetRehydration' } else { 'ImmutableReleaseIdentity' })
+    }
+}
+
 function Resolve-ResolvedPatchAssetFromCatalog {
     <#
     .SYNOPSIS
@@ -5259,8 +5288,9 @@ function Resolve-ResolvedPatchAssetFromCatalog {
     .NOTES
         Safe under -UseBaselineOnly: the KB is never changed. In strict
         baseline mode a configured asset is resolved only when its URL/file
-        identity is missing; existing expected hashes are not silently
-        refreshed.
+        identity is missing. Mutable ResearchCandidate asset identity may be
+        rehydrated with an explicit warning; Frozen/Approved identity is never
+        rewritten.
     #>
     [CmdletBinding()]
     [OutputType([bool])]
@@ -5324,7 +5354,10 @@ function Resolve-ResolvedPatchAssetFromCatalog {
     if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline -and $Script:OsProfile.PatchBaseline.PSObject.Properties['Status']) {
         $baselineStatus = [string]$Script:OsProfile.PatchBaseline.Status
     }
-    $allowIdentityRefresh = ($baselineStatus -in @('', 'ResearchCandidate', 'Discovered', 'Resolved')) -and -not [bool]$Script:UseBaselineOnly
+    $identityDecision = Get-CatalogIdentityRefreshDecision `
+        -BaselineStatus $baselineStatus `
+        -UseBaselineOnly ([bool]$Script:UseBaselineOnly)
+    $allowIdentityRefresh = [bool]$identityDecision.AllowIdentityRefresh
     $hashes = @{}
     if ($Patch.PSObject.Properties['ExpectedHashes'] -and $Patch.ExpectedHashes) {
         foreach ($key in $Patch.ExpectedHashes.Keys) { $hashes[$key] = $Patch.ExpectedHashes[$key] }
@@ -5332,18 +5365,18 @@ function Resolve-ResolvedPatchAssetFromCatalog {
     if ($file.digest) {
         if ($hashes.ContainsKey('sha-1') -and [string]$hashes['sha-1'] -ne [string]$file.digest) {
             if (-not $allowIdentityRefresh) {
-                throw ('Catalog SHA-1 changed for frozen baseline {0}/{1}; baseline={2}, catalog={3}. Create a new candidate instead of mutating the baseline.' -f $type, $kb, $hashes['sha-1'], $file.digest)
+                throw ('Catalog SHA-1 changed for immutable baseline {0}/{1}; status={2}; baseline={3}, catalog={4}. Create a ResearchCandidate and validate it before replacing the approved identity.' -f $type, $kb, $baselineStatus, $hashes['sha-1'], $file.digest)
             }
-            Write-Caution ('Catalog SHA-1 refreshed for candidate {0}/{1}: {2} -> {3}' -f $type, $kb, $hashes['sha-1'], $file.digest)
+            Write-Caution ('Catalog SHA-1 rehydrated for mutable candidate {0}/{1}: {2} -> {3} (mode={4}; KB identity remains pinned).' -f $type, $kb, $hashes['sha-1'], $file.digest, $identityDecision.Mode)
         }
         $hashes['sha-1'] = [string]$file.digest # Catalog compatibility
     }
     if ($file.sha256) {
         if ($hashes.ContainsKey('sha-256') -and [string]$hashes['sha-256'] -ne [string]$file.sha256) {
             if (-not $allowIdentityRefresh) {
-                throw ('Catalog SHA-256 changed for frozen baseline {0}/{1}; baseline={2}, catalog={3}. Create a new candidate instead of mutating the baseline.' -f $type, $kb, $hashes['sha-256'], $file.sha256)
+                throw ('Catalog SHA-256 changed for immutable baseline {0}/{1}; status={2}; baseline={3}, catalog={4}. Create a ResearchCandidate and validate it before replacing the approved identity.' -f $type, $kb, $baselineStatus, $hashes['sha-256'], $file.sha256)
             }
-            Write-Caution ('Catalog SHA-256 refreshed for candidate {0}/{1}: {2} -> {3}' -f $type, $kb, $hashes['sha-256'], $file.sha256)
+            Write-Caution ('Catalog SHA-256 rehydrated for mutable candidate {0}/{1}: {2} -> {3} (mode={4}; KB identity remains pinned).' -f $type, $kb, $hashes['sha-256'], $file.sha256, $identityDecision.Mode)
         }
         $hashes['sha-256'] = [string]$file.sha256
     }

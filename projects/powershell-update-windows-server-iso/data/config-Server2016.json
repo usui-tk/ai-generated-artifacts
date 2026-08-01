@@ -403,9 +403,9 @@
         "ReleaseDate": "2026-07-14",
         "ReleaseType": "B",
         "State": "Discovered",
-        "FileName": null,
+        "FileName": "windows10.0-kb5099542-x64_f2b80b09ab604e1a220c253f9950fd162a8b1dcb.msu",
         "DownloadUrl": null,
-        "Digest": null,
+        "Digest": "8rgLCatgThoiDCU/mVD9FiqLHcs=",
         "Sha256": "",
         "SizeBytes": null,
         "ApplyOrder": 10,
@@ -429,8 +429,8 @@
         "Integrity": {
           "Sha1": {
             "Encoding": "base64",
-            "Value": "hLaSLG6W8mrZGFnQcq7rbfjlq5k=",
-            "Hex": "84b6922c6e96f26ad91859d072aeeb6df8e5ab99"
+            "Value": "8rgLCatgThoiDCU/mVD9FiqLHcs=",
+            "Hex": "f2b80b09ab604e1a220c253f9950fd162a8b1dcb"
           },
           "Sha256": null,
           "SizeBytes": null,
@@ -467,9 +467,9 @@
         "ReleaseDate": "2026-07-14",
         "ReleaseType": "B",
         "State": "Discovered",
-        "FileName": null,
+        "FileName": "windows10.0-kb5099535-x64_272339725d88cf3a31a3ea9bf4e3e61ace5c2d91.msu",
         "DownloadUrl": null,
-        "Digest": null,
+        "Digest": "JyM5cl2Izzoxo+qb9OPmGs5cLZE=",
         "Sha256": "",
         "SizeBytes": null,
         "ApplyOrder": 20,
@@ -494,8 +494,8 @@
         "Integrity": {
           "Sha1": {
             "Encoding": "base64",
-            "Value": "Nr3Up4Pt5vYXS4++EEbo46YTrUQ=",
-            "Hex": "36bdd4a783ede6f6174b8fbe1046e8e3a613ad44"
+            "Value": "JyM5cl2Izzoxo+qb9OPmGs5cLZE=",
+            "Hex": "272339725d88cf3a31a3ea9bf4e3e61ace5c2d91"
           },
           "Sha256": null,
           "SizeBytes": null,

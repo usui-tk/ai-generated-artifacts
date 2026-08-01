@@ -22,6 +22,41 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.15-r12.12] - 2026-08-02
+
+Tag: `july-asset-integrity-fix` (the tag advances). The 2026-07 lines
+carry their resolved Catalog file identities, and identity refresh gets
+its own declared decision.
+
+### Fixed
+
+- **Catalog file identity rehydration**:
+  `Get-CatalogIdentityRefreshDecision` decides, from the baseline
+  state and `-UseBaselineOnly`, whether an already-selected KB may
+  refresh missing or stale Catalog transport/file identity in memory —
+  `-UseBaselineOnly` pins the selected KB set but does not turn a
+  `ResearchCandidate` into an immutable release;
+  `ResearchCandidate` / `Discovered` / `Resolved` baselines may
+  rehydrate, while `Frozen` / `Approved` stay immutable and fail on
+  any digest change.
+- **All four configs carry resolved 2026-07 asset identities**: the
+  July lines gain their actual Catalog `FileName`s with matching
+  SHA-1 digests (e.g. the Server 2016 SSU and combined packages). The
+  declaration-derived T43 tracks the added `Integrity` surface and
+  grows from 145 to 153 assertions with no edit (measured, matching
+  the convergence-matrix row).
+
+### Changed
+
+- **T40**: release pin advanced to `update-wsi-2026.07.15-r12.12`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/30W/4I**
+on the committed tree — unchanged from r12.11; the declared series
+debt carries as-is per the no-fix-forward rule.
+
 ## [update-wsi-2026.07.15-r12.11] - 2026-08-02
 
 Tag: `resume-parameter-default-fix` (the tag advances). Runs without

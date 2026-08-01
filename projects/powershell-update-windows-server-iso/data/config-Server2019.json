@@ -379,9 +379,9 @@
         "ReleaseDate": "2026-07-14",
         "ReleaseType": "B",
         "State": "Discovered",
-        "FileName": null,
+        "FileName": "windows10.0-kb5099538-x64_8ed669753c1d230738068aaac189c6457937dafb.msu",
         "DownloadUrl": null,
-        "Digest": null,
+        "Digest": "jtZpdTwdIwc4BoqqwYnGRXk32vs=",
         "Sha256": "",
         "SizeBytes": null,
         "ApplyOrder": 20,
@@ -410,7 +410,11 @@
         },
         "Dependencies": [],
         "Integrity": {
-          "Sha1": null,
+          "Sha1": {
+            "Encoding": "base64",
+            "Value": "jtZpdTwdIwc4BoqqwYnGRXk32vs=",
+            "Hex": "8ed669753c1d230738068aaac189c6457937dafb"
+          },
           "Sha256": null,
           "SizeBytes": null,
           "AuthenticodeStatus": "NotTested"
