@@ -317,7 +317,8 @@
         ],
         "Targets": [
           "Install",
-          "Boot"
+          "Boot",
+          "WinRE"
         ],
         "Condition": {
           "Mode": "IfSourceBelowFloor",
@@ -327,7 +328,7 @@
             "Get-WindowsPackage",
             "Get-WindowsImage"
           ],
-          "WinRePolicy": "RequiresE4BeforeEnable"
+          "WinRePolicy": "ApplyWhenSourceBelowFloor_E2EConfirmed_0x800f0823"
         },
         "Asset": {
           "KbId": "KB5030216",
@@ -354,7 +355,8 @@
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
           "Notes": [
-            "Apply only when the source image is below Microsoft's documented servicing floor."
+            "Apply only when the source image is below Microsoft's documented servicing floor.",
+            "2026-07-12 E2E: WinRE SSU 20348.557 rejected KB5094128, which requires SSU 20348.1960 (0x800f0823)."
           ]
         }
       }

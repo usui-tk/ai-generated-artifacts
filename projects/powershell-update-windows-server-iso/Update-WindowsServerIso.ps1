@@ -528,8 +528,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.11-r12.00'
-$Script:ScriptTag     = 'schema-v4-role-planner'
+$Script:ScriptVersion = 'update-wsi-2026.07.12-r12.01'
+$Script:ScriptTag     = 'e2e-log-fixes'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -4722,10 +4722,16 @@ function Invoke-CatalogPost {
 }
 
 function Search-Catalog {
-    param([string]$Query)
+    param(
+        [string]$Query,
+        [switch]$RefreshCache
+    )
     $slug = [regex]::Replace($Query, '[^A-Za-z0-9]+', '_')
     if ($slug.Length -gt 60) { $slug = $slug.Substring(0, 60) }
     $tag = "search.$slug.html"
+    if ($RefreshCache) {
+        Remove-Item -LiteralPath (Join-Path $script:CatCache $tag) -Force -ErrorAction SilentlyContinue
+    }
     $html = Get-CatalogText ($script:CatSearchUrl + '?q=' + [uri]::EscapeDataString($Query)) $tag
     $guid = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
     $rx = [regex]::new("id=['""]($guid)_link['""][^>]*>(.*?)</a>", 'Singleline,IgnoreCase')
@@ -4752,10 +4758,16 @@ function Search-Catalog {
 }
 
 function Resolve-CatalogDownload {
-    param([string]$Uid)
+    param(
+        [string]$Uid,
+        [switch]$RefreshCache
+    )
     $body = 'updateIDs=[{"size":0,"languages":"","uidInfo":"' + $Uid + '","updateID":"' + $Uid + '"}]' +
             '&updateIDsBlockedForImport=&wsusApiPresent=&contentImport=&sku=&serverName=&ssl=&portNumber=&version='
     $tag = "dl.$($Uid.Substring(0,8)).html"
+    if ($RefreshCache) {
+        Remove-Item -LiteralPath (Join-Path $script:CatCache $tag) -Force -ErrorAction SilentlyContinue
+    }
     $html = Invoke-CatalogPost $script:CatDownloadUrl $body $tag
     $files = @{}
     $rx = [regex]::new("files\[(\d+)\]\.(\w+)\s*=\s*'([^']*)'")
@@ -4777,6 +4789,223 @@ function Resolve-CatalogDownload {
         }
     }
     return , $out
+}
+
+function Get-CatalogRowsForResolvedPatch {
+    <#
+    .SYNOPSIS
+        Resolve the exact KB already selected by the baseline to one x64
+        Microsoft Update Catalog row. This does not select a newer KB; it only
+        rehydrates the distributable asset (UpdateId/file URL/hash).
+    .DESCRIPTION
+        Direct download URLs are not durable configuration identifiers. The
+        2026-07-12 Server 2019 E2E proved that a syntactically valid, committed
+        URL can return HTTP 404 while the KB remains present in Catalog. This
+        function therefore treats KbId + OS + package role as the stable key.
+    #>
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param(
+        [Parameter(Mandatory)]$Patch,
+        [switch]$RefreshCache
+    )
+
+    $kb = [string]$Patch.KbId
+    if ([string]::IsNullOrWhiteSpace($kb)) { return @() }
+    $type = Get-PatchEntryType -Patch $Patch
+    $rows = @(Search-Catalog -Query $kb -RefreshCache:$RefreshCache)
+    if ($rows.Count -eq 0) { return @() }
+
+    $osProduct = switch ($Script:OsVersion) {
+        'Server2016' { 'Windows Server 2016' }
+        'Server2019' { 'Windows Server 2019' }
+        'Server2022' { 'Microsoft Server operating system-21H2' }
+        'Server2025' { 'Microsoft Server Operating System-24H2' }
+        default      { '' }
+    }
+    $duToken = switch ($Script:OsVersion) {
+        'Server2016' { 'Version 1607' }
+        'Server2019' { 'Version 1809' }
+        'Server2022' { '21H2' }
+        'Server2025' { '24H2' }
+        default      { '' }
+    }
+
+    $x64 = @($rows | Where-Object {
+        $t = [string]$_.title
+        $t -match '(?i)x64' -and $t -notmatch '(?i)arm64|x86-based'
+    })
+    if ($x64.Count -eq 0) { return @() }
+
+    $filtered = switch ($type) {
+        'SafeOSDU' {
+            @($x64 | Where-Object {
+                ([string]$_.products -match '(?i)Safe OS Dynamic Update') -and
+                (-not $duToken -or [string]$_.title -match [regex]::Escape($duToken))
+            })
+        }
+        'SetupDU' {
+            @($x64 | Where-Object {
+                ([string]$_.products -match '(?i)Dynamic Update') -and
+                ([string]$_.products -notmatch '(?i)Safe OS Dynamic Update') -and
+                ([string]$_.title -notmatch '(?i)Cumulative Update') -and
+                (-not $duToken -or [string]$_.title -match [regex]::Escape($duToken))
+            })
+        }
+        default {
+            @($x64 | Where-Object {
+                (-not $osProduct) -or
+                ([string]$_.products -match [regex]::Escape($osProduct)) -or
+                ([string]$_.title -match [regex]::Escape($osProduct))
+            })
+        }
+    }
+    if ($filtered.Count -eq 0) { return @() }
+
+    # Prefer the baseline's exact title when present, then a Server product row.
+    $baselineTitle = ''
+    if ($Patch.PSObject.Properties['Title']) { $baselineTitle = [string]$Patch.Title }
+    if ($baselineTitle) {
+        $exact = @($filtered | Where-Object { ([string]$_.title).Trim() -eq $baselineTitle.Trim() })
+        if ($exact.Count -eq 1) { return $exact }
+    }
+    $serverRows = @($filtered | Where-Object { [string]$_.products -match '(?i)Server' })
+    if ($serverRows.Count -eq 1) { return $serverRows }
+    return @($filtered | Sort-Object lastUpdated, version -Descending)
+}
+
+function Resolve-ResolvedPatchAssetFromCatalog {
+    <#
+    .SYNOPSIS
+        Mutate one runtime ResolvedPatch with the current Catalog URL/file
+        identity for its already-selected KB.
+    .NOTES
+        Safe under -UseBaselineOnly: the KB is never changed. If the baseline
+        contains an expected SHA-1/SHA-256, the normal integrity gate still
+        validates the downloaded file.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)]$Patch,
+        [switch]$Force,
+        [switch]$RefreshCache
+    )
+
+    if (-not $Force -and -not ($Patch.PSObject.Properties['IsMetadataOnly'] -and $Patch.IsMetadataOnly)) {
+        return $false
+    }
+    $kb = [string]$Patch.KbId
+    $type = Get-PatchEntryType -Patch $Patch
+    $rows = @(Get-CatalogRowsForResolvedPatch -Patch $Patch -RefreshCache:$RefreshCache)
+    if ($rows.Count -eq 0) {
+        throw ('Microsoft Update Catalog returned no unambiguous x64 row for {0}/{1} on {2}.' -f $type, $kb, $Script:OsVersion)
+    }
+    if ($rows.Count -gt 1) {
+        $titles = @($rows | ForEach-Object { [string]$_.title }) -join ' | '
+        throw ('Microsoft Update Catalog result is ambiguous for {0}/{1} on {2}: {3}' -f $type, $kb, $Script:OsVersion, $titles)
+    }
+    $row = $rows[0]
+    $files = @(Resolve-CatalogDownload -Uid ([string]$row.uid) -RefreshCache:$RefreshCache)
+    if ($files.Count -eq 0) {
+        throw ('Catalog DownloadDialog returned no files for {0}/{1} (UpdateId {2}).' -f $type, $kb, $row.uid)
+    }
+
+    $kbDigits = $kb -replace '(?i)^KB',''
+    $candidates = @($files | Where-Object {
+        $fn = ([string]$_.fileName).ToLowerInvariant()
+        $fn -match 'x64' -and $fn -match [regex]::Escape($kbDigits) -and
+        $fn -notmatch 'express|delta|psf|pkgproperties|metadata'
+    })
+    if ($type -in @('SafeOSDU','SetupDU')) {
+        $preferred = @($candidates | Where-Object { ([string]$_.fileName).ToLowerInvariant().EndsWith('.cab') })
+    } else {
+        $preferred = @($candidates | Where-Object { ([string]$_.fileName).ToLowerInvariant().EndsWith('.msu') })
+    }
+    if ($preferred.Count -eq 0) { $preferred = $candidates }
+    if ($preferred.Count -ne 1) {
+        $names = @($preferred | ForEach-Object { [string]$_.fileName }) -join ', '
+        throw ('Catalog file selection is ambiguous for {0}/{1}: {2}' -f $type, $kb, $names)
+    }
+    $file = $preferred[0]
+
+    $Patch.Source = [string]$file.url
+    $Patch.LocalPath = Get-PatchLocalPath -Kind $type -FileName ([string]$file.fileName)
+
+    # Research candidates are intentionally mutable until Freeze.  The exact
+    # KB remains fixed, but Catalog may republish the row/file identity or a
+    # committed CDN URL may expire.  Frozen/E3/E4/E5/Approved baselines must
+    # never have their expected digest silently rewritten.
+    $baselineStatus = ''
+    if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline -and $Script:OsProfile.PatchBaseline.PSObject.Properties['Status']) {
+        $baselineStatus = [string]$Script:OsProfile.PatchBaseline.Status
+    }
+    $allowIdentityRefresh = $baselineStatus -in @('', 'ResearchCandidate', 'Discovered', 'Resolved')
+    $hashes = @{}
+    if ($Patch.PSObject.Properties['ExpectedHashes'] -and $Patch.ExpectedHashes) {
+        foreach ($key in $Patch.ExpectedHashes.Keys) { $hashes[$key] = $Patch.ExpectedHashes[$key] }
+    }
+    if ($file.digest) {
+        if ($hashes.ContainsKey('sha-1') -and [string]$hashes['sha-1'] -ne [string]$file.digest) {
+            if (-not $allowIdentityRefresh) {
+                throw ('Catalog SHA-1 changed for frozen baseline {0}/{1}; baseline={2}, catalog={3}. Create a new candidate instead of mutating the baseline.' -f $type, $kb, $hashes['sha-1'], $file.digest)
+            }
+            Write-Caution ('Catalog SHA-1 refreshed for candidate {0}/{1}: {2} -> {3}' -f $type, $kb, $hashes['sha-1'], $file.digest)
+        }
+        $hashes['sha-1'] = [string]$file.digest # Catalog compatibility
+    }
+    if ($file.sha256) {
+        if ($hashes.ContainsKey('sha-256') -and [string]$hashes['sha-256'] -ne [string]$file.sha256) {
+            if (-not $allowIdentityRefresh) {
+                throw ('Catalog SHA-256 changed for frozen baseline {0}/{1}; baseline={2}, catalog={3}. Create a new candidate instead of mutating the baseline.' -f $type, $kb, $hashes['sha-256'], $file.sha256)
+            }
+            Write-Caution ('Catalog SHA-256 refreshed for candidate {0}/{1}: {2} -> {3}' -f $type, $kb, $hashes['sha-256'], $file.sha256)
+        }
+        $hashes['sha-256'] = [string]$file.sha256
+    }
+    $Patch.ExpectedHashes = $hashes
+    $Patch.IsMetadataOnly = $false
+    if (-not $Patch.PSObject.Properties['UpdateId']) {
+        $Patch | Add-Member -NotePropertyName UpdateId -NotePropertyValue ([string]$row.uid)
+    } else {
+        $Patch.UpdateId = [string]$row.uid
+    }
+    if (-not $Patch.PSObject.Properties['Title']) {
+        $Patch | Add-Member -NotePropertyName Title -NotePropertyValue ([string]$row.title)
+    } else {
+        $Patch.Title = [string]$row.title
+    }
+    Write-Ok ('Catalog asset resolved: {0}/{1} -> {2} (UpdateId {3})' -f $type, $kb, $file.fileName, $row.uid)
+    return $true
+}
+
+function Merge-ResolvedPatchDuplicates {
+    <# Collapse duplicate Kind+KB runtime entries, preferring a resolved asset. #>
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param([AllowEmptyCollection()][object[]]$Patches)
+
+    $byKey = [ordered]@{}
+    foreach ($p in @($Patches)) {
+        if (-not $p) { continue }
+        $type = Get-PatchEntryType -Patch $p
+        $key = ('{0}|{1}' -f $type, ([string]$p.KbId).ToUpperInvariant())
+        if (-not $byKey.Contains($key)) {
+            $byKey[$key] = $p
+            continue
+        }
+        $current = $byKey[$key]
+        $currentMetadata = $current.PSObject.Properties['IsMetadataOnly'] -and $current.IsMetadataOnly
+        $newMetadata = $p.PSObject.Properties['IsMetadataOnly'] -and $p.IsMetadataOnly
+        if ($currentMetadata -and -not $newMetadata) {
+            $byKey[$key] = $p
+            $current = $p
+        }
+        $roleSet = @(@(Get-PatchRoles -Patch $current) + @(Get-PatchRoles -Patch $p) | Sort-Object -Unique)
+        $current.Roles = $roleSet
+        Write-Caution ('Duplicate patch entry collapsed: {0}; retained {1}' -f $key, [string]$current.PackageId)
+    }
+    return @($byKey.GetEnumerator() | ForEach-Object { $_.Value })
 }
 
 # ============================================================================
@@ -7706,6 +7935,8 @@ function ConvertTo-ResolvedPatchFromBaselineLine {
         RuntimeSelector  = $runtimeSelector
         Dependencies     = $dependencies
         BaselineState    = $(if ($Line.PSObject.Properties['State']) { [string]$Line.State } else { 'LegacyResolved' })
+        Title            = $(if ($Line.PSObject.Properties['Title']) { [string]$Line.Title } else { '' })
+        Products         = $(if ($Line.PSObject.Properties['Products']) { $Line.Products } else { $null })
         IsMetadataOnly   = ([string]::IsNullOrWhiteSpace([string]$Line.DownloadUrl) -or [string]::IsNullOrWhiteSpace($fileName))
     }
 }
@@ -8460,8 +8691,9 @@ function Invoke-PatchSubPhase {
         try {
             $allowWinReKnownError = (
                 $ImageLabel -eq 'winre.wim' -and
-                $type -eq 'LCU' -and
-                (Test-PatchHasRole -Patch $p -Role 'ServicingStackCarrier')
+                $type -in @('LCU','BridgeLcu') -and
+                ((Test-PatchHasRole -Patch $p -Role 'ServicingStackCarrier') -or
+                 (Test-PatchHasRole -Patch $p -Role 'SourcePrerequisite'))
             )
             $status = Add-WindowsPackageWithRetry -MountPath $MountPath `
                 -PackagePath $pkgPath -LogDir $Script:LogsDir `
@@ -9284,8 +9516,10 @@ function Get-WimOfflineHiveValue {
             return $null
         }
         $loaded = $true
+        if (-not (Test-Path -LiteralPath $psPath)) { return $null }
         try {
-            $rv = Get-ItemProperty -Path $psPath -Name $ValueName -ErrorAction Stop
+            $rv = Get-ItemProperty -LiteralPath $psPath -Name $ValueName -ErrorAction SilentlyContinue
+            if ($null -eq $rv) { return $null }
             return $rv.$ValueName
         } catch {
             return $null
@@ -10869,8 +11103,8 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
 
         # Order by ApplyOrder, then by KbId. Wrap in @() to guarantee
         # an array even when $resolved is null or a single object.
-        $Script:ResolvedPatches = @($resolved | Sort-Object ApplyOrder, KbId)
-        Write-Ok ('Patch list resolved: {0} entries.' -f $Script:ResolvedPatches.Count)
+        $Script:ResolvedPatches = @(Merge-ResolvedPatchDuplicates -Patches @($resolved | Sort-Object ApplyOrder, KbId))
+        Write-Ok ('Patch list resolved: {0} unique entries.' -f $Script:ResolvedPatches.Count)
 
         # Build the WIM-target-aware PatchPlan and print summary.
         # Even when ResolvedPatches is empty (synthetic test mode), we
@@ -11110,7 +11344,7 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
                 }
             }
         }
-        $Script:ResolvedPatches = @($derived | Sort-Object ApplyOrder, KbId)
+        $Script:ResolvedPatches = @(Merge-ResolvedPatchDuplicates -Patches @($derived | Sort-Object ApplyOrder, KbId))
         $Script:PatchPlan = Build-PatchPlan -Patches $Script:ResolvedPatches
         Write-Ok ('Derived {0} patch entries from refreshed baseline.' -f $Script:ResolvedPatches.Count)
 
@@ -11141,6 +11375,24 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
             New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P04.ok') -Force | Out-Null
             return
         }
+
+        # Step 0: rehydrate patch assets from exact Catalog KBs.
+        # ResearchCandidate baselines are intentionally allowed to carry KB-only
+        # entries. Even resolved direct URLs are canonicalized here because the
+        # Server 2019 E2E measured HTTP 404 for a committed LCU URL.
+        Write-SubSection 'Step 0: Resolve exact-KB patch assets'
+        Set-DebugStep -Step 'patch-asset-resolve'
+        foreach ($p in @($Script:ResolvedPatches)) {
+            if (-not $p -or [string]::IsNullOrWhiteSpace([string]$p.KbId)) { continue }
+            $forceResolve = ($p.PSObject.Properties['IsMetadataOnly'] -and $p.IsMetadataOnly)
+            if ($Script:OsProfile.PatchBaseline -and [string]$Script:OsProfile.PatchBaseline.Status -eq 'ResearchCandidate') {
+                $forceResolve = $true
+            }
+            if ($forceResolve) {
+                $null = Resolve-ResolvedPatchAssetFromCatalog -Patch $p -Force -RefreshCache
+            }
+        }
+        $Script:PatchPlan = Build-PatchPlan -Patches $Script:ResolvedPatches
 
         # Step 1: ISO download
         Write-SubSection 'Step 1: Source ISO'
@@ -11202,8 +11454,7 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
         foreach ($p in $Script:ResolvedPatches) {
             $idx++
             if ($p.PSObject.Properties['IsMetadataOnly'] -and $p.IsMetadataOnly) {
-                Write-Step ('[{0}/{1}] {2}: metadata-only prerequisite; applicability will be evaluated after mount.' -f $idx, $Script:ResolvedPatches.Count, $p.KbId)
-                continue
+                throw ('Patch asset remains unresolved after exact-KB Catalog resolution: {0}/{1}.' -f (Get-PatchEntryType -Patch $p), $p.KbId)
             }
             $leaf = [System.IO.Path]::GetFileName($p.LocalPath)
             # Per-patch landing directory: LCU/Checkpoint land in the
@@ -11234,7 +11485,19 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
                     }
                 }
                 $patchTmp = Join-Path $targetDir ('.dl_' + [Guid]::NewGuid().Guid + '.part')
-                Invoke-WebRequestWithRetry -Uri $p.Source -OutFile $patchTmp -MaxAttempts 3
+                try {
+                    Invoke-WebRequestWithRetry -Uri $p.Source -OutFile $patchTmp -MaxAttempts 3
+                } catch {
+                    Remove-Item -LiteralPath $patchTmp -Force -ErrorAction SilentlyContinue
+                    Write-Caution ('  committed download URL failed ({0}); re-resolving exact KB {1} from Catalog.' -f $_.Exception.Message, $p.KbId)
+                    $null = Resolve-ResolvedPatchAssetFromCatalog -Patch $p -Force -RefreshCache
+                    $patchParent = [System.IO.Path]::GetDirectoryName($p.LocalPath)
+                    if ($patchParent -and -not (Test-Path -LiteralPath $patchParent)) {
+                        New-Item -ItemType Directory -Path $patchParent -Force | Out-Null
+                    }
+                    $patchTmp = Join-Path $targetDir ('.dl_' + [Guid]::NewGuid().Guid + '.part')
+                    Invoke-WebRequestWithRetry -Uri $p.Source -OutFile $patchTmp -MaxAttempts 3
+                }
                 Move-Item -LiteralPath $patchTmp -Destination $p.LocalPath -Force
                 Write-Ok ('  downloaded: {0}' -f $p.LocalPath)
             } else {
@@ -12130,7 +12393,7 @@ function Invoke-BuildPhase08S_SyncSetupBinaries { # psa-disable-line PSA6003 -- 
             BootWimPath    = $bootWim
             BootWimIdx2Build = $buildNumber
             Plan           = $plan
-            Records        = @($records)
+            Records        = $records.ToArray()
         } | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
         Write-Ok ('Setup-binary sync evidence written: {0} / {1}' -f $csvPath, $jsonPath)
     } finally {

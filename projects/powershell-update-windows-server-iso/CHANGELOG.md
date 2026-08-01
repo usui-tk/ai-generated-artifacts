@@ -22,6 +22,64 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.12-r12.01] - 2026-08-01
+
+Tag: `e2e-log-fixes`. Fixes derived from the 2026-07-12 E2E runs on a
+Windows Server 2025 / Windows PowerShell 5.1 host, where all four OS
+builds failed for four *distinct* measured causes (not one shared
+root): 2016 stopped at P07 on a .NET line that was metadata-only (KB
+known, distribution file never resolved); 2019 failed at P04 on a
+pinned CDN URL returning HTTP 404; 2022 hit `0x800f0823` in WinRE
+because its servicing stack (20348.557) sat below the LCU's floor;
+2025's P08S succeeded but a `Generic.List` → `@(...)` coercion was
+type-mismatched under Windows PowerShell 5.1.
+
+### Added
+
+- **Exact-KB Catalog re-resolution**: `Get-CatalogRowsForResolvedPatch`
+  and `Resolve-ResolvedPatchAssetFromCatalog` re-resolve the
+  distribution assets of the KBs already in the baseline — never
+  selecting a different KB. Server 2022/2025 queries are narrowed by
+  the full Server product token so Windows-client rows are excluded;
+  SafeOS DU and Setup DU are discriminated by the Products column; the
+  Catalog search / DownloadDialog caches can be refreshed explicitly.
+- **`Merge-ResolvedPatchDuplicates`**: de-duplicates resolved patches
+  on `Kind` + KB, preferring an entry with a real file over a
+  metadata-only one and taking the union of `Roles`.
+
+### Changed
+
+- **P04 fails early on unresolved assets**: an exact-KB resolution
+  step runs first and any line still metadata-only after it fails the
+  phase — instead of r12.00's behaviour of admitting metadata-only
+  lines at P04 and failing later inside P07/P08/P09. Build phases
+  consume resolved files only.
+- **`config-Server2022.json`**: the source-prerequisite (bridge)
+  declaration now targets WinRE as well (Targets 2 → 3) and its
+  `Condition.WinRePolicy` records the E2E-confirmed stance
+  (`ApplyWhenSourceBelowFloor_E2EConfirmed_0x800f0823`) — the measured
+  answer to the WinRE `0x800f0823` failure.
+- **Offline-registry probe quieting**: the `SecureBoot\Servicing` key
+  may be absent on older ISOs; the probe now checks `Test-Path` and
+  reads with `-ErrorAction SilentlyContinue`, so transcripts no longer
+  record a terminating error that was already being caught.
+- **T40** release pin advanced to `update-wsi-2026.07.12-r12.01` /
+  `e2e-log-fixes`; the pin-tracking wording in TESTING.md /
+  tests/README.md is made revision-agnostic (the pin advances in every
+  merge commit).
+
+### Unchanged (safety envelope)
+
+Single-script layout; baseline KBs are never silently swapped;
+previews are never auto-adopted; Frozen/Approved hash mismatches are
+never silently accepted; WinRE `0x800f0823` is never ignored;
+checkpoint CU + target LCU stay co-located in one folder.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; PSA 0E/15W/0I on
+the committed tree (declared series debt; +1W over r12.00).
+
 ## [update-wsi-2026.07.11-r12.00] - 2026-08-01
 
 Tag: `schema-v4-role-planner`. First commit of the r12-series merge
