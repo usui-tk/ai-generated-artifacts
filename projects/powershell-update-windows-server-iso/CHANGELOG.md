@@ -22,6 +22,46 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.17-r12.13] - 2026-08-02
+
+Tag: `measured-e2e-corrections` (the tag advances; the version date
+moves to 2026.07.17). A batch of corrections from measured E2E runs,
+each landing as a declared decision or evidence artifact.
+
+### Fixed
+
+- **Measured E2E correction batch** — seven new decision/evidence
+  helpers: `Get-BootSequencePolicyDecision` (boot.wim apply-sequence
+  policy), `Get-ExpandedMsuCabRolesForSubPhase` +
+  `Assert-ExpandedBootLcuTarget` (expanded-CAB role classification and
+  target assertion for the ExpandedCab path),
+  `Get-WinReServicingVerificationDecision` (WinRE verification
+  routing), `Test-Server2025PcaPolicyPreflight` (PCA policy
+  preflight), `Write-DismRollbackEvidence` and
+  `Write-PatchFreshnessSummary` (rollback and freshness evidence
+  artifacts).
+- **Server 2025 PCA compliance defaults to audit-only**: the shipped
+  `config-Server2025.json` moves `CompliancePolicy` from
+  `RequirePca2023` to `AuditOnly` and declares
+  `SourceMediaAssurance: Unverified` — the 2016/2019/2022
+  media-conversion workflow is not documented for this media
+  generation, so requiring PCA2023 needs an explicitly verified source
+  or `-ForcePca2023OnServer2025`.
+
+### Changed
+
+- **T40**: release pin advanced to `update-wsi-2026.07.17-r12.13`
+  with the measured tag and date.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **3E/35W/4I**
+on the committed tree — one carried PSA2010 error is resolved by the
+deliverable (`Get-PatchTargets` is now defined) and five findings join
+the debt (1× PSA2002 + 1× PSA2007 `$Error` shadowing, 3× PSA6005
+mandatory-parameter defaults); committed verbatim per the
+no-fix-forward rule, draining post-series.
+
 ## [update-wsi-2026.07.15-r12.12] - 2026-08-02
 
 Tag: `july-asset-integrity-fix` (the tag advances). The 2026-07 lines

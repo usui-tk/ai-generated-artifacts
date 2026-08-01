@@ -741,8 +741,9 @@
     "NotesSource": [
       "https://techcommunity.microsoft.com/blog/windowsservernewsandbestpractices/windows-server-secure-boot-playbook-for-certificates-expiring-in-2026/4495789"
     ],
-    "Notes": "Do not force the Server 2016/2019/2022 media-conversion path onto Server 2025 without an explicit advanced override.",
-    "CompliancePolicy": "RequirePca2023"
+    "Notes": "Server 2025 defaults to audit-only because the Server 2016/2019/2022 conversion workflow is not documented for this media generation. RequirePca2023 needs an explicitly verified source or -ForcePca2023OnServer2025.",
+    "CompliancePolicy": "AuditOnly",
+    "SourceMediaAssurance": "Unverified"
   },
   "AutoRefreshPolicy": {
     "Mode": "OnNewPatchTuesday",
