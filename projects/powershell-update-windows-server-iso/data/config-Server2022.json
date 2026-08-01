@@ -298,15 +298,18 @@
       "SafeOS DU / Setup DU Support KB",
       "Monthly Windows Server images",
       "Windows release health / message center"
-    ]
+    ],
+    "ResolveMonthlyAuxiliariesAtFetch": true,
+    "MonthlyAuxiliaryStrict": true,
+    "BaselineMonth": "2026-07"
   },
   "PatchBaseline": {
     "Schema": "4.0",
-    "BaselineId": "2026-06-B",
+    "BaselineId": "2026-07-B",
     "Status": "ResearchCandidate",
     "ReleaseChannel": "B",
-    "CutoffUtc": "2026-06-18T00:00:00Z",
-    "TargetBuildAfterUpdate": "20348.5256",
+    "CutoffUtc": "2026-07-14T23:59:59Z",
+    "TargetBuildAfterUpdate": "20348.5386",
     "ChecksumAlgorithm": "SHA256",
     "SourcePrerequisites": [
       {
@@ -364,29 +367,29 @@
     ],
     "Lines": [
       {
-        "PackageId": "Server2022-KB5094128-x64",
+        "PackageId": "Server2022-KB5099540-x64",
         "Kind": "LCU",
-        "KbId": "KB5094128",
+        "KbId": "KB5099540",
         "ParentKbId": null,
-        "UpdateId": "522273b0-daa7-4f44-8562-2046a18b5e0a",
+        "UpdateId": null,
         "Revision": null,
-        "Title": "2026-06 Cumulative Update for Microsoft server operating system version 21H2 for x64-based Systems (KB5094128)",
+        "Title": "2026-07 B release for Server2022 (KB5099540)",
         "Products": [
           "Microsoft Server operating system-21H2"
         ],
         "Classification": "Security Updates",
         "Architecture": "x64",
-        "ReleaseDate": "2026-06-09",
+        "ReleaseDate": "2026-07-14",
         "ReleaseType": "B",
-        "State": "Resolved",
-        "FileName": "windows10.0-kb5094128-x64_f2fe90c2e70536da77dcb1d08e40a554e4e2df6c.msu",
-        "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/06/windows10.0-kb5094128-x64_f2fe90c2e70536da77dcb1d08e40a554e4e2df6c.msu",
-        "Digest": "8v6QwucFNtp33LHQjkClVOTi32w=",
+        "State": "Discovered",
+        "FileName": null,
+        "DownloadUrl": null,
+        "Digest": null,
         "Sha256": "",
         "SizeBytes": null,
         "ApplyOrder": 20,
         "InScope": {
-          "build": "20348.5256"
+          "build": "20348.5386"
         },
         "Note": "The same combined LCU asset is reused as servicing-stack carrier and final LCU.",
         "Roles": [
@@ -425,13 +428,13 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://support.microsoft.com/en-us/topic/june-9-2026-kb5094128-os-build-20348-5256-56823f3e-e2a4-4839-ab01-b9de5ec4cbed",
-            "https://learn.microsoft.com/en-us/windows/release-health/windows-server-release-info"
+            "https://support.microsoft.com/help/5099540"
           ],
-          "VerifiedAt": "2026-07-11T00:00:00+09:00",
-          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "VerifiedAt": "2026-07-15T00:00:00Z",
+          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
           "Notes": [
-            "The same combined LCU asset is reused as servicing-stack carrier and final LCU."
+            "Target OS build 20348.5386. Exact Catalog asset is re-resolved at P04.",
+            "Embedded SSU KB5120210 build 20348.5384."
           ]
         }
       },
@@ -450,7 +453,7 @@
         "Architecture": "x64",
         "ReleaseDate": "2026-05-12",
         "ReleaseType": "B",
-        "State": "Resolved",
+        "State": "Fallback",
         "FileName": "windows10.0-kb5087068-x64-ndp48_e788771a4119e01a7840dd1c13a1e25b223be12a.msu",
         "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/04/windows10.0-kb5087068-x64-ndp48_e788771a4119e01a7840dd1c13a1e25b223be12a.msu",
         "Digest": "54h3GkEZ4Bp4QN0cE6HiWyI74So=",
@@ -497,7 +500,8 @@
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
           "Notes": [
-            "Leaf asset for the default Server 2022 .NET Framework 4.8 media state."
+            "Leaf asset for the default Server 2022 .NET Framework 4.8 media state.",
+            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
           ]
         }
       },
@@ -514,7 +518,7 @@
         "Architecture": "x64",
         "ReleaseDate": "2026-05-12",
         "ReleaseType": "B",
-        "State": "Discovered",
+        "State": "Fallback",
         "FileName": null,
         "DownloadUrl": null,
         "Digest": null,
@@ -557,7 +561,8 @@
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
           "Notes": [
-            "Alternative leaf asset when .NET Framework 4.8.1 is detected."
+            "Alternative leaf asset when .NET Framework 4.8.1 is detected.",
+            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
           ]
         }
       },
@@ -577,7 +582,7 @@
         "Architecture": "x64",
         "ReleaseDate": "2026-06-09",
         "ReleaseType": "DynamicUpdate",
-        "State": "Resolved",
+        "State": "Fallback",
         "FileName": "windows10.0-kb5094157-x64_c3ee5d03ee5bdfa16846ca51a3ab171071260b94.cab",
         "DownloadUrl": "https://catalog.s.download.windowsupdate.com/d/msdownload/update/software/crup/2026/06/windows10.0-kb5094157-x64_c3ee5d03ee5bdfa16846ca51a3ab171071260b94.cab",
         "Digest": "w+5dA+5b36FoRspRo6sXEHEmC5Q=",
@@ -625,7 +630,8 @@
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
           "Notes": [
-            "Resolved Safe OS Dynamic Update asset."
+            "Resolved Safe OS Dynamic Update asset.",
+            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
           ]
         }
       },
@@ -644,7 +650,7 @@
         "Architecture": "x64",
         "ReleaseDate": "2026-03-10",
         "ReleaseType": "DynamicUpdate",
-        "State": "Discovered",
+        "State": "Fallback",
         "FileName": null,
         "DownloadUrl": null,
         "Digest": null,
@@ -685,7 +691,8 @@
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
           "Notes": [
-            "Latest prior Setup Dynamic Update used by the June 2026 Server image set."
+            "Latest prior Setup Dynamic Update used by the June 2026 Server image set.",
+            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
           ]
         }
       }
@@ -707,9 +714,9 @@
       ],
       "ApprovalRequiredForBuild": true
     },
-    "LastVerifiedDate": "2026-07-11T00:00:00+09:00",
-    "LastVerifiedBy": "research:data-model-v4",
-    "PatchTuesdayOfBaseline": "2026-06-09",
+    "LastVerifiedDate": "2026-07-15T00:00:00Z",
+    "LastVerifiedBy": "ChatGPT+official-Microsoft-sources",
+    "PatchTuesdayOfBaseline": "2026-07-14",
     "BridgeLcu": {
       "KbId": "KB5030216",
       "FileName": "windows10.0-kb5030216-x64_cbe587155f9818548b75f65d5cd41d341ed2fc61.msu",

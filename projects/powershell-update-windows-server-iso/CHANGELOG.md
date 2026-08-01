@@ -22,6 +22,57 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.15-r12.06] - 2026-08-02
+
+Tag: `release-validation-hardening` (continued). The monthly patch set
+stops being a hand-refreshed constant: the baseline month is declared
+per config and the auxiliary packages are re-resolved at fetch time.
+
+### Added
+
+- **Three `DiscoveryPolicy` keys** in every config:
+  `BaselineMonth` (`"2026-07"` in the shipped profiles),
+  `MonthlyAuxiliaryStrict`, and `ResolveMonthlyAuxiliariesAtFetch`.
+  The declaration-derived T46 absorbed the new keys without an edit
+  (measured).
+- **P04 monthly-auxiliary resolution (Step 0A)**: when
+  `ResolveMonthlyAuxiliariesAtFetch` is declared true, the run derives
+  the baseline month from the config's `PatchBaseline`, re-resolves
+  the SafeOS DU and Setup DU rows for that month, re-resolves the
+  Server 2016 standalone monthly SSU, and builds .NET monthly selector
+  lines from the official .NET Framework release-notes cache (fetching
+  the cache when missing or stale). Selected rows replace the shipped
+  fallback lines, duplicates are merged, and the selection is
+  persisted as a `logs/` evidence artifact
+  (`P04_monthly_auxiliary_selection.json`).
+
+### Changed
+
+- **All four shipped patch sets re-resolved to the 2026-07 baseline.**
+  Server 2016's monthly SSU (KB5099542) is declared `State=Discovered`
+  with no `DownloadUrl` — resolution is deferred to fetch under the
+  new policy. The declaration-derived T43 absorbed the shape without
+  an edit (measured); the pre-series T23 contract this supersedes was
+  retired at r12.00 (SPEC §B.15.4).
+- **T40**: release pin advanced to `update-wsi-2026.07.15-r12.06`
+  (the P08S four-list wiring is unchanged, measured).
+
+### Distribution note
+
+The r12.06 snapshot ships its own validation scripts and reports under
+its `tests/` directory. Per the series ruling these are input only and
+are not committed; their content is logged in the campaign observation
+ledger.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/24W/4I**
+on the committed tree — the r12.04/r12.05 declared debt carries
+unchanged (2× PSA2010, 2× PSA2012) and four findings join it in the
+new monthly-auxiliary code (2× PSA3004 empty catch, 1× PSA5003 SHA1
+usage, 1× PSA6003 plural noun); committed verbatim per the
+no-fix-forward rule, draining post-series.
+
 ## [update-wsi-2026.07.15-r12.05] - 2026-08-02
 
 Tag: `release-validation-hardening` (continued). Closes the four

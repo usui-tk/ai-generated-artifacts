@@ -298,15 +298,18 @@
       "SafeOS DU / Setup DU Support KB",
       "Monthly Windows Server images",
       "Windows release health / message center"
-    ]
+    ],
+    "ResolveMonthlyAuxiliariesAtFetch": true,
+    "MonthlyAuxiliaryStrict": true,
+    "BaselineMonth": "2026-07"
   },
   "PatchBaseline": {
     "Schema": "4.0",
-    "BaselineId": "2026-06-B",
+    "BaselineId": "2026-07-B",
     "Status": "ResearchCandidate",
     "ReleaseChannel": "B",
-    "CutoffUtc": "2026-06-18T00:00:00Z",
-    "TargetBuildAfterUpdate": "26100.32995",
+    "CutoffUtc": "2026-07-14T23:59:59Z",
+    "TargetBuildAfterUpdate": "26100.33158",
     "ChecksumAlgorithm": "SHA256",
     "SourcePrerequisites": [
       {
@@ -324,7 +327,7 @@
         "Condition": {
           "Mode": "ResolveFromTargetLcuDownloadSet",
           "ApplicationMode": "CoLocatedFolder",
-          "TargetKb": "KB5094125"
+          "TargetKb": "KB5099536"
         },
         "Asset": null,
         "State": "Conditional",
@@ -414,29 +417,29 @@
         }
       },
       {
-        "PackageId": "Server2025-KB5094125-x64",
+        "PackageId": "Server2025-KB5099536-x64",
         "Kind": "LCU",
-        "KbId": "KB5094125",
+        "KbId": "KB5099536",
         "ParentKbId": null,
-        "UpdateId": "c108488b-a8ac-4607-899d-7d24cbd504e4",
+        "UpdateId": null,
         "Revision": null,
-        "Title": "2026-06 Cumulative Update for Microsoft server operating system version 24H2 for x64-based Systems (KB5094125)",
+        "Title": "2026-07 B release for Server2025 (KB5099536)",
         "Products": [
           "Microsoft Server Operating System-24H2"
         ],
         "Classification": "Security Updates",
         "Architecture": "x64",
-        "ReleaseDate": "2026-06-09",
+        "ReleaseDate": "2026-07-14",
         "ReleaseType": "B",
-        "State": "Resolved",
-        "FileName": "windows11.0-kb5094125-x64_8e89fa4917df313fe118b9fe150611975ab92565.msu",
-        "DownloadUrl": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/7bb8f378-6d48-4161-ac28-0be28444e642/public/windows11.0-kb5094125-x64_8e89fa4917df313fe118b9fe150611975ab92565.msu",
-        "Digest": "jon6SRffMT/hGLn+FQYRl1q5JWU=",
-        "Sha256": "989kXeuFH+u063587IKQFA0qKpdUyFxVYzINJN5or6U=",
+        "State": "Discovered",
+        "FileName": null,
+        "DownloadUrl": null,
+        "Digest": null,
+        "Sha256": "",
         "SizeBytes": null,
         "ApplyOrder": 20,
         "InScope": {
-          "build": "26100.32995"
+          "build": "26100.33158"
         },
         "Note": "Target LCU; the same asset serves the servicing-stack carrier and final LCU roles.",
         "Roles": [
@@ -481,13 +484,13 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://support.microsoft.com/en-us/topic/june-9-2026-kb5094125-os-build-26100-32995-e28b3956-9a5a-4b4d-bc2c-fb1bdc5d3709",
-            "https://learn.microsoft.com/en-us/windows/release-health/windows-server-release-info"
+            "https://support.microsoft.com/help/5099536"
           ],
-          "VerifiedAt": "2026-07-11T00:00:00+09:00",
-          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "VerifiedAt": "2026-07-15T00:00:00Z",
+          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
           "Notes": [
-            "Target LCU; the same asset serves the servicing-stack carrier and final LCU roles."
+            "Target OS build 26100.33158. Exact Catalog asset is re-resolved at P04.",
+            "Embedded SSU KB5101372 build 26100.33150."
           ]
         }
       },
@@ -506,7 +509,7 @@
         "Architecture": "x64",
         "ReleaseDate": "2026-05-12",
         "ReleaseType": "B",
-        "State": "Resolved",
+        "State": "Fallback",
         "FileName": "windows11.0-kb5087051-x64-ndp481_1b5e85a299767e6186f9c693037df973254662d9.msu",
         "DownloadUrl": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/3e11ae04-442d-4988-8d96-979aa04e7de6/public/windows11.0-kb5087051-x64-ndp481_1b5e85a299767e6186f9c693037df973254662d9.msu",
         "Digest": "G16Fopl2fmGG+caTA335cyVGYtk=",
@@ -557,7 +560,8 @@
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
           "Notes": [
-            "Server 2025 .NET Framework leaf asset."
+            "Server 2025 .NET Framework leaf asset.",
+            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
           ]
         }
       },
@@ -577,7 +581,7 @@
         "Architecture": "x64",
         "ReleaseDate": "2026-06-09",
         "ReleaseType": "DynamicUpdate",
-        "State": "Resolved",
+        "State": "Fallback",
         "FileName": "windows11.0-kb5094150-x64_89ccb9d87264b8e7d651a24951436069dd1d6eed.cab",
         "DownloadUrl": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/bbb639ee-a802-4cbb-9058-e69216636070/public/windows11.0-kb5094150-x64_89ccb9d87264b8e7d651a24951436069dd1d6eed.cab",
         "Digest": "icy52HJkuOfWUaJJUUNgad0dbu0=",
@@ -625,7 +629,8 @@
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
           "Notes": [
-            "Resolved Safe OS Dynamic Update asset."
+            "Resolved Safe OS Dynamic Update asset.",
+            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
           ]
         }
       },
@@ -644,7 +649,7 @@
         "Architecture": "x64",
         "ReleaseDate": "2026-06-09",
         "ReleaseType": "DynamicUpdate",
-        "State": "Resolved",
+        "State": "Fallback",
         "FileName": "windows11.0-kb5095966-x64_c62ffd613fd7048e9a27157aeae1e832f6543c06.cab",
         "DownloadUrl": "https://catalog.sf.dl.delivery.mp.microsoft.com/filestreamingservice/files/2963a8a8-7af5-4044-b911-3c1b6b11f5cc/public/windows11.0-kb5095966-x64_c62ffd613fd7048e9a27157aeae1e832f6543c06.cab",
         "Digest": "xi/9YT/XBI6aJxV66uHoMvZUPAY=",
@@ -692,7 +697,8 @@
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
           "Notes": [
-            "Resolved Setup Dynamic Update asset."
+            "Resolved Setup Dynamic Update asset.",
+            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
           ]
         }
       }
@@ -714,14 +720,14 @@
       ],
       "ApprovalRequiredForBuild": true
     },
-    "LastVerifiedDate": "2026-07-11T00:00:00+09:00",
-    "LastVerifiedBy": "research:data-model-v4",
-    "PatchTuesdayOfBaseline": "2026-06-09",
+    "LastVerifiedDate": "2026-07-15T00:00:00Z",
+    "LastVerifiedBy": "ChatGPT+official-Microsoft-sources",
+    "PatchTuesdayOfBaseline": "2026-07-14",
     "CheckpointPolicy": {
       "Mode": "CoLocatedFolder",
       "ResolveFromTargetLcuDownloadSet": true,
       "RejectUnrelatedMsuInFolder": true,
-      "TargetKb": "KB5094125",
+      "TargetKb": "KB5099536",
       "CheckpointKbs": [
         "KB5043080"
       ]

@@ -559,7 +559,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.15-r12.05'
+$Script:ScriptVersion = 'update-wsi-2026.07.15-r12.06'
 $Script:ScriptTag     = 'release-validation-hardening'
 $Script:ScriptHash    = '(unknown)'
 try {
@@ -11976,6 +11976,141 @@ function Test-RemotePatchUrlStatus {
     }
 }
 
+function Get-ResearchCandidateBaselineMonth {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+    if (-not $Script:OsProfile -or -not $Script:OsProfile.PatchBaseline) { return '' }
+    $pb = $Script:OsProfile.PatchBaseline
+    if ($pb.PSObject.Properties['BaselineId']) {
+        $m = [regex]::Match([string]$pb.BaselineId, '^(\d{4}-\d{2})')
+        if ($m.Success) { return $m.Groups[1].Value }
+    }
+    if ($pb.PSObject.Properties['PatchTuesdayOfBaseline'] -and $pb.PatchTuesdayOfBaseline) {
+        try { return ([datetime]$pb.PatchTuesdayOfBaseline).ToString('yyyy-MM') } catch { }
+    }
+    return ''
+}
+
+function New-DotNetMonthlySelectorLine {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$OsVersion,
+        [Parameter(Mandatory)][string]$KbId,
+        [Parameter(Mandatory)][string]$DotNetVersions,
+        [Parameter(Mandatory)][string]$ReleaseDate,
+        [Parameter(Mandatory)][string]$SourceUrl
+    )
+    $runtime = ''
+    if ($DotNetVersions -match '4\.8\.1') { $runtime = '4.8.1' }
+    elseif ($DotNetVersions -match '4\.8') { $runtime = '4.8' }
+    elseif ($DotNetVersions -match '4\.7\.2') { $runtime = '4.7.2' }
+    elseif ($DotNetVersions -match '4\.6\.2') { $runtime = '4.6.2' }
+    $selector = [ordered]@{}
+    if ($DotNetVersions -match '(^|\D)3\.5(\D|$)') { $selector.NetFx3 = 'PresentOrEnabled' }
+    if ($runtime) { $selector.NetFx4Release = $runtime }
+    return [pscustomobject][ordered]@{
+        PackageId = ('{0}-{1}-x64' -f $OsVersion, $KbId)
+        Kind = 'DotNet'; KbId = $KbId; ParentKbId = $null; UpdateId = $null; Revision = $null
+        Title = ('Monthly .NET Framework CU selector: {0}' -f $DotNetVersions)
+        Products = $null; Classification = $null; Architecture = 'x64'
+        ReleaseDate = $ReleaseDate; ReleaseType = 'B'; State = 'Discovered'
+        FileName = $null; DownloadUrl = $null; Digest = $null; Sha256 = ''; SizeBytes = $null
+        ApplyOrder = 60; InScope = [pscustomobject]@{ DotNetVersions=$DotNetVersions }
+        Note = 'Resolved from the official .NET Framework monthly release-notes page at P04.'
+        Roles = @('DotNetLeaf'); TargetsByRole = [pscustomobject]@{ DotNetLeaf=@('Install') }
+        RuntimeSelector = [pscustomobject]$selector
+        Applicability = [pscustomobject]@{ Mode='IfRuntimeDetectedPerInstallIndex' }
+        Dependencies = @()
+        Integrity = [pscustomobject]@{ Sha1=$null; Sha256=$null; SizeBytes=$null; AuthenticodeStatus='NotTested' }
+        Evidence = [pscustomobject]@{ Levels=@('E1'); SourceUrls=@($SourceUrl); VerifiedAt=(Get-Date).ToUniversalTime().ToString('o'); VerifiedBy='auto:DotNetReleaseNotes'; Notes=@('Exact Catalog asset is resolved immediately after selector refresh.') }
+    }
+}
+
+function Resolve-DotNetMonthlySelectorLines {
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param(
+        [Parameter(Mandatory)][string]$OsVersion,
+        [Parameter(Mandatory)][string]$BaselineMonth
+    )
+    $cutoff = [datetime]::ParseExact(($BaselineMonth + '-28'), 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+    $cache = $null
+    try { $cache = Get-DotNetCuCache } catch { }
+    $cacheLatest = ''
+    if ($cache -and $cache.IndexSummary -and $cache.IndexSummary.LatestDate) { $cacheLatest = [string]$cache.IndexSummary.LatestDate }
+    if (-not $cache -or -not $cacheLatest -or $cacheLatest.Substring(0,7) -lt $BaselineMonth) {
+        Write-Step ('.NET monthly selector cache is missing/stale; fetching official release notes through {0}.' -f $Script:DotNetCuIndexUrl)
+        $null = Invoke-DotNetCuFetch
+        $null = Update-DotNetCuCache
+        $cache = Get-DotNetCuCache
+    }
+    $months = @($cache.Months | Where-Object {
+        $_.Ok -and $_.Date -and $_.Kind -notmatch '(?i)preview' -and ([datetime]$_.Date) -le $cutoff
+    } | Sort-Object { [datetime]$_.Date } -Descending)
+    $selectedMonth = $null; $selectedEntry = $null
+    foreach ($month in $months) {
+        $entry = @($month.Entries | Where-Object { $_.OsNormalised -eq $OsVersion }) | Select-Object -First 1
+        if ($entry) { $selectedMonth=$month; $selectedEntry=$entry; break }
+    }
+    if (-not $selectedEntry) { throw ('.NET release notes did not contain an applicable entry for {0} at or before {1}.' -f $OsVersion, $BaselineMonth) }
+    $allowed = switch ($OsVersion) {
+        'Server2016' { @('4.8') }
+        'Server2019' { @('4.7.2','4.8') }
+        'Server2022' { @('4.8','4.8.1') }
+        'Server2025' { @('4.8.1') }
+        default { @() }
+    }
+    $lines = New-Object System.Collections.Generic.List[object]
+    foreach ($row in @($selectedEntry.Rows)) {
+        if (-not $row.KbId) { continue }
+        $matched = $false
+        foreach ($v in $allowed) { if ([string]$row.DotNetVersions -match [regex]::Escape($v)) { $matched=$true; break } }
+        if (-not $matched) { continue }
+        $lines.Add((New-DotNetMonthlySelectorLine -OsVersion $OsVersion -KbId ([string]$row.KbId) -DotNetVersions ([string]$row.DotNetVersions) -ReleaseDate ([string]$selectedMonth.Date) -SourceUrl ([string]$selectedMonth.AbsoluteUrl))) | Out-Null
+    }
+    if ($lines.Count -eq 0) { throw ('.NET release notes entry for {0} had no supported runtime leaf rows.' -f $OsVersion) }
+    Write-Ok ('.NET monthly selectors: {0} ({1}) -> {2}' -f $OsVersion, $selectedMonth.Date, (@($lines | ForEach-Object KbId) -join ', '))
+    return @($lines.ToArray())
+}
+
+function Update-MonthlyAuxiliaryResolvedPatchesAtFetch {
+    [CmdletBinding()]
+    param()
+    $policy = $null
+    if ($Script:OsProfile -and $Script:OsProfile.PSObject.Properties['DiscoveryPolicy']) { $policy = $Script:OsProfile.DiscoveryPolicy }
+    if (-not $policy -or -not $policy.PSObject.Properties['ResolveMonthlyAuxiliariesAtFetch'] -or -not [bool]$policy.ResolveMonthlyAuxiliariesAtFetch) { return }
+    $month = Get-ResearchCandidateBaselineMonth
+    if (-not $month) { throw 'ResolveMonthlyAuxiliariesAtFetch is enabled, but the baseline month could not be derived.' }
+    Write-SubSection ('Step 0A: Resolve monthly auxiliary packages for {0}' -f $month)
+    $osShort = $Script:OsVersion -replace '^Server',''
+    $modelMap = @{ Server2016='separate-ssu'; Server2019='embedded-ssu'; Server2022='embedded-ssu-du'; Server2025='uup-checkpoint' }
+    $freshConfigLines = New-Object System.Collections.Generic.List[object]
+    if ($Script:OsVersion -eq 'Server2016') {
+        $rawSsu = Resolve-Ssu2016 -BaselineMonth $month
+        foreach ($x in @(ConvertTo-ConfigLines -OsResolved ([pscustomobject]@{os=$Script:OsVersion;lines=@($rawSsu)}) -PatchModel $modelMap[$Script:OsVersion])) { $freshConfigLines.Add($x) | Out-Null }
+    }
+    foreach ($rawDu in @((Resolve-SafeOsDu -OsKey $osShort -BaselineMonth $month),(Resolve-SetupDu -OsKey $osShort -BaselineMonth $month))) {
+        foreach ($x in @(ConvertTo-ConfigLines -OsResolved ([pscustomobject]@{os=$Script:OsVersion;lines=@($rawDu)}) -PatchModel $modelMap[$Script:OsVersion])) { $freshConfigLines.Add($x) | Out-Null }
+    }
+    foreach ($x in @(Resolve-DotNetMonthlySelectorLines -OsVersion $Script:OsVersion -BaselineMonth $month)) { $freshConfigLines.Add($x) | Out-Null }
+
+    $kept = New-Object System.Collections.Generic.List[object]
+    foreach ($p in @($Script:ResolvedPatches)) {
+        $roles = @(Get-PatchRoles -Patch $p)
+        $t = Get-PatchEntryType -Patch $p
+        $isSourcePrereq = $roles -contains 'SourcePrerequisite'
+        if ($isSourcePrereq -or $t -in @('LCU','Checkpoint','BridgeLcu')) { $kept.Add($p) | Out-Null }
+    }
+    foreach ($line in @($freshConfigLines)) { $kept.Add((ConvertTo-ResolvedPatchFromBaselineLine -Line $line)) | Out-Null }
+    $Script:ResolvedPatches = @(Merge-ResolvedPatchDuplicates -Patches @($kept.ToArray() | Sort-Object ApplyOrder,KbId))
+    $Script:PatchPlan = Build-PatchPlan -Patches $Script:ResolvedPatches
+    $evidencePath = Join-Path $Script:LogsDir 'P04_monthly_auxiliary_selection.json'
+    $freshConfigLines.ToArray() | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $evidencePath -Encoding UTF8
+    Write-Ok ('Monthly auxiliary selection written: {0}' -f $evidencePath)
+}
+
 # ============================================================
 # Phase P04: Fetch assets (Fetch group)
 # ============================================================
@@ -12010,6 +12145,9 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
             $baselineStatus = [string]$Script:OsProfile.PatchBaseline.Status
         }
         $candidateMutable = $baselineStatus -in @('', 'ResearchCandidate', 'Discovered', 'Resolved')
+        if ($candidateMutable) {
+            Update-MonthlyAuxiliaryResolvedPatchesAtFetch
+        }
         foreach ($p in @($Script:ResolvedPatches)) {
             if (-not $p -or [string]::IsNullOrWhiteSpace([string]$p.KbId)) { continue }
             $type = Get-PatchEntryType -Patch $p

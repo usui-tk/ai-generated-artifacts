@@ -323,15 +323,18 @@
       "SafeOS DU / Setup DU Support KB",
       "Monthly Windows Server images",
       "Windows release health / message center"
-    ]
+    ],
+    "ResolveMonthlyAuxiliariesAtFetch": true,
+    "MonthlyAuxiliaryStrict": true,
+    "BaselineMonth": "2026-07"
   },
   "PatchBaseline": {
     "Schema": "4.0",
-    "BaselineId": "2026-06-B",
+    "BaselineId": "2026-07-B",
     "Status": "ResearchCandidate",
     "ReleaseChannel": "B",
-    "CutoffUtc": "2026-06-18T00:00:00Z",
-    "TargetBuildAfterUpdate": "14393.9234",
+    "CutoffUtc": "2026-07-14T23:59:59Z",
+    "TargetBuildAfterUpdate": "14393.9339",
     "ChecksumAlgorithm": "SHA256",
     "SourcePrerequisites": [
       {
@@ -385,24 +388,24 @@
     ],
     "Lines": [
       {
-        "PackageId": "Server2016-KB5094141-x64",
+        "PackageId": "Server2016-KB5099542-x64",
         "Kind": "SSU",
-        "KbId": "KB5094141",
+        "KbId": "KB5099542",
         "ParentKbId": null,
-        "UpdateId": "a5501aa9-aad8-4dc4-922b-23b02e4fe0bf",
+        "UpdateId": null,
         "Revision": null,
-        "Title": "2026-06 Servicing Stack Update for Windows Server 2016 for x64-based Systems (KB5094141)",
+        "Title": "2026-07 Servicing Stack Update for Windows Server 2016 (KB5099542)",
         "Products": [
           "Windows Server 2016"
         ],
         "Classification": "Security Updates",
         "Architecture": "x64",
-        "ReleaseDate": "2026-06-09",
+        "ReleaseDate": "2026-07-14",
         "ReleaseType": "B",
-        "State": "Resolved",
-        "FileName": "windows10.0-kb5094141-x64_84b6922c6e96f26ad91859d072aeeb6df8e5ab99.msu",
-        "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/06/windows10.0-kb5094141-x64_84b6922c6e96f26ad91859d072aeeb6df8e5ab99.msu",
-        "Digest": "hLaSLG6W8mrZGFnQcq7rbfjlq5k=",
+        "State": "Discovered",
+        "FileName": null,
+        "DownloadUrl": null,
+        "Digest": null,
         "Sha256": "",
         "SizeBytes": null,
         "ApplyOrder": 10,
@@ -439,40 +442,39 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5094141",
-            "https://support.microsoft.com/en-us/topic/windows-server-images-for-june-2026-7d8577d4-1f36-447b-bbbf-60b68a9f4a69"
+            "https://support.microsoft.com/help/5099535"
           ],
-          "VerifiedAt": "2026-07-11T00:00:00+09:00",
-          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "VerifiedAt": "2026-07-15T00:00:00Z",
+          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
           "Notes": [
-            "Standalone monthly SSU for Server 2016."
+            "KB5099542 is required/recommended before KB5099535 for offline Catalog servicing."
           ]
         }
       },
       {
-        "PackageId": "Server2016-KB5094122-x64",
+        "PackageId": "Server2016-KB5099535-x64",
         "Kind": "LCU",
-        "KbId": "KB5094122",
+        "KbId": "KB5099535",
         "ParentKbId": null,
-        "UpdateId": "e0284a61-45d3-4e35-8eca-318e41c41331",
+        "UpdateId": null,
         "Revision": null,
-        "Title": "2026-06 Cumulative Update for Windows Server 2016 for x64-based Systems (KB5094122)",
+        "Title": "2026-07 B release for Server2016 (KB5099535)",
         "Products": [
           "Windows Server 2016"
         ],
         "Classification": "Security Updates",
         "Architecture": "x64",
-        "ReleaseDate": "2026-06-09",
+        "ReleaseDate": "2026-07-14",
         "ReleaseType": "B",
-        "State": "Resolved",
-        "FileName": "windows10.0-kb5094122-x64_36bdd4a783ede6f6174b8fbe1046e8e3a613ad44.msu",
-        "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/06/windows10.0-kb5094122-x64_36bdd4a783ede6f6174b8fbe1046e8e3a613ad44.msu",
-        "Digest": "Nr3Up4Pt5vYXS4++EEbo46YTrUQ=",
+        "State": "Discovered",
+        "FileName": null,
+        "DownloadUrl": null,
+        "Digest": null,
         "Sha256": "",
         "SizeBytes": null,
         "ApplyOrder": 20,
         "InScope": {
-          "build": "14393.9234"
+          "build": "14393.9339"
         },
         "Note": "Target OS build 14393.9234.",
         "Roles": [
@@ -505,13 +507,12 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://support.microsoft.com/en-us/topic/june-9-2026-kb5094122-os-build-14393-9234-e1f06a86-1ecc-497e-a024-6cb3471b57dd",
-            "https://learn.microsoft.com/en-us/windows/release-health/windows-server-release-info"
+            "https://support.microsoft.com/help/5099535"
           ],
-          "VerifiedAt": "2026-07-11T00:00:00+09:00",
-          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "VerifiedAt": "2026-07-15T00:00:00Z",
+          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
           "Notes": [
-            "Target OS build 14393.9234."
+            "Target OS build 14393.9339. Exact Catalog asset is re-resolved at P04."
           ]
         }
       },
@@ -528,7 +529,7 @@
         "Architecture": "x64",
         "ReleaseDate": "2026-05-12",
         "ReleaseType": "B",
-        "State": "Discovered",
+        "State": "Fallback",
         "FileName": null,
         "DownloadUrl": null,
         "Digest": null,
@@ -570,7 +571,8 @@
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
           "Notes": [
-            "Leaf KB candidate when .NET Framework 4.8 is present."
+            "Leaf KB candidate when .NET Framework 4.8 is present.",
+            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
           ]
         }
       },
@@ -590,7 +592,7 @@
         "Architecture": "x64",
         "ReleaseDate": "2026-06-09",
         "ReleaseType": "DynamicUpdate",
-        "State": "Discovered",
+        "State": "Fallback",
         "FileName": null,
         "DownloadUrl": null,
         "Digest": null,
@@ -631,7 +633,8 @@
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
           "Notes": [
-            "Safe OS Dynamic Update for Windows 10 version 1607 and Windows Server 2016."
+            "Safe OS Dynamic Update for Windows 10 version 1607 and Windows Server 2016.",
+            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
           ]
         }
       },
@@ -650,7 +653,7 @@
         "Architecture": "x64",
         "ReleaseDate": "2025-11-11",
         "ReleaseType": "DynamicUpdate",
-        "State": "Discovered",
+        "State": "Fallback",
         "FileName": null,
         "DownloadUrl": null,
         "Digest": null,
@@ -691,7 +694,8 @@
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
           "Notes": [
-            "Latest prior Setup Dynamic Update used by the June 2026 Server image set."
+            "Latest prior Setup Dynamic Update used by the June 2026 Server image set.",
+            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07."
           ]
         }
       }
@@ -713,9 +717,9 @@
       ],
       "ApprovalRequiredForBuild": true
     },
-    "LastVerifiedDate": "2026-07-12T18:00:00+09:00",
-    "LastVerifiedBy": "e2e-correction:r12.02",
-    "PatchTuesdayOfBaseline": "2026-06-09"
+    "LastVerifiedDate": "2026-07-15T00:00:00Z",
+    "LastVerifiedBy": "ChatGPT+official-Microsoft-sources",
+    "PatchTuesdayOfBaseline": "2026-07-14"
   },
   "Pca2023": {
     "Mode": "ConvertByDefault",
