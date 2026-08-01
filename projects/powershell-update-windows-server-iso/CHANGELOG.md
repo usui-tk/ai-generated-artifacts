@@ -22,6 +22,46 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.15-r12.10] - 2026-08-02
+
+Tag: `option-semantics-pwsh7-fix` (continued). Generic-collection
+enumeration stops depending on the PowerShell edition.
+
+### Fixed
+
+- **Stable array materialisation**: `ConvertTo-StableObjectArray`
+  materialises any enumerable (including
+  `System.Collections.Generic.List`) as a plain object array, avoiding
+  engine-specific array-subexpression behaviour between Windows
+  PowerShell 5.1 and PowerShell 7; the P04 fresh-config-line
+  enumeration goes through it, and a test switch deliberately
+  round-trips through a generic list so both editions exercise the
+  same implementation. Script-only change: `data/*` and `schema/*` are
+  byte-identical to r12.06 (measured).
+
+### Distribution note
+
+The r12.10 snapshot is the first in the series to ship its own CI
+workflow files (`.github/workflows/catalog-live.yml`,
+`powershell-regression.yml`) alongside its own regression suite
+(`tests/Invoke-RegressionSuite.ps1` and companions). Per the series
+ruling these are input only and are not committed — workflow changes
+are never taken in-series; the content is logged in the campaign
+observation ledger. The snapshot script also drops the UTF-8 BOM
+(committed verbatim; surfaced by PSA below).
+
+### Changed
+
+- **T40**: release pin advanced to `update-wsi-2026.07.15-r12.10`
+  (tag unchanged).
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/30W/4I**
+on the committed tree — one finding joins the carried debt (1×
+PSA7001: the script lacks the UTF-8 BOM at this revision); committed
+verbatim per the no-fix-forward rule, draining post-series.
+
 ## [update-wsi-2026.07.15-r12.09] - 2026-08-02
 
 Tag: `option-semantics-pwsh7-fix` (the tag advances). The P03/P04

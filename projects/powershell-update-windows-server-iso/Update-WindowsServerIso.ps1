@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Build an updated Windows Server ISO by integrating SSU/LCU/Dynamic Updates
     into the install.wim, boot.wim, and winre.wim, then repackaging the media.
@@ -565,7 +565,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.15-r12.09'
+$Script:ScriptVersion = 'update-wsi-2026.07.15-r12.10'
 $Script:ScriptTag     = 'option-semantics-pwsh7-fix'
 $Script:ScriptHash    = '(unknown)'
 try {
@@ -12194,6 +12194,39 @@ function Resolve-DotNetMonthlySelectorLines {
     return @($lines.ToArray())
 }
 
+function ConvertTo-StableObjectArray {
+    <#
+    .SYNOPSIS
+        Materialize any enumerable as an ordinary PowerShell object array.
+    .DESCRIPTION
+        Avoids engine-specific array-subexpression behaviour around generic
+        collections.  The optional test switch deliberately round-trips the
+        input through Generic.List[object] so the same implementation can be
+        exercised under Windows PowerShell 5.1 and PowerShell 7 in CI.
+    #>
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param(
+        [AllowNull()][object]$InputObject,
+        [switch]$SimulateGenericList
+    )
+
+    $source = $InputObject
+    if ($SimulateGenericList) {
+        $generic = New-Object 'System.Collections.Generic.List[object]'
+        if ($null -ne $InputObject) {
+            foreach ($item in $InputObject) { $generic.Add($item) | Out-Null }
+        }
+        $source = $generic
+    }
+
+    $result = @()
+    if ($null -ne $source) {
+        foreach ($item in $source) { $result += ,$item }
+    }
+    return $result
+}
+
 function Get-PatchRefreshDecision {
     <#
     .SYNOPSIS
@@ -12284,7 +12317,7 @@ function Update-MonthlyAuxiliaryResolvedPatchesAtFetch {
         $isSourcePrereq = $roles -contains 'SourcePrerequisite'
         if ($isSourcePrereq -or $t -in @('LCU','Checkpoint','BridgeLcu')) { $kept += ,$p }
     }
-    foreach ($line in $freshConfigLines) {
+    foreach ($line in (ConvertTo-StableObjectArray -InputObject $freshConfigLines)) {
         $resolvedLine = ConvertTo-ResolvedPatchFromBaselineLine -Line $line
         $kept += ,$resolvedLine
     }
