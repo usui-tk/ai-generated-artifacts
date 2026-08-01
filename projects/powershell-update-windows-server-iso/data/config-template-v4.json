@@ -1,12 +1,12 @@
 {
   "Schema": "4.0",
-  "OsKey": "Server2019",
+  "OsKey": "Server2099",
   "Common": {
-    "Build": 17763,
-    "OsShortName": "WS2019",
+    "Build": 99999,
+    "OsShortName": "WS2099",
     "Edition": "Datacenter",
     "Architecture": "x64",
-    "WimEdition": "Windows Server 2019 Datacenter (Desktop Experience)",
+    "WimEdition": "Windows Server 2099 Datacenter (Desktop Experience)",
     "InstallWimIndex": 4,
     "BootWimIndexes": [
       1,
@@ -20,11 +20,11 @@
     "DefaultLanguage": "en-us",
     "LCUExpandViaMum": false,
     "EnableInstallWimUpdate": true,
-    "BootWimLcuPolicy": "disabled",
+    "BootWimLcuPolicy": "enabled",
     "EnableWinREUpdate": true,
     "UpdateAllInstallWimIndexes": true,
     "WinReDistributionPolicy": "ServiceOnceCopyToAllInstallIndexes",
-    "BootWimFailurePolicy": "UnsupportedByPinnedSourceMedia",
+    "BootWimFailurePolicy": "FailBuild",
     "_VerifiedDate": "2026-07-11T00:00:00+09:00",
     "_VerifiedBy": "research:data-model-v4"
   },
@@ -235,9 +235,9 @@
     "DynamicUpdateSelection": "SameMonthOrLatestPrior",
     "DotNetSelection": "LatestNonPreviewAtOrBeforeBaselineCutoff",
     "CatalogAliases": {
-      "OsUpdate": "Windows Server 2019",
-      "DynamicUpdate": "Windows 10 Version 1809",
-      "BuildFamily": "17763"
+      "OsUpdate": "<catalog OS product alias>",
+      "DynamicUpdate": "<catalog Dynamic Update alias>",
+      "BuildFamily": "99999"
     },
     "SearchProfiles": {
       "LCU": {
@@ -301,45 +301,33 @@
   },
   "PatchBaseline": {
     "Schema": "4.0",
-    "BaselineId": "2026-06-B",
-    "Status": "ResearchCandidate",
+    "BaselineId": "YYYY-MM-B",
+    "Status": "Discovered",
     "ReleaseChannel": "B",
-    "CutoffUtc": "2026-06-18T00:00:00Z",
-    "TargetBuildAfterUpdate": "17763.8880",
+    "CutoffUtc": null,
+    "TargetBuildAfterUpdate": "99999.0",
     "ChecksumAlgorithm": "SHA256",
     "SourcePrerequisites": [
       {
-        "PrerequisiteId": "Server2019-KB5005112-source-floor",
-        "Kind": "SSU",
-        "KbId": "KB5005112",
+        "PrerequisiteId": "Server2099-source-prerequisite",
+        "Kind": "BridgeLCU",
+        "KbId": "KB0000000",
         "Roles": [
           "SourcePrerequisite"
         ],
         "Targets": [
           "Install",
-          "Boot",
-          "WinRE"
+          "Boot"
         ],
         "Condition": {
-          "Mode": "IfPackageAbsent",
+          "Mode": "IfSourceBelowFloor",
+          "MinimumImageBuild": "99999.0",
           "Detection": [
-            "Get-WindowsPackage"
-          ],
-          "RequiredBefore": [
-            "KB5094123"
+            "Get-WindowsPackage",
+            "Get-WindowsImage"
           ]
         },
-        "Asset": {
-          "KbId": "KB5005112",
-          "UpdateId": "c93b3ce0-c637-47c6-9ba7-ca7725eb5a98",
-          "Revision": null,
-          "FileName": "windows10.0-kb5005112-x64_81d09dc6978520e1a6d44b3b15567667f83eba2c.msu",
-          "DownloadUrl": "https://catalog.s.download.windowsupdate.com/d/msdownload/update/software/secu/2021/08/windows10.0-kb5005112-x64_81d09dc6978520e1a6d44b3b15567667f83eba2c.msu",
-          "Digest": "gdCdxpeFIOGm1Es7FVZ2Z/g+uiw=",
-          "Sha256": "",
-          "SizeBytes": null,
-          "State": "ResolvedHashPending"
-        },
+        "Asset": null,
         "State": "Conditional",
         "Evidence": {
           "Levels": [
@@ -347,44 +335,39 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://support.microsoft.com/en-us/topic/june-9-2026-kb5094123-os-build-17763-8880-19adceff-e266-40ec-8a10-df4bb0e320ea",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5005112"
+            "https://support.microsoft.com/<LCU-KB>"
           ],
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
           "Notes": [
-            "Current monthly packages are combined SSU/LCU, but older source media may still require this standalone prerequisite."
+            "Replace with the OS-specific prerequisite rule."
           ]
         }
       }
     ],
     "Lines": [
       {
-        "PackageId": "Server2019-KB5094123-x64",
+        "PackageId": "Server2099-KB0000001-x64",
         "Kind": "LCU",
-        "KbId": "KB5094123",
+        "KbId": "KB0000001",
         "ParentKbId": null,
-        "UpdateId": "786110c1-2c99-4c75-aab1-841c9347d87b",
+        "UpdateId": null,
         "Revision": null,
-        "Title": "2026-06 Cumulative Update for Windows Server 2019 for x64-based Systems (KB5094123)",
-        "Products": [
-          "Windows Server 2019"
-        ],
-        "Classification": "Security Updates",
+        "Title": null,
+        "Products": null,
+        "Classification": null,
         "Architecture": "x64",
-        "ReleaseDate": "2026-06-09",
+        "ReleaseDate": null,
         "ReleaseType": "B",
-        "State": "Resolved",
-        "FileName": "windows10.0-kb5094123-x64_150ef9e518c1e534d2d255a558c4d2bdefe54073.msu",
-        "DownloadUrl": "https://catalog.s.download.windowsupdate.com/d/msdownload/update/software/secu/2026/06/windows10.0-kb5094123-x64_150ef9e518c1e534d2d255a558c4d2bdefe54073.msu",
-        "Digest": "FQ755RjB5TTS0lWlWMTSve/lQHM=",
+        "State": "Discovered",
+        "FileName": null,
+        "DownloadUrl": null,
+        "Digest": null,
         "Sha256": "",
         "SizeBytes": null,
         "ApplyOrder": 20,
-        "InScope": {
-          "build": "17763.8880"
-        },
-        "Note": "The same combined LCU asset is reused as servicing-stack carrier and final LCU.",
+        "InScope": {},
+        "Note": "Populate UpdateId, revision, file identity and SHA-256 before Freeze.",
         "Roles": [
           "ServicingStackCarrier",
           "FinalLCU"
@@ -406,136 +389,6 @@
         },
         "Dependencies": [],
         "Integrity": {
-          "Sha1": {
-            "Encoding": "base64",
-            "Value": "FQ755RjB5TTS0lWlWMTSve/lQHM=",
-            "Hex": "150ef9e518c1e534d2d255a558c4d2bdefe54073"
-          },
-          "Sha256": null,
-          "SizeBytes": null,
-          "AuthenticodeStatus": "NotTested"
-        },
-        "Evidence": {
-          "Levels": [
-            "E1",
-            "E2"
-          ],
-          "SourceUrls": [
-            "https://support.microsoft.com/en-us/topic/june-9-2026-kb5094123-os-build-17763-8880-19adceff-e266-40ec-8a10-df4bb0e320ea",
-            "https://learn.microsoft.com/en-us/windows/release-health/windows-server-release-info"
-          ],
-          "VerifiedAt": "2026-07-11T00:00:00+09:00",
-          "VerifiedBy": "research:ChatGPT-2026-07-11",
-          "Notes": [
-            "The same combined LCU asset is reused as servicing-stack carrier and final LCU."
-          ]
-        }
-      },
-      {
-        "PackageId": "Server2019-KB5087061-x64",
-        "Kind": "DotNet",
-        "KbId": "KB5087061",
-        "ParentKbId": "KB5088864",
-        "UpdateId": "a57cf2ba-286e-46dc-b15a-a0fc3ec5dbe2",
-        "Revision": null,
-        "Title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.7.2 for Windows Server 2019 for x64 (KB5087061)",
-        "Products": [
-          "Windows Server 2019"
-        ],
-        "Classification": null,
-        "Architecture": "x64",
-        "ReleaseDate": "2026-05-12",
-        "ReleaseType": "B",
-        "State": "Resolved",
-        "FileName": "windows10.0-kb5087061-x64_25b4ce6e32862a6288609b4471ff1cd8e07d8e3f.msu",
-        "DownloadUrl": "https://catalog.s.download.windowsupdate.com/d/msdownload/update/software/secu/2026/04/windows10.0-kb5087061-x64_25b4ce6e32862a6288609b4471ff1cd8e07d8e3f.msu",
-        "Digest": "JbTObjKGKmKIYJtEcf8c2OB9jj8=",
-        "Sha256": "",
-        "SizeBytes": null,
-        "ApplyOrder": 60,
-        "InScope": {},
-        "Note": "Leaf asset under the May 2026 .NET rollup.",
-        "Roles": [
-          "DotNetLeaf"
-        ],
-        "TargetsByRole": {
-          "DotNetLeaf": [
-            "Install"
-          ]
-        },
-        "RuntimeSelector": {
-          "NetFx3": "PresentOrEnabled",
-          "NetFx4Release": "4.7.2"
-        },
-        "Applicability": {
-          "Mode": "IfRuntimeDetectedPerInstallIndex"
-        },
-        "Dependencies": [],
-        "Integrity": {
-          "Sha1": {
-            "Encoding": "base64",
-            "Value": "JbTObjKGKmKIYJtEcf8c2OB9jj8=",
-            "Hex": "25b4ce6e32862a6288609b4471ff1cd8e07d8e3f"
-          },
-          "Sha256": null,
-          "SizeBytes": null,
-          "AuthenticodeStatus": "NotTested"
-        },
-        "Evidence": {
-          "Levels": [
-            "E1",
-            "E2"
-          ],
-          "SourceUrls": [
-            "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/05-12-may-cumulative-update",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5087061"
-          ],
-          "VerifiedAt": "2026-07-11T00:00:00+09:00",
-          "VerifiedBy": "research:ChatGPT-2026-07-11",
-          "Notes": [
-            "Leaf asset under the May 2026 .NET rollup."
-          ]
-        }
-      },
-      {
-        "PackageId": "Server2019-KB5087066-x64",
-        "Kind": "DotNet",
-        "KbId": "KB5087066",
-        "ParentKbId": null,
-        "UpdateId": null,
-        "Revision": null,
-        "Title": null,
-        "Products": null,
-        "Classification": null,
-        "Architecture": "x64",
-        "ReleaseDate": "2026-05-12",
-        "ReleaseType": "B",
-        "State": "Discovered",
-        "FileName": null,
-        "DownloadUrl": null,
-        "Digest": null,
-        "Sha256": "",
-        "SizeBytes": null,
-        "ApplyOrder": 60,
-        "InScope": {},
-        "Note": "Alternative leaf asset when .NET Framework 4.8 is detected.",
-        "Roles": [
-          "DotNetLeaf"
-        ],
-        "TargetsByRole": {
-          "DotNetLeaf": [
-            "Install"
-          ]
-        },
-        "RuntimeSelector": {
-          "NetFx3": "PresentOrEnabled",
-          "NetFx4Release": "4.8"
-        },
-        "Applicability": {
-          "Mode": "IfRuntimeDetectedPerInstallIndex"
-        },
-        "Dependencies": [],
-        "Integrity": {
           "Sha1": null,
           "Sha256": null,
           "SizeBytes": null,
@@ -547,31 +400,29 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/05-12-may-cumulative-update",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5087066"
+            "https://learn.microsoft.com/en-us/windows/release-health/windows-server-release-info",
+            "https://support.microsoft.com/<LCU-KB>",
+            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB0000001"
           ],
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
           "Notes": [
-            "Alternative leaf asset when .NET Framework 4.8 is detected."
+            "Populate UpdateId, revision, file identity and SHA-256 before Freeze."
           ]
         }
       },
       {
-        "PackageId": "Server2019-KB5094153-x64",
+        "PackageId": "Server2099-KB0000002-x64",
         "Kind": "SafeOSDU",
-        "KbId": "KB5094153",
+        "KbId": "KB0000002",
         "ParentKbId": null,
         "UpdateId": null,
         "Revision": null,
         "Title": null,
-        "Products": [
-          "Windows 10 and later Dynamic Update",
-          "Windows Safe OS Dynamic Update"
-        ],
-        "Classification": "Critical Updates",
+        "Products": null,
+        "Classification": null,
         "Architecture": "x64",
-        "ReleaseDate": "2026-06-09",
+        "ReleaseDate": null,
         "ReleaseType": "DynamicUpdate",
         "State": "Discovered",
         "FileName": null,
@@ -581,7 +432,7 @@
         "SizeBytes": null,
         "ApplyOrder": 40,
         "InScope": {},
-        "Note": "Safe OS Dynamic Update for Windows 10 version 1809 and Windows Server 2019.",
+        "Note": null,
         "Roles": [
           "SafeOSDU"
         ],
@@ -607,31 +458,25 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://support.microsoft.com/en-us/topic/kb5094153-safe-os-dynamic-update-for-windows-10-version-1809-and-windows-server-2019-june-9-2026-e5e98b51-edd2-4417-ada4-4030e18de455",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5094153",
-            "https://support.microsoft.com/en-us/topic/windows-server-images-for-june-2026-7d8577d4-1f36-447b-bbbf-60b68a9f4a69"
+            "https://support.microsoft.com/<SafeOS-DU-KB>"
           ],
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
-          "Notes": [
-            "Safe OS Dynamic Update for Windows 10 version 1809 and Windows Server 2019."
-          ]
+          "Notes": []
         }
       },
       {
-        "PackageId": "Server2019-KB5068795-x64",
+        "PackageId": "Server2099-KB0000003-x64",
         "Kind": "SetupDU",
-        "KbId": "KB5068795",
+        "KbId": "KB0000003",
         "ParentKbId": null,
         "UpdateId": null,
         "Revision": null,
         "Title": null,
-        "Products": [
-          "Windows 10 and later Dynamic Update"
-        ],
-        "Classification": "Critical Updates",
+        "Products": null,
+        "Classification": null,
         "Architecture": "x64",
-        "ReleaseDate": "2025-11-11",
+        "ReleaseDate": null,
         "ReleaseType": "DynamicUpdate",
         "State": "Discovered",
         "FileName": null,
@@ -641,7 +486,7 @@
         "SizeBytes": null,
         "ApplyOrder": 80,
         "InScope": {},
-        "Note": "Latest prior Setup Dynamic Update used by the June 2026 Server image set.",
+        "Note": null,
         "Roles": [
           "SetupDU"
         ],
@@ -652,7 +497,7 @@
         },
         "RuntimeSelector": null,
         "Applicability": {
-          "Mode": "LatestPriorForBuildFamily"
+          "Mode": "SameMonthOrLatestPrior"
         },
         "Dependencies": [],
         "Integrity": {
@@ -667,15 +512,67 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://support.microsoft.com/en-us/topic/kb5068795-setup-dynamic-update-for-windows-10-version-1809-and-windows-server-2019-november-11-2025-feead7c8-6d0e-486f-8848-1e7042d601cb",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5068795",
-            "https://support.microsoft.com/en-us/topic/windows-server-images-for-june-2026-7d8577d4-1f36-447b-bbbf-60b68a9f4a69"
+            "https://support.microsoft.com/<Setup-DU-KB>"
           ],
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
-          "Notes": [
-            "Latest prior Setup Dynamic Update used by the June 2026 Server image set."
+          "Notes": []
+        }
+      },
+      {
+        "PackageId": "Server2099-KB0000004-x64",
+        "Kind": "DotNet",
+        "KbId": "KB0000004",
+        "ParentKbId": null,
+        "UpdateId": null,
+        "Revision": null,
+        "Title": null,
+        "Products": null,
+        "Classification": null,
+        "Architecture": "x64",
+        "ReleaseDate": null,
+        "ReleaseType": "B",
+        "State": "Discovered",
+        "FileName": null,
+        "DownloadUrl": null,
+        "Digest": null,
+        "Sha256": "",
+        "SizeBytes": null,
+        "ApplyOrder": 60,
+        "InScope": {},
+        "Note": null,
+        "Roles": [
+          "DotNetLeaf"
+        ],
+        "TargetsByRole": {
+          "DotNetLeaf": [
+            "Install"
           ]
+        },
+        "RuntimeSelector": {
+          "NetFx4Release": "<detected runtime>"
+        },
+        "Applicability": {
+          "Mode": "IfRuntimeDetectedPerInstallIndex"
+        },
+        "Dependencies": [],
+        "Integrity": {
+          "Sha1": null,
+          "Sha256": null,
+          "SizeBytes": null,
+          "AuthenticodeStatus": "NotTested"
+        },
+        "Evidence": {
+          "Levels": [
+            "E1",
+            "E2"
+          ],
+          "SourceUrls": [
+            "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/release-notes"
+          ],
+          "VerifiedAt": "2026-07-11T00:00:00+09:00",
+          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "Notes": []
         }
       }
     ],
@@ -703,12 +600,13 @@
   "Pca2023": {
     "Mode": "ConvertByDefault",
     "RequiredByDefault": true,
-    "RequiredUpdateLevelKb": "2024-4B or later",
-    "RequiredUpdateLevelMinDate": "2024-04-09",
+    "RequiredUpdateLevelKb": "2025-2B or later",
+    "RequiredUpdateLevelMinDate": "2025-02-11",
     "NotesSource": [
-      "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f"
+      "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f",
+      "https://github.com/microsoft/secureboot_objects/blob/main/scripts/windows/Make2023BootableMedia.ps1"
     ],
-    "Notes": "Microsoft's PCA2023 media conversion workflow supports Server 2019."
+    "Notes": "Use readiness checks for required EFI_EX files before invoking the Microsoft conversion workflow."
   },
   "AutoRefreshPolicy": {
     "Mode": "OnNewPatchTuesday",
@@ -744,30 +642,13 @@
     "en-us": {
       "DisplayName": "English (United States)",
       "Iso": {
-        "Url": "https://software-static.download.prss.microsoft.com/dbazure/988969d5-f34g-4e03-ac9d-1f9786c66749/17763.3650.221105-1748.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso",
+        "Url": "<official ISO URL>",
         "Sha256": "",
         "State": "UrlResolvedHashPending",
-        "_VerifiedDate": "2026-05-26",
-        "_VerifiedBy": "legacy:v3"
+        "_VerifiedDate": null,
+        "_VerifiedBy": null
       },
-      "VolumeLabelPrefix": "WS2019EN",
-      "LanguageSpecificPatches": {
-        "LanguagePacks": [],
-        "LxpUpdates": [],
-        "DotNetLanguagePacks": [],
-        "SelectionPolicy": "ExplicitOnly"
-      }
-    },
-    "ja-jp": {
-      "DisplayName": "Japanese",
-      "Iso": {
-        "Url": "https://software-static.download.prss.microsoft.com/dbazure/988969d5-f34g-4e03-ac9d-1f9786c66749/17763.3650.221105-1748.rs5_release_svc_refresh_SERVER_EVAL_x64FRE_ja-jp.iso",
-        "Sha256": "",
-        "State": "UrlResolvedHashPending",
-        "_VerifiedDate": "2026-05-26",
-        "_VerifiedBy": "legacy:v3"
-      },
-      "VolumeLabelPrefix": "WS2019JA",
+      "VolumeLabelPrefix": "WS2099EN",
       "LanguageSpecificPatches": {
         "LanguagePacks": [],
         "LxpUpdates": [],
@@ -779,7 +660,7 @@
   "_meta": {
     "scriptVersion": "proposed-v4-model",
     "generatedAt": "2026-07-11T00:00:00Z",
-    "isTemplate": false,
+    "isTemplate": true,
     "migrationFromSchema": "3.0",
     "compatibilityNote": "PatchModel and legacy flat package fields are retained for staged migration."
   },

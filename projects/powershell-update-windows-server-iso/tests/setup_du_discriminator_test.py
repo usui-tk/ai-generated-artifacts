@@ -1,6 +1,20 @@
 #!/usr/bin/env python3
 """T30: Setup-DU discriminator unit test (offline, real captured rows).
 
+STATUS AT r12.00: **SUPERSEDED-PENDING (declared failing)**. r12.00's
+selector returns three candidate rows where this contract expects one
+(the server 24H2 Setup DU, a Windows 11 client 24H2 row, and a 2025-11
+stale row). This is not adjudicated as a defect: Catalog title-string
+heuristics are a known fragility surface, and the r12 series tightens
+exactly this through `DiscoveryPolicy.SearchProfiles` (`QueryStrategy` /
+`RejectTitleContains` / `ClassificationMustBe`), arriving progressively
+(scoped product identity at r12.19; pinned identity at r12.51-r12.53).
+The scheduled replacement contract is "the resolved rows conform to the
+config's declared SearchProfiles for that Kind", assertable once the
+discovery policy is honoured end to end. Re-examine at the r12.19 and
+r12.51 merge cards. Until then this test is the declared red on the
+integration branch (branch rule: red is allowed, but only declared red).
+
 FACT (reference architecture memo, resolution-recipes section; re-verified
 against the live Microsoft Update Catalog on 2026-07-02): a Setup Dynamic
 Update row's Products column carries ONLY ``Windows 10 and later Dynamic

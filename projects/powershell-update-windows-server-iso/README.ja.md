@@ -134,11 +134,16 @@ projects/powershell-update-windows-server-iso/
 ├── PSScriptAnalyzerSettings.psd1     # PSScriptAnalyzer プロジェクト設定
 ├── data/                             # 永続的な入力データ（コミット対象、flat 配置）
 │   ├── config-Server{2016,2019,2022,2025}.json
+│   ├── config-template-v4.json       # OS 追加用の Schema 4.0 テンプレート
 │   ├── raw-release-info.md (+ .meta.json)
 │   ├── raw-dotnet-cu.json
 │   ├── cache-release-info.json
 │   └── cache-dotnet-cu.json
-├── tests/                            # 自己検証スイート（疎番号 T1-T31 + ゲート）
+├── schema/                           # 機械可読の config 契約
+│   ├── config.schema.json            # Config Schema v3.0（互換保持）
+│   ├── config.schema.v4.json         # Config Schema v4.0（正準・r12.00）
+│   └── config-seed.schema.json       # SEED 射影（SPEC B.14.2）
+├── tests/                            # 自己検証スイート（疎番号 T1-T46 + ゲート）
 └── docs/history/                     # サイクル別の調査レポート
 ```
 
@@ -505,9 +510,11 @@ python3 ../../quality-tools/powershell-static-analyzer/psa.py Update-WindowsServ
 
 ## 自己検証ツール
 
-`tests/` サブディレクトリには 17 個の Python 自己検証ツール（疎番号
-T1 – T31。退役したツールの番号は再利用しません）に加え、
-フォーマット／スキーマ／シードの 3 ゲートが同梱されています。これらは
+`tests/` サブディレクトリには 16 個の Python 自己検証ツール（疎番号
+T1 – T46。退役したツールの番号は再利用しません）に加え、
+フォーマット／スキーマ／シードの 3 ゲートが同梱されています。r12.00
+以降は、期待値をハードコードせず検証対象 config の宣言から読み取る
+declaration-derived 契約 6 本（T41 – T46）を含みます。これらは
 スクリプトの外部依存をプローブし、PowerShell 関数をユニットテストし、
 さらに SPEC §B.23 の JSON canonical 形式を強制します。オフラインツールは
 Python 標準ライブラリのみを利用するため、`pip install` は不要です。

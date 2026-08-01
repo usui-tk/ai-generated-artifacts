@@ -22,6 +22,168 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.11-r12.00] - 2026-08-01
+
+Tag: `schema-v4-role-planner`. First commit of the r12-series merge
+campaign on the integration branch
+`integration/powershell-update-windows-server-iso/r12-series` (56
+commits total; the history itself is the deliverable). The script,
+`data/*` and `schema/*` are committed **verbatim** from the delivered
+r12.00 snapshot (14,861 lines; staged-blob SHA-256 verified identical
+to the snapshot source): Schema 4.0 lands whole — the declared
+servicing-policy architecture that every later revision refines. The
+repository contract set is re-founded on the terminal-referenced
+convergence model: contracts are authored once against the series
+terminal and evaluated per revision; a contract whose anchor does not
+yet exist at a revision is a recorded gap (`NOT-YET`), not a failure.
+
+### Added
+
+- **Config Schema v4.0** (`schema/config.schema.v4.json`, JSON Schema
+  draft 2020-12) and `data/config-template-v4.json`. All four
+  `data/config-Server*.json` move to `Schema: "4.0"` and gain the
+  declared policy surfaces: `ServicingModel` (canonical servicing
+  model; `ApplyPlans` declares the apply sequence as data, replacing
+  the in-code apply map), `DiscoveryPolicy` (live-Catalog discovery:
+  `CatalogAliases`, per-Kind `SearchProfiles`, release-channel and
+  preview policy), `ValidationPolicy` (what must be proven before
+  freeze/approval), `Compatibility` (the config's own migration map:
+  `LegacyFieldsRetained` / `CanonicalV4Fields`), and per-Line `Roles`,
+  `TargetsByRole`, `Applicability`, `RuntimeSelector`, `Integrity`,
+  `State`, `Evidence`, `ParentKbId`. SPEC §B.4.0 is the normative
+  description.
+- **Six declaration-derived contracts (T41–T46)** — authored once
+  against the series terminal, expected values read from the config
+  under test, never hardcoded:
+  T41 `apply_plan_conformance_test.py` (ApplyPlans + TargetsByRole),
+  T42 `servicing_model_declaration_test.py` (SourcePrerequisites,
+  BootWimUpdateModel, ValidationPolicy),
+  T43 `line_integrity_declaration_test.py` (Lines[].Integrity + Roles),
+  T44 `compatibility_declaration_test.py` (legacy/canonical
+  meta-contract: a test asserting a `LegacyFieldsRetained` field is by
+  definition asserting the superseded model),
+  T45 `servicing_contract_baseline_test.py` (NOT-YET at r12.00: its
+  anchor `data/servicing-contract-baselines.json` is introduced at
+  r12.44),
+  T46 `discovery_policy_declaration_test.py` (CatalogAliases +
+  SearchProfiles; supersedes T28, with T30's replacement scheduled).
+- **SPEC §B.4.0** (Config Schema v4.0 — declared servicing policy) and
+  **SPEC §B.15.4** (contract retirements at r12.00: per retired
+  contract, what it asserted and why that reading of Microsoft's
+  servicing model was wrong).
+
+### Changed
+
+- **Config schema gate** (`config_schema_test.py`): schema selection is
+  now **declaration-based** — each config's top-level `Schema` field
+  selects `config.schema.json` (`"3.0"`) or `config.schema.v4.json`
+  (`"4.0"`); an unknown value fails loudly. The stdlib-only validator
+  gains the five 2020-12 keywords the v4 schema uses (`#/$defs/...`
+  refs, `oneOf`, `pattern`, `minItems`, `minimum`), each covered by
+  self-tests in both directions.
+- **T32 `checkpoint_placement_test.py`** (partial retirement): the
+  `PatchModel` Forbid-axis assertion is retired (see Removed) and
+  replaced by a retirement guard asserting the Forbid axis stays
+  **absent** from `Test-PatchModelConsistency`, plus three new rows
+  pinning the r12.00 State-driven integrity requirement (a Line at
+  state `Frozen`+ must carry a SHA-256; a `LegacyResolved` Line must
+  carry at least one integrity key). The landing-layout and routing
+  rows are unchanged.
+- **T29 `patch_integrity_digest_test.py`** (replaced wiring guard): the
+  static pins on direct flat-field seeding (`$p.Digest` / `$p.Sha256`)
+  are replaced by single-accessor pins — all baseline hash reads go
+  through `Get-BaselineHashValue -Line ... -Algorithm Sha1|Sha256`,
+  which serves the canonical `Integrity.<Alg>.Value` node and guards
+  the flat `Digest`/`Sha256` fields as the retained-legacy path; a
+  regression pin rejects any resurfaced direct-field seeding. The
+  format-boundary rows are unchanged; the data-side declaration is T43.
+- **T40 `setup_binaries_sync_test.py`**: release pin advanced to
+  `update-wsi-2026.07.11-r12.00` / `schema-v4-role-planner` (recurs at
+  every merge).
+- **T30 `setup_du_discriminator_test.py`** → **SUPERSEDED-PENDING (the
+  declared red on the integration branch)**: r12.00's selector returns
+  three candidate rows where the contract expects one. Not adjudicated
+  as a defect — Catalog title-string heuristics are a known fragility
+  surface and the series tightens exactly this via
+  `DiscoveryPolicy.SearchProfiles`, progressively (scoped product
+  identity at r12.19; pinned identity at r12.51–53). The replacement
+  contract ("resolved rows conform to the declared SearchProfiles")
+  becomes assertable once the policy is honoured end to end; re-examine
+  at the r12.19 and r12.51 merge cards.
+- **SPEC §B.4** heading and intro (v4.0 current, v3.0 retained;
+  compatibility note on §B.4.1–§B.4.5) and **§B.15** (the Require/Forbid
+  matrix documented as **superseded** with Microsoft citations; kept as
+  the historical record).
+- **TESTING.md / tests/README.md**: contract inventory updated for the
+  retirements, the T41–T46 additions, and the revised gates.
+
+### Removed
+
+Eight contracts retired. Per the series rule, no test is deleted
+without a record of what it asserted and why that reading of
+Microsoft's servicing model was wrong; SPEC §B.15.4 carries the full
+records — summarised here:
+
+- **T28 `setup_du_forbid_test.py`** — asserted Setup DU exists only for
+  the uup-checkpoint OS and that 2016/2019/2022 resolve the empty
+  no-line marker. Wrong: Microsoft publishes Setup DU per servicing
+  branch; the live Catalog resolves KB5068794 / KB5068795 / KB5079518
+  for 2016 / 2019 / 2022. A point-in-time absence of rows had been
+  generalised into a publishing rule. Successor: T46 (+ live-network
+  behavioural half, scheduled).
+- **T23 `config_required_ssu_downloadurl_test.py`** — asserted every
+  SSU line carries its own `DownloadUrl` and a per-OS
+  `PatchModel` ⇔ SSU-presence consistency. Wrong: an SSU delivered as
+  a child of a combined parent (`ParentKbId`) has no standalone URL and
+  is resolvable through its parent; under live discovery a committed
+  URL is a staleness hazard, not a guarantee. Successor: T43.
+- **T27 `catalog_patchset_builder_test.py`** — asserted the builder
+  reproduces an in-code apply map keyed by `PatchModel`. Wrong: the
+  apply sequence is a property of the servicing model, expressible as
+  data — `ServicingModel.ApplyPlans` — which the builder must conform
+  to rather than restate; the earlier fail-closed rows had encoded
+  fixture staleness as designed behaviour. Successor: T41.
+- **T31 `lcu_target_verify_test.py`** — asserted Server 2016 verifies
+  post-update state by KB-id membership while other OSes verify by
+  measured build. Wrong: the fork mistook an implementation workaround
+  for a Microsoft-side distinction; 2016 joins the unified
+  `RollupFixAndMeasuredBuild` evidence mode (measured at r12.46).
+  Successor: T42/T43.
+- **T32 (Forbid rows only)** — the `PatchModel` Forbid axis encoded
+  per-generation publishing assumptions the Catalog disproves; the
+  runtime keeps Require + the State-driven integrity rule. The file
+  survives with the routing rows and the new absence guard.
+- **T33 `bridge_lcu_contract_test.py`** — asserted a standalone
+  `BridgeLcu` block and "no other OS carries a bridge". Wrong: the
+  bridge is one instance of the uniform source-prerequisite fact
+  (`SourcePrerequisites[]` + `Condition.Mode`); Server 2016 carries a
+  legacy prerequisite under the same structure, falsifying the scope
+  pin. Successor: T42.
+- **T34 `bootwim_policy_test.py`** — asserted a per-OS
+  `BootWimLcuPolicy` matrix (enabled/disabled/tolerate). Wrong twice:
+  the stance is a validation policy, not a per-OS capability
+  (`ValidationPolicy.FailOnBootWimServicingFailure`, every OS
+  `enabled` from r12.04); and boot.wim cannot be LCU-serviced at all
+  (WinPE rejects the `.msu` with `0x80070032`; the extracted CAB fails
+  `0x8007371b`) — a per-OS policy matrix over a structurally
+  impossible operation encoded a distinction that does not exist.
+  Successor: T42.
+- **T37 `per_os_evidence_test.py`** — asserted four forked per-OS
+  evidence resolvers and hardcoded 2024-4B build floors. Wrong: the
+  floors are per-prerequisite facts of Microsoft's servicing timeline,
+  declared in `SourcePrerequisites[].Condition`; one uniform declared
+  structure now expresses what four hand-written branches used to.
+  Successor: T42 + the declared `Detection` list.
+
+### Gate state (measured on the branch, not assumed)
+
+Offline suite 25/26 PASS with T30 the **declared** red (branch rule:
+red is allowed, but only declared red). PSA on the committed tree:
+0 errors / 14 warnings / 0 info (the raw-LF snapshot sweep additionally
+shows the one-off PSA7002 line-ending artefact; committed form is CRLF
+via `.gitattributes` and does not carry it). PSA debt is declared per
+revision and drains in the post-series conformance release.
+
 ### Fixed (2026-07-14 — docs only; no script change)
 
 - Repaired the pre-migration analyzer path `../../python/powershell-static-analyzer/psa.py`

@@ -43,14 +43,16 @@
 .DESCRIPTION_PHASES
     Phases (P01..P13):
       P01 : Initialize        (Setup ) PowerShell env, admin, ADK, disk, Hyper-V
-      P02 : ResolveInputs     (Setup ) ISO/patch source resolution, Config JSON
+      P02 : ResolveInputs     (Setup ) ISO/patch source resolution, Schema 3/4
+                                       Config JSON, role-based apply plan
       P04 : FetchAssets       (Fetch ) ISO + patch downloads with hash verify
       P05 : ExpandIso         (Plan  ) Mount source ISO, copy to workspace,
                                        enumerate WIM indexes
-      P07 : PatchInstallWim   (Build ) For each install.wim index: SSU then LCU
-                                       then .NET, then DISM cleanup
-      P08 : PatchBootWim      (Build ) boot.wim (PE + Setup) and winre.wim
-      P09 : AssembleIso       (Build ) Dynamic Update Setup overlay,
+      P07 : PatchInstallWim   (Build ) Source prerequisite / SSU carrier,
+                                       final LCU, cleanup, then .NET per index
+      P08 : PatchBootWim      (Build ) boot.wim plus one serviced WinRE copied
+                                       to every selected install.wim index
+      P09 : AssembleIso       (Build ) Setup Dynamic Update overlay,
                                        Export-WindowsImage, oscdimg ISO build
       P11 : StaticVerify      (Verify) Mount output ISO, confirm KB packages
                                        are present
@@ -526,8 +528,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.11-r11.68'
-$Script:ScriptTag     = 'setup-binaries-sync'
+$Script:ScriptVersion = 'update-wsi-2026.07.11-r12.00'
+$Script:ScriptTag     = 'schema-v4-role-planner'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -638,8 +640,8 @@ $Script:OsConfigFieldGroups = @(
 # target. Unknown Types are treated as Install-only with a warning.
 #
 # Microsoft public guidance behind this mapping:
-#   - SSU             : required on every serviced WIM
-#   - LCU             : Install + Boot (WinRE uses the SafeOS DU instead)
+#   - SSU / servicing-stack carrier: required on every serviced WIM
+#   - LCU             : role-dependent. FinalLCU -> Install/Boot; a combined LCU may also be ServicingStackCarrier -> Install/Boot/WinRE
 #   - DotNet          : Install only (.NET 4.x runtime KB lives in install.wim)
 #   - SafeOSDU        : WinRE only (WinRE is the "Safe OS")
 #   - SetupDU         : Setup binaries (sources overlay; not WIM-mounted)
@@ -2798,28 +2800,17 @@ function Assert-WorkspacePreflight {
 function Get-ConfigProfile {
     <#
     .SYNOPSIS
-        Load the OS profile JSON (Config Schema v3.0) for the given OsKey
-        and resolve the language sub-profile for OsLang.
+        Load an OS profile JSON (Config Schema v3.0 or v4.0) and resolve
+        the requested language sub-profile.
     .DESCRIPTION
-        v3.0 layout (the Catalog data-source generation): top-level keys
-        are Schema, OsKey, PatchModel, Common, PatchBaseline, Pca2023,
-        AutoRefreshPolicy, LanguageSpecific.<lang>; resolved patches
-        live in PatchBaseline.Lines[] (SPEC B.4.3).
+        Schema 4.0 is the canonical model. It separates the monthly
+        servicing style, source-media prerequisites, package assets and
+        servicing roles. Schema 3.0 remains accepted as a compatibility
+        input so existing baselines can be migrated incrementally.
 
-        This loader accepts Schema "3.0" ONLY and returns a flat
-        pscustomobject for backward-compatible access patterns used by
-        downstream phases: properties from Common are promoted to the
-        top level of the returned object, PatchBaseline / Pca2023 (if
-        present) / AutoRefreshPolicy are passed through verbatim, the
-        resolved language sub-profile is attached as 'Language', and
-        the entire LanguageSpecific dictionary is attached as
-        'LanguageSpecific' for Action workers (RefreshAllBaselines)
-        that need cross-language access.
-
-        Legacy schemas (v1.x / v2.x) are NOT supported; the loader
-        throws immediately if the Schema field is missing or
-        unrecognised. (The docstring long claimed "2.0 or 2.1" while
-        the code accepted only 3.0 -- v2-era residue swept at r11.47.)
+        Common fields are promoted to the returned object to preserve the
+        existing single-script phase contract. Schema-4-only sections are
+        attached verbatim and are $null for a v3 profile.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -2840,73 +2831,77 @@ function Get-ConfigProfile {
     $raw = Get-Content -LiteralPath $cfgFile -Raw -Encoding UTF8
     $json = $raw | ConvertFrom-CanonicalJson
 
-    # Schema validation (v3.0 only; legacy schemas rejected)
-    $acceptedSchemas = @('3.0')
-    if (-not $json.Schema -or ($acceptedSchemas -notcontains $json.Schema)) {
-        throw ('Config {0} has Schema="{1}"; expected one of: {2}. Legacy schemas are not supported.' -f $cfgFile, $json.Schema, ($acceptedSchemas -join ', '))
+    $acceptedSchemas = @('3.0', '4.0')
+    if (-not $json.Schema -or ($acceptedSchemas -notcontains [string]$json.Schema)) {
+        throw ('Config {0} has Schema="{1}"; expected one of: {2}.' -f $cfgFile, $json.Schema, ($acceptedSchemas -join ', '))
     }
     if (-not $json.Common) {
         throw ('Config {0} has no Common section.' -f $cfgFile)
     }
+    if (-not $json.PatchBaseline) {
+        throw ('Config {0} has no PatchBaseline section.' -f $cfgFile)
+    }
     if (-not $json.LanguageSpecific) {
         throw ('Config {0} has no LanguageSpecific section.' -f $cfgFile)
     }
-    # v3.0 REQUIRES the Pca2023 block (the SecureBoot feature,
-    # SPEC.md B.10/B.18 lineage); there is no soft-warning path --
-    # the v2-era migration grace described here previously no longer
-    # exists in the code.
     if (-not $json.Pca2023) {
-        throw ('Config {0} declares Schema="3.0" but has no Pca2023 block. v3.0 requires Pca2023; see SPEC.md B.10.' -f $cfgFile)
+        throw ('Config {0} has no Pca2023 block.' -f $cfgFile)
     }
+    if ([string]$json.Schema -eq '4.0' -and -not $json.ServicingModel) {
+        throw ('Config {0} declares Schema="4.0" but has no ServicingModel block.' -f $cfgFile)
+    }
+
     $langNode = $json.LanguageSpecific.$OsLang
     if ($null -eq $langNode) {
         throw ('Config {0} has no LanguageSpecific entry for "{1}".' -f $cfgFile, $OsLang)
     }
 
-    # Build a flat profile object: promote Common fields to top-level
-    # so legacy access patterns like $profile.Build still work, then
-    # attach the resolved language sub-profile as 'Language' and the
-    # full LanguageSpecific dictionary for cross-lang admin access.
+    $bootPolicy = Resolve-BootWimLcuPolicyValue -RawValue $json.Common.BootWimLcuPolicy
+    $installIndexes = $null
+    if ($json.Common.PSObject.Properties['InstallWimIndexes']) {
+        $installIndexes = $json.Common.InstallWimIndexes
+    }
+
     $merged = [pscustomobject]@{
-        Schema                 = $json.Schema
-        OsKey                  = $json.OsKey
-        PatchModel             = $json.PatchModel
-        Build                  = $json.Common.Build
-        OsShortName            = $json.Common.OsShortName
-        Edition                = $json.Common.Edition
-        Architecture           = $json.Common.Architecture
-        WimEdition             = $json.Common.WimEdition
-        InstallWimIndex        = $json.Common.InstallWimIndex
-        BootWimIndexes         = $json.Common.BootWimIndexes
-        WinReWimPath           = $json.Common.WinReWimPath
-        SupportedLanguages     = $json.Common.SupportedLanguages
-        DefaultLanguage        = $json.Common.DefaultLanguage
-        LCUExpandViaMum        = $json.Common.LCUExpandViaMum
-        # Phase build-enable flags: promoted from Common so the build
-        # phases (P07 install.wim patching, P08 boot.wim patching) can
-        # access them as $Script:OsProfile.<flag> directly. Documented
-        # in SPEC.md B.4. These flags must be promoted explicitly here
-        # because PowerShell does not auto-flatten nested PSCustomObject
-        # properties; without promotion, callers reading the top-level
-        # property receive $null and the corresponding phase becomes
-        # unconditionally skipped regardless of profile content.
-        EnableInstallWimUpdate = $json.Common.EnableInstallWimUpdate
-        # Per-OS boot.wim LCU policy (tri-state; the retired boolean
-        # EnableBootWimUpdate had no per-media expressiveness).
-        # Validated + defaulted ('disabled') by the pure helper so
-        # P08 reads a trustworthy value.
-        BootWimLcuPolicy       = (Resolve-BootWimLcuPolicyValue -RawValue $json.Common.BootWimLcuPolicy)
-        EnableWinREUpdate      = $json.Common.EnableWinREUpdate
-        Common                 = $json.Common
-        PatchBaseline          = $json.PatchBaseline
-        AutoRefreshPolicy      = $json.AutoRefreshPolicy
-        LanguageSpecific       = $json.LanguageSpecific
-        Language               = $langNode
-        LanguageKey            = $OsLang
-        # Raw is exposed for admin actions (RefreshAllBaselines) which
-        # need to mutate-and-persist the on-disk JSON shape.
-        Raw                    = $json
-        ConfigFilePath         = $cfgFile
+        Schema                    = [string]$json.Schema
+        OsKey                     = $json.OsKey
+        PatchModel                = $json.PatchModel
+        Build                     = $json.Common.Build
+        OsShortName               = $json.Common.OsShortName
+        Edition                   = $json.Common.Edition
+        Architecture              = $json.Common.Architecture
+        WimEdition                = $json.Common.WimEdition
+        InstallWimIndex           = $json.Common.InstallWimIndex
+        InstallWimIndexes         = $installIndexes
+        BootWimIndexes            = $json.Common.BootWimIndexes
+        WinReWimPath              = $json.Common.WinReWimPath
+        SupportedLanguages        = $json.Common.SupportedLanguages
+        DefaultLanguage           = $json.Common.DefaultLanguage
+        LCUExpandViaMum           = $json.Common.LCUExpandViaMum
+        EnableInstallWimUpdate    = $json.Common.EnableInstallWimUpdate
+        BootWimLcuPolicy          = $bootPolicy
+        EnableWinREUpdate         = $json.Common.EnableWinREUpdate
+        UpdateAllInstallWimIndexes = $(if ($json.Common.PSObject.Properties['UpdateAllInstallWimIndexes']) { [bool]$json.Common.UpdateAllInstallWimIndexes } else { $true })
+        WinReDistributionPolicy   = $(if ($json.Common.PSObject.Properties['WinReDistributionPolicy']) { [string]$json.Common.WinReDistributionPolicy } else { 'ServiceOnceCopyToAllInstallIndexes' })
+        BootWimFailurePolicy      = $(if ($json.Common.PSObject.Properties['BootWimFailurePolicy']) { [string]$json.Common.BootWimFailurePolicy } else { 'LegacyPolicy' })
+        Common                    = $json.Common
+        ServicingModel            = $(if ($json.PSObject.Properties['ServicingModel']) { $json.ServicingModel } else { $null })
+        DiscoveryPolicy           = $(if ($json.PSObject.Properties['DiscoveryPolicy']) { $json.DiscoveryPolicy } else { $null })
+        ValidationPolicy          = $(if ($json.PSObject.Properties['ValidationPolicy']) { $json.ValidationPolicy } else { $null })
+        Compatibility             = $(if ($json.PSObject.Properties['Compatibility']) { $json.Compatibility } else { $null })
+        PatchBaseline             = $json.PatchBaseline
+        Pca2023                   = $json.Pca2023
+        AutoRefreshPolicy         = $json.AutoRefreshPolicy
+        LanguageSpecific          = $json.LanguageSpecific
+        Language                  = $langNode
+        LanguageKey               = $OsLang
+        Raw                       = $json
+        ConfigFilePath            = $cfgFile
+    }
+
+    if ([string]$json.Schema -eq '4.0') {
+        Write-Step ('Config Schema 4.0 enabled: MonthlyServicingStyle={0}; BaselineStatus={1}' -f `
+            [string]$json.ServicingModel.MonthlyServicingStyle, [string]$json.PatchBaseline.Status)
     }
     return $merged
 }
@@ -3192,7 +3187,8 @@ function Test-PatchBaselineFresh {
     # Also require at least one usable patch entry
     if (-not $Baseline.Lines -or $Baseline.Lines.Count -eq 0) { return $false }
     $usable = @($Baseline.Lines | Where-Object {
-        $_.KbId -and $_.DownloadUrl -and $_.Digest -and ($_.Digest -ne '')
+        $hasIntegrity = ((Get-BaselineHashValue -Line $_ -Algorithm Sha256) -or (Get-BaselineHashValue -Line $_ -Algorithm Sha1))
+        $_.KbId -and $_.DownloadUrl -and $hasIntegrity
     })
     return ($usable.Count -gt 0)
 }
@@ -3208,7 +3204,8 @@ function Test-PatchBaselineUsable {
     param([Parameter(Mandatory)] [AllowNull()] $Baseline)
     if (-not $Baseline -or -not $Baseline.Lines) { return $false }
     $usable = @($Baseline.Lines | Where-Object {
-        $_.KbId -and $_.DownloadUrl -and $_.Digest -and ($_.Digest -ne '')
+        $hasIntegrity = ((Get-BaselineHashValue -Line $_ -Algorithm Sha256) -or (Get-BaselineHashValue -Line $_ -Algorithm Sha1))
+        $_.KbId -and $_.DownloadUrl -and $hasIntegrity
     })
     return ($usable.Count -gt 0)
 }
@@ -4823,10 +4820,56 @@ function Get-ServerRow {
 
 function Get-Newest {
     param($Rows)
-    @($Rows) | Sort-Object @{ Expression = {
-        $m = [regex]::Match($_.title, '\s*(\d{4})-(\d{2})')
-        if ($m.Success) { [int]$m.Groups[1].Value * 100 + [int]$m.Groups[2].Value } else { 0 }
-    } } -Descending | Select-Object -First 1
+    @($Rows) | Sort-Object `
+        @{ Expression = {
+            $m = [regex]::Match($_.title, '\s*(\d{4})-(\d{2})')
+            if ($m.Success) { [int]$m.Groups[1].Value * 100 + [int]$m.Groups[2].Value } else { 0 }
+        }; Descending = $true }, `
+        @{ Expression = {
+            try { [datetime]$_.lastUpdated } catch { [datetime]::MinValue }
+        }; Descending = $true }, `
+        @{ Expression = { [string]$_.version }; Descending = $true } | Select-Object -First 1
+}
+
+function Get-UpdateMonthFromTitle {
+    <# Return yyyy-MM from a Catalog title, or $null when no release month is present. #>
+    [OutputType([string])]
+    param([AllowNull()][string]$Title)
+    if ([string]::IsNullOrWhiteSpace($Title)) { return $null }
+    $m = [regex]::Match($Title, '(?<!\d)(\d{4})-(\d{2})(?!\d)')
+    if (-not $m.Success) { return $null }
+    return ('{0}-{1}' -f $m.Groups[1].Value, $m.Groups[2].Value)
+}
+
+function Get-NewestAtOrBeforeMonth {
+    <#
+    Select the newest Catalog row whose title month is not later than the
+    Windows baseline month. This enforces the Dynamic Update and .NET policy
+    "same month, otherwise latest prior" and prevents a future preview/month
+    from leaking into a reproducible baseline.
+    #>
+    param(
+        [AllowNull()][object[]]$Rows,
+        [AllowNull()][string]$BaselineMonth,
+        [switch]$IncludePreview
+    )
+    $all = @($Rows)
+    if (-not $IncludePreview) {
+        $all = @($all | Where-Object { ([string]$_.title) -notmatch '(?i)\bPreview\b' })
+    }
+    if ($all.Count -eq 0) { return $null }
+    if ($BaselineMonth -notmatch '^(\d{4})-(\d{2})$') {
+        return (Get-Newest $all)
+    }
+    $cutoff = ([int]$Matches[1] * 100) + [int]$Matches[2]
+    $eligible = @($all | Where-Object {
+        $month = Get-UpdateMonthFromTitle -Title ([string]$_.title)
+        if ($month -notmatch '^(\d{4})-(\d{2})$') { return $false }
+        $value = ([int]$Matches[1] * 100) + [int]$Matches[2]
+        return ($value -le $cutoff)
+    })
+    if ($eligible.Count -eq 0) { return $null }
+    return (Get-Newest $eligible)
 }
 
 function Get-RuntimeCount {
@@ -4863,9 +4906,10 @@ function Resolve-Lcu {
 }
 
 function Resolve-Ssu2016 {
+    param([AllowNull()][string]$BaselineMonth)
     $rows = Search-Catalog 'Servicing Stack Update Windows Server 2016'
     $cands = @($rows | Where-Object { $_.title.Contains('Servicing Stack Update') -and $_.products.Contains('Windows Server 2016') })
-    $row = Get-Newest $cands
+    $row = Get-NewestAtOrBeforeMonth -Rows $cands -BaselineMonth $BaselineMonth
     $files = if ($row) { Resolve-CatalogDownload $row.uid } else { @() }
     $inScope = [pscustomobject]@{ standalone = $true; files = @($files | ForEach-Object { $_.fileName }) }
     return (New-Line 'SSU' $row $files $inScope '2016 only: standalone SSU row (apply before LCU)')
@@ -4876,6 +4920,7 @@ function Resolve-Ssu2016 {
 function Test-NetInScope {
     param([string]$OsKey, [string]$FileName)
     switch ($OsKey) {
+        '2016' { return (($FileName -notmatch '-ndp48') -and ($FileName -notmatch '-ndp481')) }  # base 4.6.2/4.7.x (+3.5)
         '2019' { return (($FileName -notmatch '-ndp48') -and ($FileName -notmatch '-ndp481')) }  # base 4.7.2 (+3.5)
         '2022' { return (($FileName -match '-ndp48') -and ($FileName -notmatch '-ndp481')) }      # 4.8 (+3.5)
         '2025' { return ($FileName -match '-ndp481') }                                            # 4.8.1 (+3.5)
@@ -4884,20 +4929,16 @@ function Test-NetInScope {
 }
 
 function Resolve-Net {
-    param([string]$OsKey)
+    param([string]$OsKey, [AllowNull()][string]$BaselineMonth)
     $info = $script:CatOsDef[$OsKey]
-    if ($OsKey -eq '2016') {
-        return (New-Line '.NET' $null @() $null ('2016: in-box .NET payload (3.5 + 4.6.2/4.7.x) is serviced INSIDE the LCU; ' +
-                'the only standalone WS2016 .NET CU is .NET 4.8 (add-on, NOT in base media) -> out-of-scope. No leaf to fetch.'))
-    }
     $q = $script:CatNetQuery[$OsKey]
     $rows = Search-Catalog $q
     $rows = @($rows | Where-Object { $_.products.ToLower().Contains($info.products.ToLower()) })
     $rows = Get-X64Rows $rows
-    $nm = Get-Newest $rows
+    $nm = Get-NewestAtOrBeforeMonth -Rows $rows -BaselineMonth $BaselineMonth
     if (-not $nm) { return (New-Line '.NET' $null @() $null 'no .NET row matched OS token') }
     $month = [regex]::Match($nm.title, '\s*(\d{4}-\d{2})').Groups[1].Value
-    $variants = @($rows | Where-Object { $_.title.TrimStart().StartsWith($month) })
+    $variants = @($rows | Where-Object { $_.title.TrimStart().StartsWith($month) -and $_.title -notmatch '(?i)\bPreview\b' })
     $row = $variants | Sort-Object @{ Expression = { Get-RuntimeCount $_.title } } -Descending | Select-Object -First 1
     $files = Resolve-CatalogDownload $row.uid
     $x64 = @($files | Where-Object { $_.fileName -match '-x64' })
@@ -4910,48 +4951,30 @@ function Resolve-Net {
 }
 
 function Resolve-SafeOsDu {
-    param([string]$OsKey)
-    $info = $script:CatOsDef[$OsKey]
-    if ($OsKey -eq '2016' -or $OsKey -eq '2019') {
-        return (New-Line 'SafeOSDU' $null @() $null "${OsKey}: no monthly SafeOS DU line (matches oracle)")
+    param([string]$OsKey, [AllowNull()][string]$BaselineMonth)
+    $aliases = @{
+        '2016' = @{ Query='Dynamic Update Windows 10 Version 1607 x64'; Token='Version 1607' }
+        '2019' = @{ Query='Dynamic Update Windows 10 Version 1809 x64'; Token='Version 1809' }
+        '2022' = @{ Query='Dynamic Update Microsoft server operating system version 21H2 x64'; Token='21H2' }
+        '2025' = @{ Query='Safe OS Dynamic Update Microsoft server operating system version 24H2 x64'; Token='24H2' }
     }
-    $tok = $info.verToken
-    $q = if ($OsKey -eq '2022') { 'Dynamic Update Microsoft server operating system version 21H2' }
-         else { 'Safe OS Dynamic Update for Microsoft server operating system version 24H2 x64' }
-    $rows = Search-Catalog $q
+    $a = $aliases[$OsKey]
+    $rows = Search-Catalog $a.Query
     $cands = @($rows | Where-Object {
         $_.products.Contains('Safe OS Dynamic Update') -and
-        $_.title.Contains($tok) -and
-        $_.title.ToLower().Contains('server operating system') -and
-        ($_.title.ToLower() -notmatch 'arm64')
+        $_.title.Contains($a.Token) -and
+        $_.title.ToLower().Contains('x64') -and
+        ($_.title.ToLower() -notmatch 'arm64|x86-based')
     })
-    $row = Get-Newest $cands
+    $row = Get-NewestAtOrBeforeMonth -Rows $cands -BaselineMonth $BaselineMonth
     $files = if ($row) { Resolve-CatalogDownload $row.uid } else { @() }
-    $x64 = @($files | Where-Object { $_.fileName.Contains('x64') -and $_.fileName.EndsWith('.cab') })
-    $inScope = [pscustomobject]@{ files = @($x64 | ForEach-Object { $_.fileName }) }
-    return (New-Line 'SafeOSDU' $row $files $inScope "Products has 'Safe OS Dynamic Update' + title version token")
+    $x64 = @($files | Where-Object { $_.fileName.ToLower().Contains('x64') -and $_.fileName.ToLower().EndsWith('.cab') })
+    $inScope = [pscustomobject]@{ files=@($x64 | ForEach-Object { $_.fileName }); selection='same-month-or-latest-prior' }
+    return (New-Line 'SafeOSDU' $row $x64 $inScope "Products contains Windows Safe OS Dynamic Update; OS build-family alias matched")
 }
 
 function Select-SetupDuCandidate {
-    <#
-    .SYNOPSIS
-        Pure discriminator: pick the server-OS Setup Dynamic Update candidate
-        rows from Catalog search rows (title/products). Offline-testable (T30).
-    .DESCRIPTION
-        FACT (reference architecture memo, resolution-recipes section;
-        re-verified against the live Catalog 2026-07-02): a Setup Dynamic
-        Update row's Products column carries ONLY 'Windows 10 and later
-        Dynamic Update' -- there is NO 'Setup Dynamic Update' product
-        category. Only the SafeOS DU has a dedicated product string
-        ('Windows Safe OS Dynamic Update'). The Setup-DU discriminator is
-        therefore the TITLE: 'Setup Dynamic Update' + the version token +
-        'server operating system' (excludes the same-month Windows 11
-        client rows), excluding arm64. Products membership in the Dynamic
-        Update family is kept as a sanity net against the Catalog's fuzzy
-        search relevance, never as the discriminator.
-    .OUTPUTS
-        System.Object[] (candidate rows; possibly empty)
-    #>
+    <# Select Setup DU rows by Dynamic Update product membership, excluding SafeOS. #>
     [CmdletBinding()]
     [OutputType([object[]])]
     param(
@@ -4959,63 +4982,101 @@ function Select-SetupDuCandidate {
         [Parameter(Mandatory)] [string]$VersionToken
     )
     $cands = @($Rows | Where-Object {
-        $_.title.Contains('Setup Dynamic Update') -and
         $_.title.Contains($VersionToken) -and
-        $_.title.ToLower().Contains('server operating system') -and
-        ($_.title.ToLower() -notmatch 'arm64') -and
-        $_.products.Contains('Dynamic Update')
+        $_.title.ToLower().Contains('x64') -and
+        ($_.title.ToLower() -notmatch 'arm64|x86-based') -and
+        $_.products.Contains('Dynamic Update') -and
+        (-not $_.products.Contains('Safe OS Dynamic Update')) -and
+        ($_.title -notmatch 'Cumulative Update')
     })
+    $explicit = @($cands | Where-Object { $_.title.Contains('Setup Dynamic Update') })
+    if ($explicit.Count -gt 0) { return ,$explicit }
     return ,$cands
 }
 
-function Resolve-SetupDu { # psa-disable-line PSA6003 -- 'Du' is the dynamic-update abbreviation, not a plural; mirrors Resolve-SafeOsDu
-    # Setup Dynamic Update (b3 acquisition, sibling of Resolve-SafeOsDu). Setup DU
-    # updates the media's setup/installer binaries (the sources\ tree, applied by
-    # P09 via expand.exe overlay), NOT a WIM. It is published only for the
-    # UUP-checkpoint OS (Server 2025 / 24H2); the separate-ssu / embedded-ssu /
-    # embedded-ssu-du models FORBID it (Test-PatchModelConsistency Forbid list), so
-    # only the 2025 branch of Resolve-Os requests it. DISCRIMINATOR (corrected
-    # 2026-07-02, live-Catalog-verified): unlike the SafeOS DU, a Setup DU row
-    # has NO dedicated Products category -- its Products column is only
-    # 'Windows 10 and later Dynamic Update' (reference memo, resolution-recipes
-    # section). The prior products.Contains('Setup Dynamic Update') filter could
-    # therefore NEVER match a live row, and the 2025 SetupDU line silently
-    # starved for weeks while every gate stayed green (the T27 fixture had
-    # fabricated the assumed Products string). Selection is now by TITLE via the
-    # pure, offline-tested Select-SetupDuCandidate (T30).
-    param([string]$OsKey)
-    $info = $script:CatOsDef[$OsKey]
-    if ($OsKey -ne '2025') {
-        return (New-Line 'SetupDU' $null @() $null "${OsKey}: no Setup DU line (Forbid; only uup-checkpoint carries SetupDU)")
+function Resolve-SetupDu { # psa-disable-line PSA6003 -- dynamic-update abbreviation
+    param([string]$OsKey, [AllowNull()][string]$BaselineMonth)
+    $aliases = @{
+        '2016' = @{ Query='Dynamic Update Windows 10 Version 1607 x64'; Token='Version 1607' }
+        '2019' = @{ Query='Dynamic Update Windows 10 Version 1809 x64'; Token='Version 1809' }
+        '2022' = @{ Query='Dynamic Update Microsoft server operating system version 21H2 x64'; Token='21H2' }
+        '2025' = @{ Query='Setup Dynamic Update Microsoft server operating system version 24H2 x64'; Token='24H2' }
     }
-    $tok = $info.verToken
-    $q = 'Setup Dynamic Update for Microsoft server operating system version 24H2 x64'
-    $rows = Search-Catalog $q
-    $cands = Select-SetupDuCandidate -Rows @($rows) -VersionToken $tok
-    $row = Get-Newest $cands
+    $a = $aliases[$OsKey]
+    $rows = Search-Catalog $a.Query
+    $cands = Select-SetupDuCandidate -Rows @($rows) -VersionToken $a.Token
+    $row = Get-NewestAtOrBeforeMonth -Rows $cands -BaselineMonth $BaselineMonth
     $files = if ($row) { Resolve-CatalogDownload $row.uid } else { @() }
-    $x64 = @($files | Where-Object { $_.fileName.Contains('x64') -and $_.fileName.EndsWith('.cab') })
-    $inScope = [pscustomobject]@{ files = @($x64 | ForEach-Object { $_.fileName }) }
-    return (New-Line 'SetupDU' $row $files $inScope "Title has 'Setup Dynamic Update' + version token (no Setup-DU Products discriminator exists)")
+    $x64 = @($files | Where-Object { $_.fileName.ToLower().Contains('x64') -and $_.fileName.ToLower().EndsWith('.cab') })
+    $inScope = [pscustomobject]@{ files=@($x64 | ForEach-Object { $_.fileName }); selection='same-month-or-latest-prior' }
+    return (New-Line 'SetupDU' $row $x64 $inScope 'Generic Dynamic Update product minus SafeOS; Support KB must confirm Setup role')
 }
 
 function Resolve-Os { # psa-disable-line PSA6003 -- noun is 'OS' (operating system), not a plural; ported reference contract
     param([string]$OsKey)
+
+    # Resolve the B/OOB LCU first. Its yyyy-MM title is the cutoff for SSU,
+    # .NET and Dynamic Update selection. This prevents a later preview or
+    # future-month DU from entering an older reproducible baseline.
+    $lcu = Resolve-Lcu $OsKey
+    $baselineMonth = Get-UpdateMonthFromTitle -Title ([string]$lcu.title)
+
     switch ($OsKey) {
-        '2016' { return [pscustomobject]@{ os = 'Server2016'; lines = @((Resolve-Lcu '2016'), (Resolve-Ssu2016), (Resolve-Net '2016'), (Resolve-SafeOsDu '2016')) } }
-        '2019' { return [pscustomobject]@{ os = 'Server2019'; lines = @((Resolve-Lcu '2019'), (New-Line 'SSU' $null @() $null 'embedded in LCU (no standalone row)'), (Resolve-Net '2019'), (Resolve-SafeOsDu '2019')) } }
-        '2022' { return [pscustomobject]@{ os = 'Server2022'; lines = @((Resolve-Lcu '2022'), (New-Line 'SSU' $null @() $null 'embedded in LCU (no standalone row)'), (Resolve-Net '2022'), (Resolve-SafeOsDu '2022')) } }
+        '2016' {
+            return [pscustomobject]@{
+                os = 'Server2016'
+                lines = @(
+                    $lcu,
+                    (Resolve-Ssu2016 -BaselineMonth $baselineMonth),
+                    (Resolve-Net -OsKey '2016' -BaselineMonth $baselineMonth),
+                    (Resolve-SafeOsDu -OsKey '2016' -BaselineMonth $baselineMonth),
+                    (Resolve-SetupDu -OsKey '2016' -BaselineMonth $baselineMonth)
+                )
+            }
+        }
+        '2019' {
+            return [pscustomobject]@{
+                os = 'Server2019'
+                lines = @(
+                    $lcu,
+                    (New-Line 'SSU' $null @() $null 'monthly SSU embedded in LCU; source prerequisite is modelled separately'),
+                    (Resolve-Net -OsKey '2019' -BaselineMonth $baselineMonth),
+                    (Resolve-SafeOsDu -OsKey '2019' -BaselineMonth $baselineMonth),
+                    (Resolve-SetupDu -OsKey '2019' -BaselineMonth $baselineMonth)
+                )
+            }
+        }
+        '2022' {
+            return [pscustomobject]@{
+                os = 'Server2022'
+                lines = @(
+                    $lcu,
+                    (New-Line 'SSU' $null @() $null 'monthly SSU embedded in LCU; source prerequisite is modelled separately'),
+                    (Resolve-Net -OsKey '2022' -BaselineMonth $baselineMonth),
+                    (Resolve-SafeOsDu -OsKey '2022' -BaselineMonth $baselineMonth),
+                    (Resolve-SetupDu -OsKey '2022' -BaselineMonth $baselineMonth)
+                )
+            }
+        }
         '2025' {
-            $lcu = Resolve-Lcu '2025'
             $lcuKb = if ($lcu.kb) { $lcu.kb.ToLower() } else { '' }
-            $baseline = @($lcu.files | Where-Object {
+            $checkpointFiles = @($lcu.files | Where-Object {
                 $_.fileName.ToLower().EndsWith('.msu') -and (($lcuKb -eq '') -or (-not $_.fileName.ToLower().Contains($lcuKb)))
             })
-            $blKb = if ($baseline.Count) { Get-KbOf $baseline[0].fileName } else { $null }
-            $checkpoint = New-Line 'Checkpoint' $null $baseline ([pscustomobject]@{ files = @($baseline | ForEach-Object { $_.fileName }) }) `
-                '2025: checkpoint cumulative baseline (the co-served GA .msu in the 2-file set); co-located with the LCU for DISM folder discovery, never applied standalone'
-            $checkpoint.kb = $blKb
-            return [pscustomobject]@{ os = 'Server2025'; lines = @($lcu, $checkpoint, (Resolve-Net '2025'), (Resolve-SafeOsDu '2025'), (Resolve-SetupDu '2025')) }
+            $checkpointKb = if ($checkpointFiles.Count) { Get-KbOf $checkpointFiles[0].fileName } else { $null }
+            $checkpoint = New-Line 'Checkpoint' $null $checkpointFiles ([pscustomobject]@{ files = @($checkpointFiles | ForEach-Object { $_.fileName }) }) `
+                '2025: checkpoint cumulative baseline co-served with the target LCU; keep it in the same package folder for DISM dependency discovery, never target it as the final LCU'
+            $checkpoint.kb = $checkpointKb
+            return [pscustomobject]@{
+                os = 'Server2025'
+                lines = @(
+                    $lcu,
+                    $checkpoint,
+                    (Resolve-Net -OsKey '2025' -BaselineMonth $baselineMonth),
+                    (Resolve-SafeOsDu -OsKey '2025' -BaselineMonth $baselineMonth),
+                    (Resolve-SetupDu -OsKey '2025' -BaselineMonth $baselineMonth)
+                )
+            }
         }
     }
 }
@@ -5034,20 +5095,7 @@ function Resolve-Os { # psa-disable-line PSA6003 -- noun is 'OS' (operating syst
 # ============================================================
 
 function Test-PatchModelConsistency {
-    <#
-    .SYNOPSIS
-        P06 runtime consistency check: assert a per-OS resolved Lines[] set
-        matches the invariants its PatchModel declares (the runtime mirror of
-        config.schema.json's PatchModel allOf discriminated union, SPEC B.19).
-    .DESCRIPTION
-        Anti-"forced-uniform" contract (D0 design section 5): each PatchModel
-        branch ASSERTS the Kinds it expects and FORBIDS those it must not carry,
-        so a resolver anomaly surfaces as a typed error that names the OS, the
-        PatchModel, and the violated invariant -- never silently normalised.
-        Pure function (no I/O); unit-tested offline against fixture Lines[].
-    .OUTPUTS
-        pscustomobject { OsKey; PatchModel; IsConsistent[bool]; Errors[string[]] }
-    #>
+    <# Validate core package invariants without forbidding optional/current DU kinds. #>
     [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)][string]$OsKey,
@@ -5055,34 +5103,31 @@ function Test-PatchModelConsistency {
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Lines
     )
     $rules = @{
-        'separate-ssu'    = @{ Require = @('SSU','LCU');                    Forbid = @('DotNet','SafeOSDU','SetupDU') }
-        'embedded-ssu'    = @{ Require = @('LCU','DotNet');                 Forbid = @('SSU','SafeOSDU','SetupDU') }
-        'embedded-ssu-du' = @{ Require = @('LCU','DotNet','SafeOSDU');      Forbid = @('SSU','SetupDU') }
-        'uup-checkpoint'  = @{ Require = @('LCU','Checkpoint','DotNet','SafeOSDU'); Forbid = @('SSU') }
+        'separate-ssu'    = @{ Require=@('SSU','LCU') }
+        'embedded-ssu'    = @{ Require=@('LCU','DotNet') }
+        'embedded-ssu-du' = @{ Require=@('LCU','DotNet','SafeOSDU') }
+        'uup-checkpoint'  = @{ Require=@('LCU','Checkpoint','DotNet','SafeOSDU','SetupDU') }
     }
     if (-not $rules.ContainsKey($PatchModel)) {
-        throw "P06 consistency: unknown PatchModel '$PatchModel' for $OsKey (expected: $(($rules.Keys | Sort-Object) -join ', '))."
+        throw "P06 consistency: unknown PatchModel '$PatchModel' for $OsKey."
     }
-    $rule    = $rules[$PatchModel]
     $present = @($Lines | ForEach-Object { $_.Kind } | Sort-Object -Unique)
-    $errors  = [System.Collections.Generic.List[string]]::new()
-    foreach ($k in $rule.Require) {
-        if ($present -notcontains $k) { $errors.Add("missing required Kind '$k'") }
+    $errors = [System.Collections.Generic.List[string]]::new()
+    foreach ($kind in $rules[$PatchModel].Require) {
+        if ($present -notcontains $kind) { $errors.Add("missing required Kind '$kind'") }
     }
-    foreach ($k in $rule.Forbid) {
-        if ($present -contains $k) { $errors.Add("forbidden Kind '$k' present") }
-    }
-    for ($i = 0; $i -lt $Lines.Count; $i++) {
-        if ([string]::IsNullOrWhiteSpace([string]$Lines[$i].Digest)) {
-            $errors.Add("Lines[$i] (Kind '$($Lines[$i].Kind)') has empty Digest (integrity key required)")
+    for ($i=0; $i -lt $Lines.Count; $i++) {
+        $line = $Lines[$i]
+        $state = if ($line.PSObject.Properties['State']) { [string]$line.State } else { 'LegacyResolved' }
+        $sha1 = Get-BaselineHashValue -Line $line -Algorithm Sha1
+        $sha256 = Get-BaselineHashValue -Line $line -Algorithm Sha256
+        if ($state -in @('Frozen','E3Validated','E4Validated','E5Validated','Approved') -and -not $sha256) {
+            $errors.Add("Lines[$i] (Kind '$($line.Kind)') is state=$state but has no SHA-256")
+        } elseif ($state -eq 'LegacyResolved' -and -not $sha1 -and -not $sha256) {
+            $errors.Add("Lines[$i] (Kind '$($line.Kind)') has no integrity key")
         }
     }
-    return [pscustomobject]@{
-        OsKey        = $OsKey
-        PatchModel   = $PatchModel
-        IsConsistent = ($errors.Count -eq 0)
-        Errors       = $errors.ToArray()
-    }
+    return [pscustomobject]@{ OsKey=$OsKey; PatchModel=$PatchModel; IsConsistent=($errors.Count -eq 0); Errors=$errors.ToArray() }
 }
 
 function ConvertTo-ConfigLines { # psa-disable-line PSA6003 -- returns the Lines[] collection; plural noun intentional
@@ -5098,8 +5143,9 @@ function ConvertTo-ConfigLines { # psa-disable-line PSA6003 -- returns the Lines
           (2) 2025 LCU 2-file split -> keep only the LCU-proper file (the baseline .msu is
               the separate Checkpoint line);
           (3) .NET in-scope leaf selection (inScope.inScopeFiles);
-          (4) 2016 .NET line is a placeholder -> dropped by (1) (the D0 "remove 2016 .NET"
-              correction); SetupDU is added by the resolver extension upstream, not here.
+          (4) all four OS generations may carry .NET, SafeOS DU and Setup DU rows;
+              runtime/applicability selection is expressed in v4 metadata rather than
+              hard-coded PatchModel exclusion.
         Pure function; offline-tested against the captured resolve.json.
     .OUTPUTS
         System.Collections.Generic.List[object]  (the Lines[] for one OS)
@@ -5111,10 +5157,10 @@ function ConvertTo-ConfigLines { # psa-disable-line PSA6003 -- returns the Lines
     )
     $kindMap  = @{ 'LCU'='LCU'; 'SSU'='SSU'; 'Checkpoint'='Checkpoint'; '.NET'='DotNet'; 'SafeOSDU'='SafeOSDU'; 'SetupDU'='SetupDU' }
     $applyMap = @{
-        'separate-ssu'    = @{ 'SSU'=1; 'LCU'=2 }
-        'embedded-ssu'    = @{ 'LCU'=1; 'DotNet'=2 }
-        'embedded-ssu-du' = @{ 'LCU'=1; 'DotNet'=2; 'SafeOSDU'=3 }
-        'uup-checkpoint'  = @{ 'Checkpoint'=1; 'LCU'=2; 'DotNet'=3; 'SafeOSDU'=4; 'SetupDU'=5 }
+        'separate-ssu'    = @{ 'SSU'=10; 'LCU'=20; 'SafeOSDU'=40; 'DotNet'=60; 'SetupDU'=80 }
+        'embedded-ssu'    = @{ 'LCU'=20; 'SafeOSDU'=40; 'DotNet'=60; 'SetupDU'=80 }
+        'embedded-ssu-du' = @{ 'LCU'=20; 'SafeOSDU'=40; 'DotNet'=60; 'SetupDU'=80 }
+        'uup-checkpoint'  = @{ 'Checkpoint'=10; 'LCU'=20; 'SafeOSDU'=40; 'DotNet'=60; 'SetupDU'=80 }
     }
     if (-not $applyMap.ContainsKey($PatchModel)) {
         throw "ConvertTo-ConfigLines: unknown PatchModel '$PatchModel' for $($OsResolved.os)."
@@ -5125,9 +5171,9 @@ function ConvertTo-ConfigLines { # psa-disable-line PSA6003 -- returns the Lines
         $kind = $kindMap[$L.kind]
         if (-not $L.files -or @($L.files).Count -eq 0) {                     # (1)
             # Rule (1) drops a placeholder line ONLY when its Kind is OUTSIDE
-            # the PatchModel's apply map (by-design absences: 2016 .NET /
-            # SafeOSDU, 2019/2022 SSU). An EMPTY line for an IN-MODEL Kind
-            # means the live Catalog resolution silently failed (forensic:
+            # the PatchModel's apply map (for example, a standalone monthly SSU
+            # on an integrated-SSU generation). An EMPTY line for an IN-MODEL
+            # Kind means the live Catalog resolution silently failed (forensic:
             # the 2025 SetupDU line starved for weeks behind a never-matching
             # Products filter while all gates stayed green) -- HARD FAIL,
             # never a silent drop [DECIDED 2026-07-02, user].
@@ -5148,21 +5194,61 @@ function ConvertTo-ConfigLines { # psa-disable-line PSA6003 -- returns the Lines
         }
         $order = $orders[$kind]
         foreach ($f in $files) {
+            $roles = switch ($kind) {
+                'SSU'        { @('ServicingStackCarrier') }
+                'LCU'        { if ($PatchModel -eq 'separate-ssu') { @('FinalLCU') } else { @('ServicingStackCarrier','FinalLCU') } }
+                'Checkpoint' { @('CheckpointDependency') }
+                'DotNet'     { @('DotNetLeaf') }
+                'SafeOSDU'   { @('SafeOSDU') }
+                'SetupDU'    { @('SetupDU') }
+                default      { @() }
+            }
+            $targets = [ordered]@{}
+            foreach ($role in $roles) {
+                $targets[$role] = switch ($role) {
+                    'ServicingStackCarrier' { @('Install','Boot','WinRE') }
+                    'FinalLCU'              { @('Install','Boot') }
+                    'DotNetLeaf'            { @('Install') }
+                    'SafeOSDU'              { @('WinRE') }
+                    'SetupDU'               { @('Setup') }
+                    default                 { @() }
+                }
+            }
+            $sha256Value = $(if ($f.PSObject.Properties.Name -contains 'sha256') { $f.sha256 } else { '' })
             $out.Add([pscustomobject]@{
+                PackageId   = ('{0}-{1}-{2}' -f $OsResolved.os, $L.kb, $f.fileName)
                 Kind        = $kind
                 KbId        = $L.kb
+                ParentKbId  = $null
                 UpdateId    = $L.catalogUid
+                Revision    = $null
                 Title       = $L.title
                 Products    = $L.products
                 Classification = $null
+                Architecture = 'x64'
+                ReleaseDate = $null
+                ReleaseType = $(if ($kind -in @('SafeOSDU','SetupDU')) { 'DynamicUpdate' } else { 'B' })
+                State       = 'Resolved'
                 FileName    = $f.fileName
                 DownloadUrl = $f.url
                 Digest      = $f.digest
-                Sha256      = $(if ($f.PSObject.Properties.Name -contains 'sha256') { $f.sha256 } else { '' })
-                SizeBytes   = $null      # per-file HEAD pass refinement
+                Sha256      = $sha256Value
+                SizeBytes   = $null
                 ApplyOrder  = $order
                 InScope     = $insc
                 Note        = $L.note
+                Roles       = $roles
+                TargetsByRole = [pscustomobject]$targets
+                RuntimeSelector = $null
+                Applicability = [pscustomobject]@{ Mode = $(if ($kind -eq 'DotNet') { 'IfRuntimeDetectedPerInstallIndex' } elseif ($kind -in @('SafeOSDU','SetupDU')) { 'SameMonthOrLatestPrior' } else { 'Always' }) }
+                Dependencies = @()
+                Integrity = [pscustomobject]@{
+                    Sha1 = $(if ($f.digest) { [pscustomobject]@{ Encoding='base64'; Value=$f.digest; Hex=$null } } else { $null })
+                    Sha256 = $(if ($sha256Value) { [pscustomobject]@{ Encoding='base64'; Value=$sha256Value; Hex=$null } } else { $null })
+                    SizeBytes = $null
+                    AuthenticodeStatus = 'NotTested'
+                }
+                Evidence = [pscustomobject]@{ Levels=@('E1','E2'); SourceUrls=@(); VerifiedAt=(Get-Date).ToString('o'); VerifiedBy='auto:CatalogRefresh'; Notes=@($L.note) }
             })
         }
     }
@@ -5708,15 +5794,16 @@ function Add-WindowsPackageWithRetry {
         known-benign DISM errors and downgrades them to Warning per
         SPEC Part D.12 (OSDBuilder's 0x800f081e suppression pattern).
     .OUTPUTS
-        String status code: 'Ok' | 'OkAfterRetry' | 'NotApplicable'.
-        Fatal errors are re-thrown.
+        String status code: 'Ok' | 'OkAfterRetry' | 'NotApplicable' |
+        'WinReServicingStackKnownIssue'. Fatal errors are re-thrown.
     #>
     [CmdletBinding()]
     [OutputType([string])]
     param(
         [Parameter(Mandatory)] [string]$MountPath,
         [Parameter(Mandatory)] [string]$PackagePath,
-        [string]$LogDir
+        [string]$LogDir,
+        [switch]$AllowWinReCombinedLcuKnownError
     )
     if (-not (Test-Path -LiteralPath $PackagePath)) {
         throw ('Package missing: {0}' -f $PackagePath)
@@ -5736,6 +5823,15 @@ function Add-WindowsPackageWithRetry {
         return 'Ok'
     } catch {
         $m = [string]$_.Exception.Message
+        $hresult = [int]$_.Exception.HResult
+        # Microsoft's installation-media sample documents 0x8007007e as a
+        # known result when a combined LCU is supplied to WinRE only to carry
+        # its servicing-stack payload. Suppress it exclusively for that
+        # explicit caller-selected role; all other 0x8007007e failures remain fatal.
+        if ($AllowWinReCombinedLcuKnownError -and (($m -match '0x8007007e') -or ($hresult -eq -2147024770))) {
+            Write-Caution ('0x8007007e: known WinRE combined-LCU servicing-stack result; continuing: {0}' -f [System.IO.Path]::GetFileName($PackagePath))
+            return 'WinReServicingStackKnownIssue'
+        }
         if ($m -match '0x800f081e') {
             Write-Caution ('0x800f081e: Package not applicable, skipping: {0}' -f [System.IO.Path]::GetFileName($PackagePath))
             return 'NotApplicable'
@@ -6003,6 +6099,52 @@ function Export-InstallWimCompressed {
     $newBytes = (Get-Item -LiteralPath $WimPath).Length
     $savedPct = if ($origBytes -gt 0) { [Math]::Round((1 - ($newBytes / $origBytes)) * 100, 1) } else { 0 }
     Write-Ok ('install.wim recompressed: {0:N0} -> {1:N0} bytes ({2}% smaller).' -f $origBytes, $newBytes, $savedPct)
+}
+
+function Export-WinReRecoveryCompressed {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$WinRePath)
+    $exported = $WinRePath + '.recovery.wim'
+    if (Test-Path -LiteralPath $exported) { Remove-Item -LiteralPath $exported -Force }
+    $args = @(
+        '/Export-Image',
+        ("/SourceImageFile:$WinRePath"),
+        '/SourceIndex:1',
+        ("/DestinationImageFile:$exported"),
+        '/Compress:recovery',
+        ("/ScratchDir:$Script:ScratchDir")
+    )
+    $code = Invoke-DismCli -Arguments $args -Context 'export-winre-recovery'
+    if ($code -ne 0) { throw ('WinRE /Export-Image /Compress:recovery failed with exit code {0}' -f $code) }
+    Remove-Item -LiteralPath $WinRePath -Force
+    Move-Item -LiteralPath $exported -Destination $WinRePath -Force
+}
+
+function Copy-ServicedWinReToInstallIndexes {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$InstallWim,
+        [Parameter(Mandatory)][string]$ServicedWinRe,
+        [Parameter(Mandatory)][array]$Indexes
+    )
+    $expectedHash = (Get-FileHash -LiteralPath $ServicedWinRe -Algorithm SHA256).Hash
+    foreach ($img in $Indexes) {
+        $index = if ($img.PSObject.Properties['ImageIndex']) { [int]$img.ImageIndex } else { [int]$img }
+        Write-Step ('Distributing serviced WinRE to install.wim index {0}.' -f $index)
+        Invoke-WimMountSafe -ImagePath $InstallWim -Index $index -Path $Script:MountInstallDir -LogDir $Script:LogsDir | Out-Null
+        try {
+            $destination = Join-Path $Script:MountInstallDir 'Windows\System32\Recovery\Winre.wim'
+            $parent = Split-Path -Parent $destination
+            if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+            Copy-Item -LiteralPath $ServicedWinRe -Destination $destination -Force
+            $actualHash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash
+            if ($actualHash -ne $expectedHash) {
+                throw ('WinRE copy verification failed for install.wim index {0}: expected {1}, actual {2}' -f $index, $expectedHash, $actualHash)
+            }
+        } finally {
+            Invoke-WimDismountSafe -Path $Script:MountInstallDir -LogDir $Script:LogsDir
+        }
+    }
 }
 
 # ===========================================================================
@@ -7496,6 +7638,133 @@ function ConvertTo-BridgeLcuResolvedPatch {
     }
 }
 
+function Get-BaselineHashValue {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [AllowNull()]$Line,
+        [Parameter(Mandatory)][ValidateSet('Sha1','Sha256')][string]$Algorithm
+    )
+    if (-not $Line) { return '' }
+    if ($Algorithm -eq 'Sha1' -and $Line.PSObject.Properties['Digest'] -and $Line.Digest) {
+        return [string]$Line.Digest
+    }
+    if ($Algorithm -eq 'Sha256' -and $Line.PSObject.Properties['Sha256'] -and $Line.Sha256) {
+        return [string]$Line.Sha256
+    }
+    if ($Line.PSObject.Properties['Integrity'] -and $Line.Integrity) {
+        $node = $Line.Integrity.$Algorithm
+        if ($node -and $node.PSObject.Properties['Value'] -and $node.Value) {
+            return [string]$node.Value
+        }
+    }
+    return ''
+}
+
+function ConvertTo-ResolvedPatchFromBaselineLine {
+    <# Convert one v3/v4 PatchBaseline.Lines entry into the runtime shape. #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)]$Line)
+
+    $fileName = [string]$Line.FileName
+    if (-not $fileName -and $Line.DownloadUrl) {
+        try { $fileName = [System.IO.Path]::GetFileName(([Uri]$Line.DownloadUrl).AbsolutePath) } catch { $fileName = '' }
+    }
+    if (-not $fileName -and $Line.KbId) { $fileName = ('{0}.msu' -f $Line.KbId) }
+
+    $expectedHashes = @{}
+    $sha1 = Get-BaselineHashValue -Line $Line -Algorithm Sha1
+    $sha256 = Get-BaselineHashValue -Line $Line -Algorithm Sha256
+    if ($sha1)   { $expectedHashes['sha-1'] = $sha1 } # psa-disable-line PSA5003 -- Catalog compatibility
+    if ($sha256) { $expectedHashes['sha-256'] = $sha256 }
+
+    $roles = @()
+    if ($Line.PSObject.Properties['Roles'] -and $Line.Roles) { $roles = @($Line.Roles) }
+    $targetsByRole = $null
+    if ($Line.PSObject.Properties['TargetsByRole']) { $targetsByRole = $Line.TargetsByRole }
+    $applicability = $null
+    if ($Line.PSObject.Properties['Applicability']) { $applicability = $Line.Applicability }
+    $runtimeSelector = $null
+    if ($Line.PSObject.Properties['RuntimeSelector']) { $runtimeSelector = $Line.RuntimeSelector }
+    $dependencies = @()
+    if ($Line.PSObject.Properties['Dependencies'] -and $Line.Dependencies) { $dependencies = @($Line.Dependencies) }
+
+    return [pscustomobject][ordered]@{
+        Kind             = 'Patch'
+        PackageId        = $(if ($Line.PSObject.Properties['PackageId']) { [string]$Line.PackageId } else { '' })
+        Source           = [string]$Line.DownloadUrl
+        LocalPath        = $(if ($fileName) { Get-PatchLocalPath -Kind ([string]$Line.Kind) -FileName $fileName } else { '' })
+        KbId             = [string]$Line.KbId
+        ParentKbId       = $(if ($Line.PSObject.Properties['ParentKbId']) { [string]$Line.ParentKbId } else { '' })
+        PatchType        = [string]$Line.Kind
+        ApplyOrder       = $(if ($null -ne $Line.ApplyOrder) { [int]$Line.ApplyOrder } else { 99 })
+        ExpectedHashes   = $expectedHashes
+        Roles            = $roles
+        TargetsByRole    = $targetsByRole
+        Applicability    = $applicability
+        RuntimeSelector  = $runtimeSelector
+        Dependencies     = $dependencies
+        BaselineState    = $(if ($Line.PSObject.Properties['State']) { [string]$Line.State } else { 'LegacyResolved' })
+        IsMetadataOnly   = ([string]::IsNullOrWhiteSpace([string]$Line.DownloadUrl) -or [string]::IsNullOrWhiteSpace($fileName))
+    }
+}
+
+function ConvertTo-SourcePrerequisiteResolvedPatch {
+    <#
+    .SYNOPSIS
+        Convert a v4 SourcePrerequisites entry into a conditional runtime
+        patch. Metadata-only entries remain in the plan so the mounted-image
+        condition can be evaluated; if applicable but unresolved, the build
+        fails with an actionable message instead of silently omitting it.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)]$Prerequisite)
+
+    $asset = $null
+    if ($Prerequisite.PSObject.Properties['Asset']) { $asset = $Prerequisite.Asset }
+    $kind = [string]$Prerequisite.Kind
+    if ($kind -eq 'BridgeLCU') { $kind = 'BridgeLcu' }
+    if ($kind -eq 'CheckpointChain') { $kind = 'Checkpoint' }
+
+    $fileName = ''
+    $source = ''
+    $expectedHashes = @{}
+    if ($asset) {
+        if ($asset.PSObject.Properties['FileName']) { $fileName = [string]$asset.FileName }
+        if ($asset.PSObject.Properties['DownloadUrl']) { $source = [string]$asset.DownloadUrl }
+        $sha1 = Get-BaselineHashValue -Line $asset -Algorithm Sha1
+        $sha256 = Get-BaselineHashValue -Line $asset -Algorithm Sha256
+        if ($sha1) { $expectedHashes['sha-1'] = $sha1 } # psa-disable-line PSA5003 -- Catalog compatibility
+        if ($sha256) { $expectedHashes['sha-256'] = $sha256 }
+    }
+
+    $targetsByRole = [ordered]@{}
+    foreach ($role in @($Prerequisite.Roles)) {
+        $targetsByRole[[string]$role] = @($Prerequisite.Targets)
+    }
+
+    return [pscustomobject][ordered]@{
+        Kind             = 'Patch'
+        PackageId        = [string]$Prerequisite.PrerequisiteId
+        Source           = $source
+        LocalPath        = $(if ($fileName) { Get-PatchLocalPath -Kind $kind -FileName $fileName } else { '' })
+        KbId             = [string]$Prerequisite.KbId
+        ParentKbId       = ''
+        PatchType        = $kind
+        ApplyOrder       = 0
+        ExpectedHashes   = $expectedHashes
+        Roles            = @($Prerequisite.Roles)
+        TargetsByRole    = [pscustomobject]$targetsByRole
+        Applicability    = $Prerequisite.Condition
+        RuntimeSelector  = $null
+        Dependencies     = @()
+        BaselineState    = [string]$Prerequisite.State
+        IsMetadataOnly   = (-not $asset -or -not $fileName -or -not $source)
+    }
+}
+
 function Get-PatchLocalPath {
     <#
     .SYNOPSIS
@@ -7561,37 +7830,24 @@ function Get-PatchTargetsForType {
     return [string[]]@('Install')
 }
 
-function Build-PatchPlan {
-    <#
-    .SYNOPSIS
-        Construct a PatchPlan object from a flat patch list.
-    .DESCRIPTION
-        The PatchPlan is a hashtable with keys for each WIM target
-        (Install / Boot / WinRE / Setup); each value is an array of
-        patch entries sorted by their ApplyOrder field. Patches whose
-        Type maps to multiple targets appear in each target's list.
+function ConvertTo-PatchPlanTarget {
+    <# Normalize schema-v4 target names to the script's existing plan buckets. #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][string]$Target)
+    switch ($Target) {
+        'Media' { return 'Setup' }
+        default { return $Target }
+    }
+}
 
-        Returned shape:
-            @{
-                Install = @(patch1, patch2, ...)
-                Boot    = @(patch1, ...)
-                WinRE   = @(patch1, patch3, ...)
-                Setup   = @(patch5, ...)
-                # Diagnostic / summary fields:
-                _GeneratedAt    = '<ISO 8601 timestamp>'
-                _PatchCount     = <int>
-                _TargetCounts   = @{Install=N; Boot=N; WinRE=N; Setup=N}
-                _UnknownTypes   = @(<list of unknown Types seen>)
-            }
-    #>
+function Build-PatchPlan {
+    <# Construct a target plan from v4 roles, with v3 type fallback. #>
     [CmdletBinding()]
     [OutputType([hashtable])]
-    param(
-        [Parameter(Mandatory)] [AllowNull()] [AllowEmptyCollection()] [array]$Patches
-    )
+    param([Parameter(Mandatory)] [AllowNull()] [AllowEmptyCollection()] [array]$Patches)
 
     if (-not $Patches) { $Patches = @() }
-
     $plan = @{
         Install       = New-Object System.Collections.Generic.List[object]
         Boot          = New-Object System.Collections.Generic.List[object]
@@ -7600,282 +7856,227 @@ function Build-PatchPlan {
         _GeneratedAt  = (Get-Date).ToString('o')
         _PatchCount   = 0
         _UnknownTypes = New-Object System.Collections.Generic.List[string]
+        _RoleCounts   = @{}
     }
 
     foreach ($p in $Patches) {
         if (-not $p) { continue }
-        # ResolvedPatches entries built by P02 use PatchType; raw
-        # config-* PatchBaseline entries use Type. Get-PatchEntryType
-        # normalises both shapes.
         $type = Get-PatchEntryType -Patch $p
-        $targets = Get-PatchTargetsForType -PatchType $type
-        if (-not $Script:PatchTargetMap.ContainsKey($type) -and -not [string]::IsNullOrEmpty($type)) {
-            if ($plan._UnknownTypes -notcontains $type) {
-                $plan._UnknownTypes.Add($type) | Out-Null
-            }
+        $roles = @(Get-PatchRoles -Patch $p)
+        foreach ($role in $roles) {
+            if (-not $plan._RoleCounts.ContainsKey($role)) { $plan._RoleCounts[$role] = 0 }
+            $plan._RoleCounts[$role] = [int]$plan._RoleCounts[$role] + 1
         }
-        foreach ($t in $targets) {
-            $plan[$t].Add($p) | Out-Null
+        $targets = Get-PatchTargetsForEntry -Patch $p
+        if ($roles.Count -eq 0 -and -not $Script:PatchTargetMap.ContainsKey($type) -and $type) {
+            if ($plan._UnknownTypes -notcontains $type) { $plan._UnknownTypes.Add($type) | Out-Null }
+        }
+        foreach ($target in $targets) {
+            $planTarget = ConvertTo-PatchPlanTarget -Target ([string]$target)
+            if ($plan.ContainsKey($planTarget)) { $plan[$planTarget].Add($p) | Out-Null }
         }
         $plan._PatchCount++
     }
 
-    # Sort each target list by ApplyOrder (ascending), then by KbId for stability
-    foreach ($t in @('Install', 'Boot', 'WinRE', 'Setup')) {
-        $sorted = @($plan[$t] | Sort-Object @{ Expression={ if ($_.PSObject.Properties['ApplyOrder']) { [int]$_.ApplyOrder } else { 99 } } }, @{ Expression='KbId' })
-        $plan[$t] = $sorted
+    foreach ($target in @('Install','Boot','WinRE','Setup')) {
+        $plan[$target] = @($plan[$target] | Sort-Object `
+            @{ Expression={ if ($_.PSObject.Properties['ApplyOrder']) { [int]$_.ApplyOrder } else { 99 } } }, `
+            @{ Expression='KbId' })
     }
-
     $plan['_TargetCounts'] = @{
         Install = $plan.Install.Count
         Boot    = $plan.Boot.Count
         WinRE   = $plan.WinRE.Count
         Setup   = $plan.Setup.Count
     }
-
-    # Build the sub-phase sequences per Microsoft media-dynamic-update.
-    # Each target gets a list of named sub-phases, each carrying its own
-    # patch slice. Phase workers iterate the sub-phases in order.
     $plan['InstallSequence'] = Build-InstallApplySequence -InstallPatches $plan.Install
-    $plan['BootSequence']    = Build-BootApplySequence    -BootPatches    $plan.Boot
-    $plan['WinReSequence']   = Build-WinReApplySequence   -WinRePatches   $plan.WinRE
-
+    $plan['BootSequence']    = Build-BootApplySequence -BootPatches $plan.Boot
+    $plan['WinReSequence']   = Build-WinReApplySequence -WinRePatches $plan.WinRE
     return $plan
 }
 
 function Get-PatchEntryType {
-    <#
-    .SYNOPSIS
-        Read the patch-kind/type string from a patch entry, preferring
-        'PatchType' (P02/P03 ResolvedPatches, which reuse 'Kind' as an
-        Iso/Patch input marker), then 'Kind' (raw Config Schema v3.0
-        Lines[]), then the legacy 'Type' field.
-
-        Returns an empty string when neither is set. PatchType takes
-        precedence when both are present, mirroring the dual-field
-        handling in Build-PatchPlan and Write-PatchPlanSummary.
-
-        Centralised so that all five call sites (Build-PatchPlan,
-        Write-PatchPlanSummary, Build-InstallApplySequence,
-        Build-BootApplySequence, Build-WinReApplySequence) read the
-        type field through one canonical helper instead of repeating
-        the inline if/elseif chain - which had drifted between call
-        sites in earlier revisions and caused sub-phase classification
-        to silently produce empty buckets.
-    #>
     [CmdletBinding()]
     [OutputType([string])]
     param([Parameter(Mandatory)] [AllowNull()] $Patch)
     if (-not $Patch) { return '' }
-    # Precedence: 'PatchType' (P02/P03 ResolvedPatches, which reuse 'Kind' as an
-    # Iso/Patch input-source marker, so 'Kind' must NOT win for those) -> 'Kind'
-    # (raw Config Schema v3.0 Lines[]: LCU/SSU/DotNet/SafeOSDU/SetupDU) -> 'Type'
-    # (language-specific entries: LanguagePack/LXP/DotNet.LangPack).
-    if ($Patch.PSObject.Properties['PatchType'] -and $Patch.PatchType) {
-        return [string]$Patch.PatchType
-    }
-    if ($Patch.PSObject.Properties['Kind'] -and $Patch.Kind) {
-        return [string]$Patch.Kind
-    }
-    if ($Patch.PSObject.Properties['Type'] -and $Patch.Type) {
-        return [string]$Patch.Type
-    }
+    if ($Patch.PSObject.Properties['PatchType'] -and $Patch.PatchType) { return [string]$Patch.PatchType }
+    if ($Patch.PSObject.Properties['Kind'] -and $Patch.Kind) { return [string]$Patch.Kind }
+    if ($Patch.PSObject.Properties['Type'] -and $Patch.Type) { return [string]$Patch.Type }
     return ''
+}
+
+function Get-PatchRoles {
+    <# Return canonical servicing roles, deriving them for a v3 entry. #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param([Parameter(Mandatory)] [AllowNull()]$Patch)
+    if (-not $Patch) { return [string[]]@() }
+    if ($Patch.PSObject.Properties['Roles'] -and $Patch.Roles -and @($Patch.Roles).Count -gt 0) {
+        return [string[]]@($Patch.Roles | ForEach-Object { [string]$_ })
+    }
+    switch (Get-PatchEntryType -Patch $Patch) {
+        'SSU'                     { return [string[]]@('ServicingStackCarrier') }
+        'BridgeLcu'               { return [string[]]@('SourcePrerequisite') }
+        'LCU'                     { return [string[]]@('FinalLCU') }
+        'Checkpoint'              { return [string[]]@('CheckpointDependency') }
+        'DotNet'                  { return [string[]]@('DotNetLeaf') }
+        'SafeOSDU'                { return [string[]]@('SafeOSDU') }
+        'SetupDU'                 { return [string[]]@('SetupDU') }
+        'LanguagePack'            { return [string[]]@('LanguagePack') }
+        'LXP'                     { return [string[]]@('LXP') }
+        'DotNet.LangPack'         { return [string[]]@('DotNetLanguagePack') }
+        'DynamicUpdate.Component' { return [string[]]@('DynamicUpdateComponent') }
+    }
+    return [string[]]@()
+}
+
+function Get-PatchTargetsForRole {
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory)]$Patch,
+        [Parameter(Mandatory)][string]$Role
+    )
+    if ($Patch.PSObject.Properties['TargetsByRole'] -and $Patch.TargetsByRole) {
+        $prop = $Patch.TargetsByRole.PSObject.Properties[$Role]
+        if ($prop -and $prop.Value) { return [string[]]@($prop.Value) }
+    }
+    switch ($Role) {
+        'SourcePrerequisite'     { return (Get-PatchTargetsForType -PatchType (Get-PatchEntryType -Patch $Patch)) }
+        'ServicingStackCarrier'  { return [string[]]@('Install','Boot','WinRE') }
+        'FinalLCU'               { return [string[]]@('Install','Boot') }
+        'CheckpointDependency'   { return [string[]]@() }
+        'DotNetLeaf'             { return [string[]]@('Install') }
+        'SafeOSDU'               { return [string[]]@('WinRE') }
+        'SetupDU'                { return [string[]]@('Setup') }
+        'LanguagePack'           { return [string[]]@('Install','WinRE') }
+        'WinPeLanguagePack'      { return [string[]]@('Boot') }
+        'WinReLanguagePack'      { return [string[]]@('WinRE') }
+        'LXP'                    { return [string[]]@('Install') }
+        'DotNetLanguagePack'     { return [string[]]@('Install') }
+        'DynamicUpdateComponent'{ return [string[]]@('Install') }
+    }
+    return [string[]]@()
+}
+
+function Get-PatchTargetsForEntry {
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param([Parameter(Mandatory)]$Patch)
+    $targets = New-Object System.Collections.Generic.List[string]
+    foreach ($role in (Get-PatchRoles -Patch $Patch)) {
+        foreach ($target in (Get-PatchTargetsForRole -Patch $Patch -Role $role)) {
+            if ($targets -notcontains $target) { $targets.Add($target) | Out-Null }
+        }
+    }
+    if ($targets.Count -eq 0) {
+        $type = Get-PatchEntryType -Patch $Patch
+        foreach ($target in (Get-PatchTargetsForType -PatchType $type)) {
+            if ($targets -notcontains $target) { $targets.Add($target) | Out-Null }
+        }
+    }
+    return [string[]]$targets.ToArray()
+}
+
+function Test-PatchHasRole {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([Parameter(Mandatory)]$Patch, [Parameter(Mandatory)][string]$Role)
+    return ((Get-PatchRoles -Patch $Patch) -contains $Role)
+}
+
+function Get-PatchesForRole {
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][array]$Patches,
+        [Parameter(Mandatory)][string[]]$Roles
+    )
+    return @($Patches | Where-Object {
+        $entry = $_
+        $matched = $false
+        foreach ($role in $Roles) {
+            if (Test-PatchHasRole -Patch $entry -Role $role) { $matched = $true; break }
+        }
+        $matched
+    })
 }
 
 function Build-InstallApplySequence {
     <#
     .SYNOPSIS
-        Convert the install.wim patch slice into Microsoft's official
-        media-dynamic-update servicing sequence, prefixed by the
-        optional I0 bridge-LCU sub-phase (axis-3 servicing-stack floor).
+        Build the install.wim sequence from servicing roles.
     .DESCRIPTION
-        Per Microsoft's media-dynamic-update doc, install.wim is
-        serviced in this order (mount once, traverse, dismount):
-
-          I1. SSU                                (servicing stack first)
-          I2. LanguagePack injection             (UI must be in place
-                                                  before LCU)
-          I3. LCU first pass                     (Microsoft requires
-                                                  LCU AFTER LP because
-                                                  LP can shadow files
-                                                  delivered by LCU)
-          I4. .NET CU                            (.NET 4.x updates)
-          I5. DynamicUpdate.Component            (component-store DU)
-          I6. (Cleanup + Export, handled by P07)
-          I7. LCU second pass                    (re-applied because the
-                                                  LP injection in I2
-                                                  shadowed some LCU
-                                                  payload files; only
-                                                  required when LP was
-                                                  actually injected)
-
-        The returned object is an array of sub-phases, each describing
-        its name, the patch slice it owns, and a 'RequiresRemount'
-        flag that the worker uses to decide whether to re-mount the
-        WIM between this sub-phase and the previous one.
+        Source prerequisite -> servicing-stack carrier -> language/FOD ->
+        final LCU -> component cleanup -> .NET leaf. The same combined LCU
+        asset can appear in the carrier and final-LCU phases without being
+        downloaded twice. .NET is intentionally after cleanup.
     #>
     [CmdletBinding()]
     [OutputType([array])]
-    param(
-        [Parameter(Mandatory)] [AllowEmptyCollection()] [array]$InstallPatches
-    )
-    # Bucket by Type
-    $byType = @{}
-    foreach ($p in $InstallPatches) {
-        $t = Get-PatchEntryType -Patch $p
-        if (-not $byType.ContainsKey($t)) { $byType[$t] = New-Object System.Collections.Generic.List[object] }
-        $byType[$t].Add($p) | Out-Null
-    }
-    $bridge     = @(if ($byType.ContainsKey('BridgeLcu')) { $byType['BridgeLcu'] } else { @() })
-    $ssu        = @(if ($byType.ContainsKey('SSU')) { $byType['SSU'] } else { @() })
-    $lp         = @()
-    if ($byType.ContainsKey('LanguagePack')) { $lp += $byType['LanguagePack'] }
-    if ($byType.ContainsKey('LXP'))          { $lp += $byType['LXP'] }
-    if ($byType.ContainsKey('DotNet.LangPack')) { $lp += $byType['DotNet.LangPack'] }
-    $lcu        = @(if ($byType.ContainsKey('LCU')) { $byType['LCU'] } else { @() })
-    $dotnet     = @(if ($byType.ContainsKey('DotNet')) { $byType['DotNet'] } else { @() })
-    # Reserved slot mirroring Microsoft's documented sequence; the
-    # baseline Kind vocabulary (LCU/SSU/DotNet/SafeOSDU/SetupDU) does not
-    # currently produce this type, so the bucket is normally empty.
-    $dynUpComp  = @(if ($byType.ContainsKey('DynamicUpdate.Component')) { $byType['DynamicUpdate.Component'] } else { @() })
+    param([Parameter(Mandatory)] [AllowEmptyCollection()] [array]$InstallPatches)
 
-    $hasLp = ($lp.Count -gt 0)
+    $prereq = Get-PatchesForRole -Patches $InstallPatches -Roles @('SourcePrerequisite')
+    $stack  = Get-PatchesForRole -Patches $InstallPatches -Roles @('ServicingStackCarrier')
+    $lp     = Get-PatchesForRole -Patches $InstallPatches -Roles @('LanguagePack','LXP','DotNetLanguagePack')
+    $lcu    = Get-PatchesForRole -Patches $InstallPatches -Roles @('FinalLCU')
+    $dyn    = Get-PatchesForRole -Patches $InstallPatches -Roles @('DynamicUpdateComponent')
+    $dotnet = Get-PatchesForRole -Patches $InstallPatches -Roles @('DotNetLeaf')
 
-    $sequence = New-Object System.Collections.Generic.List[object]
-    # I0: static bridge LCU (axis-3 image-side servicing-stack floor;
-    # MS per-KB guidance, e.g. KB5094128: install KB5030216-or-later on
-    # the offline media BEFORE the latest update). Unconditionally first
-    # when present [A1]; supersedence no-ops it on already-current images.
-    $sequence.Add([pscustomobject]@{
-        Name             = 'I0.BridgeLcu'
-        Description      = 'Bridge LCU (image servicing-stack floor; applied before everything)'
-        Patches          = $bridge
-        RequiresRemount  = $false
-    }) | Out-Null
-    $sequence.Add([pscustomobject]@{
-        Name             = 'I1.SSU'
-        Description      = 'Servicing Stack Update (must come first)'
-        Patches          = $ssu
-        RequiresRemount  = $false
-    }) | Out-Null
-    $sequence.Add([pscustomobject]@{
-        Name             = 'I2.LanguagePack'
-        Description      = 'Language Pack injection (UI must be in place before LCU)'
-        Patches          = $lp
-        RequiresRemount  = $false
-    }) | Out-Null
-    $sequence.Add([pscustomobject]@{
-        Name             = 'I3.LCU.FirstPass'
-        Description      = 'Cumulative Update (after LP per Microsoft media-dynamic-update)'
-        Patches          = $lcu
-        RequiresRemount  = $false
-    }) | Out-Null
-    $sequence.Add([pscustomobject]@{
-        Name             = 'I4.DotNet'
-        Description      = '.NET Framework Cumulative Update'
-        Patches          = $dotnet
-        RequiresRemount  = $false
-    }) | Out-Null
-    $sequence.Add([pscustomobject]@{
-        Name             = 'I5.DynamicUpdate.Component'
-        Description      = 'Component-store Dynamic Update'
-        Patches          = $dynUpComp
-        RequiresRemount  = $false
-    }) | Out-Null
-    # I6: Component Cleanup + Export are handled by P07's mount-scope
-    # finalisation, not as a Patches-bearing sub-phase. Modelled here
-    # as a marker entry so the worker can hook in.
-    $sequence.Add([pscustomobject]@{
-        Name             = 'I6.CleanupAndExport'
-        Description      = 'DISM /Cleanup-Image + Export-WindowsImage'
-        Patches          = @()
-        RequiresRemount  = $false
-        IsCleanupMarker  = $true
-    }) | Out-Null
-    # I7: LCU second pass. Only emit when LP was actually injected,
-    # since the official Microsoft rationale for the second pass is
-    # "language-pack injection shadows some LCU files".
-    if ($hasLp -and $lcu.Count -gt 0) {
-        $sequence.Add([pscustomobject]@{
-            Name             = 'I7.LCU.SecondPass'
-            Description      = 'LCU re-applied (LP shadowed first-pass LCU files)'
-            Patches          = $lcu
-            RequiresRemount  = $true
-        }) | Out-Null
-    }
-    return $sequence.ToArray()
+    $seq = New-Object System.Collections.Generic.List[object]
+    $seq.Add([pscustomobject]@{ Name='I0.SourcePrerequisite'; Description='Source-media prerequisite, conditionally injected'; Patches=$prereq; RequiresRemount=$false }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='I1.ServicingStack'; Description='Standalone SSU or combined-LCU servicing-stack carrier'; Patches=$stack; RequiresRemount=$false }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='I2.LanguageFodOptional'; Description='Language/FOD/optional-component payloads'; Patches=$lp; RequiresRemount=$false }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='I3.FinalLCU'; Description='Final cumulative update after language/component changes'; Patches=$lcu; RequiresRemount=$false }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='I4.DynamicUpdate.Component'; Description='Component-store Dynamic Update'; Patches=$dyn; RequiresRemount=$false }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='I5.Cleanup'; Description='DISM /Cleanup-Image before .NET'; Patches=@(); RequiresRemount=$false; IsCleanupMarker=$true }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='I6.DotNet'; Description='.NET Framework cumulative leaf selected for the mounted index'; Patches=$dotnet; RequiresRemount=$false }) | Out-Null
+    return $seq.ToArray()
 }
 
 function Build-BootApplySequence {
-    <#
-    .SYNOPSIS
-        Convert the boot.wim patch slice into the documented servicing
-        sub-phases, prefixed by the optional B0 bridge-LCU sub-phase
-        (axis-3 servicing-stack floor; mirrors I0 on install.wim).
-    #>
     [CmdletBinding()]
     [OutputType([array])]
-    param(
-        [Parameter(Mandatory)] [AllowEmptyCollection()] [array]$BootPatches
-    )
-    $byType = @{}
-    foreach ($p in $BootPatches) {
-        $t = Get-PatchEntryType -Patch $p
-        if (-not $byType.ContainsKey($t)) { $byType[$t] = New-Object System.Collections.Generic.List[object] }
-        $byType[$t].Add($p) | Out-Null
-    }
-    $bridge = @(if ($byType.ContainsKey('BridgeLcu')) { $byType['BridgeLcu'] } else { @() })
-    $ssu = @(if ($byType.ContainsKey('SSU')) { $byType['SSU'] } else { @() })
-    $lp  = @()
-    if ($byType.ContainsKey('LanguagePack')) { $lp += $byType['LanguagePack'] }
-    $lcu = @(if ($byType.ContainsKey('LCU')) { $byType['LCU'] } else { @() })
+    param([Parameter(Mandatory)] [AllowEmptyCollection()] [array]$BootPatches)
+
+    $prereq = Get-PatchesForRole -Patches $BootPatches -Roles @('SourcePrerequisite')
+    $stack  = Get-PatchesForRole -Patches $BootPatches -Roles @('ServicingStackCarrier')
+    $lp     = Get-PatchesForRole -Patches $BootPatches -Roles @('WinPeLanguagePack','LanguagePack')
+    $lcu    = Get-PatchesForRole -Patches $BootPatches -Roles @('FinalLCU')
 
     $seq = New-Object System.Collections.Generic.List[object]
-    # B0: static bridge LCU. Measured basis (2026-07-07 Server 2022
-    # E2E): boot.wim rejected the target LCU with 0x800f0823 -- the
-    # identical image-side servicing-stack floor that I0 bridges on
-    # install.wim. Unconditionally first when present [A1];
-    # supersedence no-ops it on already-current images.
-    $seq.Add([pscustomobject]@{ Name='B0.BridgeLcu'; Description='Bridge LCU (image servicing-stack floor; applied before everything)'; Patches=$bridge; RequiresRemount=$false }) | Out-Null
-    $seq.Add([pscustomobject]@{ Name='B1.SSU'; Description='SSU'; Patches=$ssu; RequiresRemount=$false }) | Out-Null
-    $seq.Add([pscustomobject]@{ Name='B2.LanguagePack'; Description='Language Pack'; Patches=$lp; RequiresRemount=$false }) | Out-Null
-    $seq.Add([pscustomobject]@{ Name='B3.LCU'; Description='LCU'; Patches=$lcu; RequiresRemount=$false }) | Out-Null
-    $seq.Add([pscustomobject]@{ Name='B4.CleanupAndExport'; Description='Cleanup + Export'; Patches=@(); RequiresRemount=$false; IsCleanupMarker=$true }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='B0.SourcePrerequisite'; Description='Source-media prerequisite, conditionally injected'; Patches=$prereq; RequiresRemount=$false }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='B1.ServicingStack'; Description='Standalone SSU or combined-LCU servicing-stack carrier'; Patches=$stack; RequiresRemount=$false }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='B2.LanguagePack'; Description='WinPE language pack'; Patches=$lp; RequiresRemount=$false }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='B3.FinalLCU'; Description='Final cumulative update'; Patches=$lcu; RequiresRemount=$false }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='B4.Cleanup'; Description='Cleanup + export'; Patches=@(); RequiresRemount=$false; IsCleanupMarker=$true }) | Out-Null
     return $seq.ToArray()
 }
 
 function Build-WinReApplySequence {
     <#
     .SYNOPSIS
-        Convert the WinRE.wim patch slice into the documented servicing
-        sub-phases (SSU -> LP -> SafeOS DU).
-
-        WinRE is NOT serviced with LCU - the Safe OS DU is the
-        Microsoft-supported equivalent. WinRE also does NOT need a
-        twice-apply pass because there is no LCU in the sequence to
-        be shadowed by the language pack.
+        Build the WinRE sequence from roles.
+    .DESCRIPTION
+        A combined LCU can be supplied as the servicing-stack carrier; its
+        final OS LCU role is intentionally not targeted to WinRE. SafeOS DU
+        remains a separate WinRE payload.
     #>
     [CmdletBinding()]
     [OutputType([array])]
-    param(
-        [Parameter(Mandatory)] [AllowEmptyCollection()] [array]$WinRePatches
-    )
-    $byType = @{}
-    foreach ($p in $WinRePatches) {
-        $t = Get-PatchEntryType -Patch $p
-        if (-not $byType.ContainsKey($t)) { $byType[$t] = New-Object System.Collections.Generic.List[object] }
-        $byType[$t].Add($p) | Out-Null
-    }
-    $ssu     = @(if ($byType.ContainsKey('SSU')) { $byType['SSU'] } else { @() })
-    $lp      = @()
-    if ($byType.ContainsKey('LanguagePack')) { $lp += $byType['LanguagePack'] }
-    $safeOs  = @(if ($byType.ContainsKey('SafeOSDU')) { $byType['SafeOSDU'] } else { @() })
+    param([Parameter(Mandatory)] [AllowEmptyCollection()] [array]$WinRePatches)
+
+    $prereq = Get-PatchesForRole -Patches $WinRePatches -Roles @('SourcePrerequisite')
+    $stack  = Get-PatchesForRole -Patches $WinRePatches -Roles @('ServicingStackCarrier')
+    $lp     = Get-PatchesForRole -Patches $WinRePatches -Roles @('WinReLanguagePack','LanguagePack')
+    $safeOs = Get-PatchesForRole -Patches $WinRePatches -Roles @('SafeOSDU')
 
     $seq = New-Object System.Collections.Generic.List[object]
-    $seq.Add([pscustomobject]@{ Name='W1.SSU'; Description='SSU (or combined LCU surrogate)'; Patches=$ssu; RequiresRemount=$false }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='W0.SourcePrerequisite'; Description='Source-media prerequisite, conditionally injected'; Patches=$prereq; RequiresRemount=$false }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='W1.ServicingStack'; Description='Standalone SSU or combined-LCU servicing-stack carrier'; Patches=$stack; RequiresRemount=$false }) | Out-Null
     $seq.Add([pscustomobject]@{ Name='W2.LanguagePack'; Description='Recovery UI language pack'; Patches=$lp; RequiresRemount=$false }) | Out-Null
-    $seq.Add([pscustomobject]@{ Name='W3.SafeOsDU'; Description='Safe OS Dynamic Update (WinRE-only LCU substitute)'; Patches=$safeOs; RequiresRemount=$false }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='W3.SafeOsDU'; Description='Safe OS Dynamic Update'; Patches=$safeOs; RequiresRemount=$false }) | Out-Null
     $seq.Add([pscustomobject]@{ Name='W4.CleanupAndExport'; Description='Cleanup + Export /Compress:Recovery'; Patches=@(); RequiresRemount=$false; IsCleanupMarker=$true }) | Out-Null
     return $seq.ToArray()
 }
@@ -8029,6 +8230,128 @@ function Test-PatchServicingReadinessOnMount {
     return $false
 }
 
+function Get-OfflineWindowsState {
+    <# Read build and .NET Framework state from an offline mounted image. #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)][string]$MountPath)
+
+    $softwareHive = Join-Path $MountPath 'Windows\System32\Config\SOFTWARE'
+    if (-not (Test-Path -LiteralPath $softwareHive)) {
+        return [pscustomobject]@{ Build=''; Ubr=0; Version=''; DotNetRelease=0; DotNetVersion='Unknown' }
+    }
+    $mountName = ('WSI_{0}_{1}' -f $PID, ([Guid]::NewGuid().ToString('N')))
+    $regRoot = ('Registry::HKEY_LOCAL_MACHINE\' + $mountName)
+    $loaded = $false
+    try {
+        & reg.exe load ('HKLM\' + $mountName) $softwareHive *> $null
+        if ($LASTEXITCODE -ne 0) { throw ('reg.exe load failed with exit code {0}' -f $LASTEXITCODE) }
+        $loaded = $true
+        $cv = Get-ItemProperty -LiteralPath (Join-Path $regRoot 'Microsoft\Windows NT\CurrentVersion') -ErrorAction Stop
+        $build = [string]$cv.CurrentBuildNumber
+        $ubr = 0
+        if ($cv.PSObject.Properties['UBR']) { $ubr = [int]$cv.UBR }
+        $release = 0
+        $netPath = Join-Path $regRoot 'Microsoft\NET Framework Setup\NDP\v4\Full'
+        if (Test-Path -LiteralPath $netPath) {
+            $net = Get-ItemProperty -LiteralPath $netPath -ErrorAction SilentlyContinue
+            if ($net -and $net.PSObject.Properties['Release']) { $release = [int]$net.Release }
+        }
+        $dotNetVersion = 'Unknown'
+        if ($release -ge 533320) { $dotNetVersion = '4.8.1' }
+        elseif ($release -ge 528040) { $dotNetVersion = '4.8' }
+        elseif ($release -ge 461808) { $dotNetVersion = '4.7.2' }
+        elseif ($release -ge 394802) { $dotNetVersion = '4.6.2' }
+        return [pscustomobject]@{
+            Build         = $build
+            Ubr           = $ubr
+            Version       = $(if ($build) { ('{0}.{1}' -f $build, $ubr) } else { '' })
+            DotNetRelease = $release
+            DotNetVersion = $dotNetVersion
+        }
+    } finally {
+        if ($loaded) {
+            [gc]::Collect()
+            [gc]::WaitForPendingFinalizers()
+            & reg.exe unload ('HKLM\' + $mountName) *> $null
+        }
+    }
+}
+
+function Test-KbPresentOnMount {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([Parameter(Mandatory)][string]$MountPath, [Parameter(Mandatory)][string]$KbId)
+    if (-not $KbId) { return $false }
+    $packages = @(Invoke-DismCmdlet -CommandName 'Get-WindowsPackage' -Parameters @{ Path=$MountPath; ErrorAction='Stop' })
+    foreach ($pkg in $packages) {
+        if ([string]$pkg.PackageIdentity -like ('*' + $KbId + '*')) { return $true }
+    }
+    return $false
+}
+
+function Test-DotNetRuntimeSelector {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([AllowNull()]$Selector, [Parameter(Mandatory)]$OfflineState)
+    if (-not $Selector) { return $true }
+    $actual = [string]$OfflineState.DotNetVersion
+    if ($Selector.PSObject.Properties['NetFx4Release'] -and $Selector.NetFx4Release) {
+        return ($actual -eq [string]$Selector.NetFx4Release)
+    }
+    if ($Selector.PSObject.Properties['NetFx4ReleaseRange'] -and $Selector.NetFx4ReleaseRange) {
+        $range = ([string]$Selector.NetFx4ReleaseRange).Split('-')
+        if ($range.Count -eq 2) {
+            try {
+                return (([version]$actual -ge [version]$range[0]) -and ([version]$actual -le [version]$range[1]))
+            } catch { return $false }
+        }
+    }
+    return $true
+}
+
+function Get-PatchApplicabilityDecision {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)]$Patch,
+        [Parameter(Mandatory)][string]$MountPath,
+        [Parameter(Mandatory)]$OfflineState
+    )
+    $mode = 'Always'
+    $rule = $null
+    if ($Patch.PSObject.Properties['Applicability'] -and $Patch.Applicability) {
+        $rule = $Patch.Applicability
+        if ($rule.PSObject.Properties['Mode'] -and $rule.Mode) { $mode = [string]$rule.Mode }
+    }
+    if ((Get-PatchRoles -Patch $Patch) -contains 'DotNetLeaf') {
+        $matches = Test-DotNetRuntimeSelector -Selector $Patch.RuntimeSelector -OfflineState $OfflineState
+        return [pscustomobject]@{ Applicable=$matches; Reason=$(if ($matches) { 'runtime matched' } else { 'runtime did not match' }); Mode='IfRuntimeDetectedPerInstallIndex' }
+    }
+    switch ($mode) {
+        'IfPackageAbsent' {
+            $present = Test-KbPresentOnMount -MountPath $MountPath -KbId ([string]$Patch.KbId)
+            return [pscustomobject]@{ Applicable=(-not $present); Reason=$(if ($present) { 'KB already present' } else { 'KB absent' }); Mode=$mode }
+        }
+        'IfSourceBelowFloor' {
+            $minimum = ''
+            if ($rule.PSObject.Properties['MinimumImageBuild']) { $minimum = [string]$rule.MinimumImageBuild }
+            if (-not $minimum -and $rule.PSObject.Properties['MinimumServicingStack']) { $minimum = [string]$rule.MinimumServicingStack }
+            if (-not $minimum -or -not $OfflineState.Version) {
+                return [pscustomobject]@{ Applicable=$true; Reason='source floor could not be proven; fail-safe apply'; Mode=$mode }
+            }
+            return [pscustomobject]@{ Applicable=([version]$OfflineState.Version -lt [version]$minimum); Reason=('source={0}; floor={1}' -f $OfflineState.Version, $minimum); Mode=$mode }
+        }
+        'IfLatestSsuNotApplicableOrPackageAbsent' {
+            $present = Test-KbPresentOnMount -MountPath $MountPath -KbId ([string]$Patch.KbId)
+            return [pscustomobject]@{ Applicable=(-not $present); Reason=$(if ($present) { 'legacy prerequisite already present' } else { 'legacy prerequisite absent' }); Mode=$mode }
+        }
+        default {
+            return [pscustomobject]@{ Applicable=$true; Reason='unconditional or resolver-selected asset'; Mode=$mode }
+        }
+    }
+}
+
 function Invoke-PatchSubPhase {
     <#
     .SYNOPSIS
@@ -8081,6 +8404,21 @@ function Invoke-PatchSubPhase {
         # display '?' when neither field is populated.
         $type    = Get-PatchEntryType -Patch $p
         if ([string]::IsNullOrEmpty($type)) { $type = '?' }
+
+        $offlineState = Get-OfflineWindowsState -MountPath $MountPath
+        $decision = Get-PatchApplicabilityDecision -Patch $p -MountPath $MountPath -OfflineState $offlineState
+        if (-not $decision.Applicable) {
+            Write-Step ('    [SKIP] {0}/{1}: {2}' -f $type, $kb, $decision.Reason)
+            $rows.Add([pscustomobject]@{
+                SubPhase=$SubPhase.Name; ImageLabel=$ImageLabel; PatchType=$type; KbId=$kb
+                FilePath=$pkgPath; ApplyStatus='NotApplicable'; ElapsedSec=0
+            }) | Out-Null
+            continue
+        }
+        if ($p.PSObject.Properties['IsMetadataOnly'] -and $p.IsMetadataOnly) {
+            throw ('{0}/{1} is required for {2} ({3}) but its Asset is unresolved. Refresh the baseline or populate SourcePrerequisites[].Asset before Build.' -f $type, $kb, $ImageLabel, $decision.Reason)
+        }
+
         $sw = [System.Diagnostics.Stopwatch]::StartNew()
         $status = 'Planned'
         $errMsg = ''
@@ -8120,8 +8458,14 @@ function Invoke-PatchSubPhase {
         Set-DebugStep -Step ('add-pkg:{0}:{1}' -f $SubPhase.Name, $kb)
         Write-Step ('    Applying {0}/{1} ({2})' -f $type, $kb, [System.IO.Path]::GetFileName($pkgPath))
         try {
+            $allowWinReKnownError = (
+                $ImageLabel -eq 'winre.wim' -and
+                $type -eq 'LCU' -and
+                (Test-PatchHasRole -Patch $p -Role 'ServicingStackCarrier')
+            )
             $status = Add-WindowsPackageWithRetry -MountPath $MountPath `
-                -PackagePath $pkgPath -LogDir $Script:LogsDir
+                -PackagePath $pkgPath -LogDir $Script:LogsDir `
+                -AllowWinReCombinedLcuKnownError:$allowWinReKnownError
             Write-Ok ('      status={0}' -f $status)
         } catch {
             $errMsg = $_.Exception.Message
@@ -10494,57 +10838,28 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
             if ($baselineSource) {
                 Write-Step ('Seeding ResolvedPatches from PatchBaseline.{0}: {1} entries.' -f $baselineField, $baselineSource.Count)
                 foreach ($p in $baselineSource) {
-                    # Derive LocalPath from FileName when available; fall
-                    # back to the URL basename for legacy entries that may
-                    # omit FileName. An empty LocalPath would crash
-                    # P04 Step 2 'Patches' at 'Split-Path -LiteralPath'
-                    # ('cannot bind argument to LiteralPath because it
-                    # is an empty string').
-                    $pFileName = $p.FileName
-                    if (-not $pFileName -and $p.DownloadUrl) {
-                        try {
-                            $pFileName = [System.IO.Path]::GetFileName(([Uri]$p.DownloadUrl).AbsolutePath)
-                        } catch {
-                            $pFileName = $null
-                        }
-                    }
-                    if (-not $pFileName) {
-                        $pFileName = ('{0}.msu' -f $p.KbId)
-                    }
-                    # Only declare a sha-256 expected-hash when the
-                    # baseline actually has one. Inserting an empty
-                    # string would let .ExpectedHashes.Count -gt 0
-                    # evaluate true and force Test-PatchIntegrity into
-                    # comparing against ''.
-                    $expectedHashes = @{}
-                    if ($p.PSObject.Properties['Digest'] -and $p.Digest) {
-                        # Line.Digest = the Catalog SHA-1 base64 (the cross-  # psa-disable-line PSA5003 -- MS Catalog SHA-1
-                        # surface primary key); Test-PatchIntegrity normalizes
-                        # base64->hex via ConvertTo-HexDigestString.
-                        $expectedHashes['sha-1'] = [string]$p.Digest  # psa-disable-line PSA5003 -- MS Catalog SHA-1
-                    }
-                    if ($p.Sha256) {
-                        $expectedHashes['sha-256'] = $p.Sha256
-                    }
-                    $resolved.Add([pscustomobject]@{
-                        Kind = 'Patch'; Source = $p.DownloadUrl
-                        LocalPath = Get-PatchLocalPath -Kind ([string]$p.Kind) -FileName $pFileName
-                        KbId = $p.KbId
-                        PatchType = $p.Kind
-                        ApplyOrder = $p.ApplyOrder
-                        ExpectedHashes = $expectedHashes
-                    }) | Out-Null
+                    $resolved.Add((ConvertTo-ResolvedPatchFromBaselineLine -Line $p)) | Out-Null
                 }
             } else {
                 Write-Step 'PatchBaseline.Lines is empty; P03 will populate from Microsoft Update Catalog.'
             }
             # Static bridge LCU (SEED envelope; independent of Lines).
             # See ConvertTo-BridgeLcuResolvedPatch for the axis-3 basis.
-            if ($bl.PSObject.Properties['BridgeLcu'] -and $bl.BridgeLcu) {
+            if ($Script:OsProfile.Schema -eq '3.0' -and $bl.PSObject.Properties['BridgeLcu'] -and $bl.BridgeLcu) {
                 $bridgeEntry = ConvertTo-BridgeLcuResolvedPatch -BridgeLcu $bl.BridgeLcu
                 $resolved.Add($bridgeEntry) | Out-Null
                 Write-Step ('Bridge LCU staged: {0} (floor {1}; applied first, I0).' -f `
                     $bridgeEntry.KbId, [string]$bl.BridgeLcu.MinimumImageServicingStack)
+            }
+            if ($bl.PSObject.Properties['SourcePrerequisites'] -and $bl.SourcePrerequisites) {
+                foreach ($prereq in @($bl.SourcePrerequisites)) {
+                    $entry = ConvertTo-SourcePrerequisiteResolvedPatch -Prerequisite $prereq
+                    # Avoid adding the v3 compatibility BridgeLcu twice.
+                    if (-not (@($resolved | ForEach-Object { $_.PackageId }) -contains $entry.PackageId)) {
+                        $resolved.Add($entry) | Out-Null
+                    }
+                }
+                Write-Step ('SourcePrerequisites staged: {0} metadata/asset entry(s).' -f @($bl.SourcePrerequisites).Count)
             }
         } elseif ($Script:SyntheticTestMode) {
             Write-Step '-SyntheticTestMode is on; no real patches required.'
@@ -10779,59 +11094,25 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
 
         # ---- Re-derive $Script:ResolvedPatches from new baseline ----
         Set-DebugStep -Step 'derive-resolved-patches'
-        # The refreshed baseline is the source of truth for P04.
-        if ($true) {
-            $derived = New-Object System.Collections.Generic.List[object]
-            foreach ($p in $newPatches) {
-                # Same LocalPath / ExpectedHashes derivation as the P02
-                # baseline-seeding path; see SPEC.md for the empty-
-                # LocalPath bug this guards against (would crash P04
-                # Step 2 'Patches' at 'Split-Path -LiteralPath').
-                $pFileName = $p.FileName
-                if (-not $pFileName -and $p.DownloadUrl) {
-                    try {
-                        $pFileName = [System.IO.Path]::GetFileName(([Uri]$p.DownloadUrl).AbsolutePath)
-                    } catch {
-                        $pFileName = $null
-                    }
-                }
-                if (-not $pFileName) {
-                    $pFileName = ('{0}.msu' -f $p.KbId)
-                }
-                $expectedHashes = @{}
-                if ($p.PSObject.Properties['Digest'] -and $p.Digest) {
-                    # Line.Digest = the Catalog SHA-1 base64 primary key;  # psa-disable-line PSA5003 -- MS Catalog SHA-1
-                    # same wiring as the P02 baseline-seeding path
-                    # (Test-PatchIntegrity normalizes base64->hex).
-                    $expectedHashes['sha-1'] = [string]$p.Digest  # psa-disable-line PSA5003 -- MS Catalog SHA-1
-                }
-                if ($p.Sha256) {
-                    $expectedHashes['sha-256'] = $p.Sha256
-                }
-                $derived.Add([pscustomobject][ordered]@{
-                    Kind            = 'Patch'
-                    Source          = $p.DownloadUrl
-                    LocalPath       = Get-PatchLocalPath -Kind ([string]$p.Kind) -FileName $pFileName
-                    KbId            = $p.KbId
-                    # Line objects carry the type under 'Kind' (Config
-                    # Schema v3.0); reading a non-existent 'Type' here
-                    # yielded $null PatchType and dropped every refreshed
-                    # patch from the apply sub-phases.
-                    PatchType       = $p.Kind
-                    ApplyOrder      = $p.ApplyOrder
-                    ExpectedHashes  = $expectedHashes
-                }) | Out-Null
-            }
-            # Static bridge LCU (SEED envelope): re-derivation must carry
-            # it exactly like the P02 baseline-seeding path, or a P03
-            # refresh would silently drop the axis-3 floor bridge.
-            $blRefreshed = $Script:OsProfile.PatchBaseline
-            if ($blRefreshed -and $blRefreshed.PSObject.Properties['BridgeLcu'] -and $blRefreshed.BridgeLcu) {
-                $derived.Add((ConvertTo-BridgeLcuResolvedPatch -BridgeLcu $blRefreshed.BridgeLcu)) | Out-Null
-            }
-            $Script:ResolvedPatches = $derived | Sort-Object ApplyOrder, KbId
-            Write-Ok ('Derived {0} patch entries from refreshed baseline.' -f $Script:ResolvedPatches.Count)
+        $derived = New-Object System.Collections.Generic.List[object]
+        foreach ($p in $newPatches) {
+            $derived.Add((ConvertTo-ResolvedPatchFromBaselineLine -Line $p)) | Out-Null
         }
+        $blRefreshed = $Script:OsProfile.PatchBaseline
+        if ($Script:OsProfile.Schema -eq '3.0' -and $blRefreshed -and $blRefreshed.PSObject.Properties['BridgeLcu'] -and $blRefreshed.BridgeLcu) {
+            $derived.Add((ConvertTo-BridgeLcuResolvedPatch -BridgeLcu $blRefreshed.BridgeLcu)) | Out-Null
+        }
+        if ($blRefreshed -and $blRefreshed.PSObject.Properties['SourcePrerequisites'] -and $blRefreshed.SourcePrerequisites) {
+            foreach ($prereq in @($blRefreshed.SourcePrerequisites)) {
+                $entry = ConvertTo-SourcePrerequisiteResolvedPatch -Prerequisite $prereq
+                if (-not (@($derived | ForEach-Object { $_.PackageId }) -contains $entry.PackageId)) {
+                    $derived.Add($entry) | Out-Null
+                }
+            }
+        }
+        $Script:ResolvedPatches = @($derived | Sort-Object ApplyOrder, KbId)
+        $Script:PatchPlan = Build-PatchPlan -Patches $Script:ResolvedPatches
+        Write-Ok ('Derived {0} patch entries from refreshed baseline.' -f $Script:ResolvedPatches.Count)
 
         return $true
     } finally {
@@ -10920,6 +11201,10 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
         $idx = 0
         foreach ($p in $Script:ResolvedPatches) {
             $idx++
+            if ($p.PSObject.Properties['IsMetadataOnly'] -and $p.IsMetadataOnly) {
+                Write-Step ('[{0}/{1}] {2}: metadata-only prerequisite; applicability will be evaluated after mount.' -f $idx, $Script:ResolvedPatches.Count, $p.KbId)
+                continue
+            }
             $leaf = [System.IO.Path]::GetFileName($p.LocalPath)
             # Per-patch landing directory: LCU/Checkpoint land in the
             # cu\ discovery subfolder (Get-PatchLocalPath), so the
@@ -11268,8 +11553,9 @@ function Invoke-BuildPhase07_PatchInstallWim {
         $patches = Get-PatchListForInstallWim
         Write-Step ('install.wim-targeted patches: {0}' -f $patches.Count)
 
-        # Pull the install sub-phase sequence (I1.SSU ... I7.LCU.SecondPass)
-        # from the cached PatchPlan. The plan was built in P02.
+        # Pull the role-based install sequence from the cached PatchPlan.
+        # Current order is prerequisite/carrier -> language/FOD -> final LCU
+        # -> cleanup -> .NET -> export. The plan was built in P02.
         $plan = Get-OrInitPatchPlan
         $installSequence = @($plan.InstallSequence)
         Write-Step ('install.wim apply sequence: {0} sub-phase(s)' -f $installSequence.Count)
@@ -11296,9 +11582,10 @@ function Invoke-BuildPhase07_PatchInstallWim {
                 foreach ($sp in $installSequence) {
                     foreach ($p in @($sp.Patches)) {
                         if (-not $p) { continue }
-                        Write-Step ('  [PLAN] {0}: {1} ({2}) -> {3}' -f $sp.Name, $p.KbId, $p.Type, $imgLabel)
+                        $plannedType = Get-PatchEntryType -Patch $p
+                        Write-Step ('  [PLAN] {0}: {1} ({2}) -> {3}' -f $sp.Name, $p.KbId, $plannedType, $imgLabel)
                         $rows.Add([pscustomobject]@{
-                            KbId = $p.KbId; PatchType = $p.Kind
+                            KbId = $p.KbId; PatchType = $plannedType
                             FilePath = $p.LocalPath; ApplyOrder = $p.ApplyOrder
                             AppliesTo = $imgLabel; SubPhase = $sp.Name
                             ApplyStatus = 'Planned'; ElapsedSeconds = 0
@@ -11309,14 +11596,10 @@ function Invoke-BuildPhase07_PatchInstallWim {
                 continue
             }
 
-            # Microsoft media-dynamic-update sequence requires that the
-            # install.wim be mounted, traversed through I1..I6 in order,
-            # then dismounted+committed+exported, and finally re-mounted
-            # for I7 (LCU second pass) IFF a language pack was injected.
-            # The Build-InstallApplySequence helper marks I7 with
-            # RequiresRemount = $true. We honour that by closing the
-            # first mount on the cleanup marker and opening a fresh one
-            # for any RequiresRemount sub-phase.
+            # Execute the generated role-based sequence in order. The generic
+            # remount path remains for compatibility with a future or legacy
+            # plan that explicitly marks a sub-phase RequiresRemount; the v4
+            # default sequence does not rely on a hard-coded I7 second pass.
 
             $remountAndContinue = $false
             $secondPassSubPhases = New-Object System.Collections.Generic.List[object]
@@ -11476,7 +11759,7 @@ function Invoke-BuildPhase08_PatchBootWim {
             $bootIndexes = @(1, 2)
         }
 
-        # Pull boot.wim apply sequence (B0.BridgeLcu -> B1.SSU -> B2.LP -> B3.LCU -> B4.cleanup)
+        # Pull the role-based boot.wim sequence (prerequisite/carrier -> language -> final LCU -> cleanup/export)
         $bootSequence = @($plan.BootSequence)
         Write-Step ('boot.wim apply sequence: {0} sub-phase(s)' -f $bootSequence.Count)
 
@@ -11531,66 +11814,52 @@ function Invoke-BuildPhase08_PatchBootWim {
         }
         }
 
-        # winre.wim (extracted from install.wim)
+        # winre.wim: service once, then copy the identical result to every
+        # selected install.wim index. This prevents Standard/Datacenter or
+        # Core/Desktop indexes from retaining the source-media WinRE.
         if ($Script:OsProfile.EnableWinREUpdate) {
-            Write-SubSection 'winre.wim (extracted from install.wim)'
+            Write-SubSection 'winre.wim (service once; distribute to all install.wim indexes)'
             Set-DebugStep -Step 'winre-extract'
-            # Decide BEFORE mounting anything: a no-work WinRE pass
-            # used to mount + dismount install.wim (60-100s) just to
-            # discover there was nothing to apply.
-            # Pull WinRE apply sequence (W1.SSU -> W2.LP -> W3.SafeOsDU -> W4.cleanup)
             $winReSequence = @($plan.WinReSequence)
             $winReHasWork = Test-WimSequenceHasWork -Sequence $winReSequence
             if (-not $winReHasWork) {
-                Write-Step 'WinRE sequence has no patches; skipping install.wim mount + WinRE servicing.'
+                Write-Step 'WinRE sequence has no patches; skipping WinRE servicing.'
             } else {
-            $installWim = Join-Path $Script:ExtractedDir 'sources\install.wim'
-            $primaryIdx = ($Script:WimIndexInventory | Select-Object -First 1).ImageIndex
-            if (-not $primaryIdx) { $primaryIdx = 1 }
+                $installWim = Join-Path $Script:ExtractedDir 'sources\install.wim'
+                $targets = @(Resolve-InstallWimTargetIndexes -Inventory $Script:WimIndexInventory)
+                if ($targets.Count -eq 0) { throw 'No install.wim indexes are selected for WinRE distribution.' }
+                $primaryIdx = [int]$targets[0].ImageIndex
+                $winReWork = Join-Path $Script:TempDir 'winre_work.wim'
 
-            Invoke-WimMountSafe -ImagePath $installWim -Index $primaryIdx `
-                -Path $Script:MountInstallDir -LogDir $Script:LogsDir | Out-Null
-            $winReInside = Join-Path $Script:MountInstallDir 'Windows\System32\Recovery\Winre.wim'
-            $winReWork = Join-Path $Script:TempDir 'winre_work.wim'
-            try {
-                if (-not (Test-Path -LiteralPath $winReInside)) {
-                    Write-Caution 'Winre.wim not found inside install.wim; skipping winre update.'
-                } else {
-                        Write-Step ('winre.wim apply sequence: {0} sub-phase(s)' -f $winReSequence.Count)
-                        Copy-Item -LiteralPath $winReInside -Destination $winReWork -Force
-                        # winre.wim is typically a single-index image
-                        Invoke-WimMountSafe -ImagePath $winReWork -Index 1 `
-                            -Path $Script:MountWinReDir -LogDir $Script:LogsDir | Out-Null
-                        try {
-                            # Dependency closure for WinRE
-                            $allWinRePatches = @($winReSequence | Where-Object {
-                                -not ($_.PSObject.Properties['IsCleanupMarker'] -and $_.IsCleanupMarker)
-                            } | ForEach-Object { $_.Patches }) | Where-Object { $_ }
-                            Test-PatchServicingReadinessOnMount -MountPath $Script:MountWinReDir `
-                                -PatchesToApply $allWinRePatches `
-                                -ImageLabel 'winre.wim' | Out-Null
-
-                            foreach ($sp in $winReSequence) {
-                                if ($sp.PSObject.Properties['IsCleanupMarker'] -and $sp.IsCleanupMarker) {
-                                    Invoke-DismCleanup -MountPath $Script:MountWinReDir
-                                    continue
-                                }
-                                Invoke-PatchSubPhase -SubPhase $sp `
-                                    -MountPath $Script:MountWinReDir `
-                                    -ImageLabel 'winre.wim' | Out-Null
-                            }
-                        } finally {
-                            Invoke-WimDismountSafe -Path $Script:MountWinReDir -LogDir $Script:LogsDir
-                        }
-                        # Copy the freshly-serviced WinRE back into install.wim's
-                        # recovery slot. The outer install.wim mount is still
-                        # open at this point, so the file write commits when
-                        # the install.wim dismount in our finally block runs.
-                        Copy-Item -LiteralPath $winReWork -Destination $winReInside -Force
+                # Extract from one index without modifying it yet.
+                Invoke-WimMountSafe -ImagePath $installWim -Index $primaryIdx -Path $Script:MountInstallDir -LogDir $Script:LogsDir | Out-Null
+                try {
+                    $winReInside = Join-Path $Script:MountInstallDir 'Windows\System32\Recovery\Winre.wim'
+                    if (-not (Test-Path -LiteralPath $winReInside)) { throw ('Winre.wim not found in install.wim index {0}.' -f $primaryIdx) }
+                    Copy-Item -LiteralPath $winReInside -Destination $winReWork -Force
+                } finally {
+                    Invoke-WimDismountSafe -Path $Script:MountInstallDir -Discard -LogDir $Script:LogsDir
                 }
-            } finally {
-                Invoke-WimDismountSafe -Path $Script:MountInstallDir -LogDir $Script:LogsDir
-            }
+
+                Invoke-WimMountSafe -ImagePath $winReWork -Index 1 -Path $Script:MountWinReDir -LogDir $Script:LogsDir | Out-Null
+                try {
+                    $allWinRePatches = @($winReSequence | Where-Object {
+                        -not ($_.PSObject.Properties['IsCleanupMarker'] -and $_.IsCleanupMarker)
+                    } | ForEach-Object { $_.Patches }) | Where-Object { $_ }
+                    Test-PatchServicingReadinessOnMount -MountPath $Script:MountWinReDir -PatchesToApply $allWinRePatches -ImageLabel 'winre.wim' | Out-Null
+                    foreach ($sp in $winReSequence) {
+                        if ($sp.PSObject.Properties['IsCleanupMarker'] -and $sp.IsCleanupMarker) {
+                            Invoke-DismCleanup -MountPath $Script:MountWinReDir
+                            continue
+                        }
+                        Invoke-PatchSubPhase -SubPhase $sp -MountPath $Script:MountWinReDir -ImageLabel 'winre.wim' | Out-Null
+                    }
+                } finally {
+                    Invoke-WimDismountSafe -Path $Script:MountWinReDir -LogDir $Script:LogsDir
+                }
+                Export-WinReRecoveryCompressed -WinRePath $winReWork
+                Copy-ServicedWinReToInstallIndexes -InstallWim $installWim -ServicedWinRe $winReWork -Indexes $targets
+                Write-Ok ('Serviced WinRE distributed to {0} install.wim index(es).' -f $targets.Count)
             }
         }
 
@@ -11622,9 +11891,9 @@ function Invoke-BuildPhase08_PatchBootWim {
 # before/after size + timestamp + SHA-256 of every file are recorded
 # to the console, to logs\P08S_setup_binaries_sync.csv and to
 # logs\setup_binaries_sync.json -- never an implicit side effect.
-# For Server 2016 this doubles as the working closure of the V3
-# SetupDU gap (no Setup DU exists for 14393; the serviced boot.wim
-# is the only in-band source of matching Setup binaries).
+# This sync remains mandatory even when a Setup Dynamic Update is
+# available: the serviced boot.wim index 2 is the authoritative source
+# for matching setup.exe (and setuphost.exe on build 26100+).
 
 function Get-SetupBinarySyncPlan {
     <#
@@ -11885,6 +12154,12 @@ function Invoke-BuildPhase09_AssembleIso {
         $setupDuPatches = @($Script:ResolvedPatches | Where-Object { $_.PatchType -eq 'SetupDU' })
         if ($setupDuPatches.Count -gt 0 -and -not $Script:SyntheticTestMode) {
             foreach ($p in $setupDuPatches) {
+                if (($p.PSObject.Properties['IsMetadataOnly'] -and $p.IsMetadataOnly) -or [string]::IsNullOrWhiteSpace([string]$p.LocalPath)) {
+                    throw ('Setup DU {0} is required by the v4 baseline but its distributable asset is unresolved. Run DiscoverBaseline/ResolveAssets/FreezeBaseline, or populate FileName, DownloadUrl, and SHA-256 before Build.' -f $p.KbId)
+                }
+                if (-not (Test-Path -LiteralPath $p.LocalPath)) {
+                    throw ('Setup DU asset was resolved but is not present locally: {0} ({1})' -f $p.KbId, $p.LocalPath)
+                }
                 Write-Step ('Overlaying {0} onto extracted ISO sources\' -f $p.KbId)
                 # Dynamic Update Setup CABs are extracted with expand.exe and
                 # files are copied into the sources\ tree

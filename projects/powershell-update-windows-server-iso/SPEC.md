@@ -560,17 +560,92 @@ family** (e.g. `D:\UpdateWsi_2016`, `D:\UpdateWsi_2019`, …). This
 side-steps the DISM mount-cache poisoning class of failure
 documented in §D.25.
 
-## B.4 OS profile (Config Schema v3.0)
+## B.4 OS profile (Config Schema v4.0; v3.0 retained for compatibility)
 
 **Status**: normative. **Policy ID**: SPEC-WSI-011 (Patch integrity
 three-layer is built on this schema).
 
 Each `data/config-Server<OsKey>.json` file is a per-OS configuration
-profile that the script reads at P02 (ResolveInputs). Schema 3.0 is
-the current shape; older revisions are documented in §B.22 for
-historical reference.
+profile that the script reads at P02 (ResolveInputs). **Schema 4.0
+(r12.00) is the current shape**, described in §B.4.0; the v3.0 shapes
+documented in §B.4.1–§B.4.5 remain valid as the retained-compatibility
+surface declared by `Compatibility.LegacyFieldsRetained`. Older
+revisions are documented in §B.22 for historical reference.
+
+### B.4.0 Config Schema v4.0 (r12.00) — declared servicing policy
+
+Schema 4.0 moves servicing truth out of hand-authored per-OS matrices
+in code and tests, and into **machine-readable declarations inside each
+config**. The machine contract is `schema/config.schema.v4.json`
+(JSON Schema draft 2020-12); `data/config-template-v4.json` is the
+template for adding a new OS. Every config's top-level `Schema` field
+declares which schema it satisfies (`"3.0"` → `config.schema.json`,
+`"4.0"` → `config.schema.v4.json`); the schema gate selects by that
+declaration rather than assuming a single global schema.
+
+The v4 additions, per surface:
+
+- **`ServicingModel`** — the canonical servicing model, replacing the
+  `PatchModel` discriminated union as the source of truth.
+  `MonthlyServicingStyle` (`SeparateSSU` / `CombinedSSULCU` /
+  `CheckpointCU`) declares the monthly delivery form;
+  `ServicingModel.ApplyPlans` declares the apply sequence per WIM
+  target as data (replacing the in-code `$applyMap`);
+  `PackageRoleModel`, `DotNetPolicy`, `DynamicUpdatePolicy` and
+  `SourcePrerequisitePolicy` declare the remaining per-axis stances.
+- **`DiscoveryPolicy`** — how patches are discovered from the live
+  Microsoft Update Catalog: `CatalogAliases`, `SearchProfiles` (per
+  Kind: `QueryStrategy`, title accept/reject constraints,
+  classification requirements), `ReleaseChannel`, `OobPolicy`,
+  `ExcludePreview`, `DotNetSelection`, `DynamicUpdateSelection`,
+  `SourcePriority`.
+- **`ValidationPolicy`** — what must be proven before freeze/approval
+  (flag set; grows across the series, e.g. r12.04 adds
+  `FailOnPca2023ComplianceFailure`, `SuppressRedundantCombinedLcuReapply`,
+  `VerifyAllInstallIndexes`, `VerifySetupDuManifest`,
+  `VerifyWinRePackageState`). `FailOnBootWimServicingFailure` is where
+  the boot.wim servicing stance now lives (superseding the per-OS
+  `Common.BootWimLcuPolicy` matrix; see §B.15).
+- **`PatchBaseline.SourcePrerequisites[]`** — one uniform shape for
+  what the *source ISO* requires before servicing, independent of the
+  monthly delivery form, with a `Condition.Mode` discriminator (e.g.
+  `IfImageOrServicingStackBelowFloor` with `MinimumImageBuild` /
+  `MinimumServicingStack` for the Server 2022 bridge LCU;
+  `IfServicingStackBelow` for the Server 2016 legacy-SSU
+  prerequisite). This replaces both the standalone
+  `PatchBaseline.BridgeLcu` block and the hardcoded per-OS build
+  floors.
+- **`PatchBaseline.Lines[]` extensions** — `Roles` (servicing roles,
+  e.g. `ServicingStackCarrier` / `FinalLCU`, distinct from the
+  distribution-file `Kind`), `TargetsByRole` (per-role WIM targets),
+  `Applicability`, `RuntimeSelector`, `Integrity` (canonical
+  per-algorithm integrity nodes `Integrity.<Alg>.Value`, superseding
+  the flat `Digest` / `Sha256` fields), `State` (baseline lifecycle:
+  `Discovered` → `Resolved` → `Frozen` → `E3Validated` →
+  `E4Validated` → `E5Validated` → `Approved`; a Line at `Frozen` or
+  later must carry a SHA-256), `Evidence`, and `ParentKbId` (an asset
+  modelled as a child of a combined parent is resolvable through that
+  parent and need not carry its own `DownloadUrl`).
+- **`Compatibility`** — the config's own migration map:
+  `LegacySchema`, `LegacyFieldsRetained` (`Common.InstallWimIndex`,
+  `Common.BootWimLcuPolicy`, `PatchBaseline.Lines[].Digest`,
+  `PatchBaseline.Lines[].Sha256`, `PatchBaseline.Lines[].ApplyOrder`,
+  `PatchModel`) and `CanonicalV4Fields`. A test or code path that
+  asserts a `LegacyFieldsRetained` entry is by definition asserting
+  the superseded model; the canonical successor is listed in
+  `CanonicalV4Fields`.
+
+Discovery-time URL policy: under `DiscoveryPolicy`, download URLs are
+resolved at runtime; a committed `DownloadUrl` on a Line is a
+compatibility convenience, not a requirement — committing one is
+exactly the staleness hazard the discovery model exists to avoid.
 
 ### B.4.1 Top-level structure
+
+> **Compatibility note (r12.00)**: §B.4.1–§B.4.5 document the v3.0
+> shapes. Under Schema 4.0 these remain present as the
+> retained-compatibility surface (`Compatibility.LegacyFieldsRetained`);
+> the canonical v4 surfaces are described in §B.4.0.
 
 ```jsonc
 {
@@ -1262,7 +1337,34 @@ PowerShell.
 
 ## B.15 Update type matrix per OS generation
 
-**Status**: normative. **Policy ID**: SPEC-WSI-017.
+**Status**: **superseded at r12.00 (Schema 4.0) — retained as the
+historical record of the v3 model.** **Policy ID**: SPEC-WSI-017.
+
+> **Supersession (r12.00).** The Require/Forbid matrix in §B.15.1
+> encoded the assumption that Microsoft publishes .NET, SafeOS DU and
+> Setup DU rows only for specific OS generations. Measured against the
+> live Microsoft Update Catalog at r12.00, that assumption is factually
+> wrong: all four supported generations resolve real Catalog rows for
+> the "forbidden" kinds — e.g. Setup Dynamic Update KB5068794
+> (Server 2016), KB5068795 (Server 2019) and KB5079518 (Server 2022),
+> where the matrix declared the empty no-line marker. Microsoft's own
+> guidance ("Update Windows installation media with Dynamic Update",
+> Microsoft Learn) describes Dynamic Update packages generically per
+> media, not as a per-generation entitlement; the checkpoint-cumulative
+> model is likewise documented per servicing branch ("Checkpoint
+> cumulative updates and the Microsoft Update Catalog", Microsoft
+> Learn), not as a Kind-forbidding contract. Under Schema 4.0 the
+> per-OS stance therefore lives in **declared data** —
+> `DiscoveryPolicy.SearchProfiles` (what is discovered),
+> `ServicingModel.ApplyPlans` (what applies where, in what order) and
+> `Lines[].Roles` / `Applicability` (what a resolved asset is for) —
+> and the runtime `Test-PatchModelConsistency` keeps only the Require
+> axis plus the State-driven integrity requirement. The Forbid axis is
+> retired everywhere; §B.15.4 records the contract retirements this
+> implies. §B.15.1–§B.15.3 below are kept verbatim as the historical
+> statement of the superseded model (in particular, the Forbid
+> enforcement §B.15.3 attributes to `Test-PatchModelConsistency` no
+> longer exists at r12.00).
 
 ### B.15.1 The matrix
 
@@ -1329,6 +1431,115 @@ models forbid one (`Test-PatchModelConsistency` enforces this at P06).
 The pre-v3.0 `Test-IsCombinedLcuTitle` Title-matching helper that set a
 per-entry `IsCombined` flag is legacy and no longer drives
 `Build-PatchPlan`.
+
+### B.15.4 Contract retirements at r12.00 — what each contract asserted, and how that reading of Microsoft's servicing model was wrong
+
+Eight repository contracts were retired with the Schema 4.0 landing.
+Per the series rule, a test may not be deleted without a record of what
+it asserted and why that reading of Microsoft's servicing model was
+wrong; this section is that record. Where the underlying concern
+survives, the successor contract is named (the successors are the
+declaration-derived T41–T46 set; see TESTING.md).
+
+**T28 `setup_du_forbid_test.py` — the Setup DU Forbid matrix.**
+Asserted that Setup Dynamic Update is published only for the
+uup-checkpoint generation and that 2016/2019/2022 resolve the empty
+no-line marker. Wrong because Microsoft publishes Setup DU per
+servicing branch, not per "generation entitlement": the live Catalog
+resolves KB5068794 (2016), KB5068795 (2019) and KB5079518 (2022). The
+contract had generalised a point-in-time absence of rows into a
+publishing rule. Successor: T46 `discovery_policy_declaration_test.py`
+(declared `DiscoveryPolicy.SearchProfiles` conformance), with the
+behavioural half scheduled for the live-network tier alongside T1/T4.
+
+**T23 `config_required_ssu_downloadurl_test.py` — the SSU DownloadUrl
+guard.** Asserted every `Kind=SSU` line carries a non-empty
+`DownloadUrl` and that `PatchModel` ⇔ SSU-line presence is consistent
+per OS. Wrong because an SSU can be delivered as a child of a combined
+parent package (`ParentKbId`), in which case a standalone download URL
+is not meaningful — the asset is resolvable through its parent; and
+because under a live-discovery model a committed URL is a staleness
+hazard, not a guarantee. `PatchModel` itself is
+`Compatibility.LegacyFieldsRetained`. Successor: T43
+`line_integrity_declaration_test.py` (an SSU-role asset is resolvable
+either by its own URL or through its parent, and carries `Integrity`
+either way).
+
+**T27 `catalog_patchset_builder_test.py` — the in-code apply map.**
+Asserted `ConvertTo-ConfigLines` reproduces a hand-written `$applyMap`
+keyed by `PatchModel`. Wrong because the apply sequence is not a
+property of the builder's source code but of the servicing model, and
+Microsoft's model is expressible as data: r12 declares it as
+`ServicingModel.ApplyPlans`, which the builder must conform to rather
+than restate. The earlier "2016/2019 fail closed" rows additionally
+encoded the staleness of the `resolve-2026-06.json` capture as designed
+behaviour. Successor: T41 `apply_plan_conformance_test.py` (built Lines
+conform to the config's declared ApplyPlans).
+
+**T31 `lcu_target_verify_test.py` — per-OS comparator forks.**
+Asserted Server 2016 verifies the post-update build by KB-id /
+`KbIdsAtBuild` membership while RollupFix OSes verify by measured
+build. Wrong because the fork mistook an implementation workaround for
+a Microsoft-side distinction: 2016's registry surface also exposes a
+measurable RollupFix, and r12.46 measures 2016 joining the unified
+`LcuEvidenceMode=RollupFixAndMeasuredBuild`. Successor: T42/T43 over
+the declared `LcuEvidenceMode` and `Lines[].Evidence` /
+`Applicability`.
+
+**T32 `checkpoint_placement_test.py` — the PatchModel Forbid axis
+(partial retirement).** The Forbid/Require assertion mirrored the v3
+discriminated union, forbidding e.g. `SSU` on `uup-checkpoint`. The
+Forbid half is wrong for the same reason as the §B.15.1 matrix: it
+encoded per-generation publishing assumptions the Catalog disproves.
+The landing-layout and routing rows (a genuinely Microsoft-mandated
+concern: only the target CU and its checkpoints may sit in the DISM
+discovery folder) survive unchanged, and the test now guards the
+Forbid axis's *absence* plus the r12.00 State-driven integrity rule.
+
+**T33 `bridge_lcu_contract_test.py` — the Server 2022 bridge
+envelope.** Asserted a standalone `PatchBaseline.BridgeLcu` block and
+pinned "no other OS carries a bridge". Wrong because the bridge is not
+a Server 2022 peculiarity but one instance of a general fact —
+Microsoft media below a floor needs a source prerequisite before
+current servicing — which r12 expresses uniformly as
+`PatchBaseline.SourcePrerequisites[]` with `Condition.Mode`
+discriminators; Server 2016 carries
+`Server2016-KB4132216-legacy-prerequisite` under the same structure,
+directly falsifying the scope pin. Successor: T42
+`servicing_model_declaration_test.py` (SourcePrerequisites
+declaration).
+
+**T34 `bootwim_policy_test.py` — the per-OS BootWimLcuPolicy matrix.**
+Asserted 2016 enabled / 2019 disabled / 2022 tolerate / 2025 enabled.
+Wrong twice over: (1) the boot.wim servicing stance is a validation
+policy, not a per-OS capability, and r12.04 declares every OS
+`enabled` under `ValidationPolicy.FailOnBootWimServicingFailure`;
+(2) the research knowledge base establishes that boot.wim cannot be
+LCU-serviced at all — WinPE rejects the `.msu` with `0x80070032` and
+the extracted LCU CAB fails with `0x8007371b` — so a per-OS *policy*
+matrix over a structurally impossible operation encoded a distinction
+that does not exist. `Common.BootWimLcuPolicy` is
+`LegacyFieldsRetained`. Successor: T42 (ValidationPolicy declaration).
+
+**T37 `per_os_evidence_test.py` — forked resolvers and hardcoded
+2024-4B floors.** Asserted four per-OS evidence resolvers and the
+hardcoded floors 14393.6897 / 17763.5696 / 20348.2402 / 26100.1.
+Wrong because the floors are not code constants of this script but
+per-prerequisite facts of Microsoft's servicing timeline, and r12
+declares them per prerequisite in
+`PatchBaseline.SourcePrerequisites[].Condition` (e.g. Server 2022:
+`MinimumImageBuild: 20348.1970`, `MinimumServicingStack: 20348.1960`,
+`Mode: IfImageOrServicingStackBelowFloor`; Server 2016:
+`Mode: IfServicingStackBelow`). This is the clearest single instance
+of the epistemology change: one uniform declared structure now
+expresses what used to be four hand-written per-OS branches.
+Successor: T42 (SourcePrerequisites conformance) plus the declared
+`Detection` list.
+
+(The ninth broken contract, T30 `setup_du_discriminator_test.py`, is
+**not** retired: it is SUPERSEDED-PENDING — the declared red on the
+integration branch — until `DiscoveryPolicy.SearchProfiles` is
+honoured end to end; re-examined at the r12.19 and r12.51 merge cards.)
 
 ### B.15.4 Hotpatch is out of scope
 

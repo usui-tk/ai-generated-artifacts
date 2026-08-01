@@ -1,0 +1,648 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/windows-server-iso-config-v4.schema.json",
+  "title": "Windows Server ISO servicing configuration schema v4",
+  "type": "object",
+  "required": [
+    "Schema",
+    "OsKey",
+    "Common",
+    "ServicingModel",
+    "DiscoveryPolicy",
+    "PatchBaseline",
+    "Pca2023",
+    "AutoRefreshPolicy",
+    "ValidationPolicy",
+    "LanguageSpecific",
+    "_meta",
+    "PatchModel",
+    "Compatibility"
+  ],
+  "properties": {
+    "Schema": {
+      "const": "4.0"
+    },
+    "OsKey": {
+      "type": "string",
+      "pattern": "^Server[0-9]{4}$"
+    },
+    "Common": {
+      "type": "object",
+      "required": [
+        "Build",
+        "OsShortName",
+        "Architecture",
+        "InstallWimIndex",
+        "BootWimIndexes",
+        "WinReWimPath",
+        "SupportedLanguages",
+        "DefaultLanguage",
+        "EnableInstallWimUpdate",
+        "EnableWinREUpdate",
+        "UpdateAllInstallWimIndexes",
+        "WinReDistributionPolicy"
+      ],
+      "properties": {
+        "Build": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "OsShortName": {
+          "type": "string"
+        },
+        "Edition": {
+          "type": "string"
+        },
+        "Architecture": {
+          "enum": [
+            "x64"
+          ]
+        },
+        "WimEdition": {
+          "type": "string"
+        },
+        "InstallWimIndex": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "BootWimIndexes": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "minItems": 1
+        },
+        "WinReWimPath": {
+          "type": "string"
+        },
+        "SupportedLanguages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "DefaultLanguage": {
+          "type": "string"
+        },
+        "LCUExpandViaMum": {
+          "type": "boolean"
+        },
+        "EnableInstallWimUpdate": {
+          "type": "boolean"
+        },
+        "BootWimLcuPolicy": {
+          "type": "string"
+        },
+        "EnableWinREUpdate": {
+          "type": "boolean"
+        },
+        "UpdateAllInstallWimIndexes": {
+          "type": "boolean"
+        },
+        "WinReDistributionPolicy": {
+          "type": "string"
+        },
+        "BootWimFailurePolicy": {
+          "type": "string"
+        },
+        "_VerifiedDate": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "_VerifiedBy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "ServicingModel": {
+      "type": "object",
+      "required": [
+        "MonthlyServicingStyle",
+        "SourcePrerequisitePolicy",
+        "DynamicUpdatePolicy",
+        "DotNetPolicy",
+        "PackageRoleModel",
+        "ApplyPlans"
+      ],
+      "properties": {
+        "MonthlyServicingStyle": {
+          "enum": [
+            "SeparateSSU",
+            "CombinedSSULCU",
+            "CheckpointCU"
+          ]
+        },
+        "SourcePrerequisitePolicy": {
+          "type": "string"
+        },
+        "DynamicUpdatePolicy": {
+          "type": "string"
+        },
+        "DotNetPolicy": {
+          "type": "string"
+        },
+        "PackageRoleModel": {
+          "type": "string"
+        },
+        "ApplyPlans": {
+          "type": "object",
+          "required": [
+            "Install",
+            "Boot",
+            "WinRE",
+            "Media"
+          ],
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/applyStep"
+            }
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "DiscoveryPolicy": {
+      "type": "object"
+    },
+    "PatchBaseline": {
+      "type": "object",
+      "required": [
+        "Schema",
+        "BaselineId",
+        "Status",
+        "ReleaseChannel",
+        "TargetBuildAfterUpdate",
+        "ChecksumAlgorithm",
+        "SourcePrerequisites",
+        "Lines",
+        "Lifecycle"
+      ],
+      "properties": {
+        "Schema": {
+          "const": "4.0"
+        },
+        "BaselineId": {
+          "type": "string"
+        },
+        "Status": {
+          "type": "string"
+        },
+        "ReleaseChannel": {
+          "type": "string"
+        },
+        "CutoffUtc": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "TargetBuildAfterUpdate": {
+          "type": "string"
+        },
+        "ChecksumAlgorithm": {
+          "enum": [
+            "SHA256"
+          ]
+        },
+        "SourcePrerequisites": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/prerequisite"
+          }
+        },
+        "Lines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/package"
+          }
+        },
+        "Lifecycle": {
+          "type": "object"
+        },
+        "LastVerifiedDate": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "LastVerifiedBy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "PatchTuesdayOfBaseline": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "BridgeLcu": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "CheckpointPolicy": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": true
+    },
+    "Pca2023": {
+      "type": "object"
+    },
+    "AutoRefreshPolicy": {
+      "type": "object"
+    },
+    "ValidationPolicy": {
+      "type": "object"
+    },
+    "LanguageSpecific": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/language"
+      }
+    },
+    "_meta": {
+      "type": "object"
+    },
+    "PatchModel": {
+      "type": "string"
+    },
+    "Compatibility": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "applyStep": {
+      "type": "object",
+      "required": [
+        "Order",
+        "Step",
+        "Condition"
+      ],
+      "properties": {
+        "Order": {
+          "type": "integer"
+        },
+        "Step": {
+          "type": "string"
+        },
+        "Roles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "Operation": {
+          "type": "string"
+        },
+        "Condition": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "prerequisite": {
+      "type": "object",
+      "required": [
+        "PrerequisiteId",
+        "Kind",
+        "KbId",
+        "Roles",
+        "Targets",
+        "Condition",
+        "State",
+        "Evidence"
+      ],
+      "properties": {
+        "PrerequisiteId": {
+          "type": "string"
+        },
+        "Kind": {
+          "type": "string"
+        },
+        "KbId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "Roles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "Targets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "Condition": {
+          "type": "object"
+        },
+        "Asset": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "State": {
+          "type": "string"
+        },
+        "Evidence": {
+          "$ref": "#/$defs/evidence"
+        }
+      },
+      "additionalProperties": false
+    },
+    "package": {
+      "type": "object",
+      "required": [
+        "PackageId",
+        "Kind",
+        "KbId",
+        "Architecture",
+        "State",
+        "ApplyOrder",
+        "Roles",
+        "TargetsByRole",
+        "Applicability",
+        "Dependencies",
+        "Integrity",
+        "Evidence"
+      ],
+      "properties": {
+        "PackageId": {
+          "type": "string"
+        },
+        "Kind": {
+          "type": "string"
+        },
+        "KbId": {
+          "type": "string",
+          "pattern": "^KB[0-9]+$"
+        },
+        "ParentKbId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "UpdateId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "Revision": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "Title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "Products": {
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "Classification": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "Architecture": {
+          "enum": [
+            "x64"
+          ]
+        },
+        "ReleaseDate": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ReleaseType": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "State": {
+          "type": "string"
+        },
+        "FileName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "DownloadUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "Digest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "Sha256": {
+          "type": "string"
+        },
+        "SizeBytes": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "ApplyOrder": {
+          "type": "integer"
+        },
+        "InScope": {
+          "type": "object"
+        },
+        "Note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "Roles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "TargetsByRole": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "RuntimeSelector": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "Applicability": {
+          "type": "object"
+        },
+        "Dependencies": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "Integrity": {
+          "$ref": "#/$defs/integrity"
+        },
+        "Evidence": {
+          "$ref": "#/$defs/evidence"
+        }
+      },
+      "additionalProperties": false
+    },
+    "integrity": {
+      "type": "object",
+      "required": [
+        "Sha1",
+        "Sha256",
+        "SizeBytes",
+        "AuthenticodeStatus"
+      ],
+      "properties": {
+        "Sha1": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "Sha256": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "SizeBytes": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "AuthenticodeStatus": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "Levels",
+        "SourceUrls",
+        "VerifiedAt",
+        "VerifiedBy",
+        "Notes"
+      ],
+      "properties": {
+        "Levels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "SourceUrls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "VerifiedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "VerifiedBy": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "Notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "language": {
+      "type": "object",
+      "required": [
+        "DisplayName",
+        "Iso",
+        "VolumeLabelPrefix",
+        "LanguageSpecificPatches"
+      ],
+      "properties": {
+        "DisplayName": {
+          "type": "string"
+        },
+        "Iso": {
+          "type": "object"
+        },
+        "VolumeLabelPrefix": {
+          "type": "string"
+        },
+        "LanguageSpecificPatches": {
+          "type": "object"
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

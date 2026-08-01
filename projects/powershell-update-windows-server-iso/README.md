@@ -141,11 +141,16 @@ projects/powershell-update-windows-server-iso/
 ├── PSScriptAnalyzerSettings.psd1     # PSScriptAnalyzer project configuration
 ├── data/                             # Persistent inputs (committed, flat layout)
 │   ├── config-Server{2016,2019,2022,2025}.json
+│   ├── config-template-v4.json       # Schema 4.0 template for adding an OS
 │   ├── raw-release-info.md (+ .meta.json)
 │   ├── raw-dotnet-cu.json
 │   ├── cache-release-info.json
 │   └── cache-dotnet-cu.json
-├── tests/                            # Self-verification suite (sparse T1-T31 + gates)
+├── schema/                           # Machine-readable config contracts
+│   ├── config.schema.json            # Config Schema v3.0 (retained-compatibility)
+│   ├── config.schema.v4.json         # Config Schema v4.0 (canonical, r12.00)
+│   └── config-seed.schema.json       # SEED projection (SPEC B.14.2)
+├── tests/                            # Self-verification suite (sparse T1-T46 + gates)
 └── docs/history/                     # Per-cycle investigation reports
 ```
 
@@ -520,9 +525,11 @@ last-verified row.
 
 ## Self-verification tools
 
-The `tests/` subdirectory ships seventeen Python-based self-verification
-tools (sparse T-numbering, T1 – T31; numbers of retired tools are never
-reused) plus three format / schema / seed gates. They probe the
+The `tests/` subdirectory ships sixteen Python-based self-verification
+tools (sparse T-numbering, T1 – T46; numbers of retired tools are never
+reused) plus three format / schema / seed gates. Since r12.00 the set
+includes six declaration-derived contracts (T41 – T46) that read their
+expected values from the config under test rather than hardcoding them. They probe the
 script's external dependencies, unit-test its PowerShell functions, and
 enforce the SPEC §B.23 JSON canonical format. All offline tools use only
 the Python standard library (no `pip install` required).

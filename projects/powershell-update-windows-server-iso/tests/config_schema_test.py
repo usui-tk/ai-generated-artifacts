@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Config schema conformance test (SPEC B.4, Config Schema v2.1).
+"""Config schema conformance test (SPEC B.4; declaration-based selection).
 
 Validates every ``data/config-Server*.json`` against the machine-readable
-contract in ``schema/config.schema.json``. That schema is the single
-source of truth that mirrors the SPEC B.4 prose; this test is what makes the
-contract enforceable in CI.
+schema that config **declares**: the top-level ``Schema`` field selects
+``schema/config.schema.v4.json`` for ``"4.0"`` and the legacy
+``schema/config.schema.json`` for ``"3.0"`` (an undeclared or unknown value
+is a failure -- the declaration is the contract, r12.00 Schema 4.0). The
+selected schema is the single source of truth that mirrors the SPEC B.4
+prose; this test is what makes the contract enforceable in CI.
 
 Why this exists
 ---------------
@@ -24,12 +27,15 @@ Design constraints
 ------------------
 This project's Python tooling is standard-library-only (the same rule psa.py
 follows: "No external dependencies"). The ``jsonschema`` package is therefore
-NOT available on CI runners, so this module ships a tiny draft-07-subset
-validator covering exactly the keywords used by config.schema.json:
+NOT available on CI runners, so this module ships a tiny subset validator
+covering exactly the keywords used by the two committed schemas:
 type, required, properties, additionalProperties, patternProperties, items,
-enum, const, $ref (local "#/definitions/..." only), and "not" (required-form,
-used to forbid the legacy Patches field). It is intentionally minimal -- it is
-a contract checker for one known schema, not a general JSON Schema engine.
+enum, const, "not" (required-form, used to forbid the legacy Patches field),
+$ref (local "#/definitions/..." and, for the 2020-12 v4 schema,
+"#/$defs/..."), plus the five 2020-12-draft keywords the v4 schema uses:
+$defs-anchored refs, oneOf, pattern, minItems, and minimum. It is
+intentionally minimal -- a contract checker for the two known schemas, not a
+general JSON Schema engine.
 
 Relationship to the CI inline check
 ------------------------------------
@@ -51,7 +57,16 @@ FAIL = "  FAIL"
 TESTS_DIR = pathlib.Path(__file__).resolve().parent
 SUBPROJECT_ROOT = TESTS_DIR.parent
 DATA_DIR = SUBPROJECT_ROOT / "data"
-SCHEMA_PATH = SUBPROJECT_ROOT / "schema" / "config.schema.json"
+SCHEMA_PATH_V3 = SUBPROJECT_ROOT / "schema" / "config.schema.json"
+SCHEMA_PATH_V4 = SUBPROJECT_ROOT / "schema" / "config.schema.v4.json"
+
+# Declaration-based selection (r12.00): the config's own top-level `Schema`
+# field names the contract it claims to satisfy. Anything not in this map is
+# an undeclared contract and fails loudly.
+SCHEMA_BY_DECLARATION = {
+    "3.0": SCHEMA_PATH_V3,
+    "4.0": SCHEMA_PATH_V4,
+}
 
 
 def _type_ok(value, type_name):
@@ -105,6 +120,32 @@ def _validate(value, schema, root_schema, path, errors):
     # enum
     if "enum" in schema and value not in schema["enum"]:
         errors.append(f"{path}: value {value!r} not in enum {schema['enum']}")
+
+    # oneOf (2020-12; v4 schema) -- exactly one branch must validate
+    if "oneOf" in schema:
+        matches = 0
+        for branch in schema["oneOf"]:
+            branch_errors = []
+            _validate(value, branch, root_schema, path, branch_errors)
+            if not branch_errors:
+                matches += 1
+        if matches != 1:
+            errors.append(f"{path}: oneOf matched {matches} branches (exactly 1 required)")
+
+    # pattern (2020-12; v4 schema) -- string regex constraint
+    if "pattern" in schema and isinstance(value, str):
+        if re.search(schema["pattern"], value) is None:
+            errors.append(f"{path}: value {value!r} does not match pattern {schema['pattern']!r}")
+
+    # minimum (2020-12; v4 schema) -- numeric lower bound
+    if "minimum" in schema and isinstance(value, (int, float)) and not isinstance(value, bool):
+        if value < schema["minimum"]:
+            errors.append(f"{path}: value {value!r} below minimum {schema['minimum']!r}")
+
+    # minItems (2020-12; v4 schema) -- array length lower bound
+    if "minItems" in schema and isinstance(value, list):
+        if len(value) < schema["minItems"]:
+            errors.append(f"{path}: array has {len(value)} items, minItems is {schema['minItems']}")
 
     # object
     if isinstance(value, dict):
@@ -165,22 +206,25 @@ def main():
     failed = 0
 
     print("=" * 72)
-    print("Config schema conformance (SPEC B.4 / Config Schema v2.1)")
+    print("Config schema conformance (SPEC B.4 / declaration-based selection)")
     print("=" * 72)
 
-    # Load the schema itself.
-    if not SCHEMA_PATH.exists():
-        print(f"{FAIL}  schema file not found: {SCHEMA_PATH}")
-        print("\n  Summary: 0 passed, 1 failed, 1 total")
-        return 1
-    try:
-        schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
-        print(f"{PASS}  schema loaded: {SCHEMA_PATH.name}")
-        passed += 1
-    except (OSError, ValueError) as exc:
-        print(f"{FAIL}  schema failed to parse: {exc}")
-        print("\n  Summary: 0 passed, 1 failed, 1 total")
-        return 1
+    # Load both committed schemas; each config then selects its own by
+    # declaration. A missing or unparsable schema is a hard failure.
+    schemas = {}
+    for spath in (SCHEMA_PATH_V3, SCHEMA_PATH_V4):
+        if not spath.exists():
+            print(f"{FAIL}  schema file not found: {spath}")
+            print("\n  Summary: 0 passed, 1 failed, 1 total")
+            return 1
+        try:
+            schemas[spath] = json.loads(spath.read_text(encoding="utf-8"))
+            print(f"{PASS}  schema loaded: {spath.name}")
+            passed += 1
+        except (OSError, ValueError) as exc:
+            print(f"{FAIL}  schema failed to parse ({spath.name}): {exc}")
+            print("\n  Summary: 0 passed, 1 failed, 1 total")
+            return 1
 
     # Self-test the mini-validator so a broken validator cannot mask config
     # errors by silently passing everything.
@@ -196,12 +240,37 @@ def main():
     must_fail_extra = {"a": "ok", "b": 1}        # additional prop
     must_fail_type = {"a": 123}                  # wrong type
     must_fail_forbidden = {"a": "ok", "legacy": 1}  # forbidden prop
+    st2020 = {
+        "type": "object",
+        "properties": {
+            "kind": {"oneOf": [{"const": "a"}, {"const": "b"}]},
+            "kb": {"type": "string", "pattern": "^KB[0-9]+$"},
+            "order": {"type": "integer", "minimum": 1},
+            "items_": {"type": "array", "minItems": 1,
+                       "items": {"$ref": "#/$defs/Leaf"}},
+        },
+        "$defs": {"Leaf": {"type": "string"}},
+    }
     checks = [
         ("validator accepts a valid object", validate_instance(must_pass, selftest_schema) == []),
         ("validator rejects missing required", len(validate_instance(must_fail_missing, selftest_schema)) > 0),
         ("validator rejects additional property", len(validate_instance(must_fail_extra, selftest_schema)) > 0),
         ("validator rejects wrong type", len(validate_instance(must_fail_type, selftest_schema)) > 0),
         ("validator rejects forbidden 'not.required'", len(validate_instance(must_fail_forbidden, selftest_schema)) > 0),
+        # 2020-12 keyword coverage (v4 schema): $defs ref, oneOf, pattern,
+        # minItems, minimum -- each exercised in both directions.
+        ("2020-12: valid instance passes all five keywords",
+         validate_instance({"kind": "a", "kb": "KB5043080", "order": 1,
+                            "items_": ["x"]}, st2020) == []),
+        ("2020-12: oneOf rejects a non-matching value",
+         len(validate_instance({"kind": "c"}, st2020)) > 0),
+        ("2020-12: pattern rejects a malformed KB id",
+         len(validate_instance({"kb": "5043080"}, st2020)) > 0),
+        ("2020-12: minimum rejects a below-floor integer",
+         len(validate_instance({"order": 0}, st2020)) > 0),
+        ("2020-12: minItems + $defs ref reject an empty/typed-wrong array",
+         len(validate_instance({"items_": []}, st2020)) > 0
+         and len(validate_instance({"items_": [1]}, st2020)) > 0),
     ]
     for name, ok in checks:
         if ok:
@@ -230,12 +299,19 @@ def main():
             print(f"{FAIL}  {fname}: parse error: {exc}")
             failed += 1
             continue
-        errs = validate_instance(instance, schema)
+        declared = instance.get("Schema")
+        spath = SCHEMA_BY_DECLARATION.get(declared)
+        if spath is None:
+            print(f"{FAIL}  {fname}: undeclared/unknown Schema value {declared!r} "
+                  f"(known: {sorted(SCHEMA_BY_DECLARATION)})")
+            failed += 1
+            continue
+        errs = validate_instance(instance, schemas[spath])
         if not errs:
-            print(f"{PASS}  {fname}: conforms to Config Schema v2.1")
+            print(f"{PASS}  {fname}: declares Schema {declared} and conforms to {spath.name}")
             passed += 1
         else:
-            print(f"{FAIL}  {fname}: {len(errs)} schema violation(s):")
+            print(f"{FAIL}  {fname}: {len(errs)} violation(s) against declared {spath.name}:")
             for e in errs[:20]:
                 print(f"           - {e}")
             failed += 1

@@ -1,5 +1,5 @@
 {
-  "Schema": "3.0",
+  "Schema": "4.0",
   "OsKey": "Server2022",
   "Common": {
     "Build": 20348,
@@ -22,107 +22,744 @@
     "EnableInstallWimUpdate": true,
     "BootWimLcuPolicy": "tolerate",
     "EnableWinREUpdate": true,
-    "_VerifiedDate": "2026-05-24T00:00:00+09:00",
-    "_VerifiedBy": "manual:initial-r03"
+    "UpdateAllInstallWimIndexes": true,
+    "WinReDistributionPolicy": "ServiceOnceCopyToAllInstallIndexes",
+    "BootWimFailurePolicy": "ResearchTolerateNotReleaseEligible",
+    "_VerifiedDate": "2026-07-11T00:00:00+09:00",
+    "_VerifiedBy": "research:data-model-v4"
+  },
+  "ServicingModel": {
+    "MonthlyServicingStyle": "CombinedSSULCU",
+    "SourcePrerequisitePolicy": "DetectAndInject",
+    "DynamicUpdatePolicy": "SameMonthOrLatestPrior",
+    "DotNetPolicy": "DetectInstalledRuntimePerIndex",
+    "PackageRoleModel": "OneAssetMayServeMultipleRoles",
+    "ApplyPlans": {
+      "Install": [
+        {
+          "Order": 10,
+          "Step": "SourcePrerequisite",
+          "Roles": [
+            "SourcePrerequisite",
+            "CheckpointDependency"
+          ],
+          "Condition": "IfApplicable"
+        },
+        {
+          "Order": 20,
+          "Step": "ServicingStack",
+          "Roles": [
+            "ServicingStackCarrier"
+          ],
+          "Condition": "Required"
+        },
+        {
+          "Order": 30,
+          "Step": "LanguageFodOptionalComponents",
+          "Roles": [
+            "LanguagePack",
+            "FOD",
+            "OptionalComponent"
+          ],
+          "Condition": "IfConfigured"
+        },
+        {
+          "Order": 40,
+          "Step": "FinalLCU",
+          "Roles": [
+            "FinalLCU"
+          ],
+          "Condition": "Required"
+        },
+        {
+          "Order": 50,
+          "Step": "Cleanup",
+          "Operation": "StartComponentCleanup",
+          "Condition": "Required"
+        },
+        {
+          "Order": 60,
+          "Step": "DotNet",
+          "Roles": [
+            "DotNetLeaf"
+          ],
+          "Condition": "IfRuntimeDetected"
+        },
+        {
+          "Order": 70,
+          "Step": "Export",
+          "Operation": "ExportImage",
+          "Condition": "Required"
+        }
+      ],
+      "Boot": [
+        {
+          "Order": 10,
+          "Step": "SourcePrerequisite",
+          "Roles": [
+            "SourcePrerequisite",
+            "CheckpointDependency"
+          ],
+          "Condition": "IfApplicable"
+        },
+        {
+          "Order": 20,
+          "Step": "ServicingStack",
+          "Roles": [
+            "ServicingStackCarrier"
+          ],
+          "Condition": "Required"
+        },
+        {
+          "Order": 30,
+          "Step": "WinPeLanguage",
+          "Roles": [
+            "WinPeLanguagePack"
+          ],
+          "Condition": "IfConfigured"
+        },
+        {
+          "Order": 40,
+          "Step": "FinalLCU",
+          "Roles": [
+            "FinalLCU"
+          ],
+          "Condition": "Required"
+        },
+        {
+          "Order": 50,
+          "Step": "Cleanup",
+          "Operation": "StartComponentCleanup",
+          "Condition": "Required"
+        },
+        {
+          "Order": 60,
+          "Step": "Export",
+          "Operation": "ExportImage",
+          "Condition": "Required"
+        }
+      ],
+      "WinRE": [
+        {
+          "Order": 10,
+          "Step": "SourcePrerequisite",
+          "Roles": [
+            "SourcePrerequisite",
+            "CheckpointDependency"
+          ],
+          "Condition": "IfApplicableAndSupported"
+        },
+        {
+          "Order": 20,
+          "Step": "ServicingStack",
+          "Roles": [
+            "ServicingStackCarrier"
+          ],
+          "Condition": "Required"
+        },
+        {
+          "Order": 30,
+          "Step": "WinReLanguage",
+          "Roles": [
+            "WinReLanguagePack"
+          ],
+          "Condition": "IfConfigured"
+        },
+        {
+          "Order": 40,
+          "Step": "SafeOSDU",
+          "Roles": [
+            "SafeOSDU"
+          ],
+          "Condition": "IfResolved"
+        },
+        {
+          "Order": 50,
+          "Step": "Cleanup",
+          "Operation": "StartComponentCleanup",
+          "Condition": "Required"
+        },
+        {
+          "Order": 60,
+          "Step": "ExportRecovery",
+          "Operation": "ExportImageRecoveryCompression",
+          "Condition": "Required"
+        },
+        {
+          "Order": 70,
+          "Step": "Redistribute",
+          "Operation": "CopyServicedWinReToAllInstallIndexes",
+          "Condition": "Required"
+        }
+      ],
+      "Media": [
+        {
+          "Order": 10,
+          "Step": "SetupDU",
+          "Roles": [
+            "SetupDU"
+          ],
+          "Condition": "IfResolved"
+        },
+        {
+          "Order": 20,
+          "Step": "CopySetupExe",
+          "Operation": "CopyFromBootWimIndex2",
+          "Condition": "Required"
+        },
+        {
+          "Order": 30,
+          "Step": "CopySetupHost",
+          "Operation": "CopyFromBootWimIndex2",
+          "Condition": "IfBuild26100OrLater"
+        },
+        {
+          "Order": 40,
+          "Step": "CopyBootManager",
+          "Operation": "CopyBootManagerAndBootStl",
+          "Condition": "Required"
+        },
+        {
+          "Order": 50,
+          "Step": "BuildIso",
+          "Operation": "Oscdimg",
+          "Condition": "Required"
+        }
+      ]
+    }
+  },
+  "DiscoveryPolicy": {
+    "ReleaseChannel": "B",
+    "ExcludePreview": true,
+    "OobPolicy": "CreateEmergencyCandidate",
+    "DynamicUpdateSelection": "SameMonthOrLatestPrior",
+    "DotNetSelection": "LatestNonPreviewAtOrBeforeBaselineCutoff",
+    "CatalogAliases": {
+      "OsUpdate": "Microsoft server operating system version 21H2",
+      "DynamicUpdate": "Microsoft server operating system version 21H2",
+      "BuildFamily": "20348"
+    },
+    "SearchProfiles": {
+      "LCU": {
+        "QueryStrategy": "ExactKbFromReleaseHealth",
+        "Architecture": "x64",
+        "RejectTitleContains": [
+          "Preview",
+          "ARM64",
+          "x86-based",
+          ".NET Framework",
+          "Hotpatch"
+        ]
+      },
+      "SSU": {
+        "QueryStrategy": "KbFromLcuPrerequisiteOrServicingStackArticle",
+        "Architecture": "x64",
+        "TitleMustContain": [
+          "Servicing Stack Update"
+        ]
+      },
+      "SafeOSDU": {
+        "QueryStrategy": "SameMonthOrLatestPriorForBuildFamily",
+        "Architecture": "x64",
+        "ClassificationMustBe": [
+          "Critical Updates"
+        ],
+        "ProductsMustContain": [
+          "Windows Safe OS Dynamic Update"
+        ]
+      },
+      "SetupDU": {
+        "QueryStrategy": "SameMonthOrLatestPriorForBuildFamily",
+        "Architecture": "x64",
+        "ClassificationMustBe": [
+          "Critical Updates"
+        ],
+        "ProductsMustContain": [
+          "Windows 10 and later Dynamic Update"
+        ],
+        "ProductsMustNotContain": [
+          "Windows Safe OS Dynamic Update"
+        ]
+      },
+      "DotNet": {
+        "QueryStrategy": "LeafKbFromDotNetReleaseNotesAndDetectedRuntime",
+        "Architecture": "x64",
+        "RejectTitleContains": [
+          "Preview"
+        ]
+      }
+    },
+    "SourcePriority": [
+      "https://learn.microsoft.com/en-us/windows/release-health/windows-server-release-info",
+      "Microsoft Support KB",
+      "Microsoft Update Catalog",
+      "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/release-notes",
+      "SafeOS DU / Setup DU Support KB",
+      "Monthly Windows Server images",
+      "Windows release health / message center"
+    ]
   },
   "PatchBaseline": {
-    "Schema": "3.0",
+    "Schema": "4.0",
+    "BaselineId": "2026-06-B",
+    "Status": "ResearchCandidate",
+    "ReleaseChannel": "B",
+    "CutoffUtc": "2026-06-18T00:00:00Z",
     "TargetBuildAfterUpdate": "20348.5256",
-    "ChecksumAlgorithm": "SHA1",
-    "BridgeLcu": {
-      "KbId": "KB5030216",
-      "FileName": "windows10.0-kb5030216-x64_cbe587155f9818548b75f65d5cd41d341ed2fc61.msu",
-      "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2023/09/windows10.0-kb5030216-x64_cbe587155f9818548b75f65d5cd41d341ed2fc61.msu",
-      "Digest": "y+WHFV+YGFSLdfZdXNQdNB7S/GE=",
-      "MinimumImageServicingStack": "20348.1960",
-      "EvidenceUrl": "https://support.microsoft.com/en-us/topic/june-9-2026-kb5094128-os-build-20348-5256-56823f3e-e2a4-4839-ab01-b9de5ec4cbed",
-      "Note": "2023-09 LCU (20348.1970); raises the image servicing stack to 20348.1960, the documented minimum for current combined LCUs (prevents 0x800f0823 on the 20348.587-era EVAL media; observed 2026-07-06 00:19 JST E2E, P07). Applied FIRST (I0) on every install.wim index, unconditionally when present [A1]. Catalog UpdateId (21H2 row): ea350b1b-b22f-4657-aae6-a75cb7ece1eb; the 22H2 row serves the identical file."
-    },
+    "ChecksumAlgorithm": "SHA256",
+    "SourcePrerequisites": [
+      {
+        "PrerequisiteId": "Server2022-KB5030216-source-floor",
+        "Kind": "BridgeLCU",
+        "KbId": "KB5030216",
+        "Roles": [
+          "SourcePrerequisite"
+        ],
+        "Targets": [
+          "Install",
+          "Boot"
+        ],
+        "Condition": {
+          "Mode": "IfSourceBelowFloor",
+          "MinimumImageBuild": "20348.1970",
+          "MinimumServicingStack": "20348.1960",
+          "Detection": [
+            "Get-WindowsPackage",
+            "Get-WindowsImage"
+          ],
+          "WinRePolicy": "RequiresE4BeforeEnable"
+        },
+        "Asset": {
+          "KbId": "KB5030216",
+          "FileName": "windows10.0-kb5030216-x64_cbe587155f9818548b75f65d5cd41d341ed2fc61.msu",
+          "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2023/09/windows10.0-kb5030216-x64_cbe587155f9818548b75f65d5cd41d341ed2fc61.msu",
+          "Digest": "y+WHFV+YGFSLdfZdXNQdNB7S/GE=",
+          "Sha256": "",
+          "MinimumImageBuild": "20348.1970",
+          "MinimumImageServicingStack": "20348.1960",
+          "Condition": "ApplyOnlyWhenSourceBelowFloor",
+          "EvidenceUrl": "https://support.microsoft.com/en-us/topic/june-9-2026-kb5094128-os-build-20348-5256-56823f3e-e2a4-4839-ab01-b9de5ec4cbed",
+          "Note": "Retained for compatibility; canonical condition is PatchBaseline.SourcePrerequisites."
+        },
+        "State": "Conditional",
+        "Evidence": {
+          "Levels": [
+            "E1",
+            "E2"
+          ],
+          "SourceUrls": [
+            "https://support.microsoft.com/en-us/topic/june-9-2026-kb5094128-os-build-20348-5256-56823f3e-e2a4-4839-ab01-b9de5ec4cbed",
+            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5030216"
+          ],
+          "VerifiedAt": "2026-07-11T00:00:00+09:00",
+          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "Notes": [
+            "Apply only when the source image is below Microsoft's documented servicing floor."
+          ]
+        }
+      }
+    ],
     "Lines": [
       {
+        "PackageId": "Server2022-KB5094128-x64",
         "Kind": "LCU",
         "KbId": "KB5094128",
+        "ParentKbId": null,
         "UpdateId": "522273b0-daa7-4f44-8562-2046a18b5e0a",
+        "Revision": null,
         "Title": "2026-06 Cumulative Update for Microsoft server operating system version 21H2 for x64-based Systems (KB5094128)",
-        "Products": "Microsoft Server operating system-21H2",
-        "Classification": null,
+        "Products": [
+          "Microsoft Server operating system-21H2"
+        ],
+        "Classification": "Security Updates",
+        "Architecture": "x64",
+        "ReleaseDate": "2026-06-09",
+        "ReleaseType": "B",
+        "State": "Resolved",
         "FileName": "windows10.0-kb5094128-x64_f2fe90c2e70536da77dcb1d08e40a554e4e2df6c.msu",
         "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/06/windows10.0-kb5094128-x64_f2fe90c2e70536da77dcb1d08e40a554e4e2df6c.msu",
         "Digest": "8v6QwucFNtp33LHQjkClVOTi32w=",
         "Sha256": "",
         "SizeBytes": null,
-        "ApplyOrder": 1,
+        "ApplyOrder": 20,
         "InScope": {
-          "build": "20348.5256",
-          "files": [
-            "windows10.0-kb5094128-x64_f2fe90c2e70536da77dcb1d08e40a554e4e2df6c.msu"
+          "build": "20348.5256"
+        },
+        "Note": "The same combined LCU asset is reused as servicing-stack carrier and final LCU.",
+        "Roles": [
+          "ServicingStackCarrier",
+          "FinalLCU"
+        ],
+        "TargetsByRole": {
+          "ServicingStackCarrier": [
+            "Install",
+            "Boot",
+            "WinRE"
+          ],
+          "FinalLCU": [
+            "Install",
+            "Boot"
           ]
         },
-        "Note": "discovered via Learn (build 20348.5256)"
+        "RuntimeSelector": null,
+        "Applicability": {
+          "Mode": "Always"
+        },
+        "Dependencies": [],
+        "Integrity": {
+          "Sha1": {
+            "Encoding": "base64",
+            "Value": "8v6QwucFNtp33LHQjkClVOTi32w=",
+            "Hex": "f2fe90c2e70536da77dcb1d08e40a554e4e2df6c"
+          },
+          "Sha256": null,
+          "SizeBytes": null,
+          "AuthenticodeStatus": "NotTested"
+        },
+        "Evidence": {
+          "Levels": [
+            "E1",
+            "E2"
+          ],
+          "SourceUrls": [
+            "https://support.microsoft.com/en-us/topic/june-9-2026-kb5094128-os-build-20348-5256-56823f3e-e2a4-4839-ab01-b9de5ec4cbed",
+            "https://learn.microsoft.com/en-us/windows/release-health/windows-server-release-info"
+          ],
+          "VerifiedAt": "2026-07-11T00:00:00+09:00",
+          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "Notes": [
+            "The same combined LCU asset is reused as servicing-stack carrier and final LCU."
+          ]
+        }
       },
       {
+        "PackageId": "Server2022-KB5087068-x64",
         "Kind": "DotNet",
-        "KbId": "KB5088862",
+        "KbId": "KB5087068",
+        "ParentKbId": "KB5088862",
         "UpdateId": "0ae6f8d8-5a5a-4551-a0cc-ca97524fc415",
-        "Title": "2026-05 Cumulative Update for .NET Framework 3.5, 4.8 and 4.8.1 for Microsoft server operating system version 21H2 for x64 (KB5088862)",
-        "Products": "Microsoft Server operating system-21H2",
+        "Revision": null,
+        "Title": "2026-05 Cumulative Update for .NET Framework 3.5 and 4.8 for Microsoft server operating system version 21H2 for x64 (KB5087068)",
+        "Products": [
+          "Microsoft Server operating system-21H2"
+        ],
         "Classification": null,
+        "Architecture": "x64",
+        "ReleaseDate": "2026-05-12",
+        "ReleaseType": "B",
+        "State": "Resolved",
         "FileName": "windows10.0-kb5087068-x64-ndp48_e788771a4119e01a7840dd1c13a1e25b223be12a.msu",
         "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2026/04/windows10.0-kb5087068-x64-ndp48_e788771a4119e01a7840dd1c13a1e25b223be12a.msu",
         "Digest": "54h3GkEZ4Bp4QN0cE6HiWyI74So=",
         "Sha256": "",
         "SizeBytes": null,
-        "ApplyOrder": 2,
-        "InScope": {
-          "inScopeFiles": [
-            "windows10.0-kb5087068-x64-ndp48_e788771a4119e01a7840dd1c13a1e25b223be12a.msu"
-          ],
-          "inScopeKb": [
-            "KB5087068"
+        "ApplyOrder": 60,
+        "InScope": {},
+        "Note": "Leaf asset for the default Server 2022 .NET Framework 4.8 media state.",
+        "Roles": [
+          "DotNetLeaf"
+        ],
+        "TargetsByRole": {
+          "DotNetLeaf": [
+            "Install"
           ]
         },
-        "Note": "superset rollup; in-scope leaf = 2022 in-media default .NET runtime (BLOCK 0.T; bundles 3.5)"
+        "RuntimeSelector": {
+          "NetFx3": "PresentOrEnabled",
+          "NetFx4Release": "4.8"
+        },
+        "Applicability": {
+          "Mode": "IfRuntimeDetectedPerInstallIndex"
+        },
+        "Dependencies": [],
+        "Integrity": {
+          "Sha1": {
+            "Encoding": "base64",
+            "Value": "54h3GkEZ4Bp4QN0cE6HiWyI74So=",
+            "Hex": "e788771a4119e01a7840dd1c13a1e25b223be12a"
+          },
+          "Sha256": null,
+          "SizeBytes": null,
+          "AuthenticodeStatus": "NotTested"
+        },
+        "Evidence": {
+          "Levels": [
+            "E1",
+            "E2"
+          ],
+          "SourceUrls": [
+            "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/05-12-may-cumulative-update",
+            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5087068"
+          ],
+          "VerifiedAt": "2026-07-11T00:00:00+09:00",
+          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "Notes": [
+            "Leaf asset for the default Server 2022 .NET Framework 4.8 media state."
+          ]
+        }
       },
       {
+        "PackageId": "Server2022-KB5087059-x64",
+        "Kind": "DotNet",
+        "KbId": "KB5087059",
+        "ParentKbId": null,
+        "UpdateId": null,
+        "Revision": null,
+        "Title": null,
+        "Products": null,
+        "Classification": null,
+        "Architecture": "x64",
+        "ReleaseDate": "2026-05-12",
+        "ReleaseType": "B",
+        "State": "Discovered",
+        "FileName": null,
+        "DownloadUrl": null,
+        "Digest": null,
+        "Sha256": "",
+        "SizeBytes": null,
+        "ApplyOrder": 60,
+        "InScope": {},
+        "Note": "Alternative leaf asset when .NET Framework 4.8.1 is detected.",
+        "Roles": [
+          "DotNetLeaf"
+        ],
+        "TargetsByRole": {
+          "DotNetLeaf": [
+            "Install"
+          ]
+        },
+        "RuntimeSelector": {
+          "NetFx3": "PresentOrEnabled",
+          "NetFx4Release": "4.8.1"
+        },
+        "Applicability": {
+          "Mode": "IfRuntimeDetectedPerInstallIndex"
+        },
+        "Dependencies": [],
+        "Integrity": {
+          "Sha1": null,
+          "Sha256": null,
+          "SizeBytes": null,
+          "AuthenticodeStatus": "NotTested"
+        },
+        "Evidence": {
+          "Levels": [
+            "E1",
+            "E2"
+          ],
+          "SourceUrls": [
+            "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/05-12-may-cumulative-update",
+            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5087059"
+          ],
+          "VerifiedAt": "2026-07-11T00:00:00+09:00",
+          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "Notes": [
+            "Alternative leaf asset when .NET Framework 4.8.1 is detected."
+          ]
+        }
+      },
+      {
+        "PackageId": "Server2022-KB5094157-x64",
         "Kind": "SafeOSDU",
         "KbId": "KB5094157",
+        "ParentKbId": null,
         "UpdateId": "c6476311-8656-4c9e-89cc-5f4b8000205c",
+        "Revision": null,
         "Title": "2026-06 Dynamic Update for Microsoft server operating system version 21H2 for x64-based Systems (KB5094157)",
-        "Products": "Windows 10 and later Dynamic Update, Windows Safe OS Dynamic Update",
-        "Classification": null,
+        "Products": [
+          "Windows 10 and later Dynamic Update",
+          "Windows Safe OS Dynamic Update"
+        ],
+        "Classification": "Critical Updates",
+        "Architecture": "x64",
+        "ReleaseDate": "2026-06-09",
+        "ReleaseType": "DynamicUpdate",
+        "State": "Resolved",
         "FileName": "windows10.0-kb5094157-x64_c3ee5d03ee5bdfa16846ca51a3ab171071260b94.cab",
         "DownloadUrl": "https://catalog.s.download.windowsupdate.com/d/msdownload/update/software/crup/2026/06/windows10.0-kb5094157-x64_c3ee5d03ee5bdfa16846ca51a3ab171071260b94.cab",
         "Digest": "w+5dA+5b36FoRspRo6sXEHEmC5Q=",
         "Sha256": "1idumQ3jZu6Qemgk5VQqQL1Ea8Ynvm3Yd6a5biWQJLI=",
         "SizeBytes": null,
-        "ApplyOrder": 3,
-        "InScope": {
-          "files": [
-            "windows10.0-kb5094157-x64_c3ee5d03ee5bdfa16846ca51a3ab171071260b94.cab"
+        "ApplyOrder": 40,
+        "InScope": {},
+        "Note": "Resolved Safe OS Dynamic Update asset.",
+        "Roles": [
+          "SafeOSDU"
+        ],
+        "TargetsByRole": {
+          "SafeOSDU": [
+            "WinRE"
           ]
         },
-        "Note": "Products has 'Safe OS Dynamic Update' + title version token"
+        "RuntimeSelector": null,
+        "Applicability": {
+          "Mode": "SameMonthOrLatestPrior"
+        },
+        "Dependencies": [],
+        "Integrity": {
+          "Sha1": {
+            "Encoding": "base64",
+            "Value": "w+5dA+5b36FoRspRo6sXEHEmC5Q=",
+            "Hex": "c3ee5d03ee5bdfa16846ca51a3ab171071260b94"
+          },
+          "Sha256": {
+            "Encoding": "base64",
+            "Value": "1idumQ3jZu6Qemgk5VQqQL1Ea8Ynvm3Yd6a5biWQJLI=",
+            "Hex": "d6276e990de366ee907a6824e5542a40bd446bc627be6dd877a6b96e259024b2"
+          },
+          "SizeBytes": null,
+          "AuthenticodeStatus": "NotTested"
+        },
+        "Evidence": {
+          "Levels": [
+            "E1",
+            "E2"
+          ],
+          "SourceUrls": [
+            "https://support.microsoft.com/en-us/topic/kb5094157-safe-os-dynamic-update-for-windows-server-2022-june-9-2026",
+            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5094157"
+          ],
+          "VerifiedAt": "2026-07-11T00:00:00+09:00",
+          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "Notes": [
+            "Resolved Safe OS Dynamic Update asset."
+          ]
+        }
+      },
+      {
+        "PackageId": "Server2022-KB5079518-x64",
+        "Kind": "SetupDU",
+        "KbId": "KB5079518",
+        "ParentKbId": null,
+        "UpdateId": null,
+        "Revision": null,
+        "Title": null,
+        "Products": [
+          "Windows 10 and later Dynamic Update"
+        ],
+        "Classification": "Critical Updates",
+        "Architecture": "x64",
+        "ReleaseDate": "2026-03-10",
+        "ReleaseType": "DynamicUpdate",
+        "State": "Discovered",
+        "FileName": null,
+        "DownloadUrl": null,
+        "Digest": null,
+        "Sha256": "",
+        "SizeBytes": null,
+        "ApplyOrder": 80,
+        "InScope": {},
+        "Note": "Latest prior Setup Dynamic Update used by the June 2026 Server image set.",
+        "Roles": [
+          "SetupDU"
+        ],
+        "TargetsByRole": {
+          "SetupDU": [
+            "Media"
+          ]
+        },
+        "RuntimeSelector": null,
+        "Applicability": {
+          "Mode": "LatestPriorForBuildFamily"
+        },
+        "Dependencies": [],
+        "Integrity": {
+          "Sha1": null,
+          "Sha256": null,
+          "SizeBytes": null,
+          "AuthenticodeStatus": "NotTested"
+        },
+        "Evidence": {
+          "Levels": [
+            "E1",
+            "E2"
+          ],
+          "SourceUrls": [
+            "https://support.microsoft.com/en-us/topic/kb5079518-setup-dynamic-update-for-windows-server-2022-march-10-2026-1e93ff7e-93de-47cf-8140-1e4ef663b4a3",
+            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5079518",
+            "https://support.microsoft.com/en-us/topic/windows-server-images-for-june-2026-7d8577d4-1f36-447b-bbbf-60b68a9f4a69"
+          ],
+          "VerifiedAt": "2026-07-11T00:00:00+09:00",
+          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "Notes": [
+            "Latest prior Setup Dynamic Update used by the June 2026 Server image set."
+          ]
+        }
       }
     ],
-    "LastVerifiedDate": "2026-07-02T13:05:57.0751698+00:00",
-    "LastVerifiedBy": "auto:RefreshAllBaselines",
-    "PatchTuesdayOfBaseline": "2026-06-09"
+    "Lifecycle": {
+      "CurrentState": "Resolved",
+      "AllowedStates": [
+        "Discovered",
+        "Resolved",
+        "Frozen",
+        "E3Validated",
+        "E4Validated",
+        "E5Validated",
+        "Approved",
+        "Rejected",
+        "Superseded",
+        "OnHoldKnownIssue",
+        "Waived"
+      ],
+      "ApprovalRequiredForBuild": true
+    },
+    "LastVerifiedDate": "2026-07-11T00:00:00+09:00",
+    "LastVerifiedBy": "research:data-model-v4",
+    "PatchTuesdayOfBaseline": "2026-06-09",
+    "BridgeLcu": {
+      "KbId": "KB5030216",
+      "FileName": "windows10.0-kb5030216-x64_cbe587155f9818548b75f65d5cd41d341ed2fc61.msu",
+      "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2023/09/windows10.0-kb5030216-x64_cbe587155f9818548b75f65d5cd41d341ed2fc61.msu",
+      "Digest": "y+WHFV+YGFSLdfZdXNQdNB7S/GE=",
+      "Sha256": "",
+      "MinimumImageBuild": "20348.1970",
+      "MinimumImageServicingStack": "20348.1960",
+      "Condition": "ApplyOnlyWhenSourceBelowFloor",
+      "EvidenceUrl": "https://support.microsoft.com/en-us/topic/june-9-2026-kb5094128-os-build-20348-5256-56823f3e-e2a4-4839-ab01-b9de5ec4cbed",
+      "Note": "Retained for compatibility; canonical condition is PatchBaseline.SourcePrerequisites."
+    }
   },
   "Pca2023": {
+    "Mode": "ConvertByDefault",
     "RequiredByDefault": true,
-    "RequiredUpdateLevelKb": "2025-2B (February 2025 LCU, 20348.2227 baseline) or later",
+    "RequiredUpdateLevelKb": "2025-2B or later",
     "RequiredUpdateLevelMinDate": "2025-02-11",
     "NotesSource": [
       "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f",
-      "https://lenovopress.lenovo.com/lp2353.pdf"
+      "https://github.com/microsoft/secureboot_objects/blob/main/scripts/windows/Make2023BootableMedia.ps1"
     ],
-    "Notes": "Per Lenovo lp2353.pdf, Server 2022 build 20348.2227 or earlier requires 2025-2B LCU before Make2023BootableMedia.ps1 succeeds. Newer builds (post 2025-02) generally already include the required EFI_EX binaries."
+    "Notes": "Use readiness checks for required EFI_EX files before invoking the Microsoft conversion workflow."
   },
   "AutoRefreshPolicy": {
     "Mode": "OnNewPatchTuesday",
-    "WritebackToConfig": true,
-    "FallbackOnScrapeFailure": "UseBaseline",
-    "ScrapeRetries": 3
+    "WritebackToConfig": false,
+    "FallbackOnScrapeFailure": "UseApprovedBaseline",
+    "ScrapeRetries": 3,
+    "DiscoveryAction": "DiscoverBaseline",
+    "BuildInputPolicy": "ApprovedOrExplicitCandidate",
+    "DailyOobCheck": true,
+    "InvalidateOn": [
+      "CatalogUpdateIdChanged",
+      "CatalogRevisionChanged",
+      "DownloadFileListChanged",
+      "FileHashChanged",
+      "PrerequisiteChanged",
+      "NewApplicableOob",
+      "DynamicUpdateReplacementChanged",
+      "CheckpointSetChanged",
+      "DotNetLeafChanged",
+      "ApplicableKnownIssuePublished"
+    ]
+  },
+  "ValidationPolicy": {
+    "RequireSha256BeforeFreeze": true,
+    "RequireAuthenticodeBeforeFreeze": true,
+    "RequireE4BeforeApproval": true,
+    "RequireE5BeforeApproval": true,
+    "FailOnBootWimServicingFailure": true,
+    "VerifyAllInstallIndexesContainSameWinRe": true,
+    "RejectAmbiguousCatalogResults": true
   },
   "LanguageSpecific": {
     "en-us": {
@@ -130,17 +767,16 @@
       "Iso": {
         "Url": "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso",
         "Sha256": "",
+        "State": "UrlResolvedHashPending",
         "_VerifiedDate": "2026-05-26",
-        "_VerifiedBy": "manual:r07.0-Step10-IsoUrl-refresh"
+        "_VerifiedBy": "legacy:v3"
       },
       "VolumeLabelPrefix": "WS2022EN",
       "LanguageSpecificPatches": {
         "LanguagePacks": [],
         "LxpUpdates": [],
         "DotNetLanguagePacks": [],
-        "LastVerifiedDate": "2026-07-02T13:05:57.8217888+00:00",
-        "LastVerifiedBy": "auto:RefreshAllBaselines",
-        "PatchTuesdayOfBaseline": "2026-06-09"
+        "SelectionPolicy": "ExplicitOnly"
       }
     },
     "ja-jp": {
@@ -148,23 +784,46 @@
       "Iso": {
         "Url": "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_ja-jp.iso",
         "Sha256": "",
+        "State": "UrlResolvedHashPending",
         "_VerifiedDate": "2026-05-26",
-        "_VerifiedBy": "manual:r07.0-Step10-IsoUrl-refresh"
+        "_VerifiedBy": "legacy:v3"
       },
       "VolumeLabelPrefix": "WS2022JA",
       "LanguageSpecificPatches": {
         "LanguagePacks": [],
         "LxpUpdates": [],
         "DotNetLanguagePacks": [],
-        "LastVerifiedDate": "2026-07-02T13:05:58.4256647+00:00",
-        "LastVerifiedBy": "auto:RefreshAllBaselines",
-        "PatchTuesdayOfBaseline": "2026-06-09"
+        "SelectionPolicy": "ExplicitOnly"
       }
     }
   },
   "_meta": {
-    "scriptVersion": "update-wsi-2026.07.02-r11.46",
-    "generatedAt": "2026-07-02T13:05:58Z"
+    "scriptVersion": "proposed-v4-model",
+    "generatedAt": "2026-07-11T00:00:00Z",
+    "isTemplate": false,
+    "migrationFromSchema": "3.0",
+    "compatibilityNote": "PatchModel and legacy flat package fields are retained for staged migration."
   },
-  "PatchModel": "embedded-ssu-du"
+  "PatchModel": "embedded-ssu-du",
+  "Compatibility": {
+    "LegacySchema": "3.0",
+    "LegacyFieldsRetained": [
+      "Common.InstallWimIndex",
+      "Common.BootWimLcuPolicy",
+      "PatchBaseline.Lines[].Digest",
+      "PatchBaseline.Lines[].Sha256",
+      "PatchBaseline.Lines[].ApplyOrder",
+      "PatchModel"
+    ],
+    "CanonicalV4Fields": [
+      "ServicingModel",
+      "DiscoveryPolicy",
+      "PatchBaseline.SourcePrerequisites",
+      "PatchBaseline.Lines[].Roles",
+      "PatchBaseline.Lines[].TargetsByRole",
+      "PatchBaseline.Lines[].Applicability",
+      "PatchBaseline.Lines[].Integrity",
+      "ValidationPolicy"
+    ]
+  }
 }

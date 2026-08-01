@@ -20,8 +20,22 @@ mislabelled Kind='SSU', was force-applied to a NEWER boot.wim):
      unknown Type. The LCU keeps its Install+Boot routing.
 
   3. `Test-PatchModelConsistency` for 'uup-checkpoint' REQUIRES the
-     Checkpoint Kind and FORBIDS the SSU Kind (the runtime mirror of the
-     schema's discriminated union).
+     Checkpoint Kind, and the r12.00 State-driven integrity rule holds:
+     a Line in state Frozen/E3Validated/E4Validated/E5Validated/Approved
+     must carry a SHA-256; a LegacyResolved Line must carry at least one
+     integrity key.
+
+r12.00 retirement (Schema 4.0): the Forbid axis of the consistency rules
+is RETIRED. The pre-r12 rule table carried Forbid sets (e.g. SSU forbidden
+on 'uup-checkpoint') that encoded the assumption that DU kinds are
+published only for specific OS generations. Measured against the live
+Catalog at r12.00, all four generations resolve real .NET / SafeOS DU /
+Setup DU rows, so per-OS Kind forbidding misread Microsoft's servicing
+model; the runtime keeps only the Require axis plus the State-driven
+integrity requirement, and applicability is expressed in v4 Line metadata
+(`Roles` / `Applicability`) under `ServicingModel.ApplyPlans` (T41).
+`PatchModel` itself is `Compatibility.LegacyFieldsRetained`. This test
+keeps a retirement guard asserting the Forbid axis stays absent.
 
 Exit code 0 on full pass, 1 on any failure (offline gate convention).
 """
@@ -115,17 +129,67 @@ def main() -> int:
             bool(res.get("IsConsistent")),
             f"Errors={res.get('Errors')}", passed, failed)
 
-        ssu_lines = [dict(ln) for ln in good_lines]
-        ssu_lines[0] = {"Kind": "SSU", "KbId": "KB5043080", "Digest": "x"}
+        no_cp_lines = [dict(ln) for ln in good_lines]
+        no_cp_lines[0] = {"Kind": "SSU", "KbId": "KB5043080", "Digest": "x"}
         res = ps.invoke("Test-PatchModelConsistency", OsKey="Server2025",
-                        PatchModel="uup-checkpoint", Lines=ssu_lines)
+                        PatchModel="uup-checkpoint", Lines=no_cp_lines)
         errs = [str(e) for e in (res.get("Errors") or [])]
         passed, failed = check(
-            "SSU Kind is forbidden AND Checkpoint required",
+            "missing Checkpoint still fails Require (SSU presence alone is NOT an error)",
             (not res.get("IsConsistent"))
-            and any("forbidden Kind 'SSU'" in e for e in errs)
-            and any("missing required Kind 'Checkpoint'" in e for e in errs),
+            and any("missing required Kind 'Checkpoint'" in e for e in errs)
+            and not any("forbidden" in e.lower() for e in errs),
             f"Errors={errs}", passed, failed)
+
+        # Retirement guard (r12.00): the Forbid axis must stay absent from the
+        # consistency function -- an absence assertion, the correct shape for
+        # a retirement (per-OS Kind forbidding misread the Catalog reality).
+        code = SCRIPT_PATH.read_text(encoding="utf-8-sig")
+        fn_start = code.index("function Test-PatchModelConsistency")
+        fn_body = code[fn_start:fn_start + 4000]
+        passed, failed = check(
+            "Forbid axis retired: consistency rules carry Require only",
+            "Forbid" not in fn_body and "Require=@(" in fn_body,
+            "Forbid keyword found inside Test-PatchModelConsistency", passed, failed)
+
+        print("=== 4. State-driven integrity requirement (r12.00) ===")
+        frozen_no_sha256 = [
+            {"Kind": "Checkpoint", "KbId": "KB5043080", "Digest": "x"},
+            {"Kind": "LCU", "KbId": "KB5094125", "Digest": "x",
+             "State": "Frozen"},
+            {"Kind": "DotNet", "KbId": "KB5087051", "Digest": "x"},
+            {"Kind": "SafeOSDU", "KbId": "KB5094150", "Digest": "x"},
+            {"Kind": "SetupDU", "KbId": "KB5095966", "Digest": "x"},
+        ]
+        res = ps.invoke("Test-PatchModelConsistency", OsKey="Server2025",
+                        PatchModel="uup-checkpoint", Lines=frozen_no_sha256)
+        errs = [str(e) for e in (res.get("Errors") or [])]
+        passed, failed = check(
+            "state=Frozen without SHA-256 is inconsistent",
+            (not res.get("IsConsistent"))
+            and any("state=Frozen but has no SHA-256" in e for e in errs),
+            f"Errors={errs}", passed, failed)
+
+        naked_line = [dict(ln) for ln in good_lines]
+        naked_line[1] = {"Kind": "LCU", "KbId": "KB5094125"}
+        res = ps.invoke("Test-PatchModelConsistency", OsKey="Server2025",
+                        PatchModel="uup-checkpoint", Lines=naked_line)
+        errs = [str(e) for e in (res.get("Errors") or [])]
+        passed, failed = check(
+            "LegacyResolved Line with no integrity key is inconsistent",
+            (not res.get("IsConsistent"))
+            and any("has no integrity key" in e for e in errs),
+            f"Errors={errs}", passed, failed)
+
+        sha256_frozen = [dict(ln) for ln in good_lines]
+        sha256_frozen[1] = {"Kind": "LCU", "KbId": "KB5094125",
+                            "State": "Frozen", "Sha256": "y"}
+        res = ps.invoke("Test-PatchModelConsistency", OsKey="Server2025",
+                        PatchModel="uup-checkpoint", Lines=sha256_frozen)
+        passed, failed = check(
+            "state=Frozen with SHA-256 is consistent",
+            bool(res.get("IsConsistent")),
+            f"Errors={res.get('Errors')}", passed, failed)
 
     print()
     print(f"  Summary: {passed} passed, {failed} failed, {passed + failed} total")
