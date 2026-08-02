@@ -22,6 +22,213 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.29-r12.44] - 2026-08-02
+
+ScriptTag advanced to `safeos-p11-metadata-contract-isolation-stage1`.
+(Backfilled 2026-08-02: this revision's commit landed without its
+CHANGELOG entry; authored from the landed commit and the measured
+gate records.)
+
+### Added
+
+- **Per-OS servicing contracts with hash enforcement**: four contract
+  constructors (`New-Server2016/2019/2022/2025ServicingContract`) and
+  `Assert-AllServicingContractBaselines`; the new
+  `data/servicing-contract-baselines.json`
+  (`servicing-contract-baselines/1.0`, four `-r1` contract revisions
+  with canonical SHA-256 component hashes) fails the build closed on
+  any undeclared contract change. The file landed by per-path
+  adjudication; T45 converges NOT-YET -> 17 asserts as scheduled
+  (matrix match).
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.07.29-r12.44`
+  with the new tag.
+
+### Gate state
+
+- Suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/120/64/112 + T45 17. PSA committed 4E/106W/10I (raw +1W =
+  PSA7002 LF artefact; declared series debt per the no-fix-forward
+  rule).
+
+## [update-wsi-2026.07.29-r12.43] - 2026-08-02
+
+Tag retained: `all-os-version-decision-hardening` (the version date component moves to 07.29).
+(Backfilled 2026-08-02: this revision's commit landed without its
+CHANGELOG entry; authored from the landed commit and the measured
+gate records.)
+
+### Added
+
+- **Fail-closed SafeOS-DU boot.wim verification decision**: the
+  boot.wim verification requires a `Package_for_SafeOSDU` identity at
+  or above the expected SafeOS version with no pending packages; the
+  full-LCU verification contract is not applied under the SafeOSDU
+  model. Script-only change.
+
+### Tests
+
+- **T40**: release pin advanced (the tag is retained).
+
+### Gate state
+
+- Suite 25/26 (T30 declared). D-totals 139/37/120/64/112 + T45
+  NOT-YET. PSA committed 4E/103W/10I (raw +1W = PSA7002).
+
+## [update-wsi-2026.07.28-r12.42] - 2026-08-02
+
+Tag retained: `all-os-version-decision-hardening`.
+(Backfilled 2026-08-02: this revision's commit landed without its
+CHANGELOG entry; authored from the landed commit and the measured
+gate records.)
+
+### Changed
+
+- **Server 2019 boot.wim update model declared as SafeOSDU**:
+  `config-Server2019.json` declares `BootWimUpdateModel` SafeOSDU and
+  the standalone ServicingStack step is dropped from the 2019
+  boot.wim plan (declared change; T41 140 -> 139 asserts, matrix
+  match).
+
+### Tests
+
+- **T40**: release pin advanced (the tag is retained).
+
+### Gate state
+
+- Suite 25/26 (T30 declared). D-totals 139/37/120/64/112 + T45
+  NOT-YET. PSA committed 4E/103W/10I (raw +1W = PSA7002).
+
+## [update-wsi-2026.07.28-r12.41] - 2026-08-02
+
+Tag retained: `all-os-version-decision-hardening`.
+(Backfilled 2026-08-02: this revision's commit landed without its
+CHANGELOG entry; authored from the landed commit and the measured
+gate records.)
+
+### Added
+
+- **Boot.wim smoke-test mount forensics (evidence 1.1)**: the P06
+  smoke test records a staged narrative marker, attribute/read-only
+  tracking and explicit per-index DISM mount logs, so a mount-side
+  failure leaves an attributable record. Script-only change.
+
+### Tests
+
+- **T40**: release pin advanced (the tag is retained).
+
+### Gate state
+
+- Suite 25/26 (T30 declared). D-totals 140/37/120/64/112 + T45
+  NOT-YET. PSA committed 4E/102W/10I (raw +1W = PSA7002).
+
+## [update-wsi-2026.07.28-r12.40] - 2026-08-02
+
+Tag retained: `all-os-version-decision-hardening` (the version date component moves to 07.28).
+(Backfilled 2026-08-02: this revision's commit landed without its
+CHANGELOG entry; authored from the landed commit and the measured
+gate records.)
+
+### Added
+
+- **Mandatory Server 2019 boot.wim pre-servicing smoke test**: P06
+  exercises the LCU against an isolated copy/mount of boot.wim before
+  the real servicing pass (mandatory for Server 2019 with
+  `BootWimLcuPolicy=enabled`); evidence schema
+  `P06-bootwim-servicing-smoke-test/1.0`. Script-only change; one
+  declared PSA warning is resolved by the deliverable.
+
+### Tests
+
+- **T40**: release pin advanced (the tag is retained).
+
+### Gate state
+
+- Suite 25/26 (T30 declared). D-totals 140/37/120/64/112 + T45
+  NOT-YET. PSA committed 4E/102W/10I (raw +1W = PSA7002).
+
+## [update-wsi-2026.07.27-r12.39] - 2026-08-02
+
+Tag retained: `all-os-version-decision-hardening`.
+(Backfilled 2026-08-02: this revision's commit landed without its
+CHANGELOG entry; authored from the landed commit and the measured
+gate records.)
+
+### Changed
+
+- **P11 setup-binary verification prefers the post-overlay digest**:
+  verification consumes `ExpectedSha256After` from the SetupDU
+  overlay evidence (the `setupdu-overlay/1.x` fallback is retained;
+  an empty expectation fails). Script-only change.
+
+### Tests
+
+- **T40**: release pin advanced (the tag is retained).
+
+### Gate state
+
+- Suite 25/26 (T30 declared). D-totals 140/37/120/64/112 + T45
+  NOT-YET. PSA committed 4E/103W/10I (raw +1W = PSA7002).
+
+## [update-wsi-2026.07.27-r12.38] - 2026-08-02
+
+Tag retained: `all-os-version-decision-hardening`.
+(Backfilled 2026-08-02: this revision's commit landed without its
+CHANGELOG entry; authored from the landed commit and the measured
+gate records.)
+
+### Added
+
+- **Server 2016 SSU state detection filesystem fallback**:
+  `Get-OfflineServicingStackFilesystemState` supplies the active
+  servicing stack from the component directory when package identity
+  does not surface it (measured Server 2016 case); the evidence rows
+  record the source column
+  (`offline-servicing-stack-filesystem-state/1.0`). Script-only
+  change.
+
+### Tests
+
+- **T40**: release pin advanced (the tag is retained).
+
+### Gate state
+
+- Suite 25/26 (T30 declared). D-totals 140/37/120/64/112 + T45
+  NOT-YET. PSA committed 4E/103W/10I (raw +1W = PSA7002).
+
+## [update-wsi-2026.07.27-r12.37] - 2026-08-02
+
+ScriptTag advanced to `all-os-version-decision-hardening`.
+(Backfilled 2026-08-02: this revision's commit landed without its
+CHANGELOG entry; authored from the landed commit and the measured
+gate records.)
+
+### Added
+
+- **Fail-closed patch version-decision pipeline**: a 27-helper layer
+  makes every patch-version decision explicit and evidence-backed —
+  downgrade rejection, `ManualReviewRequired` escalation,
+  version-aware SetupDU overlay, and `patch-version-decision/1.0`
+  evidence records.
+
+### Changed
+
+- **Declared vocabulary migration**: `VersionDecisionPolicy` /
+  `Lines[].VersionPolicy` join schema v4 and all configs (declared
+  change; T42 30 -> 37 asserts, matrix match). Snapshot overlay:
+  script + five configs + schema.
+
+### Tests
+
+- **T40**: release pin advanced with the new tag.
+
+### Gate state
+
+- Suite 25/26 (T30 declared). D-totals 140/37/120/64/112 + T45
+  NOT-YET. PSA committed 4E/102W/10I (raw +1W = PSA7002).
+
 ## [update-wsi-2026.07.26-r12.36] - 2026-08-02
 
 Revision r12.36 carries two independent delivered works under one
