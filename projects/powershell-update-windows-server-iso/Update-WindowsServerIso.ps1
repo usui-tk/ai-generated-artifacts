@@ -166,12 +166,13 @@
 
 .PARAMETER ImageDisplayDate
     Optional display date for serviced install.wim indexes, in yyyy-MM-dd
-    format. r12.27 retains the r12.26 WIM image LASTMODIFICATIONTIME metadata
-    intended for the edition-selection "Modified" / "更新日" presentation;
-    the actual Setup UI mapping remains an E2E acceptance item. When omitted,
-    P07 captures the host-local date once at phase start. Only indexes that
-    P07 actually services are changed; CREATIONTIME and all other metadata
-    remain unchanged.
+    format. r12.28 uses the WIM image CREATIONTIME metadata because measured
+    Server 2016 evidence showed that Windows Setup displayed the original
+    CREATIONTIME date even though LASTMODIFICATIONTIME already reflected the
+    2026 servicing run. When omitted, P07 captures the host-local calendar
+    date once at phase start and encodes noon UTC for a timezone-stable date.
+    Only indexes that P07 actually services are changed; identity metadata is
+    preserved and WIMGAPI write/read verification is fail-closed.
 
 .PARAMETER UseDefenderExclusions
     Opt-in. Temporarily add Windows Defender exclusions (the WorkRoot path and
@@ -697,8 +698,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.20-r12.27'
-$Script:ScriptTag     = 'wimgapi-image-root-localname-hotfix'
+$Script:ScriptVersion = 'update-wsi-2026.07.21-r12.28'
+$Script:ScriptTag     = 'wimgapi-utf16le-creationtime-displaydate-fix'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -7293,49 +7294,60 @@ function Get-DismExportArgumentList {
 }
 
 # ============================================================
-# install.wim display-date metadata (r12.26; r12.27 XML-root hotfix)
+# install.wim display-date metadata (r12.28 measured-field + UTF-16LE fix)
 # ============================================================
-# The source-media dates observed in Windows Setup remained unchanged after
-# successful package servicing. r12.26 introduced the WIM image
-# LASTMODIFICATIONTIME XML metadata and requires a real Setup UI E2E to confirm
-# the presentation mapping. The helpers below round-trip the complete IMAGE XML
-# through Windows WIMGAPI, changing only LASTMODIFICATIONTIME. CREATIONTIME and
-# every other metadata element remain invariant and are verified before P07 is
-# allowed to complete.
+# Measured r12.27 evidence established two facts:
+#   1. Windows Setup showed the original media date while WIM
+#      LASTMODIFICATIONTIME already reflected the 2026 servicing run.
+#      Therefore the edition-selection "Modified" / "更新日" column maps to
+#      CREATIONTIME for the tested Server media.
+#   2. WIMSetImageInformation rejected a re-serialized Unicode string without
+#      the UTF-16LE BOM (Win32 203). The API requires the memory representation
+#      of a Unicode XML file. r12.28 writes a BOM-prefixed UTF-16LE buffer and
+#      updates the full <WIM> XML through the WIM file handle.
+# The operation remains transactional and is preceded by a small boot.wim-copy
+# native preflight before the expensive install.wim servicing loop.
 
 function Resolve-InstallWimDisplayDateDecision {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param(
-        [AllowEmptyString()][string]$RequestedDate='',
-        [datetime]$ReferenceLocalTime=(Get-Date)
+        [string]$RequestedDate,
+        [Parameter(Mandatory)][datetime]$ReferenceLocalTime
     )
     $source='P07StartLocalDate'
-    $date=$ReferenceLocalTime.Date
-    if (-not [string]::IsNullOrWhiteSpace($RequestedDate)) {
+    if ($RequestedDate) {
         $parsed=[datetime]::MinValue
         $ok=[datetime]::TryParseExact(
-            $RequestedDate,
-            'yyyy-MM-dd',
-            [System.Globalization.CultureInfo]::InvariantCulture,
-            [System.Globalization.DateTimeStyles]::None,
-            [ref]$parsed
+            $RequestedDate,'yyyy-MM-dd',[System.Globalization.CultureInfo]::InvariantCulture,
+            [System.Globalization.DateTimeStyles]::None,[ref]$parsed
         )
         if (-not $ok -or $parsed.ToString('yyyy-MM-dd') -ne $RequestedDate) {
-            throw ('Invalid install.wim display date: {0}. Expected yyyy-MM-dd.' -f $RequestedDate)
+            throw ('Invalid install.wim display date: {0}' -f $RequestedDate)
         }
-        $date=$parsed.Date
+        $displayDate=$parsed.ToString('yyyy-MM-dd')
         $source='ImageDisplayDateParameter'
+    } else {
+        $displayDate=$ReferenceLocalTime.ToString('yyyy-MM-dd')
     }
-    # Use local noon so conversion to FILETIME is stable for the build host's
-    # time zone and cannot cross the selected date during this run.
-    $localNoon=[datetime]::SpecifyKind($date.AddHours(12),[System.DateTimeKind]::Local)
+    # Setup displayed the raw CREATIONTIME calendar date in measured Japanese
+    # media. Encode noon UTC on the selected local calendar date so the XML date
+    # remains stable regardless of the build host timezone.
+    $utcNoon=[datetime]::SpecifyKind(
+        [datetime]::ParseExact(
+            ($displayDate + ' 12:00:00'),'yyyy-MM-dd HH:mm:ss',
+            [System.Globalization.CultureInfo]::InvariantCulture
+        ),
+        [System.DateTimeKind]::Utc
+    )
     [pscustomobject][ordered]@{
-        SchemaVersion='install-wim-display-date-decision/1.0'
-        DisplayDate=$date.ToString('yyyy-MM-dd')
+        SchemaVersion='install-wim-display-date-decision/1.1'
+        DisplayDate=$displayDate
         Source=$source
-        EffectiveLocalDateTime=$localNoon.ToString('o')
-        EffectiveUtcDateTime=$localNoon.ToUniversalTime().ToString('o')
+        ReferenceLocalDateTime=$ReferenceLocalTime.ToString('o')
+        EffectiveUtcDateTime=$utcNoon.ToString('o')
+        MetadataField='CREATIONTIME'
+        SetupMappingBasis='Measured-Server2016-r12.27'
     }
 }
 
@@ -7345,12 +7357,9 @@ function ConvertTo-WimFileTimeParts {
     param([Parameter(Mandatory)][datetime]$DateTime)
     $utc=if($DateTime.Kind -eq [System.DateTimeKind]::Utc){$DateTime}else{$DateTime.ToUniversalTime()}
     $value=[uint64]$utc.ToFileTimeUtc()
-    $high=[uint32]($value -shr 32)
-    $low=[uint32]($value -band ([uint64]4294967295))
     [pscustomobject][ordered]@{
-        HighPart=('0x{0:X8}' -f $high)
-        LowPart=('0x{0:X8}' -f $low)
-        FileTime=[string]$value
+        HighPart=('0x{0:X8}' -f [uint32]($value -shr 32))
+        LowPart=('0x{0:X8}' -f [uint32]($value -band [uint64]0xFFFFFFFF))
         UtcDateTime=$utc.ToString('o')
     }
 }
@@ -7362,16 +7371,10 @@ function ConvertFrom-WimFileTimeParts {
         [Parameter(Mandatory)][string]$HighPart,
         [Parameter(Mandatory)][string]$LowPart
     )
-    function Convert-WimPart([string]$Value) {
-        if ($Value -match '^0[xX]([0-9A-Fa-f]+)$') {
-            return [uint32]([Convert]::ToUInt32($Matches[1],16))
-        }
-        return [uint32]([Convert]::ToUInt32($Value,[System.Globalization.CultureInfo]::InvariantCulture))
-    }
-    $high=Convert-WimPart -Value $HighPart
-    $low=Convert-WimPart -Value $LowPart
-    $value=([uint64]$high * ([uint64]4294967296)) + [uint64]$low
-    return [datetime]::FromFileTimeUtc([int64]$value)
+    $high=[uint64]::Parse(($HighPart -replace '^0x',''),[System.Globalization.NumberStyles]::HexNumber,[System.Globalization.CultureInfo]::InvariantCulture)
+    $low=[uint64]::Parse(($LowPart -replace '^0x',''),[System.Globalization.NumberStyles]::HexNumber,[System.Globalization.CultureInfo]::InvariantCulture)
+    $value=[int64](($high -shl 32) -bor $low)
+    return [datetime]::FromFileTimeUtc($value)
 }
 
 function Get-WimImageMetadataInvariantFingerprint {
@@ -7381,64 +7384,54 @@ function Get-WimImageMetadataInvariantFingerprint {
     $doc=[System.Xml.XmlDocument]::new()
     $doc.PreserveWhitespace=$false
     $doc.LoadXml($ImageXml.TrimStart([char]0xFEFF))
-    $node=$doc.DocumentElement.SelectSingleNode('LASTMODIFICATIONTIME')
-    if ($node) {
-        $high=$node.SelectSingleNode('HIGHPART')
-        $low=$node.SelectSingleNode('LOWPART')
-        if ($high) { $high.InnerText='__LASTMODIFICATIONTIME_HIGH__' }
-        if ($low) { $low.InnerText='__LASTMODIFICATIONTIME_LOW__' }
+    # WIMGAPI can refresh LASTMODIFICATIONTIME when metadata is stored, and
+    # r12.28 intentionally changes CREATIONTIME. Exclude both time nodes while
+    # proving that edition identity and all other metadata remain unchanged.
+    foreach($nodeName in @('CREATIONTIME','LASTMODIFICATIONTIME')) {
+        $node=$doc.DocumentElement.SelectSingleNode($nodeName)
+        if($node){$null=$doc.DocumentElement.RemoveChild($node)}
     }
-    return Get-TextFingerprint -Text $doc.OuterXml
+    return Get-TextFingerprint -Text $doc.DocumentElement.OuterXml
 }
 
-function Set-WimImageLastModificationTimeXml {
+function Set-WimImageCreationTimeXml {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)][string]$ImageXml,
-        [Parameter(Mandatory)][datetime]$DateTime
+        [Parameter(Mandatory)][datetime]$UtcDateTime
     )
     $doc=[System.Xml.XmlDocument]::new()
-    $doc.PreserveWhitespace=$false
+    $doc.PreserveWhitespace=$true
     $doc.LoadXml($ImageXml.TrimStart([char]0xFEFF))
-    # PowerShell's XML adapter is case-insensitive: on WIM IMAGE XML the
-    # child <NAME> element can shadow XmlElement.Name. LocalName is the
-    # unambiguous CLR XML-node property and must be used for the root check.
     $root=$doc.DocumentElement
     $actualRoot=if($root){[string]$root.LocalName}else{'<null>'}
-    if (-not $root -or $actualRoot -ne 'IMAGE') {
+    if(-not $root -or $actualRoot -ne 'IMAGE'){
         throw ('WIMGAPI image metadata root is not IMAGE (actual: {0}).' -f $actualRoot)
     }
-    $beforeInvariant=Get-WimImageMetadataInvariantFingerprint -ImageXml $doc.OuterXml
-    $beforeCreation=$doc.DocumentElement.SelectSingleNode('CREATIONTIME')
-    $beforeCreationXml=if($beforeCreation){$beforeCreation.OuterXml}else{''}
-    $last=$doc.DocumentElement.SelectSingleNode('LASTMODIFICATIONTIME')
-    if (-not $last) {
-        $last=$doc.CreateElement('LASTMODIFICATIONTIME')
-        $null=$doc.DocumentElement.AppendChild($last)
+    $beforeInvariant=Get-WimImageMetadataInvariantFingerprint -ImageXml $root.OuterXml
+    $creation=$root.SelectSingleNode('CREATIONTIME')
+    if(-not $creation){
+        $creation=$doc.CreateElement('CREATIONTIME')
+        $last=$root.SelectSingleNode('LASTMODIFICATIONTIME')
+        if($last){$null=$root.InsertBefore($creation,$last)}else{$null=$root.AppendChild($creation)}
     }
-    $high=$last.SelectSingleNode('HIGHPART')
-    if (-not $high) { $high=$doc.CreateElement('HIGHPART');$null=$last.AppendChild($high) }
-    $low=$last.SelectSingleNode('LOWPART')
-    if (-not $low) { $low=$doc.CreateElement('LOWPART');$null=$last.AppendChild($low) }
-    $parts=ConvertTo-WimFileTimeParts -DateTime $DateTime
+    $high=$creation.SelectSingleNode('HIGHPART')
+    if(-not $high){$high=$doc.CreateElement('HIGHPART');$null=$creation.AppendChild($high)}
+    $low=$creation.SelectSingleNode('LOWPART')
+    if(-not $low){$low=$doc.CreateElement('LOWPART');$null=$creation.AppendChild($low)}
+    $parts=ConvertTo-WimFileTimeParts -DateTime $UtcDateTime
     $high.InnerText=$parts.HighPart
     $low.InnerText=$parts.LowPart
-    $updated=$doc.OuterXml
+    $updated=$root.OuterXml
     $afterInvariant=Get-WimImageMetadataInvariantFingerprint -ImageXml $updated
-    $afterCreation=$doc.DocumentElement.SelectSingleNode('CREATIONTIME')
-    $afterCreationXml=if($afterCreation){$afterCreation.OuterXml}else{''}
-    if ($beforeInvariant -ne $afterInvariant) {
-        throw 'WIM metadata invariant changed while editing LASTMODIFICATIONTIME.'
-    }
-    if ($beforeCreationXml -ne $afterCreationXml) {
-        throw 'WIM CREATIONTIME changed while editing LASTMODIFICATIONTIME.'
+    if($beforeInvariant -ne $afterInvariant){
+        throw 'WIM metadata invariant changed while editing CREATIONTIME.'
     }
     [pscustomobject][ordered]@{
         Xml=$updated
         Parts=$parts
         InvariantFingerprint=$afterInvariant
-        CreationTimeXml=$afterCreationXml
     }
 }
 
@@ -7502,38 +7495,60 @@ function Throw-WimApiFailure {
     throw ('{0} failed: Win32={1} (0x{1:X8}) {2}' -f $Operation,$code,$message)
 }
 
-function Get-WimImageXmlFromHandle {
+function Get-WimUnicodeXmlFromHandle {
     [CmdletBinding()]
-    [OutputType([string])]
-    param([Parameter(Mandatory)][IntPtr]$ImageHandle)
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)][IntPtr]$Handle)
     $buffer=[IntPtr]::Zero
     $bytes=[uint32]0
-    if (-not [UpdateWsi.Native.WimApi]::WIMGetImageInformation($ImageHandle,[ref]$buffer,[ref]$bytes)) {
+    if(-not [UpdateWsi.Native.WimApi]::WIMGetImageInformation($Handle,[ref]$buffer,[ref]$bytes)){
         Throw-WimApiFailure -Operation 'WIMGetImageInformation'
     }
     try {
-        if ($buffer -eq [IntPtr]::Zero -or $bytes -lt 2) { throw 'WIMGetImageInformation returned an empty buffer.' }
-        $charCount=[int]($bytes / 2)
-        return ([Runtime.InteropServices.Marshal]::PtrToStringUni($buffer,$charCount)).TrimEnd([char]0)
+        if($buffer -eq [IntPtr]::Zero -or $bytes -lt 4){throw 'WIMGetImageInformation returned an empty buffer.'}
+        $raw=[byte[]]::new([int]$bytes)
+        [Runtime.InteropServices.Marshal]::Copy($buffer,$raw,0,[int]$bytes)
+        $hasBom=($raw[0] -eq 0xFF -and $raw[1] -eq 0xFE)
+        if(-not $hasBom){throw 'WIMGetImageInformation did not return a UTF-16LE BOM-prefixed XML buffer.'}
+        $payloadLength=$raw.Length-2
+        if(($payloadLength % 2) -ne 0){throw 'WIMGAPI Unicode XML buffer has an odd byte length.'}
+        $xml=[Text.Encoding]::Unicode.GetString($raw,2,$payloadLength).TrimEnd([char]0)
+        [pscustomobject][ordered]@{Xml=$xml;ByteCount=[int]$bytes;HasUtf16LeBom=$true}
     } finally {
-        if ($buffer -ne [IntPtr]::Zero) { $null=[UpdateWsi.Native.WimApi]::LocalFree($buffer) }
+        if($buffer -ne [IntPtr]::Zero){$null=[UpdateWsi.Native.WimApi]::LocalFree($buffer)}
     }
 }
 
-function Set-WimImageXmlOnHandle {
+function ConvertTo-WimUnicodeXmlBuffer {
+    [CmdletBinding()]
+    [OutputType([byte[]])]
+    param([Parameter(Mandatory)][string]$Xml)
+    $payload=[Text.Encoding]::Unicode.GetBytes($Xml)
+    $raw=[byte[]]::new($payload.Length+2)
+    $raw[0]=0xFF;$raw[1]=0xFE
+    [Array]::Copy($payload,0,$raw,2,$payload.Length)
+    return $raw
+}
+
+function Set-WimUnicodeXmlOnHandle {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][IntPtr]$ImageHandle,
-        [Parameter(Mandatory)][string]$ImageXml
+        [Parameter(Mandatory)][IntPtr]$Handle,
+        [Parameter(Mandatory)][string]$Xml,
+        [Parameter(Mandatory)][ValidateSet('WIM','IMAGE')][string]$ExpectedRoot
     )
-    $buffer=[Runtime.InteropServices.Marshal]::StringToHGlobalUni($ImageXml)
+    $doc=[System.Xml.XmlDocument]::new();$doc.PreserveWhitespace=$true;$doc.LoadXml($Xml)
+    $actual=if($doc.DocumentElement){[string]$doc.DocumentElement.LocalName}else{'<null>'}
+    if($actual -ne $ExpectedRoot){throw ('WIMGAPI XML root is {0}; expected {1}.' -f $actual,$ExpectedRoot)}
+    $raw=ConvertTo-WimUnicodeXmlBuffer -Xml $Xml
+    if($raw.Length -lt 4 -or $raw[0] -ne 0xFF -or $raw[1] -ne 0xFE){throw 'Internal error: WIMGAPI write buffer lacks UTF-16LE BOM.'}
+    $pin=[Runtime.InteropServices.GCHandle]::Alloc($raw,[Runtime.InteropServices.GCHandleType]::Pinned)
     try {
-        $bytes=[uint32](($ImageXml.Length + 1) * 2)
-        if (-not [UpdateWsi.Native.WimApi]::WIMSetImageInformation($ImageHandle,$buffer,$bytes)) {
-            Throw-WimApiFailure -Operation 'WIMSetImageInformation'
+        if(-not [UpdateWsi.Native.WimApi]::WIMSetImageInformation($Handle,$pin.AddrOfPinnedObject(),[uint32]$raw.Length)){
+            Throw-WimApiFailure -Operation ('WIMSetImageInformation(root={0},utf16le-bom=true,bytes={1})' -f $ExpectedRoot,$raw.Length)
         }
     } finally {
-        if ($buffer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::FreeHGlobal($buffer) }
+        if($pin.IsAllocated){$pin.Free()}
     }
 }
 
@@ -7544,26 +7559,18 @@ function Convert-WimImageXmlToEvidence {
         [Parameter(Mandatory)][string]$ImageXml,
         [Parameter(Mandatory)][int]$ImageIndex
     )
-    $doc=[System.Xml.XmlDocument]::new()
-    $doc.PreserveWhitespace=$false
-    $doc.LoadXml($ImageXml.TrimStart([char]0xFEFF))
+    $doc=[System.Xml.XmlDocument]::new();$doc.PreserveWhitespace=$false;$doc.LoadXml($ImageXml.TrimStart([char]0xFEFF))
     $root=$doc.DocumentElement
-    # Do not use $root.Name here. PowerShell resolves XML members
-    # case-insensitively, so the child <NAME> element can mask XmlNode.Name.
     $actualRoot=if($root){[string]$root.LocalName}else{'<null>'}
-    if (-not $root -or $actualRoot -ne 'IMAGE') {
+    if(-not $root -or $actualRoot -ne 'IMAGE'){
         throw ('WIMGAPI image metadata root is not IMAGE (actual: {0}).' -f $actualRoot)
     }
     $last=$root.SelectSingleNode('LASTMODIFICATIONTIME')
     $creation=$root.SelectSingleNode('CREATIONTIME')
     $lastUtc=$null
-    if ($last -and $last.HIGHPART -and $last.LOWPART) {
-        $lastUtc=ConvertFrom-WimFileTimeParts -HighPart ([string]$last.HIGHPART) -LowPart ([string]$last.LOWPART)
-    }
+    if($last -and $last.HIGHPART -and $last.LOWPART){$lastUtc=ConvertFrom-WimFileTimeParts -HighPart ([string]$last.HIGHPART) -LowPart ([string]$last.LOWPART)}
     $creationUtc=$null
-    if ($creation -and $creation.HIGHPART -and $creation.LOWPART) {
-        $creationUtc=ConvertFrom-WimFileTimeParts -HighPart ([string]$creation.HIGHPART) -LowPart ([string]$creation.LOWPART)
-    }
+    if($creation -and $creation.HIGHPART -and $creation.LOWPART){$creationUtc=ConvertFrom-WimFileTimeParts -HighPart ([string]$creation.HIGHPART) -LowPart ([string]$creation.LOWPART)}
     [pscustomobject][ordered]@{
         ImageIndex=$ImageIndex
         Name=[string]$root.NAME
@@ -7579,10 +7586,10 @@ function Convert-WimImageXmlToEvidence {
         CreationTimeHighPart=$(if($creation){[string]$creation.HIGHPART}else{''})
         CreationTimeLowPart=$(if($creation){[string]$creation.LOWPART}else{''})
         CreationTimeUtc=$(if($creationUtc){$creationUtc.ToString('o')}else{''})
+        CreationTimeDateUtc=$(if($creationUtc){$creationUtc.ToString('yyyy-MM-dd')}else{''})
         LastModificationTimeHighPart=$(if($last){[string]$last.HIGHPART}else{''})
         LastModificationTimeLowPart=$(if($last){[string]$last.LOWPART}else{''})
         LastModificationTimeUtc=$(if($lastUtc){$lastUtc.ToString('o')}else{''})
-        LastModificationDateLocal=$(if($lastUtc){$lastUtc.ToLocalTime().ToString('yyyy-MM-dd')}else{''})
         XmlSha256=Get-TextFingerprint -Text $root.OuterXml
         InvariantXmlSha256=Get-WimImageMetadataInvariantFingerprint -ImageXml $root.OuterXml
     }
@@ -7597,35 +7604,25 @@ function Get-WimImageMetadataSnapshot {
         [Parameter(Mandatory)][string]$TemporaryPath
     )
     Initialize-WimApiInterop
-    if (-not (Test-Path -LiteralPath $TemporaryPath)) { New-Item -ItemType Directory -Path $TemporaryPath -Force | Out-Null }
-    $creationResult=[uint32]0
-    $items=[System.Collections.Generic.List[object]]::new()
-    $hWim=[UpdateWsi.Native.WimApi]::WIMCreateFile(
-        $WimPath,
-        [UpdateWsi.Native.WimApi]::WIM_GENERIC_READ,
-        [UpdateWsi.Native.WimApi]::WIM_OPEN_EXISTING,
-        0,
-        [UpdateWsi.Native.WimApi]::WIM_COMPRESS_NONE,
-        [ref]$creationResult
-    )
-    if ($hWim -eq [IntPtr]::Zero) { Throw-WimApiFailure -Operation 'WIMCreateFile(read)' }
+    if(-not (Test-Path -LiteralPath $TemporaryPath)){New-Item -ItemType Directory -Path $TemporaryPath -Force|Out-Null}
+    $creationResult=[uint32]0;$items=[System.Collections.Generic.List[object]]::new()
+    $hWim=[UpdateWsi.Native.WimApi]::WIMCreateFile($WimPath,[UpdateWsi.Native.WimApi]::WIM_GENERIC_READ,[UpdateWsi.Native.WimApi]::WIM_OPEN_EXISTING,0,[UpdateWsi.Native.WimApi]::WIM_COMPRESS_NONE,[ref]$creationResult)
+    if($hWim -eq [IntPtr]::Zero){Throw-WimApiFailure -Operation 'WIMCreateFile(read)'}
     try {
-        if (-not [UpdateWsi.Native.WimApi]::WIMSetTemporaryPath($hWim,$TemporaryPath)) { Throw-WimApiFailure -Operation 'WIMSetTemporaryPath(read)' }
-        foreach ($index in $ImageIndexes) {
+        if(-not [UpdateWsi.Native.WimApi]::WIMSetTemporaryPath($hWim,$TemporaryPath)){Throw-WimApiFailure -Operation 'WIMSetTemporaryPath(read)'}
+        foreach($index in $ImageIndexes){
             $hImage=[UpdateWsi.Native.WimApi]::WIMLoadImage($hWim,[uint32]$index)
-            if ($hImage -eq [IntPtr]::Zero) { Throw-WimApiFailure -Operation ('WIMLoadImage(read,index={0})' -f $index) }
+            if($hImage -eq [IntPtr]::Zero){Throw-WimApiFailure -Operation ('WIMLoadImage(read,index={0})' -f $index)}
             try {
-                $xml=Get-WimImageXmlFromHandle -ImageHandle $hImage
-                $items.Add((Convert-WimImageXmlToEvidence -ImageXml $xml -ImageIndex $index)) | Out-Null
+                $info=Get-WimUnicodeXmlFromHandle -Handle $hImage
+                $items.Add((Convert-WimImageXmlToEvidence -ImageXml $info.Xml -ImageIndex $index))|Out-Null
             } finally {
-                if (-not [UpdateWsi.Native.WimApi]::WIMCloseHandle($hImage)) { Throw-WimApiFailure -Operation ('WIMCloseHandle(image,index={0})' -f $index) }
+                if(-not [UpdateWsi.Native.WimApi]::WIMCloseHandle($hImage)){Throw-WimApiFailure -Operation ('WIMCloseHandle(image,index={0})' -f $index)}
             }
         }
     } finally {
-        if (-not [UpdateWsi.Native.WimApi]::WIMCloseHandle($hWim)) { Throw-WimApiFailure -Operation 'WIMCloseHandle(wim,read)' }
+        if(-not [UpdateWsi.Native.WimApi]::WIMCloseHandle($hWim)){Throw-WimApiFailure -Operation 'WIMCloseHandle(wim,read)'}
     }
-    # Hash only after every WIMGAPI handle is closed. This avoids depending on
-    # implementation-specific sharing semantics while reading a large WIM.
     [pscustomobject][ordered]@{
         WimPath=$WimPath
         WimSizeBytes=(Get-Item -LiteralPath $WimPath).Length
@@ -7639,44 +7636,37 @@ function Set-InstallWimDisplayDateMetadata {
     [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)][string]$WimPath,
-        [Parameter(Mandatory)][int[]]$ImageIndexes,
+        [Parameter(Mandatory)][int[]]$TargetImageIndexes,
+        [Parameter(Mandatory)][int[]]$SnapshotImageIndexes,
         [Parameter(Mandatory)][pscustomobject]$DateDecision,
         [Parameter(Mandatory)][string]$TemporaryPath
     )
     Initialize-WimApiInterop
-    if (-not (Test-Path -LiteralPath $TemporaryPath)) { New-Item -ItemType Directory -Path $TemporaryPath -Force | Out-Null }
-    $target=[datetime]::Parse(
-        [string]$DateDecision.EffectiveLocalDateTime,
-        [System.Globalization.CultureInfo]::InvariantCulture,
-        [System.Globalization.DateTimeStyles]::RoundtripKind
-    )
+    if(-not (Test-Path -LiteralPath $TemporaryPath)){New-Item -ItemType Directory -Path $TemporaryPath -Force|Out-Null}
+    $targetUtc=[datetime]::Parse([string]$DateDecision.EffectiveUtcDateTime,[System.Globalization.CultureInfo]::InvariantCulture,[System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
     $creationResult=[uint32]0
     $hWim=[UpdateWsi.Native.WimApi]::WIMCreateFile(
-        $WimPath,
-        [uint32]([UpdateWsi.Native.WimApi]::WIM_GENERIC_READ -bor [UpdateWsi.Native.WimApi]::WIM_GENERIC_WRITE),
-        [UpdateWsi.Native.WimApi]::WIM_OPEN_EXISTING,
-        0,
-        [UpdateWsi.Native.WimApi]::WIM_COMPRESS_NONE,
-        [ref]$creationResult
-    )
-    if ($hWim -eq [IntPtr]::Zero) { Throw-WimApiFailure -Operation 'WIMCreateFile(write)' }
+        $WimPath,[uint32]([UpdateWsi.Native.WimApi]::WIM_GENERIC_READ -bor [UpdateWsi.Native.WimApi]::WIM_GENERIC_WRITE),
+        [UpdateWsi.Native.WimApi]::WIM_OPEN_EXISTING,0,[UpdateWsi.Native.WimApi]::WIM_COMPRESS_NONE,[ref]$creationResult)
+    if($hWim -eq [IntPtr]::Zero){Throw-WimApiFailure -Operation 'WIMCreateFile(write)'}
     try {
-        if (-not [UpdateWsi.Native.WimApi]::WIMSetTemporaryPath($hWim,$TemporaryPath)) { Throw-WimApiFailure -Operation 'WIMSetTemporaryPath(write)' }
-        foreach ($index in $ImageIndexes) {
-            $hImage=[UpdateWsi.Native.WimApi]::WIMLoadImage($hWim,[uint32]$index)
-            if ($hImage -eq [IntPtr]::Zero) { Throw-WimApiFailure -Operation ('WIMLoadImage(write,index={0})' -f $index) }
-            try {
-                $beforeXml=Get-WimImageXmlFromHandle -ImageHandle $hImage
-                $updated=Set-WimImageLastModificationTimeXml -ImageXml $beforeXml -DateTime $target
-                Set-WimImageXmlOnHandle -ImageHandle $hImage -ImageXml $updated.Xml
-            } finally {
-                if (-not [UpdateWsi.Native.WimApi]::WIMCloseHandle($hImage)) { Throw-WimApiFailure -Operation ('WIMCloseHandle(image,index={0})' -f $index) }
-            }
+        if(-not [UpdateWsi.Native.WimApi]::WIMSetTemporaryPath($hWim,$TemporaryPath)){Throw-WimApiFailure -Operation 'WIMSetTemporaryPath(write)'}
+        $wimInfo=Get-WimUnicodeXmlFromHandle -Handle $hWim
+        $doc=[System.Xml.XmlDocument]::new();$doc.PreserveWhitespace=$true;$doc.LoadXml($wimInfo.Xml)
+        $root=$doc.DocumentElement;$actual=if($root){[string]$root.LocalName}else{'<null>'}
+        if($actual -ne 'WIM'){throw ('WIMGAPI file metadata root is not WIM (actual: {0}).' -f $actual)}
+        foreach($index in $TargetImageIndexes){
+            $image=$root.SelectSingleNode(('IMAGE[@INDEX="{0}"]' -f $index))
+            if(-not $image){throw ('WIM XML does not contain target IMAGE index {0}.' -f $index)}
+            $edited=Set-WimImageCreationTimeXml -ImageXml $image.OuterXml -UtcDateTime $targetUtc
+            $replacement=$doc.CreateDocumentFragment();$replacement.InnerXml=$edited.Xml
+            $null=$root.ReplaceChild($replacement.FirstChild,$image)
         }
+        Set-WimUnicodeXmlOnHandle -Handle $hWim -Xml $doc.OuterXml -ExpectedRoot 'WIM'
     } finally {
-        if (-not [UpdateWsi.Native.WimApi]::WIMCloseHandle($hWim)) { Throw-WimApiFailure -Operation 'WIMCloseHandle(wim,write)' }
+        if(-not [UpdateWsi.Native.WimApi]::WIMCloseHandle($hWim)){Throw-WimApiFailure -Operation 'WIMCloseHandle(wim,write)'}
     }
-    return Get-WimImageMetadataSnapshot -WimPath $WimPath -ImageIndexes $ImageIndexes -TemporaryPath $TemporaryPath
+    return Get-WimImageMetadataSnapshot -WimPath $WimPath -ImageIndexes $SnapshotImageIndexes -TemporaryPath $TemporaryPath
 }
 
 function Test-InstallWimDisplayMetadataTransition {
@@ -7685,33 +7675,70 @@ function Test-InstallWimDisplayMetadataTransition {
     param(
         [Parameter(Mandatory)][pscustomobject]$Before,
         [Parameter(Mandatory)][pscustomobject]$After,
-        [Parameter(Mandatory)][pscustomobject]$DateDecision
+        [Parameter(Mandatory)][pscustomobject]$DateDecision,
+        [Parameter(Mandatory)][int[]]$TargetImageIndexes
     )
     $issues=[System.Collections.Generic.List[string]]::new()
-    $targetDateTime=[datetime]::Parse(
-        [string]$DateDecision.EffectiveLocalDateTime,
-        [System.Globalization.CultureInfo]::InvariantCulture,
-        [System.Globalization.DateTimeStyles]::RoundtripKind
-    )
-    $expectedParts=ConvertTo-WimFileTimeParts -DateTime $targetDateTime
-    $beforeImages=@($Before.Images)
-    $afterImages=@($After.Images)
-    if ($beforeImages.Count -ne $afterImages.Count) { $issues.Add('Image count changed.') | Out-Null }
-    foreach ($beforeImage in $beforeImages) {
-        $afterImage=@($afterImages | Where-Object { [int]$_.ImageIndex -eq [int]$beforeImage.ImageIndex }) | Select-Object -First 1
-        if (-not $afterImage) { $issues.Add(('Index {0} is missing after metadata update.' -f $beforeImage.ImageIndex)) | Out-Null;continue }
-        if ([string]$beforeImage.InvariantXmlSha256 -ne [string]$afterImage.InvariantXmlSha256) { $issues.Add(('Index {0} changed metadata outside LASTMODIFICATIONTIME.' -f $beforeImage.ImageIndex)) | Out-Null }
-        if ([string]$beforeImage.CreationTimeHighPart -ne [string]$afterImage.CreationTimeHighPart -or [string]$beforeImage.CreationTimeLowPart -ne [string]$afterImage.CreationTimeLowPart) { $issues.Add(('Index {0} CREATIONTIME changed.' -f $beforeImage.ImageIndex)) | Out-Null }
-        if ([string]$afterImage.LastModificationDateLocal -ne [string]$DateDecision.DisplayDate) { $issues.Add(('Index {0} display date is {1}; expected {2}.' -f $beforeImage.ImageIndex,$afterImage.LastModificationDateLocal,$DateDecision.DisplayDate)) | Out-Null }
-        if ([string]$afterImage.LastModificationTimeHighPart -ne [string]$expectedParts.HighPart -or [string]$afterImage.LastModificationTimeLowPart -ne [string]$expectedParts.LowPart) { $issues.Add(('Index {0} LASTMODIFICATIONTIME FILETIME differs from the resolved run value.' -f $beforeImage.ImageIndex)) | Out-Null }
+    $targetUtc=[datetime]::Parse([string]$DateDecision.EffectiveUtcDateTime,[System.Globalization.CultureInfo]::InvariantCulture,[System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+    $expectedParts=ConvertTo-WimFileTimeParts -DateTime $targetUtc
+    $beforeImages=@($Before.Images);$afterImages=@($After.Images)
+    if($beforeImages.Count -ne $afterImages.Count){$issues.Add('Image count changed.')|Out-Null}
+    foreach($beforeImage in $beforeImages){
+        $afterImage=@($afterImages|Where-Object{[int]$_.ImageIndex -eq [int]$beforeImage.ImageIndex})|Select-Object -First 1
+        if(-not $afterImage){$issues.Add(('Index {0} is missing after metadata update.' -f $beforeImage.ImageIndex))|Out-Null;continue}
+        if([string]$beforeImage.InvariantXmlSha256 -ne [string]$afterImage.InvariantXmlSha256){$issues.Add(('Index {0} changed metadata outside CREATIONTIME/LASTMODIFICATIONTIME.' -f $beforeImage.ImageIndex))|Out-Null}
+        $isTarget=($TargetImageIndexes -contains [int]$beforeImage.ImageIndex)
+        if($isTarget){
+            if([string]$afterImage.CreationTimeDateUtc -ne [string]$DateDecision.DisplayDate){$issues.Add(('Index {0} display date is {1}; expected {2}.' -f $beforeImage.ImageIndex,$afterImage.CreationTimeDateUtc,$DateDecision.DisplayDate))|Out-Null}
+            if([string]$afterImage.CreationTimeHighPart -ne [string]$expectedParts.HighPart -or [string]$afterImage.CreationTimeLowPart -ne [string]$expectedParts.LowPart){$issues.Add(('Index {0} CREATIONTIME FILETIME differs from the resolved run value.' -f $beforeImage.ImageIndex))|Out-Null}
+        } else {
+            if([string]$afterImage.CreationTimeHighPart -ne [string]$beforeImage.CreationTimeHighPart -or [string]$afterImage.CreationTimeLowPart -ne [string]$beforeImage.CreationTimeLowPart){$issues.Add(('Non-target index {0} CREATIONTIME changed.' -f $beforeImage.ImageIndex))|Out-Null}
+        }
     }
     [pscustomobject][ordered]@{
         Passed=($issues.Count -eq 0)
         ExpectedDisplayDate=[string]$DateDecision.DisplayDate
-        ExpectedLastModificationTimeHighPart=[string]$expectedParts.HighPart
-        ExpectedLastModificationTimeLowPart=[string]$expectedParts.LowPart
+        MetadataField='CREATIONTIME'
+        ExpectedCreationTimeHighPart=[string]$expectedParts.HighPart
+        ExpectedCreationTimeLowPart=[string]$expectedParts.LowPart
+        TargetImageIndexes=@($TargetImageIndexes)
         IndexCount=$afterImages.Count
         Issues=$issues.ToArray()
+    }
+}
+
+function Invoke-WimDisplayDateNativePreflight {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$ProbeWimPath,
+        [Parameter(Mandatory)][pscustomobject]$DateDecision,
+        [Parameter(Mandatory)][string]$TemporaryPath
+    )
+    if(-not (Test-Path -LiteralPath $ProbeWimPath -PathType Leaf)){throw ('WIMGAPI preflight source WIM missing: {0}' -f $ProbeWimPath)}
+    New-Item -ItemType Directory -Path $TemporaryPath -Force|Out-Null
+    $copy=Join-Path $TemporaryPath 'wimgapi-display-date-preflight.wim'
+    Copy-Item -LiteralPath $ProbeWimPath -Destination $copy -Force
+    try {
+        $inventory=Get-WimIndexInventory -WimPath $copy
+        $index=[int](@($inventory|Sort-Object ImageIndex|Select-Object -First 1).ImageIndex)
+        if($index -lt 1){throw 'WIMGAPI preflight copy contains no image index.'}
+        $before=Get-WimImageMetadataSnapshot -WimPath $copy -ImageIndexes @($index) -TemporaryPath (Join-Path $TemporaryPath 'scratch')
+        $after=Set-InstallWimDisplayDateMetadata -WimPath $copy -TargetImageIndexes @($index) -SnapshotImageIndexes @($index) -DateDecision $DateDecision -TemporaryPath (Join-Path $TemporaryPath 'scratch')
+        $transition=Test-InstallWimDisplayMetadataTransition -Before $before -After $after -DateDecision $DateDecision -TargetImageIndexes @($index)
+        if(-not $transition.Passed){throw ('WIMGAPI native preflight transition failed: {0}' -f ($transition.Issues -join '; '))}
+        [pscustomobject][ordered]@{
+            SchemaVersion='wimgapi-display-date-native-preflight/1.0'
+            Passed=$true
+            SourceWimPath=$ProbeWimPath
+            ProbeIndex=$index
+            DateDecision=$DateDecision
+            Transition=$transition
+            Before=$before
+            After=$after
+        }
+    } finally {
+        Remove-Item -LiteralPath $copy -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -14726,10 +14753,25 @@ function Invoke-BuildPhase07_PatchInstallWim {
         $Script:InstallWimDisplayDateDecision = Resolve-InstallWimDisplayDateDecision `
             -RequestedDate $Script:ImageDisplayDate `
             -ReferenceLocalTime (Get-Date)
-        Write-Step ('install.wim display date: {0} ({1}; local timestamp {2})' -f `
+        Write-Step ('install.wim display date: {0} ({1}; field={2}; UTC timestamp {3})' -f `
             $Script:InstallWimDisplayDateDecision.DisplayDate, `
             $Script:InstallWimDisplayDateDecision.Source, `
-            $Script:InstallWimDisplayDateDecision.EffectiveLocalDateTime)
+            $Script:InstallWimDisplayDateDecision.MetadataField, `
+            $Script:InstallWimDisplayDateDecision.EffectiveUtcDateTime)
+
+        # Fail fast before the four-hour install.wim servicing loop. A copy of
+        # boot.wim is sufficient to verify the native WIMGAPI write contract,
+        # UTF-16LE BOM buffer, full-WIM XML path, and CREATIONTIME read-back.
+        if ($Script:Execute -and -not $Script:SyntheticTestMode) {
+            Set-DebugStep -Step 'wimgapi-display-date-native-preflight'
+            $preflightSource=Join-Path $Script:ExtractedDir 'sources\boot.wim'
+            $preflight=Invoke-WimDisplayDateNativePreflight -ProbeWimPath $preflightSource `
+                -DateDecision $Script:InstallWimDisplayDateDecision `
+                -TemporaryPath (Join-Path $Script:TempDir 'wimgapi_display_date_preflight')
+            $preflightPath=Join-Path $Script:LogsDir 'P07_wimgapi_display_date_native_preflight.json'
+            Save-CanonicalJsonFile -InputObject $preflight -Path $preflightPath -Depth 18
+            Write-Ok ('WIMGAPI display-date native preflight passed before install.wim servicing. Evidence: {0}' -f $preflightPath)
+        }
 
         # Sandbox-mode safety: require -Execute for write operations
         if (-not $Script:Execute -and -not $Script:SyntheticTestMode) {
@@ -14898,11 +14940,13 @@ function Invoke-BuildPhase07_PatchInstallWim {
         if ($Script:Execute -and -not $Script:SyntheticTestMode) {
             Set-DebugStep -Step 'install-wim-display-metadata'
             $metadataIndexes=@($targets | ForEach-Object { [int]$_.ImageIndex })
+            $allMetadataIndexes=@($Script:WimIndexInventory | ForEach-Object { [int]$_.ImageIndex })
             if ($metadataIndexes.Count -eq 0) { throw 'No serviced install.wim indexes are available for display-date metadata update.' }
+            if ($allMetadataIndexes.Count -eq 0) { throw 'No install.wim indexes are available for display-date metadata snapshot.' }
             $metadataTemp=Join-Path $Script:TempDir 'wimgapi_metadata'
-            $beforeMetadata=Get-WimImageMetadataSnapshot -WimPath $installWim -ImageIndexes $metadataIndexes -TemporaryPath $metadataTemp
+            $beforeMetadata=Get-WimImageMetadataSnapshot -WimPath $installWim -ImageIndexes $allMetadataIndexes -TemporaryPath $metadataTemp
             $beforeEvidence=[pscustomobject][ordered]@{
-                SchemaVersion='P07-installwim-display-metadata/1.0'
+                SchemaVersion='P07-installwim-display-metadata/1.1'
                 Stage='Before'
                 CreatedAtUtc=([datetime]::UtcNow.ToString('o'))
                 ScriptVersion=$Script:ScriptVersion
@@ -14911,15 +14955,17 @@ function Invoke-BuildPhase07_PatchInstallWim {
                 OsKey=$Script:OsVersion
                 OsLanguage=$Script:OsLanguage
                 DateDecision=$Script:InstallWimDisplayDateDecision
+                TargetImageIndexes=@($metadataIndexes)
                 Snapshot=$beforeMetadata
             }
             $beforeMetadataPath=Join-Path $Script:LogsDir 'P07_installwim_display_metadata_before.json'
             Save-CanonicalJsonFile -InputObject $beforeEvidence -Path $beforeMetadataPath -Depth 16
 
-            $afterMetadata=Set-InstallWimDisplayDateMetadata -WimPath $installWim -ImageIndexes $metadataIndexes `
+            $afterMetadata=Set-InstallWimDisplayDateMetadata -WimPath $installWim `
+                -TargetImageIndexes $metadataIndexes -SnapshotImageIndexes $allMetadataIndexes `
                 -DateDecision $Script:InstallWimDisplayDateDecision -TemporaryPath $metadataTemp
             $transition=Test-InstallWimDisplayMetadataTransition -Before $beforeMetadata -After $afterMetadata `
-                -DateDecision $Script:InstallWimDisplayDateDecision
+                -DateDecision $Script:InstallWimDisplayDateDecision -TargetImageIndexes $metadataIndexes
             if (-not $transition.Passed) {
                 throw ('install.wim display-date metadata validation failed: {0}' -f ($transition.Issues -join '; '))
             }
@@ -14929,7 +14975,7 @@ function Invoke-BuildPhase07_PatchInstallWim {
                 throw ('install.wim index count changed after display metadata update: expected {0}; actual {1}.' -f @($Script:WimIndexInventory).Count,@($postMetadataInventory).Count)
             }
             $afterEvidence=[pscustomobject][ordered]@{
-                SchemaVersion='P07-installwim-display-metadata/1.0'
+                SchemaVersion='P07-installwim-display-metadata/1.1'
                 Stage='After'
                 CreatedAtUtc=([datetime]::UtcNow.ToString('o'))
                 ScriptVersion=$Script:ScriptVersion
@@ -14938,6 +14984,7 @@ function Invoke-BuildPhase07_PatchInstallWim {
                 OsKey=$Script:OsVersion
                 OsLanguage=$Script:OsLanguage
                 DateDecision=$Script:InstallWimDisplayDateDecision
+                TargetImageIndexes=@($metadataIndexes)
                 Transition=$transition
                 BeforeEvidencePath=$beforeMetadataPath
                 BeforeEvidenceSha256=(Get-FileSha256OrEmpty -Path $beforeMetadataPath)
@@ -14948,7 +14995,7 @@ function Invoke-BuildPhase07_PatchInstallWim {
             Write-Ok ('install.wim display date updated to {0} on index(es): {1}. Evidence: {2}' -f `
                 $Script:InstallWimDisplayDateDecision.DisplayDate,($metadataIndexes -join ', '),$afterMetadataPath)
         } elseif (-not $Script:SyntheticTestMode) {
-            Write-Step ('  [PLAN] set install.wim LASTMODIFICATIONTIME to {0} on serviced index(es).' -f $Script:InstallWimDisplayDateDecision.DisplayDate)
+            Write-Step ('  [PLAN] set install.wim CREATIONTIME to {0} on serviced index(es).' -f $Script:InstallWimDisplayDateDecision.DisplayDate)
         }
 
         $csvPath = Join-Path $Script:LogsDir 'P05_patch_inventory.csv'
@@ -16235,7 +16282,7 @@ function Invoke-VerifyPhase11_StaticVerify {
             Write-Step ('boot.wim present   : {0}' -f $hasBoot)
             Write-Step ('setup.exe present  : {0}' -f $hasSetup)
 
-            # install.wim edition-selection display-date metadata. The P07
+            # install.wim edition-selection display-date metadata (CREATIONTIME). The P07
             # after-evidence defines the exact serviced index set and expected
             # date; P11 reads the WIM shipped inside the output ISO and verifies
             # the metadata again rather than trusting the build workspace.
@@ -16249,6 +16296,7 @@ function Invoke-VerifyPhase11_StaticVerify {
                     $displayEvidence=Get-Content -LiteralPath $displayMetadataEvidencePath -Raw | ConvertFrom-Json
                     $expectedDisplayDate=[string]$displayEvidence.DateDecision.DisplayDate
                     $expectedImages=@($displayEvidence.Snapshot.Images)
+                    $targetDisplayIndexes=@($displayEvidence.TargetImageIndexes | ForEach-Object { [int]$_ })
                     $displayIndexes=@($expectedImages | ForEach-Object { [int]$_.ImageIndex })
                     if ($displayIndexes.Count -eq 0) { throw 'P07 display metadata evidence contains no image indexes.' }
                     $actualDisplaySnapshot=Get-WimImageMetadataSnapshot -WimPath $installWim -ImageIndexes $displayIndexes `
@@ -16260,13 +16308,13 @@ function Invoke-VerifyPhase11_StaticVerify {
                     foreach ($expectedImage in $expectedImages) {
                         $actualImage=@($actualDisplaySnapshot.Images | Where-Object { [int]$_.ImageIndex -eq [int]$expectedImage.ImageIndex }) | Select-Object -First 1
                         if (-not $actualImage) { $displayIssues.Add(('index {0} missing' -f $expectedImage.ImageIndex)) | Out-Null;continue }
-                        if ([string]$actualImage.LastModificationDateLocal -ne $expectedDisplayDate) { $displayIssues.Add(('index {0} date={1}' -f $expectedImage.ImageIndex,$actualImage.LastModificationDateLocal)) | Out-Null }
-                        if ([string]$actualImage.LastModificationTimeHighPart -ne [string]$expectedImage.LastModificationTimeHighPart -or [string]$actualImage.LastModificationTimeLowPart -ne [string]$expectedImage.LastModificationTimeLowPart) { $displayIssues.Add(('index {0} LASTMODIFICATIONTIME FILETIME mismatch' -f $expectedImage.ImageIndex)) | Out-Null }
+                        $isTarget=($targetDisplayIndexes -contains [int]$expectedImage.ImageIndex)
+                        if ($isTarget -and [string]$actualImage.CreationTimeDateUtc -ne $expectedDisplayDate) { $displayIssues.Add(('index {0} CREATIONTIME date={1}' -f $expectedImage.ImageIndex,$actualImage.CreationTimeDateUtc)) | Out-Null }
+                        if ([string]$actualImage.CreationTimeHighPart -ne [string]$expectedImage.CreationTimeHighPart -or [string]$actualImage.CreationTimeLowPart -ne [string]$expectedImage.CreationTimeLowPart) { $displayIssues.Add(('index {0} CREATIONTIME FILETIME mismatch' -f $expectedImage.ImageIndex)) | Out-Null }
                         if ([string]$actualImage.InvariantXmlSha256 -ne [string]$expectedImage.InvariantXmlSha256) { $displayIssues.Add(('index {0} invariant metadata mismatch' -f $expectedImage.ImageIndex)) | Out-Null }
-                        if ([string]$actualImage.CreationTimeHighPart -ne [string]$expectedImage.CreationTimeHighPart -or [string]$actualImage.CreationTimeLowPart -ne [string]$expectedImage.CreationTimeLowPart) { $displayIssues.Add(('index {0} CREATIONTIME mismatch' -f $expectedImage.ImageIndex)) | Out-Null }
                     }
                     if ($displayIssues.Count -eq 0) {
-                        Add-VRow -Check 'InstallWimDisplayDate' -Expected $expectedDisplayDate -Actual $expectedDisplayDate -Status 'Pass' -Notes ('indexes=' + ($displayIndexes -join ',') + '; evidence=' + $displayMetadataEvidencePath)
+                        Add-VRow -Check 'InstallWimDisplayDate' -Expected $expectedDisplayDate -Actual $expectedDisplayDate -Status 'Pass' -Notes ('targetIndexes=' + ($targetDisplayIndexes -join ',') + '; allIndexes=' + ($displayIndexes -join ',') + '; evidence=' + $displayMetadataEvidencePath)
                         Write-Ok ('install.wim display date verified in output ISO: {0} (indexes {1}).' -f $expectedDisplayDate,($displayIndexes -join ', '))
                     } else {
                         Add-VRow -Check 'InstallWimDisplayDate' -Expected $expectedDisplayDate -Actual 'mismatch' -Status 'Fail' -Notes ($displayIssues.ToArray() -join '; ')

@@ -22,6 +22,36 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.21-r12.28] - 2026-08-02
+
+Tag: `wimgapi-utf16le-creationtime-displaydate-fix` (the tag advances;
+the version date component moves 07.20 → 07.21). The display-date
+layer targets the measured field with the API's required encoding.
+
+### Fixed
+
+- **Display date targets CREATIONTIME, written as BOM-prefixed
+  UTF-16LE**: measured behaviour corrected two r12.26 assumptions —
+  (1) Windows displays the CREATIONTIME date for the tested Server
+  media even when LASTMODIFICATIONTIME already reflects the change,
+  so the display-date transition now sets CREATIONTIME
+  (`Set-WimImageCreationTimeXml`); (2) `WIMSetImageInformation`
+  rejects a re-serialized Unicode string without the UTF-16LE BOM
+  (Win32 error 203), so the XML round-trip now goes through
+  BOM-prefixed UTF-16LE buffers (`Get-WimUnicodeXmlFromHandle`,
+  `ConvertTo-WimUnicodeXmlBuffer`, `Set-WimUnicodeXmlOnHandle`) with
+  a native preflight (`Invoke-WimDisplayDateNativePreflight`).
+  Script-only change.
+- **T40**: release pin advanced to `update-wsi-2026.07.21-r12.28`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **5E/56W/8I** on
+the committed tree — two warnings join the debt; committed verbatim
+per the no-fix-forward rule.
+
 ## [update-wsi-2026.07.20-r12.27] - 2026-08-02
 
 Tag: `wimgapi-image-root-localname-hotfix` (the tag advances). The

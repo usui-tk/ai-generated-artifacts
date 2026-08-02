@@ -182,8 +182,8 @@ def main() -> int:
         "SetupBinarySync_" in code and "-Actual 'MISMATCH' -Status 'Fail'" in code,
         "P11 pin failed", passed, failed)
     passed, failed = check(
-        "version bumped to r12.27 wimgapi-image-root-localname-hotfix",
-        "update-wsi-2026.07.20-r12.27" in code and "'wimgapi-image-root-localname-hotfix'" in code,
+        "version bumped to r12.28 wimgapi-utf16le-creationtime-displaydate-fix",
+        "update-wsi-2026.07.21-r12.28" in code and "'wimgapi-utf16le-creationtime-displaydate-fix'" in code,
         "bump pin failed", passed, failed)
 
     print(f"\n  Summary: {passed} passed, {failed} failed, {passed + failed} total")
