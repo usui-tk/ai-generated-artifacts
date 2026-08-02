@@ -22,6 +22,31 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.18-r12.20] - 2026-08-02
+
+Tag: `runtime-catalog-handoff-placeholder-fix` (the tag advances).
+KB-only placeholder file names stop constraining live resolution.
+
+### Fixed
+
+- **Placeholder file names excluded from the identity handoff**: a new
+  `Test-IsCatalogPlaceholderFileName` helper identifies
+  non-authoritative KB-only placeholder names (e.g. `KB5101007.msu`)
+  in configured lines. The r12.18 stable-identity selector treated
+  such a placeholder as an exact expected file name, over-constraining
+  the P04 live resolution; a placeholder is never a Catalog identity
+  and is now bypassed at the runtime handoff (metadata-only lines) and
+  at local-leaf comparison. Script-only change.
+- **T40**: release pin advanced to `update-wsi-2026.07.18-r12.20`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/123/64/112 with T45 NOT-YET (unchanged). PSA **4E/48W/7I** on
+the committed tree — one warning joins the debt with the new helper;
+committed verbatim per the no-fix-forward rule.
+
 ## [update-wsi-2026.07.18-r12.19] - 2026-08-02
 
 Tag: `catalog-scoped-product-identity-live-verified` (the tag

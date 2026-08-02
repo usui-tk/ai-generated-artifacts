@@ -659,8 +659,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.18-r12.19'
-$Script:ScriptTag     = 'catalog-scoped-product-identity-live-verified'
+$Script:ScriptVersion = 'update-wsi-2026.07.18-r12.20'
+$Script:ScriptTag     = 'runtime-catalog-handoff-placeholder-fix'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -5598,6 +5598,33 @@ function Get-CatalogRowsForResolvedPatch {
     return @($verified.ToArray() | Sort-Object lastUpdated, version -Descending)
 }
 
+function Test-IsCatalogPlaceholderFileName {
+    <#
+    .SYNOPSIS
+        Identify a non-authoritative KB-only placeholder such as KB5101007.msu.
+    .DESCRIPTION
+        r12.19 synthesized these names for metadata-only monthly selectors.  The
+        stable-identity selector then treated the placeholder as an exact
+        configured filename and rejected the real Catalog asset.  A KB-only
+        placeholder is never a Catalog identity and must not constrain P04.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [AllowEmptyString()][string]$FileName,
+        [AllowEmptyString()][string]$KbId = ''
+    )
+    if ([string]::IsNullOrWhiteSpace($FileName)) { return $false }
+    $leaf = [System.IO.Path]::GetFileName($FileName).Trim()
+    if ([string]::IsNullOrWhiteSpace($leaf)) { return $false }
+    if (-not [string]::IsNullOrWhiteSpace($KbId)) {
+        $normalizedKb = $KbId.Trim().ToUpperInvariant()
+        if ($normalizedKb -notmatch '^KB\d{6,8}$') { return $false }
+        return ($leaf -match ('^(?i){0}\.(msu|cab)$' -f [regex]::Escape($normalizedKb)))
+    }
+    return ($leaf -match '^(?i)KB\d{6,8}\.(msu|cab)$')
+}
+
 function Get-PatchConfiguredCatalogIdentity {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -5605,8 +5632,19 @@ function Get-PatchConfiguredCatalogIdentity {
 
     $updateId = $(if ($Patch.PSObject.Properties['UpdateId']) { [string]$Patch.UpdateId } else { '' })
     $fileName = $(if ($Patch.PSObject.Properties['FileName']) { [string]$Patch.FileName } else { '' })
-    if ([string]::IsNullOrWhiteSpace($fileName) -and $Patch.PSObject.Properties['LocalPath']) {
-        $fileName = [System.IO.Path]::GetFileName([string]$Patch.LocalPath)
+    $metadataOnly = [bool]($Patch.PSObject.Properties['IsMetadataOnly'] -and $Patch.IsMetadataOnly)
+    $kbId = $(if ($Patch.PSObject.Properties['KbId']) { [string]$Patch.KbId } else { '' })
+    if ($metadataOnly -and (Test-IsCatalogPlaceholderFileName -FileName $fileName -KbId $kbId)) {
+        $fileName = ''
+    }
+    # LocalPath is a valid exact constraint only after an asset has been
+    # explicitly configured or resolved.  Never promote an unresolved
+    # metadata-only landing path into a Catalog filename constraint.
+    if ([string]::IsNullOrWhiteSpace($fileName) -and -not $metadataOnly -and $Patch.PSObject.Properties['LocalPath']) {
+        $localLeaf = [System.IO.Path]::GetFileName([string]$Patch.LocalPath)
+        if (-not (Test-IsCatalogPlaceholderFileName -FileName $localLeaf -KbId $kbId)) {
+            $fileName = $localLeaf
+        }
     }
     $sha1 = ''
     $sha256 = ''
@@ -5664,6 +5702,7 @@ function Select-CatalogCandidateAsset {
         $pool = $m; $basis.Add('ConfiguredSha256')
     }
     if ($pool.Count -eq 1) {
+        if ($basis.Count -eq 0) { $basis.Add('SingleStableCandidate') }
         if (-not $pool[0].Row.PSObject.Properties['ScopedIdentityVerified'] -or -not [bool]$pool[0].Row.ScopedIdentityVerified) {
             throw 'Selected Catalog candidate did not carry successful ScopedView identity verification.'
         }
@@ -5673,7 +5712,6 @@ function Select-CatalogCandidateAsset {
         $observed = @($pool | ForEach-Object { '[updateId={0};file={1}]' -f $_.Row.uid, $_.File.fileName }) -join ' | '
         throw ('Catalog stable-identity selection remained ambiguous ({0} candidates): {1}' -f $pool.Count, $observed)
     }
-    if ($basis.Count -eq 0) { $basis.Add('SingleStableCandidate') }
     return [pscustomobject][ordered]@{
         Row = $pool[0].Row
         File = $pool[0].File
@@ -5787,6 +5825,7 @@ function Resolve-ResolvedPatchAssetFromCatalog {
     $Patch.Source = [string]$file.url
     $Patch.LocalPath = Get-PatchLocalPath -Kind $type -FileName ([string]$file.fileName)
     if ($Patch.PSObject.Properties['FileName']) { $Patch.FileName = [string]$file.fileName } else { $Patch | Add-Member -NotePropertyName FileName -NotePropertyValue ([string]$file.fileName) -Force }
+    if ($Patch.PSObject.Properties['FileNameOrigin']) { $Patch.FileNameOrigin = 'CatalogResolved' } else { $Patch | Add-Member -NotePropertyName FileNameOrigin -NotePropertyValue 'CatalogResolved' -Force }
 
     # Research candidates are intentionally mutable until Freeze.  The exact
     # KB remains fixed, but Catalog may republish the row/file identity or a
@@ -8809,10 +8848,19 @@ function ConvertTo-ResolvedPatchFromBaselineLine {
     param([Parameter(Mandatory)]$Line)
 
     $fileName = [string]$Line.FileName
-    if (-not $fileName -and $Line.DownloadUrl) {
-        try { $fileName = [System.IO.Path]::GetFileName(([Uri]$Line.DownloadUrl).AbsolutePath) } catch { $fileName = '' }
+    $fileNameOrigin = $(if (-not [string]::IsNullOrWhiteSpace($fileName)) { 'Explicit' } else { 'Unresolved' })
+    if ([string]::IsNullOrWhiteSpace($fileName) -and $Line.DownloadUrl) {
+        try {
+            $fileName = [System.IO.Path]::GetFileName(([Uri]$Line.DownloadUrl).AbsolutePath)
+            if (-not [string]::IsNullOrWhiteSpace($fileName)) { $fileNameOrigin = 'DownloadUrl' }
+        } catch {
+            $fileName = ''
+            $fileNameOrigin = 'Unresolved'
+        }
     }
-    if (-not $fileName -and $Line.KbId) { $fileName = ('{0}.msu' -f $Line.KbId) }
+    # Do not synthesize "KBxxxxxxx.msu" for metadata-only selectors.  It is
+    # a landing-path label, not a Catalog identity, and r12.19 incorrectly
+    # enforced it as an exact filename during P04.
 
     $expectedHashes = @{}
     $sha1 = Get-BaselineHashValue -Line $Line -Algorithm Sha1
@@ -8836,6 +8884,7 @@ function ConvertTo-ResolvedPatchFromBaselineLine {
         PackageId        = $(if ($Line.PSObject.Properties['PackageId']) { [string]$Line.PackageId } else { '' })
         Source           = [string]$Line.DownloadUrl
         FileName         = $fileName
+        FileNameOrigin   = $fileNameOrigin
         LocalPath        = $(if ($fileName) { Get-PatchLocalPath -Kind ([string]$Line.Kind) -FileName $fileName } else { '' })
         KbId             = [string]$Line.KbId
         ParentKbId       = $(if ($Line.PSObject.Properties['ParentKbId']) { [string]$Line.ParentKbId } else { '' })
@@ -13237,7 +13286,7 @@ function Update-MonthlyAuxiliaryResolvedPatchesAtFetch {
     if ($Script:OsVersion -eq 'Server2016') {
         $rawSsu = Resolve-Ssu2016 -BaselineMonth $month
         $convertedSsu = @(ConvertTo-ConfigLines -OsResolved ([pscustomobject]@{os=$Script:OsVersion;lines=@($rawSsu)}) -PatchModel $modelMap[$Script:OsVersion])
-        foreach ($x in $convertedSsu) { $freshConfigLines += ,$x }
+        foreach ($x in (ConvertTo-StableObjectArray -InputObject $convertedSsu)) { $freshConfigLines += ,$x }
     }
     $duResults = @(
         (Resolve-SafeOsDu -OsKey $osShort -BaselineMonth $month)
@@ -13245,10 +13294,10 @@ function Update-MonthlyAuxiliaryResolvedPatchesAtFetch {
     )
     foreach ($rawDu in $duResults) {
         $convertedDu = @(ConvertTo-ConfigLines -OsResolved ([pscustomobject]@{os=$Script:OsVersion;lines=@($rawDu)}) -PatchModel $modelMap[$Script:OsVersion])
-        foreach ($x in $convertedDu) { $freshConfigLines += ,$x }
+        foreach ($x in (ConvertTo-StableObjectArray -InputObject $convertedDu)) { $freshConfigLines += ,$x }
     }
     $dotNetLines = @(Resolve-DotNetMonthlySelectorLines -OsVersion $Script:OsVersion -BaselineMonth $month)
-    foreach ($x in $dotNetLines) { $freshConfigLines += ,$x }
+    foreach ($x in (ConvertTo-StableObjectArray -InputObject $dotNetLines)) { $freshConfigLines += ,$x }
 
     $kept = @()
     foreach ($p in @($Script:ResolvedPatches)) {
@@ -13265,7 +13314,7 @@ function Update-MonthlyAuxiliaryResolvedPatchesAtFetch {
     $Script:ResolvedPatches = @(Merge-ResolvedPatchDuplicates -Patches $sortedPatches)
     $Script:PatchPlan = Build-PatchPlan -Patches $Script:ResolvedPatches
     $evidencePath = Join-Path $Script:LogsDir 'P04_monthly_auxiliary_selection.json'
-    @($freshConfigLines) | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $evidencePath -Encoding UTF8
+    @(ConvertTo-StableObjectArray -InputObject $freshConfigLines) | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $evidencePath -Encoding UTF8
     Write-Ok ('Monthly auxiliary selection written: {0}' -f $evidencePath)
 }
 
@@ -17140,7 +17189,26 @@ function Invoke-PhaseRunner {
                 $phaseReg = $Script:DebugTracePhaseRegistry[$entry.Id]
                 $phaseReg.Outcome = 'failure'
                 $phaseReg.EndedAt = Get-Date
-                $phaseReg.FailureRef = [string]$_.Exception.Message
+                $failedStep = '(phase runner)'
+                if ($phaseReg.Frame -and $phaseReg.Frame.PSObject.Properties['Step']) { $failedStep = [string]$phaseReg.Frame.Step }
+                $phaseReg.FailureRef = [pscustomobject]@{
+                    FailedStep = $failedStep
+                    ExType = $_.Exception.GetType().FullName
+                    ExMessage = [string]$_.Exception.Message
+                    InnerType = $(if ($_.Exception.InnerException) { $_.Exception.InnerException.GetType().FullName } else { $null })
+                    InnerMessage = $(if ($_.Exception.InnerException) { [string]$_.Exception.InnerException.Message } else { $null })
+                    FullyQualifiedId = [string]$_.FullyQualifiedErrorId
+                    ScriptStackTrace = [string]$_.ScriptStackTrace
+                }
+                # Stop-DebugTrace may already have retired the phase frame as
+                # success in the phase function's finally block.  The registry
+                # keeps the same frame reference, so correct the completed-frame
+                # outcome as well.
+                if ($phaseReg.Frame) {
+                    $phaseReg.Frame.Outcome = 'failure'
+                    $phaseReg.Frame.EndedAt = $phaseReg.EndedAt
+                    $phaseReg.Frame.DurationMs = [int]($phaseReg.EndedAt - $phaseReg.Frame.StartTime).TotalMilliseconds
+                }
             }
             _DebugTrace_WriteJsonlLine ([pscustomobject]@{
                 ts = _DebugTrace_Now
