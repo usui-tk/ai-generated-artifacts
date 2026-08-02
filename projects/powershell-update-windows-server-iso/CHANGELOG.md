@@ -22,6 +22,44 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.01-r12.50] - 2026-08-02
+
+Tag retained: `setupdu-language-allowlist`.
+
+### Changed
+
+- **Server 2025 contract hardened to parity** (`-r5` → `-r6`,
+  baselines schema `2.4` → `2.5`; the other three contracts are
+  unchanged): the boot.wim declaration flips
+  `SmokeTestRequired` to `true`, and the `Setup` declaration gains
+  the same package-authority trio Server 2022 received at r12.47
+  (`SameVersionDifferentContentPolicy=ApplyTrustedPackagePayload`,
+  `PackageAuthorityPolicy=CatalogScopedIdentityAndLocalHash`,
+  `RequireTrustedPackage=true`) alongside the existing language
+  allowlist. Script delta is the contract declaration only.
+- **E2E baselines add the language-compliant Server 2022 cases**:
+  `data/servicing-e2e-baselines.json` schema `1.2` → `1.3`; new
+  `Server2022-ja-jp` and `Server2022-en-us` cases record the r12.49
+  static builds as language-compliant
+  (`CompliantEnUsAndTargetOnly`), with user-confirmed Hyper-V
+  Generation 2 Secure Boot and complete installation, measured
+  builds 20348.5386 and P11/P06/operation-evidence counts. The
+  superseded `Server2022-ja-jp-r12.48` case is retained for audit
+  history.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.01-r12.50`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/120/64/112 + T45 21. PSA committed 5E/112W/10I (raw sweep
+  5E/113W/10I: +1W is the PSA7002 LF artefact; declared series
+  debt). The snapshot script remains BOM-absent at r12.50 (O1 watch
+  continues).
+
 ## [update-wsi-2026.07.31-r12.49] - 2026-08-02
 
 Tag: `setupdu-language-allowlist`.

@@ -1,6 +1,6 @@
 {
-  "SchemaVersion": "servicing-e2e-baselines/1.2",
-  "Purpose": "Compact measured baselines without ISO/WIM payloads. Functional build/boot/install evidence is retained, while r12.49 separately records that pre-r12.49 Setup DU overlays were not language-scoped and therefore are superseded for final language-purity compliance.",
+  "SchemaVersion": "servicing-e2e-baselines/1.3",
+  "Purpose": "Compact measured baselines without ISO/WIM payloads. r12.50 records language-compliant r12.49 Server 2022 ja-jp/en-us static builds and user-confirmed Hyper-V Generation 2 Secure Boot plus complete installation, while retaining older superseded evidence for audit history.",
   "Cases": {
     "Server2016-ja-jp": {
       "Status": "UserValidatedBootAndInstallPlusR1245StaticBuild",
@@ -94,6 +94,51 @@
       "SetupDuOutOfScopeFileCount": 72,
       "SetupDuChineseLocaleFileCount": 4,
       "EvidenceNote": "WIM servicing and static verification succeeded, but the common Setup DU overlay copied 36 non-allowed locale directories. Do not use as the final project-compliant ISO until repaired with r12.49."
+    },
+    "Server2022-ja-jp": {
+      "Status": "UserValidatedBootAndInstallPlusR1249StaticBuild",
+      "ImplementationBaseline": "r12.49",
+      "StaticVerificationStatus": "Pass",
+      "OutputIsoSha256": "1e2ce7bd6333aafcb98b3a22ba31fa30c3f2bf60529e2b4fa4fa01a28d7ed791",
+      "InstallBuild": "20348.5386",
+      "BootBuild": "20348.5386",
+      "WinReSafeOsVersion": "20348.5386.1.17",
+      "ServicingStackVersion": "20348.5384.1.1",
+      "BootUpdateModel": "FullLCU",
+      "P11PassCount": 32,
+      "P06DecisionCount": 32,
+      "OperationEvidenceCount": 23,
+      "SetupDuLanguageScopeStatus": "CompliantEnUsAndTargetOnly",
+      "SetupDuAllowedLanguageDirectories": [
+        "en-us",
+        "ja-jp"
+      ],
+      "SetupDuExcludedLocaleFileCount": 72,
+      "SecureBoot": "On",
+      "InstallEdition": "Windows Server 2022 Datacenter Evaluation",
+      "EvidenceNote": "r12.49 Japanese static build passed. Hyper-V Generation 2 UEFI Secure Boot, localized four-edition Setup screen dated 2026-07-20, complete installation, locale Japan, core build 20348.5386, servicing stack 20348.5384, and no problem devices were confirmed by user evidence."
+    },
+    "Server2022-en-us": {
+      "Status": "UserValidatedBootAndInstallPlusR1249StaticBuild",
+      "ImplementationBaseline": "r12.49",
+      "StaticVerificationStatus": "Pass",
+      "OutputIsoSha256": "12c2d5a51c706c3173bb0f7363868e57b46ddc5a1dc89c2f4ca275a75974c288",
+      "InstallBuild": "20348.5386",
+      "BootBuild": "20348.5386",
+      "WinReSafeOsVersion": "20348.5386.1.17",
+      "ServicingStackVersion": "20348.5384.1.1",
+      "BootUpdateModel": "FullLCU",
+      "P11PassCount": 32,
+      "P06DecisionCount": 32,
+      "OperationEvidenceCount": 23,
+      "SetupDuLanguageScopeStatus": "CompliantEnUsOnly",
+      "SetupDuAllowedLanguageDirectories": [
+        "en-us"
+      ],
+      "SetupDuExcludedLocaleFileCount": 74,
+      "SecureBoot": "On",
+      "InstallEdition": "Windows Server 2022 Datacenter Evaluation",
+      "EvidenceNote": "r12.49 English static build passed. Hyper-V Generation 2 UEFI Secure Boot, English four-edition Setup screen dated 2026-07-20, complete installation, locale United States, core build 20348.5386, servicing stack 20348.5384, and no problem devices were confirmed by user evidence."
     }
   }
 }

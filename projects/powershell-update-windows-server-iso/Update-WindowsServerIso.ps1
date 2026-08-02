@@ -703,7 +703,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.31-r12.49'
+$Script:ScriptVersion = 'update-wsi-2026.08.01-r12.50'
 # Validation marker: r12.49 portable static regression complete; Windows-native gates remain required.
 $Script:ScriptTag     = 'setupdu-language-allowlist'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
@@ -16574,17 +16574,17 @@ function New-Server2025ServicingContract {
     param()
     return [pscustomobject][ordered]@{
         SchemaVersion='servicing-contract/2.1'
-        ContractRevision='Server2025-r5'
+        ContractRevision='Server2025-r6'
         OsKey='Server2025'
         PatchModel='uup-checkpoint'
         VersionDecisionPolicy='StrictFailClosed'
         Install=[pscustomobject][ordered]@{UpdateModel='CheckpointChainThenEmbeddedSSUFullLCU';VerificationMode='CheckpointChainAndLcuBuild';PendingPolicy='Reject'}
-        Boot=[pscustomobject][ordered]@{UpdateModel='FullLCU';PackageMode='DirectMsu';VerificationMode='FullLcuTarget';FailurePolicy='FailBuild';SmokeTestRequired=$false}
+        Boot=[pscustomobject][ordered]@{UpdateModel='FullLCU';PackageMode='DirectMsu';VerificationMode='FullLcuTarget';FailurePolicy='FailBuild';SmokeTestRequired=$true}
         WinRE=[pscustomobject][ordered]@{UpdateModel='CheckpointAwareLCUThenSafeOSDU';VerificationMode='RollupSafeOsAndSsuEvidence';DistributionPolicy='ServiceOnceCopyToAllInstallIndexes'}
         Ssu=[pscustomobject][ordered]@{StateResolver='InstalledPackageIdentity';Monotonic=$true;CheckpointPolicy='ValidateOrderedCoLocatedChain'}
         Discovery=[pscustomobject][ordered]@{ResolveStandaloneSsuMonthly=$false}
         DotNet=[pscustomobject][ordered]@{SupportedRuntimeSelectors=@('4.8.1')}
-        Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After';LanguageResourcePolicy='EnUsAndTargetOnly'}
+        Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After';SameVersionDifferentContentPolicy='ApplyTrustedPackagePayload';PackageAuthorityPolicy='CatalogScopedIdentityAndLocalHash';RequireTrustedPackage=$true;LanguageResourcePolicy='EnUsAndTargetOnly'}
         RoleTargets=[pscustomobject][ordered]@{
             SourcePrerequisite=@('Install','Boot','WinRE')
             ServicingStackCarrier=@('Install','Boot','WinRE')
