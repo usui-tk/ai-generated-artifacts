@@ -702,7 +702,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.28-r12.42'
+$Script:ScriptVersion = 'update-wsi-2026.07.29-r12.43'
 # Validation marker: pwsh7-runtime-validated on PowerShell 7.6.4 Linux x64; Windows-native gates remain required.
 $Script:ScriptTag     = 'all-os-version-decision-hardening'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
@@ -18786,6 +18786,133 @@ function Get-WinReServicingVerificationDecision {
     }
 }
 
+function Get-BootSafeOsDuVerificationDecision {
+    <#
+    .SYNOPSIS
+        Verify a SafeOS-DU-serviced boot.wim without applying full-LCU
+        RollupFix/registry-build semantics to that image.
+
+    .DESCRIPTION
+        A SafeOS cumulative update installs Package_for_SafeOSDU and updates
+        the WinPE payload (including the kernel), but it does not replace the
+        source-media Package_for_RollupFix identity or CurrentBuildNumber/UBR
+        registry evidence.  Therefore the full-LCU Test-LcuTargetApplied
+        contract is not valid for BootWimUpdateModel=SafeOSDU.
+
+        The decision is fail-closed and requires all of the following:
+          * every selected SafeOS DU has parsed candidate package metadata;
+          * an installed SafeOSDU package identity at least as new as the
+            selected candidate;
+          * the offline kernel build is at least the candidate's two-part build;
+          * successful P08 operation evidence for the same KB/index, with the
+            expected SafeOsVersion and no pending packages after apply.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][object]$BootRecord,
+        [Parameter(Mandatory)][object[]]$SafeOsPatches,
+        [Parameter(Mandatory)][string]$LogDir
+    )
+
+    $safePackageNames=@($BootRecord.PackageNames | Where-Object { ([string]$_) -match '(?i)^Package_for_SafeOSDU~' })
+    $observedVersions=@($safePackageNames | ForEach-Object { Get-PackageVersionFromIdentity -Identity ([string]$_) } | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)
+    $expectedRecords=@()
+    foreach($patch in @($SafeOsPatches)){
+        if(-not $patch){continue}
+        $candidate=''
+        if($patch.PSObject.Properties['CandidatePackageVersion']){$candidate=[string]$patch.CandidatePackageVersion}
+        if([string]::IsNullOrWhiteSpace($candidate) -and $patch.PSObject.Properties['TargetVersion']){$candidate=[string]$patch.TargetVersion}
+        $expectedRecords+=,[pscustomobject]@{
+            KbId=[string]$patch.KbId
+            PackageId=[string]$patch.PackageId
+            CandidateVersion=$candidate
+        }
+    }
+
+    $metadataPass=($expectedRecords.Count -gt 0 -and @($expectedRecords | Where-Object { [string]::IsNullOrWhiteSpace([string]$_.CandidateVersion) }).Count -eq 0)
+    $packagePass=$metadataPass
+    foreach($expected in $expectedRecords){
+        if(-not $packagePass){break}
+        $matched=$false
+        foreach($observed in $observedVersions){
+            $cmp=Compare-ComparableVersion -Current $observed -Candidate $expected.CandidateVersion
+            if($cmp.Comparable -and $cmp.Result -ge 0){$matched=$true;break}
+        }
+        if(-not $matched){$packagePass=$false}
+    }
+
+    $kernelBuild=$null
+    if($BootRecord.Evidence -and $BootRecord.Evidence.PSObject.Properties['BuildFromKernel']){
+        $kernelBuild=ConvertFrom-InspectionBuildValue -Value $BootRecord.Evidence.BuildFromKernel
+    }
+    $expectedKernelBuild=$null
+    foreach($expected in $expectedRecords){
+        $candidateBuild=ConvertTo-TwoPartBuild -BuildString ([string]$expected.CandidateVersion)
+        if($candidateBuild -and (-not $expectedKernelBuild -or $candidateBuild -gt $expectedKernelBuild)){$expectedKernelBuild=$candidateBuild}
+    }
+    $kernelPass=[bool]($kernelBuild -and $expectedKernelBuild -and $kernelBuild -ge $expectedKernelBuild)
+
+    $operationDir=Join-Path $LogDir ('version-decision\operations\P08\boot.wim_idx{0}' -f [int]$BootRecord.Index)
+    $operationResults=@()
+    foreach($expected in $expectedRecords){
+        $candidateVersion=[string]$expected.CandidateVersion
+        $files=@()
+        if(Test-Path -LiteralPath $operationDir){
+            $filter=if(-not [string]::IsNullOrWhiteSpace([string]$expected.KbId)){('*_{0}_*.json' -f [string]$expected.KbId)}else{'*.json'}
+            $files=@(Get-ChildItem -LiteralPath $operationDir -File -Filter $filter -ErrorAction SilentlyContinue | Sort-Object LastWriteTimeUtc)
+        }
+        $successfulFile=''
+        $successfulAfterVersion=''
+        $successfulPending=$null
+        foreach($file in $files){
+            try{$record=Get-Content -LiteralPath $file.FullName -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop}catch{continue}
+            $applyStatus=if($record.PSObject.Properties['ApplyStatus']){[string]$record.ApplyStatus}else{''}
+            $afterVersion=if($record.AfterState -and $record.AfterState.PSObject.Properties['SafeOsVersion']){[string]$record.AfterState.SafeOsVersion}else{''}
+            $pending=if($record.AfterState -and $record.AfterState.PSObject.Properties['PendingPackageCount']){[int]$record.AfterState.PendingPackageCount}else{$null}
+            $cmp=Compare-ComparableVersion -Current $afterVersion -Candidate $candidateVersion
+            if($applyStatus -in @('Ok','OkAfterRetry') -and $cmp.Comparable -and $cmp.Result -ge 0 -and $null -ne $pending -and $pending -eq 0){
+                $successfulFile=[string]$file.FullName
+                $successfulAfterVersion=$afterVersion
+                $successfulPending=$pending
+            }
+        }
+        $operationResults+=,[pscustomobject]@{
+            KbId=[string]$expected.KbId
+            CandidateVersion=$candidateVersion
+            EvidenceFile=$successfulFile
+            AfterSafeOsVersion=$successfulAfterVersion
+            PendingPackageCount=$successfulPending
+            Passed=(-not [string]::IsNullOrWhiteSpace($successfulFile))
+        }
+    }
+    $operationPass=($operationResults.Count -gt 0 -and @($operationResults | Where-Object { -not $_.Passed }).Count -eq 0)
+    $passed=($metadataPass -and $packagePass -and $kernelPass -and $operationPass)
+
+    $reasonCode=if(-not $metadataPass){'SafeOsCandidateMetadataMissing'}elseif(-not $packagePass){'SafeOsPackageVersionMissingOrOlder'}elseif(-not $kernelPass){'SafeOsKernelBuildBelowTarget'}elseif(-not $operationPass){'SafeOsP08OperationEvidenceMissingOrInvalid'}else{'SafeOsDuVerified'}
+    $expectedText=('SafeOSDU>={0}; kernel>={1}; P08 ApplyStatus=Ok; pending=0' -f (($expectedRecords|ForEach-Object{$_.CandidateVersion}|Sort-Object -Unique)-join ','),$(if($expectedKernelBuild){[string]$expectedKernelBuild}else{'unknown'}))
+    $actualText=('package={0}; kernel={1}; P08={2}' -f $(if($observedVersions.Count -gt 0){$observedVersions -join ','}else{'Absent'}),$(if($kernelBuild){[string]$kernelBuild}else{'Unknown'}),$(if($operationResults.Count -gt 0){(($operationResults|ForEach-Object{('{0}:{1}' -f $_.KbId,$_.Passed)}) -join ',')}else{'Absent'}))
+    $notes=('SafeOS DU intentionally leaves source RollupFix/registry build unchanged; validation uses installed SafeOSDU identity, offline kernel payload, and P08 operation evidence. ReasonCode={0}; evidence={1}' -f $reasonCode,(($operationResults|ForEach-Object{$_.EvidenceFile}|Where-Object{$_}) -join ';'))
+
+    return [pscustomobject]@{
+        Passed=$passed
+        ReasonCode=$reasonCode
+        Expected=$expectedText
+        Actual=$actualText
+        Notes=$notes
+        MetadataPass=$metadataPass
+        PackagePass=$packagePass
+        KernelPass=$kernelPass
+        OperationPass=$operationPass
+        ExpectedRecords=@($expectedRecords)
+        ObservedPackageNames=@($safePackageNames)
+        ObservedPackageVersions=@($observedVersions)
+        KernelBuild=$(if($kernelBuild){[string]$kernelBuild}else{''})
+        ExpectedKernelBuild=$(if($expectedKernelBuild){[string]$expectedKernelBuild}else{''})
+        OperationResults=@($operationResults)
+    }
+}
+
 function Invoke-VerifyPhase11_StaticVerify {
     <#
     .SYNOPSIS
@@ -19102,13 +19229,14 @@ function Invoke-VerifyPhase11_StaticVerify {
                             $observedBootBuild=if($brec.Evidence -and $brec.Evidence.Build){[string]$brec.Evidence.Build}else{'unknown'}
                             Add-VRow -Check ('BootIndex' + $brec.Index + '_LcuTargetApplied') -Expected ('PolicyException: source build preserved; P14 Install required instead of target ' + $expectedBuildAll) -Actual $observedBootBuild -Status 'PolicyException' -Notes ([string]$bootPolicyException.Reason)
                         } else {
-                            $br=Test-LcuTargetApplied -OsKey $Script:OsVersion -ExpectedKbId $expectedLcuKbAll -ExpectedBuild $expectedBuildAll -Evidence $brec.Evidence
-                            $bootBuildCheckName=if($resolvedBootUpdateModel -eq 'SafeOSDU'){'BootIndex' + $brec.Index + '_SafeOsTargetBuild'}else{'BootIndex' + $brec.Index + '_LcuTargetApplied'}
-                            Add-VRow -Check $bootBuildCheckName -Expected $br.Expected -Actual $br.Actual -Status $br.Status -Notes ($br.Notes + '; model=' + $resolvedBootUpdateModel)
                             if($resolvedBootUpdateModel -eq 'SafeOSDU'){
-                                $safePackageNames=@($brec.PackageNames | Where-Object { ([string]$_) -match '(?i)SafeOSDU|SafeOS' })
-                                $expectedBootSafeKb=(($bootSafeLines|ForEach-Object{[string]$_.KbId}|Sort-Object -Unique) -join ',')
-                                Add-VRow -Check ('BootIndex' + $brec.Index + '_SafeOsPackageEvidence') -Expected $(if($expectedBootSafeKb){$expectedBootSafeKb}else{'SafeOS package identity'}) -Actual $(if($safePackageNames.Count -gt 0){$safePackageNames -join ';'}else{'Absent'}) -Status $(if($safePackageNames.Count -gt 0){'Pass'}else{'Fail'}) -Notes 'SafeOS DU is the configured Microsoft-documented boot-image cumulative alternative; build and package identity are both required.'
+                                $safeDecision=Get-BootSafeOsDuVerificationDecision -BootRecord $brec -SafeOsPatches $bootSafeLines -LogDir $Script:LogsDir
+                                Add-VRow -Check ('BootIndex' + $brec.Index + '_SafeOsTargetApplied') -Expected $safeDecision.Expected -Actual $safeDecision.Actual -Status $(if($safeDecision.Passed){'Pass'}else{'Fail'}) -Notes $safeDecision.Notes
+                                Add-VRow -Check ('BootIndex' + $brec.Index + '_SafeOsPackageEvidence') -Expected (($safeDecision.ExpectedRecords|ForEach-Object{$_.CandidateVersion}|Sort-Object -Unique) -join ',') -Actual $(if($safeDecision.ObservedPackageNames.Count -gt 0){$safeDecision.ObservedPackageNames -join ';'}else{'Absent'}) -Status $(if($safeDecision.PackagePass){'Pass'}else{'Fail'}) -Notes 'The SafeOSDU package version, not the source-media RollupFix identity, is authoritative for the selected boot update model.'
+                                Add-VRow -Check ('BootIndex' + $brec.Index + '_SafeOsKernelAndOperationEvidence') -Expected ('kernel>=' + $safeDecision.ExpectedKernelBuild + '; P08 operation evidence valid') -Actual ('kernel=' + $safeDecision.KernelBuild + '; operation=' + [string]$safeDecision.OperationPass) -Status $(if($safeDecision.KernelPass -and $safeDecision.OperationPass){'Pass'}else{'Fail'}) -Notes (($safeDecision.OperationResults|ForEach-Object{$_.EvidenceFile}|Where-Object{$_}) -join ';')
+                            } else {
+                                $br=Test-LcuTargetApplied -OsKey $Script:OsVersion -ExpectedKbId $expectedLcuKbAll -ExpectedBuild $expectedBuildAll -Evidence $brec.Evidence
+                                Add-VRow -Check ('BootIndex' + $brec.Index + '_LcuTargetApplied') -Expected $br.Expected -Actual $br.Actual -Status $br.Status -Notes ($br.Notes + '; model=' + $resolvedBootUpdateModel)
                             }
                         }
                     }
