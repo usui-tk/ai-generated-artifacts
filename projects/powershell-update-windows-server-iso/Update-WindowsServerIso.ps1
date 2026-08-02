@@ -703,9 +703,9 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.31-r12.47'
-# Validation marker: r12.47 portable static regression complete; Windows-native gates remain required.
-$Script:ScriptTag     = 'server2022-setupdu-authority'
+$Script:ScriptVersion = 'update-wsi-2026.07.31-r12.48'
+# Validation marker: r12.48 portable static regression complete; Windows-native gates remain required.
+$Script:ScriptTag     = 'server2022-setupdu-resume-hash'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -12127,26 +12127,96 @@ function Get-SetupDuPackageAuthority {
     }
 
     $expectedHash = ''
+    $expectedHashSource = ''
+
+    # Prefer an explicitly restored/measured local digest.  Resume rehydration
+    # writes this property only after comparing the current payload with the
+    # immutable P04 manifest digest.
     foreach ($propertyName in @('LocalAssetSha256','DeclaredSha256','Sha256')) {
         if ($Patch.PSObject.Properties[$propertyName]) {
             $candidate = [string]$Patch.$propertyName
-            if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+            if ($candidate -match '^[0-9a-fA-F]{64}$') {
                 $expectedHash = $candidate.ToLowerInvariant()
+                $expectedHashSource = ('Patch.{0}' -f $propertyName)
                 break
             }
         }
     }
+
+    # Fresh and resumed runs also carry expected hashes as an IDictionary.
+    # PowerShell property names are case-insensitive, but dictionary keys are
+    # not guaranteed to be, so inspect all keys.
+    if ([string]::IsNullOrWhiteSpace($expectedHash) -and
+        $Patch.PSObject.Properties['ExpectedHashes'] -and $Patch.ExpectedHashes) {
+        foreach ($key in @($Patch.ExpectedHashes.Keys)) {
+            if ([string]$key -match '^sha-?256$') {
+                $candidate = [string]$Patch.ExpectedHashes[$key]
+                if ($candidate -match '^[0-9a-fA-F]{64}$') {
+                    $expectedHash = $candidate.ToLowerInvariant()
+                    $expectedHashSource = ('Patch.ExpectedHashes[{0}]' -f [string]$key)
+                    break
+                }
+            }
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($expectedHash) -and
+        $Patch.PSObject.Properties['Integrity'] -and $Patch.Integrity -and
+        $Patch.Integrity.PSObject.Properties['Sha256'] -and $Patch.Integrity.Sha256) {
+        $integrityCandidate = ''
+        if ($Patch.Integrity.Sha256 -is [string]) {
+            $integrityCandidate = [string]$Patch.Integrity.Sha256
+        } elseif ($Patch.Integrity.Sha256.PSObject.Properties['Hex']) {
+            $integrityCandidate = [string]$Patch.Integrity.Sha256.Hex
+        } elseif ($Patch.Integrity.Sha256.PSObject.Properties['Value']) {
+            $integrityCandidate = [string]$Patch.Integrity.Sha256.Value
+        }
+        if ($integrityCandidate -match '^[0-9a-fA-F]{64}$') {
+            $expectedHash = $integrityCandidate.ToLowerInvariant()
+            $expectedHashSource = 'Patch.Integrity.Sha256'
+        }
+    }
+
     if ([string]::IsNullOrWhiteSpace($expectedHash) -and $Patch.PSObject.Properties['AssetMetadataEvidence']) {
         $metadataPath = [string]$Patch.AssetMetadataEvidence
         if ($metadataPath -and (Test-Path -LiteralPath $metadataPath -PathType Leaf)) {
             try {
                 $metadata = Get-Content -LiteralPath $metadataPath -Raw -Encoding UTF8 | ConvertFrom-Json
-                if ($metadata.PSObject.Properties['Sha256']) {
+                if ($metadata.PSObject.Properties['Sha256'] -and
+                    [string]$metadata.Sha256 -match '^[0-9a-fA-F]{64}$') {
                     $expectedHash = ([string]$metadata.Sha256).ToLowerInvariant()
+                    $expectedHashSource = 'Patch.AssetMetadataEvidence.Sha256'
                 }
             } catch { $null = $_ }
         }
     }
+
+    # Resume must remain independently auditable even if a future refactor
+    # omits a runtime patch property.  The P04 manifest is accepted only when
+    # the KB, UpdateId, file name and local path identify exactly one row.
+    $manifestPath = if ($Script:LogsDir) { Join-Path $Script:LogsDir 'resolved_patch_manifest.json' } else { '' }
+    if ([string]::IsNullOrWhiteSpace($expectedHash) -and
+        $manifestPath -and (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        try {
+            $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $manifestMatches = @($manifest.Patches | Where-Object {
+                [string]$_.KbId -eq $kbId -and
+                [string]$_.UpdateId -eq $updateId -and
+                [string]$_.FileName -eq $fileName -and
+                (
+                    [string]::IsNullOrWhiteSpace($localPath) -or
+                    [string]::IsNullOrWhiteSpace([string]$_.LocalPath) -or
+                    [System.IO.Path]::GetFullPath([string]$_.LocalPath) -eq [System.IO.Path]::GetFullPath($localPath)
+                )
+            })
+            if ($manifestMatches.Count -eq 1 -and
+                [string]$manifestMatches[0].LocalAssetSha256 -match '^[0-9a-fA-F]{64}$') {
+                $expectedHash = ([string]$manifestMatches[0].LocalAssetSha256).ToLowerInvariant()
+                $expectedHashSource = 'resolved_patch_manifest.json/LocalAssetSha256'
+            }
+        } catch { $null = $_ }
+    }
+
     $hashVerified = $localExists -and (-not [string]::IsNullOrWhiteSpace($expectedHash)) -and ($actualHash -eq $expectedHash)
 
     $sourceHost = ''
@@ -12206,8 +12276,10 @@ function Get-SetupDuPackageAuthority {
         SourceHost = $sourceHost
         LocalExists = $localExists
         ExpectedSha256 = $expectedHash
+        ExpectedSha256Source = $expectedHashSource
         ActualSha256 = $actualHash
         HashVerified = $hashVerified
+        ResumeManifestEvidencePath = $manifestPath
         CatalogEvidencePath = $catalogPath
         CatalogScopedIdentityVerified = $catalogIdentityVerified
         Trusted = $trusted
@@ -22424,6 +22496,8 @@ function Repair-ResolvedPatchManifestForResume {
         Set-ResumePatchProperty -Patch $patch -Name 'LocalPath' -Value $localPath
         Set-ResumePatchProperty -Patch $patch -Name 'UpdateId' -Value ([string]$catalog.UpdateId)
         Set-ResumePatchProperty -Patch $patch -Name 'ExpectedHashes' -Value $hashes
+        Set-ResumePatchProperty -Patch $patch -Name 'LocalAssetSha256' -Value $actualAssetSha256
+        Set-ResumePatchProperty -Patch $patch -Name 'LocalAssetSha256Source' -Value 'ResumePriorManifestVerified'
         Set-ResumePatchProperty -Patch $patch -Name 'IsMetadataOnly' -Value $false
         Set-ResumePatchProperty -Patch $patch -Name 'State' -Value 'ManifestRepairedFromP04Evidence'
         foreach ($field in @('CatalogClassification','CatalogProducts','CatalogSelectionBasis','CatalogObservedMetadataStatus','CatalogScopedIdentityVerified','CatalogScopedIdentityBasis','CatalogScopedArchitecture','CatalogScopedRawSha256','CatalogScopedParseBasis')) {
@@ -22622,6 +22696,8 @@ function Restore-ResolvedPatchAssetsForResume {
         Set-ResumePatchProperty -Patch $patch -Name 'LocalPath' -Value $localPath
         Set-ResumePatchProperty -Patch $patch -Name 'UpdateId' -Value ([string]$catalog.UpdateId)
         Set-ResumePatchProperty -Patch $patch -Name 'ExpectedHashes' -Value $hashes
+        Set-ResumePatchProperty -Patch $patch -Name 'LocalAssetSha256' -Value $actualAssetSha256
+        Set-ResumePatchProperty -Patch $patch -Name 'LocalAssetSha256Source' -Value 'ResumePriorManifestVerified'
         Set-ResumePatchProperty -Patch $patch -Name 'IsMetadataOnly' -Value $false
         Set-ResumePatchProperty -Patch $patch -Name 'State' -Value 'ResolvedFromResumeEvidence'
         foreach ($field in @('CatalogClassification','CatalogProducts','CatalogSelectionBasis','CatalogObservedMetadataStatus','CatalogScopedIdentityVerified','CatalogScopedIdentityBasis','CatalogScopedArchitecture','CatalogScopedRawSha256','CatalogScopedParseBasis')) {
@@ -22641,7 +22717,7 @@ function Restore-ResolvedPatchAssetsForResume {
     }
     $Script:PatchPlan = Build-PatchPlan -Patches $Script:ResolvedPatches
     $result = [pscustomobject][ordered]@{
-        SchemaVersion='resume-patch-state/1.1'; PhaseId=$PhaseId
+        SchemaVersion='resume-patch-state/1.2'; PhaseId=$PhaseId
         RestoredAtUtc=[datetime]::UtcNow.ToString('o')
         OsKey=[string]$Script:OsVersion; OsLanguage=[string]$Script:OsLanguage
         BaselineId=$currentBaselineId; CatalogEvidencePath=$catalogPath

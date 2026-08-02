@@ -22,6 +22,43 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.31-r12.48] - 2026-08-02
+
+Tag: `server2022-setupdu-resume-hash`.
+
+### Changed
+
+- **Setup DU expected-hash resolution widened and provenance-tagged**:
+  `Get-SetupDuPackageAuthority` now resolves the expected SHA-256
+  from an ordered set of provenance sources — `Patch.Integrity.Sha256`,
+  the `ExpectedHashes` dictionary, asset-metadata evidence, and the
+  resume manifest's `LocalAssetSha256` — and records which source
+  supplied the value (`ExpectedSha256Source`, plus the resume
+  manifest evidence path) in the authority evidence, so a hash match
+  is auditable back to where the expectation came from.
+- **Resume rehydration keeps the digest chain**: resumed runs persist
+  the measured `LocalAssetSha256` (with source
+  `ResumePriorManifestVerified`) back into the resume patch state
+  (schema `resume-patch-state/1.2`), keeping the Setup DU authority
+  check independently auditable across a resume boundary. Script-only
+  change; `data/*` and `schema/*` are untouched at this revision.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.07.31-r12.48`
+  with the measured tag `server2022-setupdu-resume-hash`. No terminal
+  D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/120/64/112 + T45 21. PSA committed 5E/110W/10I (raw sweep
+  5E/111W/10I: +1W is the PSA7002 LF artefact). A fifth PSA error
+  joins at this revision — `PSA2002` (shadowing the automatic
+  variable `$matches`) at the resume-manifest repair site — and is
+  carried as declared series debt per the no-fix-forward rule. The
+  snapshot script remains BOM-absent at r12.48 (O1 watch continues).
+
 ## [update-wsi-2026.07.31-r12.47] - 2026-08-02
 
 Tag: `server2022-setupdu-authority`.
