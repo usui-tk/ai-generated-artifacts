@@ -703,9 +703,9 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.01-r12.53'
-# Validation marker: r12.53 pinned UpdateId resolution, parser-shape resilience, and raw Catalog evidence capture.
-$Script:ScriptTag     = 'catalog-semantic-retry'
+$Script:ScriptVersion = 'update-wsi-2026.08.01-r12.54'
+# Validation marker: r12.54 pinned Catalog identity evidence handoff and P09 resume compatibility.
+$Script:ScriptTag     = 'setupdu-pinned-authority-handoff'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -12440,6 +12440,125 @@ function Get-SetupDuOverlayPolicy {
     }
 }
 
+function Get-CatalogIdentityEvidenceAssessment {
+    <#
+    .SYNOPSIS
+        Normalize scoped and reviewed-pinned Catalog identity evidence.
+    .DESCRIPTION
+        r12.53 introduced a reviewed UpdateId path that intentionally bypasses
+        Search.aspx and ScopedView. The runtime patch object carried
+        CatalogPinnedIdentityVerified, but P04_catalog_crosscheck.json omitted
+        the two pinned fields. This helper accepts explicit scoped/pinned
+        evidence and a narrowly bounded compatibility shape for r12.53 rows.
+
+        Legacy recovery is fail-closed: the explicit pinned fields must be
+        absent (not false), the row must be a non-metadata x64 payload, and the
+        retained selection/bypass fields must prove exact UpdateId, filename,
+        digest, and reviewed-pinned selection.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [AllowNull()]$Record,
+        [switch]$AllowLegacyR1253PinnedEvidence
+    )
+
+    $recordPresent = $null -ne $Record
+    $scopedVerified = $false
+    $pinnedVerified = $false
+    $pinnedDeclared = $false
+    $pinnedPropertyPresent = $false
+    $pinnedBasis = ''
+    $pinnedBasisValid = $false
+    $pinnedSelectionValid = $false
+    $reviewedPinnedBindingValid = $false
+    $selectionBasis = ''
+    $scopedBasis = ''
+    $parseBasis = ''
+    $architecture = ''
+    $scopedRawSha256 = ''
+    $fileName = ''
+    $updateId = ''
+    $metadataOnly = $false
+    if ($recordPresent) {
+        $scopedVerified = [bool]($Record.PSObject.Properties['CatalogScopedIdentityVerified'] -and [bool]$Record.CatalogScopedIdentityVerified)
+        $pinnedPropertyPresent = $null -ne $Record.PSObject.Properties['CatalogPinnedIdentityVerified']
+        $pinnedDeclared = [bool]($pinnedPropertyPresent -and [bool]$Record.CatalogPinnedIdentityVerified)
+        if ($Record.PSObject.Properties['CatalogPinnedIdentityBasis']) {
+            $pinnedBasis = [string]$Record.CatalogPinnedIdentityBasis
+        }
+        $selectionBasis = $(if ($Record.PSObject.Properties['CatalogSelectionBasis']) { [string]$Record.CatalogSelectionBasis } else { '' })
+        $scopedBasis = $(if ($Record.PSObject.Properties['CatalogScopedIdentityBasis']) { [string]$Record.CatalogScopedIdentityBasis } else { '' })
+        $parseBasis = $(if ($Record.PSObject.Properties['CatalogScopedParseBasis']) { [string]$Record.CatalogScopedParseBasis } else { '' })
+        $architecture = $(if ($Record.PSObject.Properties['CatalogScopedArchitecture']) { [string]$Record.CatalogScopedArchitecture } else { '' })
+        $scopedRawSha256 = $(if ($Record.PSObject.Properties['CatalogScopedRawSha256']) { [string]$Record.CatalogScopedRawSha256 } else { '' })
+        $fileName = $(if ($Record.PSObject.Properties['FileName']) { [string]$Record.FileName } else { '' })
+        $updateId = $(if ($Record.PSObject.Properties['UpdateId']) { [string]$Record.UpdateId } else { '' })
+        $metadataOnly = [bool]($Record.PSObject.Properties['MetadataOnly'] -and [bool]$Record.MetadataOnly)
+        $parsedUpdateId = [guid]::Empty
+        $updateIdValid = [guid]::TryParse($updateId,[ref]$parsedUpdateId)
+        $safeLeaf = (-not [string]::IsNullOrWhiteSpace($fileName)) -and ([System.IO.Path]::GetFileName($fileName) -ceq $fileName)
+        $fileNameDigestBound = $safeLeaf -and ($fileName -match '(?i)_[0-9a-f]{40}\.(?:cab|msu)$')
+        $selectionHasUpdateId = $selectionBasis -match '(?i)(^|\+)ConfiguredUpdateId(\+|$)'
+        $selectionHasFileName = $selectionBasis -match '(?i)(^|\+)ConfiguredFileName(\+|$)'
+        $selectionHasDigest = $selectionBasis -match '(?i)(^|\+)(?:ConfiguredSha1OrFileNameDigest|ConfiguredSha256)(\+|$)'
+        $selectionHasPinnedReview = $selectionBasis -match '(?i)(^|\+)PinnedReviewedIdentity(\+|$)'
+        $pinnedSelectionValid = $selectionHasUpdateId -and $selectionHasFileName -and $selectionHasDigest -and $selectionHasPinnedReview
+        $pinnedBasisValid = [string]::Equals($pinnedBasis,'ReviewedUpdateId+ExactFileName+ConfiguredDigest',[System.StringComparison]::Ordinal)
+        $reviewedPinnedBindingValid = (-not $metadataOnly) -and $updateIdValid -and $fileNameDigestBound -and
+            $pinnedSelectionValid -and [string]::Equals($architecture,'x64',[System.StringComparison]::OrdinalIgnoreCase)
+        $pinnedVerified = $pinnedDeclared -and $pinnedBasisValid -and $reviewedPinnedBindingValid
+    }
+
+    $legacyRecovered = $false
+    $legacyBasis = ''
+    if ($recordPresent -and $AllowLegacyR1253PinnedEvidence -and
+        -not $scopedVerified -and -not $pinnedVerified -and -not $pinnedPropertyPresent) {
+        $legacyRecovered = $reviewedPinnedBindingValid -and
+            [string]::Equals($scopedBasis,'NotRequiredInPinnedIdentityMode',[System.StringComparison]::Ordinal) -and
+            [string]::Equals($parseBasis,'BypassedSearchAndScopedView',[System.StringComparison]::Ordinal) -and
+            [string]::IsNullOrWhiteSpace($scopedRawSha256)
+        if ($legacyRecovered) {
+            $legacyBasis = 'RecoveredR12.53ReviewedUpdateId+ExactFileName+ConfiguredDigest+BypassedSearchAndScopedView'
+        }
+    }
+
+    $verified = $scopedVerified -or $pinnedVerified -or $legacyRecovered
+    $mode = if ($pinnedVerified) {
+        'PinnedReviewedIdentity'
+    } elseif ($scopedVerified) {
+        'ScopedLiveIdentity'
+    } elseif ($legacyRecovered) {
+        'LegacyR12.53PinnedIdentityRecovered'
+    } else {
+        'None'
+    }
+    $basis = if ($pinnedVerified -and -not [string]::IsNullOrWhiteSpace($pinnedBasis)) {
+        $pinnedBasis
+    } elseif ($legacyRecovered) {
+        $legacyBasis
+    } elseif ($scopedVerified) {
+        $(if ($Record.PSObject.Properties['CatalogScopedIdentityBasis']) { [string]$Record.CatalogScopedIdentityBasis } else { 'ScopedViewVerified' })
+    } else {
+        ''
+    }
+
+    return [pscustomobject][ordered]@{
+        SchemaVersion = 'catalog-identity-evidence-assessment/1.0'
+        RecordPresent = $recordPresent
+        Verified = [bool]$verified
+        Mode = $mode
+        Basis = $basis
+        ScopedIdentityVerified = [bool]$scopedVerified
+        PinnedIdentityVerified = [bool]$pinnedVerified
+        PinnedIdentityDeclared = [bool]$pinnedDeclared
+        PinnedIdentityBasisValid = [bool]$pinnedBasisValid
+        PinnedIdentitySelectionValid = [bool]$pinnedSelectionValid
+        LegacyR1253PinnedIdentityRecovered = [bool]$legacyRecovered
+        ExplicitPinnedPropertyPresent = [bool]$pinnedPropertyPresent
+    }
+}
+
 function Get-SetupDuPackageAuthority {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -12571,25 +12690,28 @@ function Get-SetupDuPackageAuthority {
     $parsedUpdateId = [guid]::Empty
     $updateIdValid = [guid]::TryParse($updateId,[ref]$parsedUpdateId)
     $catalogRecord = $null
+    $catalogMatchCount = 0
     $catalogPath = if ($Script:LogsDir) { Join-Path $Script:LogsDir 'P04_catalog_crosscheck.json' } else { '' }
     if ($catalogPath -and (Test-Path -LiteralPath $catalogPath -PathType Leaf)) {
         try {
             $catalogRows = @(Get-Content -LiteralPath $catalogPath -Raw -Encoding UTF8 | ConvertFrom-Json)
-            $catalogRecord = @($catalogRows | Where-Object {
+            $catalogMatches = @($catalogRows | Where-Object {
                 [string]$_.Kind -eq 'SetupDU' -and
                 [string]$_.KbId -eq $kbId -and
                 [string]$_.UpdateId -eq $updateId -and
                 [string]$_.FileName -eq $fileName -and
-                [string]$_.Source -eq $source -and
-                (
-                    $_.CatalogScopedIdentityVerified -eq $true -or
-                    $_.CatalogPinnedIdentityVerified -eq $true
-                )
-            }) | Select-Object -First 1
-        } catch { $catalogRecord = $null }
+                [string]$_.Source -eq $source
+            })
+            $catalogMatchCount = $catalogMatches.Count
+            if ($catalogMatchCount -eq 1) { $catalogRecord = $catalogMatches[0] }
+        } catch {
+            $catalogRecord = $null
+            $catalogMatchCount = 0
+        }
     }
-    $catalogIdentityVerified = $null -ne $catalogRecord
-    $catalogIdentityMode = if ($catalogRecord -and $catalogRecord.CatalogPinnedIdentityVerified -eq $true) { 'PinnedReviewedIdentity' } elseif ($catalogRecord) { 'ScopedLiveIdentity' } else { 'None' }
+    $catalogIdentity = Get-CatalogIdentityEvidenceAssessment -Record $catalogRecord -AllowLegacyR1253PinnedEvidence
+    $catalogIdentityVerified = [bool]$catalogIdentity.Verified
+    $catalogIdentityMode = [string]$catalogIdentity.Mode
     $patchTypeValid = ([string]$Patch.PatchType -eq 'SetupDU')
     $kbIdValid = $kbId -match '^KB\d+$'
     $trusted = $patchTypeValid -and $kbIdValid -and $updateIdValid -and $trustedSourceHost -and $hashVerified -and $catalogIdentityVerified
@@ -12600,11 +12722,24 @@ function Get-SetupDuPackageAuthority {
     if (-not $updateIdValid) { $statusParts.Add('UpdateIdInvalid') | Out-Null }
     if (-not $trustedSourceHost) { $statusParts.Add('SourceHostUntrusted') | Out-Null }
     if (-not $hashVerified) { $statusParts.Add('LocalHashNotVerified') | Out-Null }
-    if (-not $catalogIdentityVerified) { $statusParts.Add('CatalogScopedIdentityNotVerified') | Out-Null }
-    if ($statusParts.Count -eq 0) { $statusParts.Add($(if ($catalogIdentityMode -eq 'PinnedReviewedIdentity') { 'CatalogPinnedIdentityAndLocalHashVerified' } else { 'CatalogScopedIdentityAndLocalHashVerified' })) | Out-Null }
+    if ($catalogMatchCount -eq 0) {
+        $statusParts.Add('CatalogIdentityEvidenceNotFound') | Out-Null
+    } elseif ($catalogMatchCount -gt 1) {
+        $statusParts.Add('CatalogIdentityEvidenceAmbiguous') | Out-Null
+    } elseif (-not $catalogIdentityVerified) {
+        $statusParts.Add('CatalogIdentityNotVerified') | Out-Null
+    }
+    if ($statusParts.Count -eq 0) {
+        $successStatus = switch ($catalogIdentityMode) {
+            'PinnedReviewedIdentity' { 'CatalogPinnedIdentityAndLocalHashVerified' }
+            'LegacyR12.53PinnedIdentityRecovered' { 'CatalogLegacyPinnedIdentityAndLocalHashVerified' }
+            default { 'CatalogScopedIdentityAndLocalHashVerified' }
+        }
+        $statusParts.Add($successStatus) | Out-Null
+    }
 
     return [pscustomobject][ordered]@{
-        SchemaVersion = 'setupdu-package-authority/1.0'
+        SchemaVersion = 'setupdu-package-authority/1.1'
         KbId = $kbId
         UpdateId = $updateId
         FileName = $fileName
@@ -12618,8 +12753,13 @@ function Get-SetupDuPackageAuthority {
         HashVerified = $hashVerified
         ResumeManifestEvidencePath = $manifestPath
         CatalogEvidencePath = $catalogPath
-        CatalogScopedIdentityVerified = $catalogIdentityVerified
+        CatalogEvidenceMatchCount = $catalogMatchCount
+        CatalogIdentityVerified = $catalogIdentityVerified
+        CatalogScopedIdentityVerified = [bool]$catalogIdentity.ScopedIdentityVerified
+        CatalogPinnedIdentityVerified = [bool]$catalogIdentity.PinnedIdentityVerified
+        CatalogLegacyPinnedIdentityRecovered = [bool]$catalogIdentity.LegacyR1253PinnedIdentityRecovered
         CatalogIdentityMode = $catalogIdentityMode
+        CatalogIdentityBasis = [string]$catalogIdentity.Basis
         Trusted = $trusted
         Status = ($statusParts -join ';')
     }
@@ -17705,6 +17845,8 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
                 CatalogScopedArchitecture = $(if ($_.PSObject.Properties['CatalogScopedArchitecture']) { [string]$_.CatalogScopedArchitecture } else { '' })
                 CatalogScopedRawSha256 = $(if ($_.PSObject.Properties['CatalogScopedRawSha256']) { [string]$_.CatalogScopedRawSha256 } else { '' })
                 CatalogScopedParseBasis = $(if ($_.PSObject.Properties['CatalogScopedParseBasis']) { [string]$_.CatalogScopedParseBasis } else { '' })
+                CatalogPinnedIdentityVerified = [bool]($_.PSObject.Properties['CatalogPinnedIdentityVerified'] -and $_.CatalogPinnedIdentityVerified)
+                CatalogPinnedIdentityBasis = $(if ($_.PSObject.Properties['CatalogPinnedIdentityBasis']) { [string]$_.CatalogPinnedIdentityBasis } else { '' })
                 CatalogRequestLocale = $script:CatRequestLocale
                 Source = [string]$_.Source
                 FileName = [System.IO.Path]::GetFileName([string]$_.LocalPath)
@@ -22777,8 +22919,9 @@ function Repair-ResolvedPatchManifestForResume {
     .DESCRIPTION
         This is a fail-closed compatibility path for r12.33 and earlier WorkRoots.
         It performs no network access.  Every runtime patch must match exactly one
-        measured P04 Catalog row, that row must carry verified scoped identity,
-        the source must be a trusted Microsoft Catalog payload host, and the
+        measured P04 Catalog row, that row must carry verified scoped or
+        reviewed-pinned identity, the source must be a trusted Microsoft
+        Catalog payload host, and the
         retained local CAB/MSU SHA-1 must match the digest embedded in the measured
         Catalog file name.  The resulting SHA-256-bound manifest is then persisted
         and independently consumed by the normal resume path.
@@ -22827,10 +22970,12 @@ function Repair-ResolvedPatchManifestForResume {
         if ([bool]$catalog.MetadataOnly) {
             throw ('Resume refused: cannot repair manifest; P04 row is metadata-only for {0}/{1}.' -f $patchType,$kbId)
         }
-        if (-not ($catalog.PSObject.Properties['CatalogScopedIdentityVerified'] -and [bool]$catalog.CatalogScopedIdentityVerified)) {
-            throw ('Resume refused: cannot repair manifest; scoped Catalog identity was not verified for {0}/{1}.' -f $patchType,$kbId)
+        $catalogIdentity = Get-CatalogIdentityEvidenceAssessment -Record $catalog -AllowLegacyR1253PinnedEvidence
+        if (-not [bool]$catalogIdentity.Verified) {
+            throw ('Resume refused: cannot repair manifest; neither scoped nor reviewed-pinned Catalog identity was verified for {0}/{1}.' -f $patchType,$kbId)
         }
-        if ([string]$catalog.CatalogScopedRawSha256 -notmatch '^[0-9a-fA-F]{64}$') {
+        if ([string]$catalogIdentity.Mode -eq 'ScopedLiveIdentity' -and
+            [string]$catalog.CatalogScopedRawSha256 -notmatch '^[0-9a-fA-F]{64}$') {
             throw ('Resume refused: cannot repair manifest; scoped Catalog evidence hash is invalid for {0}/{1}.' -f $patchType,$kbId)
         }
         $fileName = [string]$catalog.FileName
@@ -22886,7 +23031,7 @@ function Repair-ResolvedPatchManifestForResume {
         Set-ResumePatchProperty -Patch $patch -Name 'LocalPath' -Value $localPath
         Set-ResumePatchProperty -Patch $patch -Name 'UpdateId' -Value ([string]$catalog.UpdateId)
         Set-ResumePatchProperty -Patch $patch -Name 'ExpectedHashes' -Value $hashes
-        Set-ResumePatchProperty -Patch $patch -Name 'LocalAssetSha256' -Value $actualAssetSha256
+        Set-ResumePatchProperty -Patch $patch -Name 'LocalAssetSha256' -Value $actualSha256
         Set-ResumePatchProperty -Patch $patch -Name 'LocalAssetSha256Source' -Value 'ResumePriorManifestVerified'
         Set-ResumePatchProperty -Patch $patch -Name 'IsMetadataOnly' -Value $false
         Set-ResumePatchProperty -Patch $patch -Name 'State' -Value 'ManifestRepairedFromP04Evidence'
@@ -22899,7 +23044,8 @@ function Repair-ResolvedPatchManifestForResume {
             PatchType=$patchType; KbId=$kbId; UpdateId=[string]$catalog.UpdateId
             FileName=$fileName; LocalPath=$localPath
             CatalogFileNameSha1=$catalogSha1; LocalAssetSha1=$actualSha1; LocalAssetSha256=$actualSha256
-            CatalogScopedRawSha256=[string]$catalog.CatalogScopedRawSha256
+            CatalogIdentityMode=[string]$catalogIdentity.Mode;CatalogIdentityBasis=[string]$catalogIdentity.Basis
+            CatalogScopedRawSha256=$(if($catalog.PSObject.Properties['CatalogScopedRawSha256']){[string]$catalog.CatalogScopedRawSha256}else{''})
         }) | Out-Null
     }
     if ($repaired.Count -ne @($Script:ResolvedPatches).Count) {
@@ -23018,6 +23164,13 @@ function Restore-ResolvedPatchAssetsForResume {
         if ([bool]$catalog.MetadataOnly) {
             throw ('Resume refused: P04 evidence still marks {0}/{1} as metadata-only.' -f $patchType,$kbId)
         }
+        $catalogIdentity = Get-CatalogIdentityEvidenceAssessment -Record $catalog -AllowLegacyR1253PinnedEvidence
+        if (-not [bool]$catalogIdentity.Verified) {
+            throw ('Resume refused: P04 Catalog identity was not verified for {0}/{1}; mode={2}.' -f $patchType,$kbId,[string]$catalogIdentity.Mode)
+        }
+        if ([bool]$catalogIdentity.LegacyR1253PinnedIdentityRecovered) {
+            Write-Step ('Resume compatibility: recovered reviewed pinned Catalog identity from r12.53 P04 evidence for {0}/{1}.' -f $patchType,$kbId)
+        }
 
         $fileName = [string]$catalog.FileName
         if ([string]::IsNullOrWhiteSpace($fileName) -or [System.IO.Path]::GetFileName($fileName) -ne $fileName) {
@@ -23095,10 +23248,16 @@ function Restore-ResolvedPatchAssetsForResume {
                 Set-ResumePatchProperty -Patch $patch -Name $field -Value $catalog.$field
             }
         }
+        if ([bool]$catalogIdentity.LegacyR1253PinnedIdentityRecovered) {
+            Set-ResumePatchProperty -Patch $patch -Name 'CatalogPinnedIdentityVerified' -Value $true
+            Set-ResumePatchProperty -Patch $patch -Name 'CatalogPinnedIdentityBasis' -Value ([string]$catalogIdentity.Basis)
+            Set-ResumePatchProperty -Patch $patch -Name 'CatalogLegacyPinnedIdentityRecovered' -Value $true
+        }
         $restored.Add([pscustomobject][ordered]@{
             PatchType=$patchType; KbId=$kbId; UpdateId=[string]$catalog.UpdateId
             FileName=$fileName; LocalPath=$localPath; LocalAssetSha256=$actualAssetSha256
-            SourceHost=$sourceUri.Host
+            SourceHost=$sourceUri.Host;CatalogIdentityMode=[string]$catalogIdentity.Mode
+            CatalogLegacyPinnedIdentityRecovered=[bool]$catalogIdentity.LegacyR1253PinnedIdentityRecovered
         }) | Out-Null
     }
 

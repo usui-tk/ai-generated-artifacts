@@ -22,6 +22,46 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.01-r12.54] - 2026-08-02
+
+Tag: `setupdu-pinned-authority-handoff`.
+
+### Changed
+
+- **Pinned Catalog identity evidence handoff**: the P04 fetch phase
+  records the pinned-identity basis and its verification state
+  (`CatalogPinnedIdentityBasis`, `CatalogPinnedIdentityVerified`)
+  into the resolved-patch manifest, and Setup DU package authority
+  accepts a reviewed pinned identity as a first-class basis
+  (`CatalogPinnedIdentityAndLocalHashVerified`) alongside the
+  scraped-identity path — under pinned-identity mode the
+  Search.aspx-scoped evidence is declared not required rather than
+  silently absent.
+- **P09 resume compatibility for pre-handoff evidence**: a resume
+  over a build fetched at r12.53 recovers the reviewed pinned
+  identity from the r12.53 P04 evidence
+  (`LegacyR12.53PinnedIdentityRecovered` →
+  `CatalogLegacyPinnedIdentityAndLocalHashVerified`), so pinned
+  authority verification does not force a refetch across the
+  revision boundary. Script-only change; `data/*` and `schema/*`
+  are untouched at this revision.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.01-r12.54`
+  with the measured tag `setupdu-pinned-authority-handoff`. No
+  terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 4E/120W/12I (raw sweep
+  4E/121W/12I: +1W is the PSA7002 LF artefact) — one PSA2002
+  automatic-variable shadow left the error set with the reworked
+  resume-manifest sites (5E → 4E; remaining findings stay declared
+  series debt). The snapshot form remains BOM + LF at r12.54 (the
+  CRLF half of the O1 oscillation is still ahead).
+
 ## [update-wsi-2026.08.01-r12.53] - 2026-08-02
 
 Tag retained: `catalog-semantic-retry`.
