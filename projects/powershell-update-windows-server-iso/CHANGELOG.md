@@ -22,6 +22,36 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.20-r12.26] - 2026-08-02
+
+Tag: `install-wim-display-date-metadata-and-p14-evidence` (the tag
+advances). Serviced install.wim indexes can carry an operator-declared
+display date, applied through the WIM API with invariant-fingerprint
+evidence.
+
+### Added
+
+- **`-ImageDisplayDate` parameter and WIM metadata layer**: thirteen
+  new helpers (WIM API interop initialisation, per-handle image XML
+  get/set, `ConvertTo`/`ConvertFrom-WimFileTimeParts`,
+  invariant-fingerprint capture, metadata snapshot/transition
+  validation and the `Resolve-InstallWimDisplayDateDecision` driver)
+  set the display last-modification date on serviced install.wim
+  indexes (`yyyy-MM-dd`, format-validated at entry). The transition
+  is evidence-gated: a metadata-invariant fingerprint proves that
+  only the display date moved, and the before/after snapshot joins
+  the P14 evidence surface. Script-only change (+552 net lines).
+- **T40**: release pin advanced to `update-wsi-2026.07.20-r12.26`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **5E/54W/8I** on
+the committed tree — five warnings and one info join the debt with
+the new WIM interop layer; committed verbatim per the no-fix-forward
+rule, draining post-series.
+
 ## [update-wsi-2026.07.20-r12.25] - 2026-08-02
 
 Tag: `measured-e2e-os-specific-servicing-and-catalog-rehydration` (the
