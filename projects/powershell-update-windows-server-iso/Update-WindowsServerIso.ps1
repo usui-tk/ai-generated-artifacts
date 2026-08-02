@@ -659,8 +659,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.18-r12.17'
-$Script:ScriptTag     = 'generic-list-binder-hardening'
+$Script:ScriptVersion = 'update-wsi-2026.07.18-r12.18'
+$Script:ScriptTag     = 'catalog-stable-identity-localization-isolation'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -4795,13 +4795,15 @@ function Select-CanonicalPatchFile {
 # Constants
 # ============================================================================
 $script:CatUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
-# Catalog transport is intentionally pinned to English. Japanese and English
-# display metadata are accepted by the identity matcher; every other locale is
-# rejected. Pinning the request avoids edge-selected German/Chinese responses,
-# while the strict matcher remains the fail-closed enforcement boundary.
+# Catalog transport requests English as a best effort only. The live service can
+# return a different localized result page even when Accept-Language is present.
+# Therefore localized Title/Classification text is observational metadata only;
+# asset selection is bound to stable KB, OS-generation, architecture, UpdateId,
+# file name and digest identity. Only canonical project metadata is propagated.
 $script:CatRequestLocale = 'en-US'
 $script:CatAcceptLanguage = 'en-US,en;q=0.9'
-$script:CatDisplayLanguagePolicy = 'en-us|ja-jp'
+$script:CatDisplayLanguagePolicy = 'canonical-project-metadata-only'
+$script:CatSelectionPolicy = 'stable-kb-os-architecture-updateid-file-digest'
 $script:CatSearchUrl   = 'https://www.catalog.update.microsoft.com/Search.aspx'
 $script:CatDownloadUrl = 'https://www.catalog.update.microsoft.com/DownloadDialog.aspx'
 $script:CatScopedUrl   = 'https://www.catalog.update.microsoft.com/ScopedViewInline.aspx'
@@ -4892,7 +4894,7 @@ function Search-Catalog {
     )
     $slug = [regex]::Replace($Query, '[^A-Za-z0-9]+', '_')
     if ($slug.Length -gt 60) { $slug = $slug.Substring(0, 60) }
-    $tag = "search.$slug.en-us.r1216.html"
+    $tag = "search.$slug.raw.r1218.html"
     if ($RefreshCache) {
         Remove-Item -LiteralPath (Join-Path $script:CatCache $tag) -Force -ErrorAction SilentlyContinue
     }
@@ -5003,7 +5005,7 @@ function Resolve-CatalogDownload {
     )
     $body = 'updateIDs=[{"size":0,"languages":"","uidInfo":"' + $Uid + '","updateID":"' + $Uid + '"}]' +
             '&updateIDsBlockedForImport=&wsusApiPresent=&contentImport=&sku=&serverName=&ssl=&portNumber=&version='
-    $tag = "dl.$($Uid.Substring(0,8)).en-us.r1216.html"
+    $tag = "dl.$($Uid.Substring(0,8)).raw.r1218.html"
     if ($RefreshCache) {
         Remove-Item -LiteralPath (Join-Path $script:CatCache $tag) -Force -ErrorAction SilentlyContinue
     }
@@ -5068,14 +5070,12 @@ function Resolve-CatalogDownload {
 function Get-CatalogIdentityRule {
     <#
     .SYNOPSIS
-        Return OS- and role-specific Microsoft Update Catalog identity rules.
+        Return stable package-identity rules and separate canonical display metadata.
     .DESCRIPTION
-        Product display names and title wording aren't identical for Server
-        2022/2025.  For example, Catalog uses product
-        "Microsoft Server operating system-21H2" while the title contains
-        "Microsoft server operating system version 21H2".  Keeping these as
-        separate aliases avoids ambiguous selection when one result page
-        contains multiple x64 server generations (KB5030216/KB5043080).
+        Microsoft Update Catalog Title and Classification cells are localized and
+        are not a trustworthy package-identity boundary. StableTitleTokens contain
+        only locale-invariant OS/version markers. TitleTokens and Classification
+        are retained solely to assess whether display metadata is canonical EN/JA.
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)]$Patch)
@@ -5103,55 +5103,79 @@ function Get-CatalogIdentityRule {
         'Server2025' { 'Microsoft server operating system version 24H2' }
         default      { '' }
     }
+    $stableOsToken = switch ($Script:OsVersion) {
+        'Server2016' { 'Windows Server 2016' }
+        'Server2019' { 'Windows Server 2019' }
+        'Server2022' { '21H2' }
+        'Server2025' { '24H2' }
+        default      { '' }
+    }
+    $stableDuToken = switch ($Script:OsVersion) {
+        'Server2016' { '1607' }
+        'Server2019' { '1809' }
+        'Server2022' { '21H2' }
+        'Server2025' { '24H2' }
+        default      { '' }
+    }
 
     $titleTokens = [System.Collections.Generic.List[string]]::new()
+    $stableTitleTokens = [System.Collections.Generic.List[string]]::new()
     $productTokens = [System.Collections.Generic.List[string]]::new()
     $productReject = [System.Collections.Generic.List[string]]::new()
     $classification = ''
+    $expectedExtension = '.msu'
 
     switch ($type) {
         'SafeOSDU' {
             if ($duTitle) { $titleTokens.Add($duTitle) }
             $titleTokens.Add('Dynamic Update')
+            if ($stableDuToken) { $stableTitleTokens.Add($stableDuToken) }
             $productTokens.Add('Windows Safe OS Dynamic Update')
             $classification = 'Critical Updates'
+            $expectedExtension = '.cab'
         }
         'SetupDU' {
             if ($duTitle) { $titleTokens.Add($duTitle) }
             $titleTokens.Add('Dynamic Update')
+            if ($stableDuToken) { $stableTitleTokens.Add($stableDuToken) }
             $productTokens.Add('Windows 10 and later Dynamic Update')
             $productReject.Add('Windows Safe OS Dynamic Update')
             $classification = 'Critical Updates'
+            $expectedExtension = '.cab'
         }
         'DotNet' {
             if ($osTitle) { $titleTokens.Add($osTitle) }
             $titleTokens.Add('.NET Framework')
+            if ($stableOsToken) { $stableTitleTokens.Add($stableOsToken) }
+            $stableTitleTokens.Add('.NET Framework')
             if ($osProduct) { $productTokens.Add($osProduct) }
             $classification = 'Security Updates'
         }
         'LCU' {
             if ($osTitle) { $titleTokens.Add($osTitle) }
             $titleTokens.Add('Cumulative Update')
+            if ($stableOsToken) { $stableTitleTokens.Add($stableOsToken) }
             if ($osProduct) { $productTokens.Add($osProduct) }
             $classification = 'Security Updates'
         }
         'BridgeLcu' {
             if ($osTitle) { $titleTokens.Add($osTitle) }
             $titleTokens.Add('Cumulative Update')
+            if ($stableOsToken) { $stableTitleTokens.Add($stableOsToken) }
             if ($osProduct) { $productTokens.Add($osProduct) }
             $classification = 'Security Updates'
         }
         'Checkpoint' {
             if ($osTitle) { $titleTokens.Add($osTitle) }
             $titleTokens.Add('Cumulative Update')
+            if ($stableOsToken) { $stableTitleTokens.Add($stableOsToken) }
             if ($osProduct) { $productTokens.Add($osProduct) }
             $classification = 'Security Updates'
         }
         'SSU' {
             if ($osTitle) { $titleTokens.Add($osTitle) }
+            if ($stableOsToken) { $stableTitleTokens.Add($stableOsToken) }
             if ($kb -eq 'KB4132216') {
-                # Microsoft classifies this legacy prerequisite as a generic
-                # Critical Update, not as a title containing "Servicing Stack".
                 $titleTokens.Add('Update')
                 $classification = 'Critical Updates'
             } else {
@@ -5162,30 +5186,43 @@ function Get-CatalogIdentityRule {
         }
         default {
             if ($osTitle) { $titleTokens.Add($osTitle) }
+            if ($stableOsToken) { $stableTitleTokens.Add($stableOsToken) }
             if ($osProduct) { $productTokens.Add($osProduct) }
         }
+    }
+
+    $canonicalTitle = ''
+    if ($Patch.PSObject.Properties['Title']) { $canonicalTitle = [string]$Patch.Title }
+    if ([string]::IsNullOrWhiteSpace($canonicalTitle)) {
+        $canonicalTitle = '{0} {1} for {2} x64' -f $type, $kb, $Script:OsVersion
+    }
+    $canonicalProducts = [System.Collections.Generic.List[string]]::new()
+    if ($Patch.PSObject.Properties['Products'] -and $Patch.Products) {
+        foreach ($value in @($Patch.Products)) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$value)) { $canonicalProducts.Add([string]$value) }
+        }
+    }
+    if ($canonicalProducts.Count -eq 0) {
+        foreach ($value in @($productTokens.ToArray())) { $canonicalProducts.Add([string]$value) }
     }
 
     return [pscustomobject]@{
         Type = $type
         KbId = $kb
         TitleTokens = @($titleTokens.ToArray())
+        StableTitleTokens = @($stableTitleTokens.ToArray())
         ProductTokens = @($productTokens.ToArray())
         ProductRejectTokens = @($productReject.ToArray())
         Classification = $classification
+        CanonicalTitle = $canonicalTitle
+        CanonicalProducts = @($canonicalProducts.ToArray())
+        CanonicalClassification = $classification
+        ExpectedExtension = $expectedExtension
     }
 }
 
 function Get-CatalogSemanticAliases {
-    <#
-    .SYNOPSIS
-        Returns only the approved English and Japanese Catalog display aliases.
-    .DESCRIPTION
-        Catalog Title and Classification are localized display metadata. The
-        project policy permits only en-us and ja-jp metadata. Unknown labels and
-        every other locale fail closed; package identity is never accepted by a
-        classification-ignoring structural fallback.
-    #>
+    <# Canonical English/Japanese display aliases. Never used as asset identity. #>
     [OutputType([string[]])]
     param([AllowEmptyString()][string]$Token)
 
@@ -5244,8 +5281,25 @@ function Test-CatalogSemanticEquals {
     return $false
 }
 
-function Test-CatalogRowAgainstRule {
+function Get-TextFingerprint {
+    [OutputType([string])]
+    param([AllowEmptyString()][string]$Text)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$Text)
+        return ([System.BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+function Get-CatalogDisplayMetadataAssessment {
+    <#
+    .SYNOPSIS
+        Assess display metadata without allowing it to influence package identity.
+    #>
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)]$Row,
         [Parameter(Mandatory)]$Rule
@@ -5253,23 +5307,62 @@ function Test-CatalogRowAgainstRule {
     $title = [string]$Row.title
     $products = [string]$Row.products
     $classification = [string]$Row.classification
-
-    if ($title -notmatch '(?i)x64' -or $title -match '(?i)arm64|x86-based') { return $false }
-    if ($Rule.KbId -and $title -notmatch [regex]::Escape([string]$Rule.KbId)) { return $false }
+    $titleCanonical = $true
     foreach ($token in @($Rule.TitleTokens)) {
-        if ($token -and -not (Test-CatalogSemanticContains -Text $title -CanonicalToken ([string]$token))) { return $false }
+        if ($token -and -not (Test-CatalogSemanticContains -Text $title -CanonicalToken ([string]$token))) {
+            $titleCanonical = $false
+            break
+        }
     }
+    $classificationCanonical = $true
+    if ($Rule.Classification) {
+        $classificationCanonical = -not [string]::IsNullOrWhiteSpace($classification) -and
+            (Test-CatalogSemanticEquals -Text $classification -CanonicalToken ([string]$Rule.Classification))
+    }
+    $productsCanonical = $true
     if (-not [string]::IsNullOrWhiteSpace($products)) {
         foreach ($token in @($Rule.ProductTokens)) {
-            if ($token -and $products -notmatch [regex]::Escape([string]$token)) { return $false }
-        }
-        foreach ($token in @($Rule.ProductRejectTokens)) {
-            if ($token -and $products -match [regex]::Escape([string]$token)) { return $false }
+            if ($token -and $products.IndexOf([string]$token, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+                $productsCanonical = $false
+                break
+            }
         }
     }
-    if ($Rule.Classification) {
-        if ([string]::IsNullOrWhiteSpace($classification)) { return $false }
-        if (-not (Test-CatalogSemanticEquals -Text $classification -CanonicalToken ([string]$Rule.Classification))) { return $false }
+    $status = $(if ($titleCanonical -and $classificationCanonical -and $productsCanonical) { 'CanonicalEnOrJa' } else { 'LocalizedOrUnknownIsolated' })
+    return [pscustomobject][ordered]@{
+        Status = $status
+        Canonical = [bool]($status -eq 'CanonicalEnOrJa')
+        TitleCanonical = [bool]$titleCanonical
+        ClassificationCanonical = [bool]$classificationCanonical
+        ProductsCanonical = [bool]$productsCanonical
+        TitleSha256 = Get-TextFingerprint -Text $title
+        ClassificationSha256 = Get-TextFingerprint -Text $classification
+        ProductsSha256 = Get-TextFingerprint -Text $products
+    }
+}
+
+function Test-CatalogRowAgainstRule {
+    <#
+    .SYNOPSIS
+        Match only locale-stable row identity. Localized display words are ignored.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Row,
+        [Parameter(Mandatory)]$Rule
+    )
+    $title = [string]$Row.title
+    $products = [string]$Row.products
+
+    if ($title -notmatch '(?i)x64' -or $title -match '(?i)arm64|x86') { return $false }
+    if ($Rule.KbId -and $title -notmatch [regex]::Escape([string]$Rule.KbId)) { return $false }
+    foreach ($token in @($Rule.StableTitleTokens)) {
+        if ($token -and $title.IndexOf([string]$token, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) { return $false }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($products)) {
+        foreach ($token in @($Rule.ProductRejectTokens)) {
+            if ($token -and $products.IndexOf([string]$token, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $false }
+        }
     }
     return $true
 }
@@ -5277,15 +5370,12 @@ function Test-CatalogRowAgainstRule {
 function Get-CatalogRowsForResolvedPatch {
     <#
     .SYNOPSIS
-        Resolve the exact KB already selected by the baseline to one x64
-        Microsoft Update Catalog row. This does not select a newer KB; it only
-        rehydrates the distributable asset (UpdateId/file URL/hash).
+        Resolve an exact KB to locale-independent structural Catalog rows.
     .DESCRIPTION
-        Direct download URLs are not durable configuration identifiers.  Row
-        selection validates KB, architecture, OS-specific title wording,
-        Product and Classification.  Server 2022/2025 title aliases are kept
-        separate from Product aliases so multi-generation KBs remain
-        unambiguous even when one Catalog column is absent.
+        The Catalog can ignore Accept-Language and return Portuguese, Chinese or
+        another localized page. This function therefore rejects wrong KB, OS
+        generation and architecture, but never rejects a row merely because the
+        display Title or Classification is localized.
     #>
     [CmdletBinding()]
     [OutputType([object[]])]
@@ -5301,29 +5391,97 @@ function Get-CatalogRowsForResolvedPatch {
 
     $rule = Get-CatalogIdentityRule -Patch $Patch
     $filtered = @($rows | Where-Object { Test-CatalogRowAgainstRule -Row $_ -Rule $rule })
-
-    # Fail closed. Exact KB/file identity is not sufficient when Catalog's
-    # human-readable metadata is outside the approved en-us/ja-jp policy.
-    # The r12.08 unique-structural fallback is intentionally removed because it
-    # accepted a Chinese Server 2016 row during the 2026-07-18 E2E run.
     if ($filtered.Count -eq 0) {
         $observed = @($rows | ForEach-Object {
-            '[title={0}; classification={1}; products={2}; updateId={3}]' -f $_.title, $_.classification, $_.products, $_.uid
+            '[updateId={0};titleSha256={1};classificationSha256={2};productsSha256={3}]' -f
+                $_.uid, (Get-TextFingerprint -Text ([string]$_.title)),
+                (Get-TextFingerprint -Text ([string]$_.classification)),
+                (Get-TextFingerprint -Text ([string]$_.products))
         }) -join ' | '
-        throw ('Microsoft Update Catalog returned no {0}/{1} row satisfying display-language policy {2}. Observed: {3}' -f
-            $rule.Type, $rule.KbId, $script:CatDisplayLanguagePolicy, $observed)
+        throw ('Microsoft Update Catalog returned no stable-identity row for {0}/{1} on {2}. Localized display text is not an identity input. Observed fingerprints: {3}' -f
+            $rule.Type, $rule.KbId, $Script:OsVersion, $observed)
     }
 
-    # Prefer the baseline's exact title when present.  Otherwise the complete
-    # identity rule above must leave exactly one candidate; returning all
-    # matches lets the caller produce a useful ambiguity failure.
-    $baselineTitle = ''
-    if ($Patch.PSObject.Properties['Title']) { $baselineTitle = [string]$Patch.Title }
-    if ($baselineTitle) {
-        $exact = @($filtered | Where-Object { ([string]$_.title).Trim() -eq $baselineTitle.Trim() })
+    $configuredUpdateId = ''
+    if ($Patch.PSObject.Properties['UpdateId']) { $configuredUpdateId = [string]$Patch.UpdateId }
+    if (-not [string]::IsNullOrWhiteSpace($configuredUpdateId)) {
+        $exact = @($filtered | Where-Object { [string]::Equals([string]$_.uid, $configuredUpdateId, [System.StringComparison]::OrdinalIgnoreCase) })
         if ($exact.Count -eq 1) { return $exact }
     }
     return @($filtered | Sort-Object lastUpdated, version -Descending)
+}
+
+function Get-PatchConfiguredCatalogIdentity {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)]$Patch)
+
+    $updateId = $(if ($Patch.PSObject.Properties['UpdateId']) { [string]$Patch.UpdateId } else { '' })
+    $fileName = $(if ($Patch.PSObject.Properties['FileName']) { [string]$Patch.FileName } else { '' })
+    if ([string]::IsNullOrWhiteSpace($fileName) -and $Patch.PSObject.Properties['LocalPath']) {
+        $fileName = [System.IO.Path]::GetFileName([string]$Patch.LocalPath)
+    }
+    $sha1 = ''
+    $sha256 = ''
+    if ($Patch.PSObject.Properties['ExpectedHashes'] -and $Patch.ExpectedHashes) {
+        $h = $Patch.ExpectedHashes
+        if ($h -is [System.Collections.IDictionary]) {
+            if ($h.Contains('sha-1')) { $sha1 = [string]$h['sha-1'] }
+            if ($h.Contains('sha-256')) { $sha256 = [string]$h['sha-256'] }
+        } else {
+            if ($h.PSObject.Properties['sha-1']) { $sha1 = [string]$h.'sha-1' }
+            if ($h.PSObject.Properties['sha-256']) { $sha256 = [string]$h.'sha-256' }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($sha1) -and $Patch.PSObject.Properties['Digest']) { $sha1 = [string]$Patch.Digest }
+    if ([string]::IsNullOrWhiteSpace($sha256) -and $Patch.PSObject.Properties['Sha256']) { $sha256 = [string]$Patch.Sha256 }
+    return [pscustomobject][ordered]@{
+        UpdateId = $updateId
+        FileName = $fileName
+        Sha1 = $sha1
+        Sha256 = $sha256
+    }
+}
+
+function Select-CatalogCandidateAsset {
+    <# Pure selector used by P04 and deterministic regression fixtures. #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)]$Patch,
+        [Parameter(Mandatory)][object[]]$Candidates
+    )
+    $pool = @($Candidates)
+    if ($pool.Count -eq 0) { throw 'No Catalog row/file candidates were supplied.' }
+    $identity = Get-PatchConfiguredCatalogIdentity -Patch $Patch
+    $basis = [System.Collections.Generic.List[string]]::new()
+
+    if (-not [string]::IsNullOrWhiteSpace($identity.UpdateId)) {
+        $m = @($pool | Where-Object { [string]::Equals([string]$_.Row.uid, $identity.UpdateId, [System.StringComparison]::OrdinalIgnoreCase) })
+        if ($m.Count -gt 0) { $pool = $m; $basis.Add('ConfiguredUpdateId') }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($identity.FileName)) {
+        $m = @($pool | Where-Object { [string]::Equals([string]$_.File.fileName, $identity.FileName, [System.StringComparison]::OrdinalIgnoreCase) })
+        if ($m.Count -gt 0) { $pool = $m; $basis.Add('ConfiguredFileName') }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($identity.Sha1)) {
+        $m = @($pool | Where-Object { [string]::Equals([string]$_.File.digest, $identity.Sha1, [System.StringComparison]::OrdinalIgnoreCase) })
+        if ($m.Count -gt 0) { $pool = $m; $basis.Add('ConfiguredSha1') }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($identity.Sha256)) {
+        $m = @($pool | Where-Object { [string]::Equals([string]$_.File.sha256, $identity.Sha256, [System.StringComparison]::OrdinalIgnoreCase) })
+        if ($m.Count -gt 0) { $pool = $m; $basis.Add('ConfiguredSha256') }
+    }
+    if ($pool.Count -ne 1) {
+        $observed = @($pool | ForEach-Object { '[updateId={0};file={1}]' -f $_.Row.uid, $_.File.fileName }) -join ' | '
+        throw ('Catalog stable-identity selection remained ambiguous ({0} candidates): {1}' -f $pool.Count, $observed)
+    }
+    if ($basis.Count -eq 0) { $basis.Add('SingleStableCandidate') }
+    return [pscustomobject][ordered]@{
+        Row = $pool[0].Row
+        File = $pool[0].File
+        SelectionBasis = ($basis -join '+')
+    }
 }
 
 function Get-CatalogIdentityRefreshDecision {
@@ -5380,41 +5538,48 @@ function Resolve-ResolvedPatchAssetFromCatalog {
     }
     $kb = [string]$Patch.KbId
     $type = Get-PatchEntryType -Patch $Patch
+    $rule = Get-CatalogIdentityRule -Patch $Patch
     $rows = @(Get-CatalogRowsForResolvedPatch -Patch $Patch -RefreshCache:$RefreshCache)
     if ($rows.Count -eq 0) {
-        throw ('Microsoft Update Catalog returned no unambiguous x64 row for {0}/{1} on {2}.' -f $type, $kb, $Script:OsVersion)
-    }
-    if ($rows.Count -gt 1) {
-        $titles = @($rows | ForEach-Object { [string]$_.title }) -join ' | '
-        throw ('Microsoft Update Catalog result is ambiguous for {0}/{1} on {2}: {3}' -f $type, $kb, $Script:OsVersion, $titles)
-    }
-    $row = $rows[0]
-    $parserName = ''
-    if ($row.PSObject.Properties['parser']) { $parserName = [string]$row.parser }
-    Write-Step ('Catalog row resolved: {0}/{1} UpdateId={2} parser={3} classification={4} products={5} title={6}' -f
-        $type, $kb, $row.uid, $parserName, $row.classification, $row.products, $row.title)
-    $files = @(Resolve-CatalogDownload -Uid ([string]$row.uid) -RefreshCache:$RefreshCache)
-    if ($files.Count -eq 0) {
-        throw ('Catalog DownloadDialog returned no files for {0}/{1} (UpdateId {2}).' -f $type, $kb, $row.uid)
+        throw ('Microsoft Update Catalog returned no stable x64 row for {0}/{1} on {2}.' -f $type, $kb, $Script:OsVersion)
     }
 
-    $kbDigits = $kb -replace '(?i)^KB',''
-    $candidates = @($files | Where-Object {
-        $fn = ([string]$_.fileName).ToLowerInvariant()
-        $fn -match 'x64' -and $fn -match [regex]::Escape($kbDigits) -and
-        $fn -notmatch 'express|delta|psf|pkgproperties|metadata'
-    })
-    if ($type -in @('SafeOSDU','SetupDU')) {
-        $preferred = @($candidates | Where-Object { ([string]$_.fileName).ToLowerInvariant().EndsWith('.cab') })
-    } else {
-        $preferred = @($candidates | Where-Object { ([string]$_.fileName).ToLowerInvariant().EndsWith('.msu') })
+    $candidateAssets = [System.Collections.Generic.List[object]]::new()
+    foreach ($candidateRow in @($rows)) {
+        $candidateFiles = @(Resolve-CatalogDownload -Uid ([string]$candidateRow.uid) -RefreshCache:$RefreshCache)
+        $kbDigits = $kb -replace '(?i)^KB',''
+        $fileCandidates = @($candidateFiles | Where-Object {
+            $fn = ([string]$_.fileName).ToLowerInvariant()
+            $fn -match 'x64' -and $fn -match [regex]::Escape($kbDigits) -and
+            $fn -notmatch 'express|delta|psf|pkgproperties|metadata'
+        })
+        $preferred = @($fileCandidates | Where-Object {
+            ([string]$_.fileName).ToLowerInvariant().EndsWith(([string]$rule.ExpectedExtension).ToLowerInvariant())
+        })
+        if ($preferred.Count -eq 0) { $preferred = $fileCandidates }
+        foreach ($candidateFile in @($preferred)) {
+            $candidateAssets.Add([pscustomobject]@{ Row = $candidateRow; File = $candidateFile }) | Out-Null
+        }
     }
-    if ($preferred.Count -eq 0) { $preferred = $candidates }
-    if ($preferred.Count -ne 1) {
-        $names = @($preferred | ForEach-Object { [string]$_.fileName }) -join ', '
-        throw ('Catalog file selection is ambiguous for {0}/{1}: {2}' -f $type, $kb, $names)
+    if ($candidateAssets.Count -eq 0) {
+        $ids = @($rows | ForEach-Object { [string]$_.uid }) -join ', '
+        throw ('Catalog DownloadDialog returned no matching {0} x64 asset for {1}/{2}; row UpdateIds: {3}' -f
+            $rule.ExpectedExtension, $type, $kb, $ids)
     }
-    $file = $preferred[0]
+    $selection = Select-CatalogCandidateAsset -Patch $Patch -Candidates @($candidateAssets.ToArray())
+    $row = $selection.Row
+    $file = $selection.File
+    $displayAssessment = Get-CatalogDisplayMetadataAssessment -Row $row -Rule $rule
+    $canonicalProductsText = @($rule.CanonicalProducts) -join ', '
+    $parserName = ''
+    if ($row.PSObject.Properties['parser']) { $parserName = [string]$row.parser }
+    Write-Step ('Catalog row resolved: {0}/{1} UpdateId={2} parser={3} selection={4} displayMetadata={5} classification={6} products={7} title={8}' -f
+        $type, $kb, $row.uid, $parserName, $selection.SelectionBasis, $displayAssessment.Status,
+        $rule.CanonicalClassification, $canonicalProductsText, $rule.CanonicalTitle)
+    if (-not $displayAssessment.Canonical) {
+        Write-Caution ('Catalog localized display metadata was isolated for {0}/{1}; canonical project metadata was retained. observed fingerprints: title={2} classification={3} products={4}' -f
+            $type, $kb, $displayAssessment.TitleSha256, $displayAssessment.ClassificationSha256, $displayAssessment.ProductsSha256)
+    }
     $fileParser = ''
     if ($file.PSObject.Properties['parser']) { $fileParser = [string]$file.parser }
     Write-Step ('Catalog file resolved: {0} parser={1} urlHost={2}' -f $file.fileName, $fileParser, ([uri]$file.url).Host)
@@ -5464,27 +5629,41 @@ function Resolve-ResolvedPatchAssetFromCatalog {
     } else {
         $Patch.UpdateId = [string]$row.uid
     }
-    if (-not $Patch.PSObject.Properties['Title']) {
-        $Patch | Add-Member -NotePropertyName Title -NotePropertyValue ([string]$row.title)
-    } else {
-        $Patch.Title = [string]$row.title
+    if (-not $Patch.PSObject.Properties['Title'] -or [string]::IsNullOrWhiteSpace([string]$Patch.Title)) {
+        if (-not $Patch.PSObject.Properties['Title']) {
+            $Patch | Add-Member -NotePropertyName Title -NotePropertyValue ([string]$rule.CanonicalTitle)
+        } else {
+            $Patch.Title = [string]$rule.CanonicalTitle
+        }
     }
     if (-not $Patch.PSObject.Properties['CatalogClassification']) {
-        $Patch | Add-Member -NotePropertyName CatalogClassification -NotePropertyValue ([string]$row.classification)
+        $Patch | Add-Member -NotePropertyName CatalogClassification -NotePropertyValue ([string]$rule.CanonicalClassification)
     } else {
-        $Patch.CatalogClassification = [string]$row.classification
+        $Patch.CatalogClassification = [string]$rule.CanonicalClassification
     }
     if (-not $Patch.PSObject.Properties['CatalogProducts']) {
-        $Patch | Add-Member -NotePropertyName CatalogProducts -NotePropertyValue ([string]$row.products)
+        $Patch | Add-Member -NotePropertyName CatalogProducts -NotePropertyValue $canonicalProductsText
     } else {
-        $Patch.CatalogProducts = [string]$row.products
+        $Patch.CatalogProducts = $canonicalProductsText
     }
-    if (-not $Patch.PSObject.Properties['CatalogDisplayLanguagePolicy']) {
-        $Patch | Add-Member -NotePropertyName CatalogDisplayLanguagePolicy -NotePropertyValue $script:CatDisplayLanguagePolicy
-    } else {
-        $Patch.CatalogDisplayLanguagePolicy = $script:CatDisplayLanguagePolicy
+    $metadataFields = [ordered]@{
+        CatalogDisplayLanguagePolicy = $script:CatDisplayLanguagePolicy
+        CatalogSelectionPolicy = $script:CatSelectionPolicy
+        CatalogSelectionBasis = [string]$selection.SelectionBasis
+        CatalogObservedMetadataStatus = [string]$displayAssessment.Status
+        CatalogObservedTitleSha256 = [string]$displayAssessment.TitleSha256
+        CatalogObservedClassificationSha256 = [string]$displayAssessment.ClassificationSha256
+        CatalogObservedProductsSha256 = [string]$displayAssessment.ProductsSha256
     }
-    Write-Ok ('Catalog asset resolved: {0}/{1} -> {2} (UpdateId {3}; metadata policy {4})' -f $type, $kb, $file.fileName, $row.uid, $script:CatDisplayLanguagePolicy)
+    foreach ($field in $metadataFields.Keys) {
+        if (-not $Patch.PSObject.Properties[$field]) {
+            $Patch | Add-Member -NotePropertyName $field -NotePropertyValue $metadataFields[$field]
+        } else {
+            $Patch.$field = $metadataFields[$field]
+        }
+    }
+    Write-Ok ('Catalog asset resolved: {0}/{1} -> {2} (UpdateId {3}; selection {4}; display metadata {5})' -f
+        $type, $kb, $file.fileName, $row.uid, $selection.SelectionBasis, $displayAssessment.Status)
     return $true
 }
 
@@ -12933,8 +13112,8 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
             -PatchRefreshMode ([string]$Script:EffectivePatchRefreshMode)
         Write-Step ('Effective patch refresh mode: {0}; monthly auxiliaries={1}; exact assets={2}' -f
             $refreshDecision.Mode, $refreshDecision.ResolveMonthlyAuxiliariesAtFetch, $refreshDecision.ExactCatalogAssetPolicy)
-        Write-Step ('Catalog metadata policy: requestLocale={0}; allowedDisplayLanguages={1}; classificationFallback=disabled' -f
-            $script:CatRequestLocale, $script:CatDisplayLanguagePolicy)
+        Write-Step ('Catalog identity policy: requestLocale={0} (best-effort); selection={1}; propagatedDisplayMetadata={2}' -f
+            $script:CatRequestLocale, $script:CatSelectionPolicy, $script:CatDisplayLanguagePolicy)
         if ($refreshDecision.ResolveMonthlyAuxiliariesAtFetch) {
             Update-MonthlyAuxiliaryResolvedPatchesAtFetch
         } else {
@@ -12980,6 +13159,12 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
                 CatalogClassification = $(if ($_.PSObject.Properties['CatalogClassification']) { [string]$_.CatalogClassification } else { '' })
                 CatalogProducts = $(if ($_.PSObject.Properties['CatalogProducts']) { [string]$_.CatalogProducts } else { '' })
                 CatalogDisplayLanguagePolicy = $script:CatDisplayLanguagePolicy
+                CatalogSelectionPolicy = $script:CatSelectionPolicy
+                CatalogSelectionBasis = $(if ($_.PSObject.Properties['CatalogSelectionBasis']) { [string]$_.CatalogSelectionBasis } else { '' })
+                CatalogObservedMetadataStatus = $(if ($_.PSObject.Properties['CatalogObservedMetadataStatus']) { [string]$_.CatalogObservedMetadataStatus } else { '' })
+                CatalogObservedTitleSha256 = $(if ($_.PSObject.Properties['CatalogObservedTitleSha256']) { [string]$_.CatalogObservedTitleSha256 } else { '' })
+                CatalogObservedClassificationSha256 = $(if ($_.PSObject.Properties['CatalogObservedClassificationSha256']) { [string]$_.CatalogObservedClassificationSha256 } else { '' })
+                CatalogObservedProductsSha256 = $(if ($_.PSObject.Properties['CatalogObservedProductsSha256']) { [string]$_.CatalogObservedProductsSha256 } else { '' })
                 CatalogRequestLocale = $script:CatRequestLocale
                 Source = [string]$_.Source
                 FileName = [System.IO.Path]::GetFileName([string]$_.LocalPath)

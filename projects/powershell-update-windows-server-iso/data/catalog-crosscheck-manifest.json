@@ -1,5 +1,5 @@
 {
-  "Schema": "catalog-crosscheck-manifest/1.2",
+  "Schema": "catalog-crosscheck-manifest/1.3",
   "BaselineId": "2026-07-B",
   "GeneratedAtUtc": "2026-07-15T00:00:00Z",
   "Notes": [
@@ -20,7 +20,12 @@
       "ProductMustNotContain": [],
       "Classification": "Critical Updates",
       "FileExtension": ".msu",
-      "ExpectedCompanionKbs": []
+      "ExpectedCompanionKbs": [],
+      "StableTitleMustContain": [
+        "Windows Server 2016"
+      ],
+      "ExpectedFileName": null,
+      "CanonicalTitle": "Windows Server 2016 (KB4132216)"
     },
     {
       "OsKey": "Server2016",
@@ -37,7 +42,12 @@
       "ProductMustNotContain": [],
       "Classification": "Security Updates",
       "FileExtension": ".msu",
-      "ExpectedCompanionKbs": []
+      "ExpectedCompanionKbs": [],
+      "StableTitleMustContain": [
+        "Windows Server 2016"
+      ],
+      "ExpectedFileName": "windows10.0-kb5099542-x64_f2b80b09ab604e1a220c253f9950fd162a8b1dcb.msu",
+      "CanonicalTitle": "Servicing Stack Update / Windows Server 2016 (KB5099542)"
     },
     {
       "OsKey": "Server2016",
@@ -54,7 +64,12 @@
       "ProductMustNotContain": [],
       "Classification": "Security Updates",
       "FileExtension": ".msu",
-      "ExpectedCompanionKbs": []
+      "ExpectedCompanionKbs": [],
+      "StableTitleMustContain": [
+        "Windows Server 2016"
+      ],
+      "ExpectedFileName": "windows10.0-kb5099535-x64_272339725d88cf3a31a3ea9bf4e3e61ace5c2d91.msu",
+      "CanonicalTitle": "Cumulative Update / Windows Server 2016 (KB5099535)"
     },
     {
       "OsKey": "Server2019",
@@ -71,7 +86,12 @@
       "ProductMustNotContain": [],
       "Classification": "Security Updates",
       "FileExtension": ".msu",
-      "ExpectedCompanionKbs": []
+      "ExpectedCompanionKbs": [],
+      "StableTitleMustContain": [
+        "Windows Server 2019"
+      ],
+      "ExpectedFileName": null,
+      "CanonicalTitle": "Servicing Stack Update / Windows Server 2019 (KB5005112)"
     },
     {
       "OsKey": "Server2019",
@@ -88,7 +108,12 @@
       "ProductMustNotContain": [],
       "Classification": "Security Updates",
       "FileExtension": ".msu",
-      "ExpectedCompanionKbs": []
+      "ExpectedCompanionKbs": [],
+      "StableTitleMustContain": [
+        "Windows Server 2019"
+      ],
+      "ExpectedFileName": "windows10.0-kb5099538-x64_8ed669753c1d230738068aaac189c6457937dafb.msu",
+      "CanonicalTitle": "Cumulative Update / Windows Server 2019 (KB5099538)"
     },
     {
       "OsKey": "Server2022",
@@ -105,7 +130,12 @@
       "ProductMustNotContain": [],
       "Classification": "Security Updates",
       "FileExtension": ".msu",
-      "ExpectedCompanionKbs": []
+      "ExpectedCompanionKbs": [],
+      "StableTitleMustContain": [
+        "21H2"
+      ],
+      "ExpectedFileName": null,
+      "CanonicalTitle": "Cumulative Update / version 21H2 (KB5030216)"
     },
     {
       "OsKey": "Server2022",
@@ -122,7 +152,12 @@
       "ProductMustNotContain": [],
       "Classification": "Security Updates",
       "FileExtension": ".msu",
-      "ExpectedCompanionKbs": []
+      "ExpectedCompanionKbs": [],
+      "StableTitleMustContain": [
+        "21H2"
+      ],
+      "ExpectedFileName": "windows10.0-kb5099540-x64_9238518dcf76e3b46d5c72e0392b0e04e5d2ae66.msu",
+      "CanonicalTitle": "Cumulative Update / version 21H2 (KB5099540)"
     },
     {
       "OsKey": "Server2025",
@@ -139,7 +174,12 @@
       "ProductMustNotContain": [],
       "Classification": "Security Updates",
       "FileExtension": ".msu",
-      "ExpectedCompanionKbs": []
+      "ExpectedCompanionKbs": [],
+      "StableTitleMustContain": [
+        "24H2"
+      ],
+      "ExpectedFileName": "windows11.0-kb5043080-x64_953449672073f8fb99badb4cc6d5d7849b9c83e8.msu",
+      "CanonicalTitle": "Cumulative Update / version 24H2 (KB5043080)"
     },
     {
       "OsKey": "Server2025",
@@ -156,7 +196,12 @@
       "ProductMustNotContain": [],
       "Classification": "Security Updates",
       "FileExtension": ".msu",
-      "ExpectedCompanionKbs": []
+      "ExpectedCompanionKbs": [],
+      "StableTitleMustContain": [
+        "24H2"
+      ],
+      "ExpectedFileName": "windows11.0-kb5099536-x64_62ec237bff7d2c4065936b2b2b58be57cf0d668d.msu",
+      "CanonicalTitle": "Cumulative Update / version 24H2 (KB5099536)"
     }
   ]
 }

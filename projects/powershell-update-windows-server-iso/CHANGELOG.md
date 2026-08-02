@@ -22,6 +22,48 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.18-r12.18] - 2026-08-02
+
+Tag: `catalog-stable-identity-localization-isolation` (the tag
+advances). Catalog asset selection moves fully onto the stable
+identity columns.
+
+### Changed
+
+- **Catalog selection keyed on stable identity, display text
+  isolated**: five new helpers (`Get-TextFingerprint`,
+  `Get-CatalogDisplayMetadataAssessment`, `Test-CatalogRowAgainstRule`,
+  `Get-PatchConfiguredCatalogIdentity`, `Select-CatalogCandidateAsset`)
+  restructure candidate selection so that the decision path consumes
+  only locale-stable columns (KB ID, Update ID, product, file name),
+  while localized Title/Classification display text is assessed
+  separately and reported, never matched on. This completes the
+  isolation line begun at r12.16 (Accept-Language pinning) and
+  r12.07/r12.08 (semantic aliases and structural fallback).
+- **Crosscheck manifest schema 1.2 → 1.3**:
+  `data/catalog-crosscheck-manifest.json` rules gain
+  `StableTitleMustContain`, `ExpectedFileName` and `CanonicalTitle`
+  columns, giving the crosscheck a per-rule stable-identity surface
+  (2026-07-B baseline identities carried over unchanged).
+- **T40**: release pin advanced to `update-wsi-2026.07.18-r12.18`
+  with the measured tag.
+
+### Distribution note
+
+The delivered snapshot ships its own regression suite under `tests/`
+and two workflow files (`catalog-live.yml`,
+`powershell-regression.yml`). Input-only per the series ruling;
+no distribution test or workflow file is committed.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/123/64/112 with T45 NOT-YET (unchanged — the declared policy
+surface does not move at this revision). PSA **4E/47W/7I** on the
+committed tree — eight warnings join the debt with the new catalog
+helpers; committed verbatim per the no-fix-forward rule, draining
+post-series.
+
 ## [update-wsi-2026.07.18-r12.17] - 2026-08-02
 
 Tag: `generic-list-binder-hardening` (the tag advances). Generic-list
