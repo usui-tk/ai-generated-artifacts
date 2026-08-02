@@ -703,9 +703,9 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.30-r12.46'
-# Validation marker: pwsh7-runtime-validated on PowerShell 7.6.4 Linux x64; Windows-native gates remain required.
-$Script:ScriptTag     = 'safeos-p11-metadata-contract-isolation-stage1'
+$Script:ScriptVersion = 'update-wsi-2026.07.31-r12.47'
+# Validation marker: r12.47 portable static regression complete; Windows-native gates remain required.
+$Script:ScriptTag     = 'server2022-setupdu-authority'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -12070,13 +12070,161 @@ function Get-SetupDuFileManifest {
 }
 
 
+function Get-SetupDuOverlayPolicy {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([AllowNull()]$Contract)
+
+    if (-not $Contract) { $Contract = $Script:ServicingContract }
+    if (-not $Contract -and $Script:OsVersion) {
+        $Contract = Get-ServicingContract -OsKey ([string]$Script:OsVersion)
+    }
+
+    $sameVersionPolicy = 'ManualReviewRequired'
+    $authorityPolicy = 'CatalogScopedIdentityAndLocalHash'
+    $requireTrustedPackage = $false
+    if ($Contract -and $Contract.Setup) {
+        if ($Contract.Setup.PSObject.Properties['SameVersionDifferentContentPolicy']) {
+            $sameVersionPolicy = [string]$Contract.Setup.SameVersionDifferentContentPolicy
+        }
+        if ($Contract.Setup.PSObject.Properties['PackageAuthorityPolicy']) {
+            $authorityPolicy = [string]$Contract.Setup.PackageAuthorityPolicy
+        }
+        if ($Contract.Setup.PSObject.Properties['RequireTrustedPackage']) {
+            $requireTrustedPackage = [bool]$Contract.Setup.RequireTrustedPackage
+        }
+    }
+
+    if ($sameVersionPolicy -notin @('ManualReviewRequired','ApplyTrustedPackagePayload')) {
+        throw ('Unsupported Setup DU SameVersionDifferentContentPolicy: {0}' -f $sameVersionPolicy)
+    }
+    if ($authorityPolicy -ne 'CatalogScopedIdentityAndLocalHash') {
+        throw ('Unsupported Setup DU PackageAuthorityPolicy: {0}' -f $authorityPolicy)
+    }
+
+    return [pscustomobject][ordered]@{
+        SameVersionDifferentContentPolicy = $sameVersionPolicy
+        PackageAuthorityPolicy = $authorityPolicy
+        RequireTrustedPackage = $requireTrustedPackage
+    }
+}
+
+function Get-SetupDuPackageAuthority {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)]$Patch)
+
+    $kbId = [string]$Patch.KbId
+    $updateId = if ($Patch.PSObject.Properties['UpdateId']) { [string]$Patch.UpdateId } else { '' }
+    $fileName = if ($Patch.PSObject.Properties['FileName']) { [string]$Patch.FileName } else { '' }
+    $localPath = if ($Patch.PSObject.Properties['LocalPath']) { [string]$Patch.LocalPath } else { '' }
+    $source = if ($Patch.PSObject.Properties['Source']) { [string]$Patch.Source } elseif ($Patch.PSObject.Properties['DownloadUrl']) { [string]$Patch.DownloadUrl } else { '' }
+
+    $actualHash = ''
+    $localExists = (-not [string]::IsNullOrWhiteSpace($localPath)) -and (Test-Path -LiteralPath $localPath -PathType Leaf)
+    if ($localExists) {
+        $actualHash = (Get-FileHash -LiteralPath $localPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+
+    $expectedHash = ''
+    foreach ($propertyName in @('LocalAssetSha256','DeclaredSha256','Sha256')) {
+        if ($Patch.PSObject.Properties[$propertyName]) {
+            $candidate = [string]$Patch.$propertyName
+            if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+                $expectedHash = $candidate.ToLowerInvariant()
+                break
+            }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($expectedHash) -and $Patch.PSObject.Properties['AssetMetadataEvidence']) {
+        $metadataPath = [string]$Patch.AssetMetadataEvidence
+        if ($metadataPath -and (Test-Path -LiteralPath $metadataPath -PathType Leaf)) {
+            try {
+                $metadata = Get-Content -LiteralPath $metadataPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ($metadata.PSObject.Properties['Sha256']) {
+                    $expectedHash = ([string]$metadata.Sha256).ToLowerInvariant()
+                }
+            } catch { $null = $_ }
+        }
+    }
+    $hashVerified = $localExists -and (-not [string]::IsNullOrWhiteSpace($expectedHash)) -and ($actualHash -eq $expectedHash)
+
+    $sourceHost = ''
+    $trustedSourceHost = $false
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($source)) {
+            $sourceUri = [uri]$source
+            $sourceHost = [string]$sourceUri.DnsSafeHost
+            $trustedSourceHost = ($sourceUri.Scheme -eq 'https') -and (
+                $sourceHost -eq 'download.windowsupdate.com' -or
+                $sourceHost.EndsWith('.download.windowsupdate.com',[System.StringComparison]::OrdinalIgnoreCase)
+            )
+        }
+    } catch {
+        $sourceHost = ''
+        $trustedSourceHost = $false
+    }
+
+    $parsedUpdateId = [guid]::Empty
+    $updateIdValid = [guid]::TryParse($updateId,[ref]$parsedUpdateId)
+    $catalogRecord = $null
+    $catalogPath = if ($Script:LogsDir) { Join-Path $Script:LogsDir 'P04_catalog_crosscheck.json' } else { '' }
+    if ($catalogPath -and (Test-Path -LiteralPath $catalogPath -PathType Leaf)) {
+        try {
+            $catalogRows = @(Get-Content -LiteralPath $catalogPath -Raw -Encoding UTF8 | ConvertFrom-Json)
+            $catalogRecord = @($catalogRows | Where-Object {
+                [string]$_.Kind -eq 'SetupDU' -and
+                [string]$_.KbId -eq $kbId -and
+                [string]$_.UpdateId -eq $updateId -and
+                [string]$_.FileName -eq $fileName -and
+                [string]$_.Source -eq $source -and
+                $_.CatalogScopedIdentityVerified -eq $true
+            }) | Select-Object -First 1
+        } catch { $catalogRecord = $null }
+    }
+    $catalogIdentityVerified = $null -ne $catalogRecord
+    $patchTypeValid = ([string]$Patch.PatchType -eq 'SetupDU')
+    $kbIdValid = $kbId -match '^KB\d+$'
+    $trusted = $patchTypeValid -and $kbIdValid -and $updateIdValid -and $trustedSourceHost -and $hashVerified -and $catalogIdentityVerified
+
+    $statusParts = [System.Collections.Generic.List[string]]::new()
+    if (-not $patchTypeValid) { $statusParts.Add('PatchTypeMismatch') | Out-Null }
+    if (-not $kbIdValid) { $statusParts.Add('KbIdInvalid') | Out-Null }
+    if (-not $updateIdValid) { $statusParts.Add('UpdateIdInvalid') | Out-Null }
+    if (-not $trustedSourceHost) { $statusParts.Add('SourceHostUntrusted') | Out-Null }
+    if (-not $hashVerified) { $statusParts.Add('LocalHashNotVerified') | Out-Null }
+    if (-not $catalogIdentityVerified) { $statusParts.Add('CatalogScopedIdentityNotVerified') | Out-Null }
+    if ($statusParts.Count -eq 0) { $statusParts.Add('CatalogScopedIdentityAndLocalHashVerified') | Out-Null }
+
+    return [pscustomobject][ordered]@{
+        SchemaVersion = 'setupdu-package-authority/1.0'
+        KbId = $kbId
+        UpdateId = $updateId
+        FileName = $fileName
+        LocalPath = $localPath
+        Source = $source
+        SourceHost = $sourceHost
+        LocalExists = $localExists
+        ExpectedSha256 = $expectedHash
+        ActualSha256 = $actualHash
+        HashVerified = $hashVerified
+        CatalogEvidencePath = $catalogPath
+        CatalogScopedIdentityVerified = $catalogIdentityVerified
+        Trusted = $trusted
+        Status = ($statusParts -join ';')
+    }
+}
+
+
 function Get-SetupDuFileVersionDecision {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)]$ManifestRow,
         [Parameter(Mandatory)][string]$KbId,
-        [string]$BootWimSetupBinaryStash=''
+        [string]$BootWimSetupBinaryStash='',
+        [AllowNull()]$PackageAuthority,
+        [ValidateSet('ManualReviewRequired','ApplyTrustedPackagePayload')][string]$SameVersionDifferentContentPolicy='ManualReviewRequired'
     )
     $sourcePath=[string]$ManifestRow.SourcePath
     $destinationPath=[string]$ManifestRow.DestinationPath
@@ -12117,9 +12265,15 @@ function Get-SetupDuFileVersionDecision {
                 $reasonCode='SetupDuSourceOlderThanDestination'
                 $reason=('Setup DU source version {0} is older than destination version {1}.' -f $sourceVersion,$destinationVersion)
             }elseif($comparison.Result -eq 0){
-                $decision='ManualReviewRequired'
-                $reasonCode='SameVersionDifferentContent'
-                $reason=('Source and destination both report version {0}, but SHA-256 differs.' -f $sourceVersion)
+                if($SameVersionDifferentContentPolicy -eq 'ApplyTrustedPackagePayload' -and $PackageAuthority -and [bool]$PackageAuthority.Trusted){
+                    $decision='Apply'
+                    $reasonCode='SetupDuTrustedPackageSameVersionReplacement'
+                    $reason=('Source and destination both report version {0}, but the trusted Catalog Setup DU package carries different content and is authoritative for the media overlay.' -f $sourceVersion)
+                }else{
+                    $decision='ManualReviewRequired'
+                    $reasonCode='SameVersionDifferentContent'
+                    $reason=('Source and destination both report version {0}, but SHA-256 differs and trusted package replacement policy was not satisfied.' -f $sourceVersion)
+                }
             }else{
                 $decision='Apply'
                 $reasonCode='SetupDuFileUpgrade'
@@ -12136,7 +12290,7 @@ function Get-SetupDuFileVersionDecision {
         }
     }
     return [pscustomobject][ordered]@{
-        SchemaVersion='setupdu-file-decision/1.0'
+        SchemaVersion='setupdu-file-decision/1.1'
         TimestampUtc=[datetime]::UtcNow.ToString('o')
         OsKey=[string]$Script:OsVersion
         KbId=$KbId
@@ -12153,6 +12307,12 @@ function Get-SetupDuFileVersionDecision {
         DestinationSizeBytes=$destinationSize
         DestinationSha256Before=$destinationHash
         DestinationFileVersionBefore=$destinationVersion
+        SameVersionDifferentContentPolicy=$SameVersionDifferentContentPolicy
+        PackageAuthorityTrusted=$(if($PackageAuthority){[bool]$PackageAuthority.Trusted}else{$false})
+        PackageAuthorityStatus=$(if($PackageAuthority){[string]$PackageAuthority.Status}else{'NotProvided'})
+        PackageUpdateId=$(if($PackageAuthority){[string]$PackageAuthority.UpdateId}else{''})
+        PackageSha256=$(if($PackageAuthority){[string]$PackageAuthority.ActualSha256}else{''})
+        PackageSourceHost=$(if($PackageAuthority){[string]$PackageAuthority.SourceHost}else{''})
         Decision=$decision
         ReasonCode=$reasonCode
         Reason=$reason
@@ -12161,17 +12321,19 @@ function Get-SetupDuFileVersionDecision {
 
 function Write-SetupDuFileDecisionEvidence {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][object[]]$Decisions)
+    param([Parameter(Mandatory)][object[]]$Decisions,[AllowNull()]$PackageAuthority,[AllowNull()]$Policy)
     Initialize-RuntimeDirectories -Directory @($Script:VersionDecisionDir)
     $jsonPath=Join-Path $Script:VersionDecisionDir 'P09_setupdu_file_decisions.json'
     $csvPath=Join-Path $Script:VersionDecisionDir 'P09_setupdu_file_decisions.csv'
     Save-CanonicalJsonFile -InputObject ([pscustomobject][ordered]@{
-        SchemaVersion='setupdu-file-decision-set/1.0'
+        SchemaVersion='setupdu-file-decision-set/1.1'
         CreatedAtUtc=[datetime]::UtcNow.ToString('o')
         OsKey=[string]$Script:OsVersion
+        Policy=$Policy
+        PackageAuthority=$PackageAuthority
         Decisions=@($Decisions)
     }) -Path $jsonPath -Depth 12
-    @($Decisions)|Select-Object KbId,RelativePath,SourceFileVersion,DestinationFileVersionBefore,Decision,ReasonCode,SourceSha256,DestinationSha256Before,OverriddenByBootWim|Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
+    @($Decisions)|Select-Object KbId,RelativePath,SourceFileVersion,DestinationFileVersionBefore,Decision,ReasonCode,SourceSha256,DestinationSha256Before,OverriddenByBootWim,SameVersionDifferentContentPolicy,PackageAuthorityTrusted,PackageAuthorityStatus,PackageUpdateId,PackageSha256,PackageSourceHost|Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
     return [pscustomobject]@{JsonPath=$jsonPath;CsvPath=$csvPath}
 }
 
@@ -12180,14 +12342,21 @@ function Invoke-SetupDuVersionAwareOverlay {
     [OutputType([object[]])]
     param(
         [Parameter(Mandatory)][object[]]$SourceManifest,
-        [Parameter(Mandatory)][string]$KbId
+        [Parameter(Mandatory)][string]$KbId,
+        [Parameter(Mandatory)]$Patch
     )
     $stashDir=Join-Path $Script:WorkRoot 'work\p08s_setup_binaries'
+    $policy=Get-SetupDuOverlayPolicy -Contract $Script:ServicingContract
+    $packageAuthority=Get-SetupDuPackageAuthority -Patch $Patch
+    if($policy.RequireTrustedPackage -and -not [bool]$packageAuthority.Trusted){
+        throw ('Setup DU package authority validation failed before overlay: {0}/{1}; status={2}; catalogEvidence={3}' -f $KbId,[string]$Patch.FileName,[string]$packageAuthority.Status,[string]$packageAuthority.CatalogEvidencePath)
+    }
+    Write-Step ('Setup DU package authority: trusted={0}; status={1}; sha256={2}' -f [bool]$packageAuthority.Trusted,[string]$packageAuthority.Status,[string]$packageAuthority.ActualSha256)
     $decisions=@()
     foreach($row in @($SourceManifest)){
-        $decisions+=,(Get-SetupDuFileVersionDecision -ManifestRow $row -KbId $KbId -BootWimSetupBinaryStash $stashDir)
+        $decisions+=,(Get-SetupDuFileVersionDecision -ManifestRow $row -KbId $KbId -BootWimSetupBinaryStash $stashDir -PackageAuthority $packageAuthority -SameVersionDifferentContentPolicy ([string]$policy.SameVersionDifferentContentPolicy))
     }
-    $evidence=Write-SetupDuFileDecisionEvidence -Decisions $decisions
+    $evidence=Write-SetupDuFileDecisionEvidence -Decisions $decisions -PackageAuthority $packageAuthority -Policy $policy
     $blocking=@($decisions|Where-Object{$_.Decision -in @('RejectDowngrade','ManualReviewRequired')})
     if($blocking.Count -gt 0){
         $summary=($blocking|Select-Object -First 10|ForEach-Object{('{0}: {1} ({2})' -f $_.RelativePath,$_.Decision,$_.ReasonCode)}) -join '; '
@@ -12220,8 +12389,8 @@ function Invoke-SetupDuVersionAwareOverlay {
     $failed=@($records|Where-Object{-not $_.MatchAfter})
     $overlayPath=Join-Path $Script:LogsDir 'setupdu_overlay_manifest.json'
     Save-CanonicalJsonFile -InputObject ([pscustomobject][ordered]@{
-        SchemaVersion='setupdu-overlay/2.0';CreatedAtUtc=[datetime]::UtcNow.ToString('o');OsKey=[string]$Script:OsVersion;KbId=$KbId
-        DecisionEvidence=$evidence;Records=$records.ToArray()
+        SchemaVersion='setupdu-overlay/2.1';CreatedAtUtc=[datetime]::UtcNow.ToString('o');OsKey=[string]$Script:OsVersion;KbId=$KbId
+        Policy=$policy;PackageAuthority=$packageAuthority;DecisionEvidence=$evidence;Records=$records.ToArray()
     }) -Path $overlayPath -Depth 12
     if($failed.Count -gt 0){throw ('Setup DU overlay verification failed for {0} file(s); evidence={1}' -f $failed.Count,$overlayPath)}
     return $records.ToArray()
@@ -16096,7 +16265,7 @@ function New-Server2022ServicingContract {
     param()
     return [pscustomobject][ordered]@{
         SchemaVersion='servicing-contract/2.1'
-        ContractRevision='Server2022-r4'
+        ContractRevision='Server2022-r5'
         OsKey='Server2022'
         PatchModel='embedded-ssu-du'
         VersionDecisionPolicy='StrictFailClosed'
@@ -16106,7 +16275,7 @@ function New-Server2022ServicingContract {
         Ssu=[pscustomobject][ordered]@{StateResolver='InstalledPackageIdentity';Monotonic=$true;BridgePolicy='CompareImageAndSsuFloors'}
         Discovery=[pscustomobject][ordered]@{ResolveStandaloneSsuMonthly=$false}
         DotNet=[pscustomobject][ordered]@{SupportedRuntimeSelectors=@('4.8','4.8.1')}
-        Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After'}
+        Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After';SameVersionDifferentContentPolicy='ApplyTrustedPackagePayload';PackageAuthorityPolicy='CatalogScopedIdentityAndLocalHash';RequireTrustedPackage=$true}
         RoleTargets=[pscustomobject][ordered]@{
             SourcePrerequisite=@('Install','Boot','WinRE')
             ServicingStackCarrier=@('Install','Boot','WinRE')
@@ -16236,6 +16405,7 @@ function Get-ServicingContractComponentHashes {
         ObservationSha256=(Get-CanonicalObjectSha256 -InputObject $Contract.Observation -Depth 12)
         DiscoverySha256=(Get-CanonicalObjectSha256 -InputObject $Contract.Discovery -Depth 12)
         DotNetSha256=(Get-CanonicalObjectSha256 -InputObject $Contract.DotNet -Depth 12)
+        SetupSha256=(Get-CanonicalObjectSha256 -InputObject $Contract.Setup -Depth 12)
     }
 }
 
@@ -16300,7 +16470,7 @@ function Assert-AllServicingContractBaselines {
         $entry=if($prop){$prop.Value}else{$null}
         $expectedContract=if($entry -and $entry.PSObject.Properties['ContractSha256']){[string]$entry.ContractSha256}elseif($entry -and $entry.PSObject.Properties['Sha256']){[string]$entry.Sha256}else{''}
         $componentResults=[System.Collections.Generic.List[object]]::new()
-        foreach($field in @('ContractSha256','TargetMapSha256','SequenceSha256','VerificationSha256','ObservationSha256','DiscoverySha256','DotNetSha256')){
+        foreach($field in @('ContractSha256','TargetMapSha256','SequenceSha256','VerificationSha256','ObservationSha256','DiscoverySha256','DotNetSha256','SetupSha256')){
             $expected=if($entry -and $entry.PSObject.Properties[$field]){[string]$entry.$field}elseif($field -eq 'ContractSha256'){$expectedContract}else{''}
             $actualValue=[string]$actual.$field
             $pass=(-not [string]::IsNullOrWhiteSpace($expected) -and $actualValue -eq $expected)
@@ -16326,7 +16496,7 @@ function Assert-AllServicingContractBaselines {
         throw ('UnexpectedCrossOsBehaviorChange: servicing contract baseline mismatch: {0}' -f ($messages -join '; '))
     }
     return [pscustomobject][ordered]@{
-        SchemaVersion='servicing-contract-baseline-check/2.1'
+        SchemaVersion='servicing-contract-baseline-check/2.2'
         BaselinePath=$path
         Passed=$true
         Results=@($results)
@@ -18714,7 +18884,7 @@ function Invoke-BuildPhase09_AssembleIso {
                 if ($LASTEXITCODE -eq 0) {
                     $setupDestRoot = Join-Path $Script:ExtractedDir 'sources'
                     $sourceManifest = @(Get-SetupDuFileManifest -Root $tmpExtract -DestinationRoot $setupDestRoot)
-                    $overlayRecords = @(Invoke-SetupDuVersionAwareOverlay -SourceManifest $sourceManifest -KbId $p.KbId)
+                    $overlayRecords = @(Invoke-SetupDuVersionAwareOverlay -SourceManifest $sourceManifest -KbId $p.KbId -Patch $p)
                     $setupEvidencePath = Join-Path $Script:LogsDir 'setupdu_overlay_manifest.json'
                     Write-Ok ('Version-aware Setup DU overlay completed: {0}; records={1}; evidence: {2}' -f $p.KbId,$overlayRecords.Count,$setupEvidencePath)
                 } else {

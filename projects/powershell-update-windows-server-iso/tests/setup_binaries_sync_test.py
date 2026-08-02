@@ -182,8 +182,8 @@ def main() -> int:
         "SetupBinarySync_" in code and "-Actual 'MISMATCH' -Status 'Fail'" in code,
         "P11 pin failed", passed, failed)
     passed, failed = check(
-        "version bumped to r12.46 (tag retained: safeos-p11-metadata-contract-isolation-stage1)",
-        "update-wsi-2026.07.30-r12.46" in code and "'safeos-p11-metadata-contract-isolation-stage1'" in code,
+        "version bumped to r12.47 (tag: server2022-setupdu-authority)",
+        "update-wsi-2026.07.31-r12.47" in code and "'server2022-setupdu-authority'" in code,
         "bump pin failed", passed, failed)
 
     print(f"\n  Summary: {passed} passed, {failed} failed, {passed + failed} total")

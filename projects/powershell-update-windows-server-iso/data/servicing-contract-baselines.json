@@ -1,6 +1,6 @@
 {
-  "SchemaVersion": "servicing-contract-baselines/2.2",
-  "Purpose": "Fail closed when any OS-specific servicing contract, role target map, sequence, verification, observation, discovery, or .NET rule changes without an explicitly reviewed baseline update. r12.46 adds explicit LCU evidence authority and a Server 2022 boot.wim smoke-test gate.",
+  "SchemaVersion": "servicing-contract-baselines/2.3",
+  "Purpose": "Fail closed when any OS-specific servicing contract, role target map, sequence, verification, observation, discovery, .NET, or Setup DU rule changes without an explicitly reviewed baseline update. r12.47 adds package-authoritative handling for trusted Server 2022 Setup DU same-version replacement payloads.",
   "Contracts": {
     "Server2016": {
       "ContractRevision": "Server2016-r4",
@@ -11,7 +11,8 @@
       "VerificationSha256": "205a3fe624b04d058d42f779bf277672c90589eee26c593860d559e77fc00df4",
       "ObservationSha256": "77bf86a203a6700f11cc88cbdd92ed6aee9f7471844eb220c40c014afa4f15df",
       "DiscoverySha256": "ec8d48d340ce385d227a67513cfa1281c58f4bd426aea49b25af8c8b6db5fa66",
-      "DotNetSha256": "e5c0580cd9e00fa8fade253a391cb620274be334fadad6e3a1ca20de0f9f2582"
+      "DotNetSha256": "e5c0580cd9e00fa8fade253a391cb620274be334fadad6e3a1ca20de0f9f2582",
+      "SetupSha256": "f32dde2db1ebff6cec9cfe84dff0e1f595d9511612e5b4f40b6c54f25cbb8105"
     },
     "Server2019": {
       "ContractRevision": "Server2019-r4",
@@ -22,18 +23,20 @@
       "VerificationSha256": "623a3c72e6817a11a0600ad8835ae09175962ed32c8ef73f587639c16f427f42",
       "ObservationSha256": "13b4f32b3550fc47c0fa6bdf52db573486fa3ca9fee2589002902bdb0942d328",
       "DiscoverySha256": "5299d46526c2198d6c32f324ddc2bea5f80f41c7265fcad705e8aec4d16e8848",
-      "DotNetSha256": "409f4d23ea7eaa8a224c0ff7db4c8aee89658713d9e63103538f1445a42be3d0"
+      "DotNetSha256": "409f4d23ea7eaa8a224c0ff7db4c8aee89658713d9e63103538f1445a42be3d0",
+      "SetupSha256": "f32dde2db1ebff6cec9cfe84dff0e1f595d9511612e5b4f40b6c54f25cbb8105"
     },
     "Server2022": {
-      "ContractRevision": "Server2022-r4",
-      "Sha256": "068e5847cd55828a89fc1109ae1b50b9aa37ebcd6bc41d06a08db3151bdf58ff",
-      "ContractSha256": "068e5847cd55828a89fc1109ae1b50b9aa37ebcd6bc41d06a08db3151bdf58ff",
+      "ContractRevision": "Server2022-r5",
+      "Sha256": "2b2b18817c7e87c0612907ccac512531da7e1f6afdffdc2e54bc896efa9c9b4d",
+      "ContractSha256": "2b2b18817c7e87c0612907ccac512531da7e1f6afdffdc2e54bc896efa9c9b4d",
       "TargetMapSha256": "8035d5f946e1e9dde0357bd44da0848daf6983e53e892a36c0e82062debcd4a2",
       "SequenceSha256": "4baea8f20294967de9e64f75048b2fd613810cc01c85b58d0f97b78303951c75",
       "VerificationSha256": "a3ca77b1a079a21b4b177ef0ca42e862622aaff2107485f37c0cf0e6da8e8411",
       "ObservationSha256": "77bf86a203a6700f11cc88cbdd92ed6aee9f7471844eb220c40c014afa4f15df",
       "DiscoverySha256": "5299d46526c2198d6c32f324ddc2bea5f80f41c7265fcad705e8aec4d16e8848",
-      "DotNetSha256": "e0eb99f9dec767fb1289d3277fc69a6c854791584b0433606257559b46d59749"
+      "DotNetSha256": "e0eb99f9dec767fb1289d3277fc69a6c854791584b0433606257559b46d59749",
+      "SetupSha256": "d5b660115501715bfbd16c11f3f96396fa8668f3c783457012153ce3432b299e"
     },
     "Server2025": {
       "ContractRevision": "Server2025-r4",
@@ -44,7 +47,8 @@
       "VerificationSha256": "1292a0ac6df8fe5ac5799a4eab86daa539e327bd10333d6c8b02238770167f37",
       "ObservationSha256": "77bf86a203a6700f11cc88cbdd92ed6aee9f7471844eb220c40c014afa4f15df",
       "DiscoverySha256": "5299d46526c2198d6c32f324ddc2bea5f80f41c7265fcad705e8aec4d16e8848",
-      "DotNetSha256": "da96332fd55393a8e6ebd6f68c910f112c979eb0d4d02398a082783895e66097"
+      "DotNetSha256": "da96332fd55393a8e6ebd6f68c910f112c979eb0d4d02398a082783895e66097",
+      "SetupSha256": "f32dde2db1ebff6cec9cfe84dff0e1f595d9511612e5b4f40b6c54f25cbb8105"
     }
   }
 }

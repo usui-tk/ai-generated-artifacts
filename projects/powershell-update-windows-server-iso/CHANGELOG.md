@@ -22,6 +22,50 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.31-r12.47] - 2026-08-02
+
+Tag: `server2022-setupdu-authority`.
+
+### Added
+
+- **Setup DU package authority for Server 2022**: the Server 2022
+  servicing contract (advanced to `-r5`) extends its `Setup`
+  declaration with `SameVersionDifferentContentPolicy`
+  (`ApplyTrustedPackagePayload`), `PackageAuthorityPolicy`
+  (`CatalogScopedIdentityAndLocalHash`) and
+  `RequireTrustedPackage=true`. New helpers
+  `Get-SetupDuOverlayPolicy` and `Get-SetupDuPackageAuthority`
+  establish package authority before an overlay: patch type, KB id,
+  UpdateId, trusted source host, local SHA-256 and catalog-scoped
+  identity must all verify, and the result is written as
+  `setupdu-package-authority/1.0` evidence. When source and
+  destination report the same file version but differing SHA-256,
+  the trusted package payload is applied under the declared policy;
+  if authority cannot be established the overlay fails closed before
+  touching the media.
+
+### Changed
+
+- **Servicing-contract baselines advanced**: schema `2.2` → `2.3`;
+  the Server 2022 contract revision `-r4` → `-r5` with re-pinned
+  component hashes (declared change; the other three contracts are
+  unchanged at `-r4`; T45 totals unchanged at 21).
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.07.31-r12.47`
+  with the measured tag `server2022-setupdu-authority` (the tag
+  changed at this revision after being retained since r12.44). No
+  terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/120/64/112 + T45 21. PSA committed 4E/110W/10I (raw sweep
+  4E/111W/10I: +1W is the PSA7002 LF artefact; declared series
+  debt). The snapshot script remains BOM-absent at r12.47 (O1 watch
+  continues).
+
 ## [update-wsi-2026.07.30-r12.46] - 2026-08-02
 
 Tag retained: `safeos-p11-metadata-contract-isolation-stage1`.
