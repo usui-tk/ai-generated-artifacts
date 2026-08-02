@@ -22,6 +22,43 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.18-r12.19] - 2026-08-02
+
+Tag: `catalog-scoped-product-identity-live-verified` (the tag
+advances). Catalog resolution gains a scoped, per-asset identity
+verification tier, live-verified for the 2026-07 baseline.
+
+### Changed
+
+- **Scoped product-identity verification**: five new helpers
+  (`Get-CatalogScopedElementText`, `Get-CatalogScopedLabeledText`,
+  `Get-CatalogScopedDetail`, `Test-CatalogProductScope`,
+  `Test-CatalogScopedDetailAgainstRule`) add a ScopedView tier to
+  Catalog resolution — each live case must pass Search product scope,
+  ScopedView UpdateId/KB/product/architecture verification and
+  DownloadDialog file selection before an asset is accepted. This is
+  the scheduled first step of the T30 structural answer (scoped
+  product identity at this revision; pinned identity completes at
+  r12.51–r12.53 per the reclassification card — T30 remains
+  SUPERSEDED-PENDING, no contract change here).
+- **Crosscheck manifest schema 1.3 → 1.4**: rules gain
+  `ExpectedUpdateId`, `ExpectedFileName` values are filled for the
+  full four-generation 2026-07 baseline, and the manifest now carries
+  all exact assets used by that baseline (not core anchors only).
+- **Config UpdateId columns resolved**: the four `config-Server*.json`
+  files fill previously null `UpdateId` values with the live-resolved
+  Catalog Update IDs for their declared lines (declared surface
+  content only; no policy-shape change).
+- **T40**: release pin advanced to `update-wsi-2026.07.18-r12.19`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/123/64/112 with T45 NOT-YET (unchanged). PSA **4E/47W/7I** on
+the committed tree — unchanged from r12.18; committed verbatim per
+the no-fix-forward rule.
+
 ## [update-wsi-2026.07.18-r12.18] - 2026-08-02
 
 Tag: `catalog-stable-identity-localization-isolation` (the tag

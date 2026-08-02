@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Build an updated Windows Server ISO by integrating SSU/LCU/Dynamic Updates
     into the install.wim, boot.wim, and winre.wim, then repackaging the media.
@@ -659,8 +659,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.18-r12.18'
-$Script:ScriptTag     = 'catalog-stable-identity-localization-isolation'
+$Script:ScriptVersion = 'update-wsi-2026.07.18-r12.19'
+$Script:ScriptTag     = 'catalog-scoped-product-identity-live-verified'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -4803,7 +4803,7 @@ $script:CatUA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (K
 $script:CatRequestLocale = 'en-US'
 $script:CatAcceptLanguage = 'en-US,en;q=0.9'
 $script:CatDisplayLanguagePolicy = 'canonical-project-metadata-only'
-$script:CatSelectionPolicy = 'stable-kb-os-architecture-updateid-file-digest'
+$script:CatSelectionPolicy = 'scoped-product-kb-architecture-updateid-file-digest'
 $script:CatSearchUrl   = 'https://www.catalog.update.microsoft.com/Search.aspx'
 $script:CatDownloadUrl = 'https://www.catalog.update.microsoft.com/DownloadDialog.aspx'
 $script:CatScopedUrl   = 'https://www.catalog.update.microsoft.com/ScopedViewInline.aspx'
@@ -4894,7 +4894,7 @@ function Search-Catalog {
     )
     $slug = [regex]::Replace($Query, '[^A-Za-z0-9]+', '_')
     if ($slug.Length -gt 60) { $slug = $slug.Substring(0, 60) }
-    $tag = "search.$slug.raw.r1218.html"
+    $tag = "search.$slug.raw.r1219.html"
     if ($RefreshCache) {
         Remove-Item -LiteralPath (Join-Path $script:CatCache $tag) -Force -ErrorAction SilentlyContinue
     }
@@ -4998,6 +4998,166 @@ function Search-Catalog {
     return @($byUid.Values | Sort-Object title, uid)
 }
 
+
+function Get-CatalogScopedElementText {
+    <# Extract a Catalog detail field by stable ASP.NET control-id suffix. #>
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$Html,
+        [Parameter(Mandatory)][string[]]$IdSuffixes
+    )
+    foreach ($suffix in @($IdSuffixes)) {
+        if ([string]::IsNullOrWhiteSpace($suffix)) { continue }
+        $pattern = '<[^>]+id\s*=\s*["''][^"'']*' + [regex]::Escape($suffix) + '["''][^>]*>(.*?)</[^>]+>'
+        $match = [regex]::Match($Html, $pattern, 'Singleline,IgnoreCase')
+        if ($match.Success) {
+            $value = Convert-HtmlToText $match.Groups[1].Value
+            if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
+        }
+    }
+    return ''
+}
+
+function Get-CatalogScopedLabeledText {
+    <# English-label fallback. Control-id extraction remains the primary path. #>
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$PlainText,
+        [Parameter(Mandatory)][string]$StartLabel,
+        [Parameter(Mandatory)][string[]]$NextLabels
+    )
+    $next = @($NextLabels | ForEach-Object { [regex]::Escape([string]$_) }) -join '|'
+    $pattern = [regex]::Escape($StartLabel) + '\s*(.*?)\s*(?=' + $next + '|$)'
+    $match = [regex]::Match($PlainText, $pattern, 'Singleline,IgnoreCase')
+    if ($match.Success) { return $match.Groups[1].Value.Trim() }
+    return ''
+}
+
+function Get-CatalogScopedDetail {
+    <#
+    .SYNOPSIS
+        Read the official Catalog Update Details page for one UpdateId.
+    .DESCRIPTION
+        Search-result titles are presentation metadata and can be localized.
+        The ScopedView endpoint supplies the row's product scope, KB identity,
+        architecture and UpdateId. Raw HTML is cached only under WorkRoot.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F-]{36}$')][string]$UpdateId,
+        [switch]$RefreshCache
+    )
+    $tag = 'scoped.{0}.raw.r1219.html' -f $UpdateId.ToLowerInvariant()
+    if ($RefreshCache) {
+        Remove-Item -LiteralPath (Join-Path $script:CatCache $tag) -Force -ErrorAction SilentlyContinue
+    }
+    $url = $script:CatScopedUrl + '?updateid=' + [uri]::EscapeDataString($UpdateId)
+    $html = Get-CatalogText -Url $url -Tag $tag
+    $plain = Convert-HtmlToText $html
+
+    $detailUpdateId = Get-CatalogScopedElementText -Html $html -IdSuffixes @('labelUpdateID','labelUpdateId','updateID')
+    if ([string]::IsNullOrWhiteSpace($detailUpdateId)) {
+        $m = [regex]::Match($plain, '(?i)Update\s*ID\s*:\s*([0-9a-f-]{36})')
+        if ($m.Success) { $detailUpdateId = $m.Groups[1].Value }
+    }
+    # Do not substitute the requested UpdateId when the response body does not
+    # expose its own identity. A missing/changed ScopedView shape must fail
+    # closed instead of making UpdateId verification tautological.
+
+    $architecture = Get-CatalogScopedElementText -Html $html -IdSuffixes @('labelArchitecture','architecture')
+    if ([string]::IsNullOrWhiteSpace($architecture)) {
+        $architecture = Get-CatalogScopedLabeledText -PlainText $plain -StartLabel 'Architecture:' -NextLabels @('Classification:','Supported products:')
+    }
+    $products = Get-CatalogScopedElementText -Html $html -IdSuffixes @('labelSupportedProducts','supportedProducts')
+    if ([string]::IsNullOrWhiteSpace($products)) {
+        $products = Get-CatalogScopedLabeledText -PlainText $plain -StartLabel 'Supported products:' -NextLabels @('Supported languages:','MSRC Number:')
+    }
+    $kbText = Get-CatalogScopedElementText -Html $html -IdSuffixes @('labelKbArticleNumbers','labelKBArticleNumbers','kbArticleNumbers')
+    if ([string]::IsNullOrWhiteSpace($kbText)) {
+        $kbText = Get-CatalogScopedLabeledText -PlainText $plain -StartLabel 'KB article numbers:' -NextLabels @('More information:','Support Url:')
+    }
+    $title = Get-CatalogScopedElementText -Html $html -IdSuffixes @('titleText','labelTitle','updateTitle')
+    if ([string]::IsNullOrWhiteSpace($title)) {
+        $m = [regex]::Match($plain, '(?i)Update Details\s+(.*?)\s+Last Modified:')
+        if ($m.Success) { $title = $m.Groups[1].Value.Trim() }
+    }
+
+    $kbNumbers = [System.Collections.Generic.List[string]]::new()
+    foreach ($m in [regex]::Matches([string]$kbText, '\b\d{6,8}\b')) {
+        if (-not $kbNumbers.Contains($m.Value)) { $kbNumbers.Add($m.Value) }
+    }
+    return [pscustomobject][ordered]@{
+        RequestedUpdateId = $UpdateId
+        UpdateId = $detailUpdateId.Trim()
+        Architecture = $architecture.Trim()
+        SupportedProducts = $products.Trim()
+        KbArticleNumbers = @($kbNumbers.ToArray())
+        Title = $title.Trim()
+        ParseBasis = $(if ($detailUpdateId -and $products -and $kbNumbers.Count -gt 0) { 'ScopedViewControlIdOrLabel' } else { 'ScopedViewIncomplete' })
+        RawSha256 = Get-TextFingerprint -Text $html
+        SourceUrl = $url
+    }
+}
+
+function Test-CatalogProductScope {
+    [OutputType([bool])]
+    param(
+        [AllowEmptyString()][string]$Products,
+        [Parameter(Mandatory)]$Rule,
+        [switch]$AllowMissing
+    )
+    if ([string]::IsNullOrWhiteSpace($Products)) { return [bool]$AllowMissing }
+    foreach ($token in @($Rule.ProductTokens)) {
+        if ($token -and $Products.IndexOf([string]$token, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) { return $false }
+    }
+    foreach ($token in @($Rule.ProductRejectTokens)) {
+        if ($token -and $Products.IndexOf([string]$token, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $false }
+    }
+    return $true
+}
+
+function Test-CatalogScopedDetailAgainstRule {
+    <# Return explicit verification evidence rather than a bare Boolean. #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)]$Detail,
+        [Parameter(Mandatory)]$Row,
+        [Parameter(Mandatory)]$Rule
+    )
+    $failures = [System.Collections.Generic.List[string]]::new()
+    if ([string]::IsNullOrWhiteSpace([string]$Detail.UpdateId) -or
+        [string]::IsNullOrWhiteSpace([string]$Detail.SupportedProducts) -or
+        @($Detail.KbArticleNumbers).Count -eq 0) {
+        $failures.Add('ScopedIdentityIncomplete')
+    }
+    if (-not [string]::Equals([string]$Detail.UpdateId, [string]$Row.uid, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $failures.Add('UpdateIdMismatch')
+    }
+    $kbDigits = ([string]$Rule.KbId) -replace '(?i)^KB',''
+    if (@($Detail.KbArticleNumbers) -notcontains $kbDigits) { $failures.Add('KbArticleMismatch') }
+    if (-not (Test-CatalogProductScope -Products ([string]$Detail.SupportedProducts) -Rule $Rule)) {
+        $failures.Add('ProductScopeMismatch')
+    }
+    $architecture = ([string]$Detail.Architecture).Trim()
+    $architectureBasis = 'ScopedView'
+    if ([string]::IsNullOrWhiteSpace($architecture) -or $architecture -match '^(?i)n/?a$') {
+        $architectureBasis = 'SearchTitleAndDownloadFile'
+    } elseif ($architecture -notmatch '^(?i)(AMD64|x64)$') {
+        $failures.Add('ArchitectureMismatch')
+    }
+    return [pscustomobject][ordered]@{
+        Verified = [bool]($failures.Count -eq 0)
+        Failures = @($failures.ToArray())
+        UpdateIdVerified = [bool](-not ($failures.Contains('UpdateIdMismatch')))
+        KbVerified = [bool](-not ($failures.Contains('KbArticleMismatch')))
+        ProductVerified = [bool](-not ($failures.Contains('ProductScopeMismatch')))
+        ArchitectureVerified = [bool](-not ($failures.Contains('ArchitectureMismatch')))
+        ArchitectureBasis = $architectureBasis
+    }
+}
+
 function Resolve-CatalogDownload {
     param(
         [string]$Uid,
@@ -5005,7 +5165,7 @@ function Resolve-CatalogDownload {
     )
     $body = 'updateIDs=[{"size":0,"languages":"","uidInfo":"' + $Uid + '","updateID":"' + $Uid + '"}]' +
             '&updateIDsBlockedForImport=&wsusApiPresent=&contentImport=&sku=&serverName=&ssl=&portNumber=&version='
-    $tag = "dl.$($Uid.Substring(0,8)).raw.r1218.html"
+    $tag = "dl.$($Uid.Substring(0,8)).raw.r1219.html"
     if ($RefreshCache) {
         Remove-Item -LiteralPath (Join-Path $script:CatCache $tag) -Force -ErrorAction SilentlyContinue
     }
@@ -5344,7 +5504,7 @@ function Get-CatalogDisplayMetadataAssessment {
 function Test-CatalogRowAgainstRule {
     <#
     .SYNOPSIS
-        Match only locale-stable row identity. Localized display words are ignored.
+        Coarse search-row filter. ScopedView performs the authoritative check.
     #>
     [CmdletBinding()]
     param(
@@ -5359,23 +5519,22 @@ function Test-CatalogRowAgainstRule {
     foreach ($token in @($Rule.StableTitleTokens)) {
         if ($token -and $title.IndexOf([string]$token, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) { return $false }
     }
-    if (-not [string]::IsNullOrWhiteSpace($products)) {
-        foreach ($token in @($Rule.ProductRejectTokens)) {
-            if ($token -and $products.IndexOf([string]$token, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $false }
-        }
-    }
+    # Catalog product taxonomy is a stronger discriminator than localized title
+    # prose. Missing cells are allowed here only because ScopedView is mandatory.
+    if (-not (Test-CatalogProductScope -Products $products -Rule $Rule -AllowMissing)) { return $false }
     return $true
 }
 
 function Get-CatalogRowsForResolvedPatch {
     <#
     .SYNOPSIS
-        Resolve an exact KB to locale-independent structural Catalog rows.
+        Resolve an exact KB through Search + authoritative ScopedView identity.
     .DESCRIPTION
-        The Catalog can ignore Accept-Language and return Portuguese, Chinese or
-        another localized page. This function therefore rejects wrong KB, OS
-        generation and architecture, but never rejects a row merely because the
-        display Title or Classification is localized.
+        Search-result display text may be localized. Candidate rows are therefore
+        verified against each row's official Update Details page using UpdateId,
+        KB article number, product scope and architecture. The DownloadDialog file
+        identity is checked later. This prevents Server 2025 checkpoint KBs that
+        share 24H2/x64/file bytes with Windows 11 from being misclassified.
     #>
     [CmdletBinding()]
     [OutputType([object[]])]
@@ -5390,25 +5549,53 @@ function Get-CatalogRowsForResolvedPatch {
     if ($rows.Count -eq 0) { return @() }
 
     $rule = Get-CatalogIdentityRule -Patch $Patch
-    $filtered = @($rows | Where-Object { Test-CatalogRowAgainstRule -Row $_ -Rule $rule })
-    if ($filtered.Count -eq 0) {
+    $coarse = @($rows | Where-Object { Test-CatalogRowAgainstRule -Row $_ -Rule $rule })
+    if ($coarse.Count -eq 0) {
         $observed = @($rows | ForEach-Object {
-            '[updateId={0};titleSha256={1};classificationSha256={2};productsSha256={3}]' -f
+            '[updateId={0};titleSha256={1};productsSha256={2}]' -f
                 $_.uid, (Get-TextFingerprint -Text ([string]$_.title)),
-                (Get-TextFingerprint -Text ([string]$_.classification)),
                 (Get-TextFingerprint -Text ([string]$_.products))
         }) -join ' | '
-        throw ('Microsoft Update Catalog returned no stable-identity row for {0}/{1} on {2}. Localized display text is not an identity input. Observed fingerprints: {3}' -f
+        throw ('Microsoft Update Catalog returned no coarse identity row for {0}/{1} on {2}. Observed fingerprints: {3}' -f
             $rule.Type, $rule.KbId, $Script:OsVersion, $observed)
     }
 
     $configuredUpdateId = ''
     if ($Patch.PSObject.Properties['UpdateId']) { $configuredUpdateId = [string]$Patch.UpdateId }
     if (-not [string]::IsNullOrWhiteSpace($configuredUpdateId)) {
-        $exact = @($filtered | Where-Object { [string]::Equals([string]$_.uid, $configuredUpdateId, [System.StringComparison]::OrdinalIgnoreCase) })
-        if ($exact.Count -eq 1) { return $exact }
+        $exact = @($coarse | Where-Object { [string]::Equals([string]$_.uid, $configuredUpdateId, [System.StringComparison]::OrdinalIgnoreCase) })
+        if ($exact.Count -ne 1) {
+            throw ('Configured Catalog UpdateId {0} did not identify exactly one coarse row for {1}/{2}; matches={3}. Refusing fallback to another row.' -f
+                $configuredUpdateId, $rule.Type, $rule.KbId, $exact.Count)
+        }
+        $coarse = $exact
     }
-    return @($filtered | Sort-Object lastUpdated, version -Descending)
+
+    $verified = [System.Collections.Generic.List[object]]::new()
+    $rejected = [System.Collections.Generic.List[string]]::new()
+    foreach ($row in @($coarse)) {
+        try {
+            $detail = Get-CatalogScopedDetail -UpdateId ([string]$row.uid) -RefreshCache:$RefreshCache
+            $assessment = Test-CatalogScopedDetailAgainstRule -Detail $detail -Row $row -Rule $rule
+            if (-not $assessment.Verified) {
+                $rejected.Add(('[updateId={0};failures={1};detailSha256={2}]' -f $row.uid, (@($assessment.Failures) -join ','), $detail.RawSha256))
+                continue
+            }
+            $row | Add-Member -NotePropertyName ScopedIdentityVerified -NotePropertyValue $true -Force
+            $row | Add-Member -NotePropertyName ScopedIdentityBasis -NotePropertyValue ('UpdateId+KB+Product+{0}' -f $assessment.ArchitectureBasis) -Force
+            $row | Add-Member -NotePropertyName ScopedArchitecture -NotePropertyValue ([string]$detail.Architecture) -Force
+            $row | Add-Member -NotePropertyName ScopedRawSha256 -NotePropertyValue ([string]$detail.RawSha256) -Force
+            $row | Add-Member -NotePropertyName ScopedParseBasis -NotePropertyValue ([string]$detail.ParseBasis) -Force
+            $verified.Add($row)
+        } catch {
+            $rejected.Add(('[updateId={0};errorSha256={1}]' -f $row.uid, (Get-TextFingerprint -Text $_.Exception.Message)))
+        }
+    }
+    if ($verified.Count -eq 0) {
+        throw ('Microsoft Update Catalog ScopedView identity verification rejected every candidate for {0}/{1} on {2}. Rejections: {3}' -f
+            $rule.Type, $rule.KbId, $Script:OsVersion, (@($rejected.ToArray()) -join ' | '))
+    }
+    return @($verified.ToArray() | Sort-Object lastUpdated, version -Descending)
 }
 
 function Get-PatchConfiguredCatalogIdentity {
@@ -5458,19 +5645,29 @@ function Select-CatalogCandidateAsset {
 
     if (-not [string]::IsNullOrWhiteSpace($identity.UpdateId)) {
         $m = @($pool | Where-Object { [string]::Equals([string]$_.Row.uid, $identity.UpdateId, [System.StringComparison]::OrdinalIgnoreCase) })
-        if ($m.Count -gt 0) { $pool = $m; $basis.Add('ConfiguredUpdateId') }
+        if ($m.Count -eq 0) { throw ('Configured Catalog UpdateId was not present in verified candidates: {0}' -f $identity.UpdateId) }
+        $pool = $m; $basis.Add('ConfiguredUpdateId')
     }
     if (-not [string]::IsNullOrWhiteSpace($identity.FileName)) {
         $m = @($pool | Where-Object { [string]::Equals([string]$_.File.fileName, $identity.FileName, [System.StringComparison]::OrdinalIgnoreCase) })
-        if ($m.Count -gt 0) { $pool = $m; $basis.Add('ConfiguredFileName') }
+        if ($m.Count -eq 0) { throw ('Configured Catalog file name was not present in verified candidates: {0}' -f $identity.FileName) }
+        $pool = $m; $basis.Add('ConfiguredFileName')
     }
     if (-not [string]::IsNullOrWhiteSpace($identity.Sha1)) {
         $m = @($pool | Where-Object { [string]::Equals([string]$_.File.digest, $identity.Sha1, [System.StringComparison]::OrdinalIgnoreCase) })
-        if ($m.Count -gt 0) { $pool = $m; $basis.Add('ConfiguredSha1') }
+        if ($m.Count -eq 0) { throw ('Configured Catalog SHA-1 was not present in verified candidates: {0}' -f $identity.Sha1) }
+        $pool = $m; $basis.Add('ConfiguredSha1')
     }
     if (-not [string]::IsNullOrWhiteSpace($identity.Sha256)) {
         $m = @($pool | Where-Object { [string]::Equals([string]$_.File.sha256, $identity.Sha256, [System.StringComparison]::OrdinalIgnoreCase) })
-        if ($m.Count -gt 0) { $pool = $m; $basis.Add('ConfiguredSha256') }
+        if ($m.Count -eq 0) { throw ('Configured Catalog SHA-256 was not present in verified candidates: {0}' -f $identity.Sha256) }
+        $pool = $m; $basis.Add('ConfiguredSha256')
+    }
+    if ($pool.Count -eq 1) {
+        if (-not $pool[0].Row.PSObject.Properties['ScopedIdentityVerified'] -or -not [bool]$pool[0].Row.ScopedIdentityVerified) {
+            throw 'Selected Catalog candidate did not carry successful ScopedView identity verification.'
+        }
+        $basis.Add('ScopedViewIdentity')
     }
     if ($pool.Count -ne 1) {
         $observed = @($pool | ForEach-Object { '[updateId={0};file={1}]' -f $_.Row.uid, $_.File.fileName }) -join ' | '
@@ -5556,7 +5753,10 @@ function Resolve-ResolvedPatchAssetFromCatalog {
         $preferred = @($fileCandidates | Where-Object {
             ([string]$_.fileName).ToLowerInvariant().EndsWith(([string]$rule.ExpectedExtension).ToLowerInvariant())
         })
-        if ($preferred.Count -eq 0) { $preferred = $fileCandidates }
+        if ($preferred.Count -eq 0 -and $fileCandidates.Count -gt 0) {
+            throw ('Catalog DownloadDialog returned KB/x64 files for {0}/{1}, but none had the required extension {2}. Refusing extension fallback.' -f
+                $rule.Type, $rule.KbId, $rule.ExpectedExtension)
+        }
         foreach ($candidateFile in @($preferred)) {
             $candidateAssets.Add([pscustomobject]@{ Row = $candidateRow; File = $candidateFile }) | Out-Null
         }
@@ -5654,6 +5854,11 @@ function Resolve-ResolvedPatchAssetFromCatalog {
         CatalogObservedTitleSha256 = [string]$displayAssessment.TitleSha256
         CatalogObservedClassificationSha256 = [string]$displayAssessment.ClassificationSha256
         CatalogObservedProductsSha256 = [string]$displayAssessment.ProductsSha256
+        CatalogScopedIdentityVerified = [bool]($row.PSObject.Properties['ScopedIdentityVerified'] -and $row.ScopedIdentityVerified)
+        CatalogScopedIdentityBasis = $(if ($row.PSObject.Properties['ScopedIdentityBasis']) { [string]$row.ScopedIdentityBasis } else { '' })
+        CatalogScopedArchitecture = $(if ($row.PSObject.Properties['ScopedArchitecture']) { [string]$row.ScopedArchitecture } else { '' })
+        CatalogScopedRawSha256 = $(if ($row.PSObject.Properties['ScopedRawSha256']) { [string]$row.ScopedRawSha256 } else { '' })
+        CatalogScopedParseBasis = $(if ($row.PSObject.Properties['ScopedParseBasis']) { [string]$row.ScopedParseBasis } else { '' })
     }
     foreach ($field in $metadataFields.Keys) {
         if (-not $Patch.PSObject.Properties[$field]) {
@@ -13165,6 +13370,11 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
                 CatalogObservedTitleSha256 = $(if ($_.PSObject.Properties['CatalogObservedTitleSha256']) { [string]$_.CatalogObservedTitleSha256 } else { '' })
                 CatalogObservedClassificationSha256 = $(if ($_.PSObject.Properties['CatalogObservedClassificationSha256']) { [string]$_.CatalogObservedClassificationSha256 } else { '' })
                 CatalogObservedProductsSha256 = $(if ($_.PSObject.Properties['CatalogObservedProductsSha256']) { [string]$_.CatalogObservedProductsSha256 } else { '' })
+                CatalogScopedIdentityVerified = [bool]($_.PSObject.Properties['CatalogScopedIdentityVerified'] -and $_.CatalogScopedIdentityVerified)
+                CatalogScopedIdentityBasis = $(if ($_.PSObject.Properties['CatalogScopedIdentityBasis']) { [string]$_.CatalogScopedIdentityBasis } else { '' })
+                CatalogScopedArchitecture = $(if ($_.PSObject.Properties['CatalogScopedArchitecture']) { [string]$_.CatalogScopedArchitecture } else { '' })
+                CatalogScopedRawSha256 = $(if ($_.PSObject.Properties['CatalogScopedRawSha256']) { [string]$_.CatalogScopedRawSha256 } else { '' })
+                CatalogScopedParseBasis = $(if ($_.PSObject.Properties['CatalogScopedParseBasis']) { [string]$_.CatalogScopedParseBasis } else { '' })
                 CatalogRequestLocale = $script:CatRequestLocale
                 Source = [string]$_.Source
                 FileName = [System.IO.Path]::GetFileName([string]$_.LocalPath)

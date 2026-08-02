@@ -393,7 +393,7 @@
         "Kind": "SSU",
         "KbId": "KB5099542",
         "ParentKbId": null,
-        "UpdateId": null,
+        "UpdateId": "27f8c7c1-52c2-4395-bf75-0adfca3d854c",
         "Revision": null,
         "Title": "2026-07 Servicing Stack Update for Windows Server 2016 (KB5099542)",
         "Products": [
@@ -457,7 +457,7 @@
         "Kind": "LCU",
         "KbId": "KB5099535",
         "ParentKbId": null,
-        "UpdateId": null,
+        "UpdateId": "4e257600-811a-49cb-b1dd-8cc1b6954e6b",
         "Revision": null,
         "Title": "2026-07 B release for Server2016 (KB5099535)",
         "Products": [
