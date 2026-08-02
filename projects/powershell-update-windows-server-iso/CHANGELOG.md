@@ -22,6 +22,39 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.02-r12.56] - 2026-08-02
+
+Tag retained: `setupdu-baseline-language-preservation`.
+
+### Added
+
+- **Automatic per-invocation run transcript**: every invocation —
+  including Resume preflight and Resume execution — starts a
+  PowerShell transcript under `WorkRoot\logs`, so a failed or
+  interrupted run always leaves a complete session record without
+  the operator having to enable anything. A JSONL debug-trace file
+  output can additionally be enabled for structured step tracing.
+  The transcript wiring also covers the P12 PCA2023-readiness and
+  P13 final-report phases. Script-only change (+36 lines); `data/*`
+  and `schema/*` are byte-identical to r12.55.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.02-r12.56`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 5E/121W/12I (raw sweep
+  5E/122W/12I: +1W is the PSA7002 LF artefact) — a fifth PSA error
+  joins with the new debug-trace code (`PSA2001` undefined variable
+  in `Enable-DebugTraceFileOutput`) and is carried as declared
+  series debt per the no-fix-forward rule. The r12.56 snapshot in
+  the currently attached source archive measures BOM + LF (the
+  committed checkout form is BOM+CRLF via `.gitattributes`
+  normalization).
+
 ## [update-wsi-2026.08.01-r12.55] - 2026-08-02
 
 Tag: `setupdu-baseline-language-preservation`.
