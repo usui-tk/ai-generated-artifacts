@@ -22,6 +22,33 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.19-r12.22] - 2026-08-02
+
+Tag: `resume-asset-state-rehydration` (the tag advances). Resumed runs
+rebuild resolved patch-asset state from measured evidence.
+
+### Fixed
+
+- **Resume rehydrates resolved patch assets**: two new helpers
+  (`Set-ResumePatchProperty`, `Restore-ResolvedPatchAssetsForResume`)
+  rebuild the P02 runtime patch objects from the measured P04 Catalog
+  crosscheck evidence when resuming at P08/P09. P01/P02 intentionally
+  rebuild runtime objects from immutable config, which left monthly
+  auxiliary entries in their pre-P04 metadata-only state on
+  `-ResumeFromPhase P08/P09` — P09 then rejected assets it had itself
+  produced. Rehydration fails closed: it refuses to resume when
+  `P04.ok` is missing or when the evidence does not contain exactly
+  one Catalog row per OS/KB/servicing type. Script-only change.
+- **T40**: release pin advanced to `update-wsi-2026.07.19-r12.22`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/123/64/112 with T45 NOT-YET (unchanged). PSA **4E/49W/7I** on
+the committed tree — one warning joins the debt with the new helpers;
+committed verbatim per the no-fix-forward rule.
+
 ## [update-wsi-2026.07.19-r12.21] - 2026-08-02
 
 Tag: `dotnet-applicability-secureboot-v165-alignment` (the tag

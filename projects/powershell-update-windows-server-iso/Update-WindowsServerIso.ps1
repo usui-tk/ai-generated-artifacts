@@ -659,8 +659,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.19-r12.21'
-$Script:ScriptTag     = 'dotnet-applicability-secureboot-v165-alignment'
+$Script:ScriptVersion = 'update-wsi-2026.07.19-r12.22'
+$Script:ScriptTag     = 'resume-asset-state-rehydration'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -9265,13 +9265,17 @@ function New-ResolvedPatchEvidenceManifest {
             Revision=$(if ($p.PSObject.Properties['Revision']) { [string]$p.Revision } else { '' })
             ReleaseDate=$(if ($p.PSObject.Properties['ReleaseDate']) { [string]$p.ReleaseDate } else { '' })
             FileName=$(if ($p.PSObject.Properties['FileName']) { [string]$p.FileName } else { '' })
+            FileNameOrigin=$(if ($p.PSObject.Properties['FileNameOrigin']) { [string]$p.FileNameOrigin } else { '' })
+            Source=$(if ($p.PSObject.Properties['Source']) { [string]$p.Source } else { '' })
+            LocalPath=$localPath
+            IsMetadataOnly=[bool]($p.PSObject.Properties['IsMetadataOnly'] -and $p.IsMetadataOnly)
             SizeBytes=$(if ($p.PSObject.Properties['SizeBytes'] -and $null -ne $p.SizeBytes) { [long]$p.SizeBytes } else { $null })
             DeclaredSha256=$integritySha
             LocalAssetSha256=(Get-FileSha256OrEmpty -Path $localPath)
         }) | Out-Null
     }
     return [pscustomobject][ordered]@{
-        SchemaVersion='release-patch-manifest/1.1'
+        SchemaVersion='release-patch-manifest/1.2'
         RunId=$Script:RunId
         OsKey=[string]$Script:OsVersion
         OsLanguage=[string]$Script:OsLanguage
@@ -17188,6 +17192,195 @@ function Restore-BootWimFromSourceIso {
     }
 }
 
+
+function Set-ResumePatchProperty {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$Patch,
+        [Parameter(Mandatory)][string]$Name,
+        [AllowNull()]$Value
+    )
+    if ($Patch.PSObject.Properties[$Name]) {
+        $Patch.$Name = $Value
+    } else {
+        $Patch | Add-Member -NotePropertyName $Name -NotePropertyValue $Value -Force
+    }
+}
+
+function Restore-ResolvedPatchAssetsForResume {
+    <#
+    .SYNOPSIS
+        Rehydrate P02 runtime patch objects from the measured P04/P11 evidence
+        and the patch payloads retained under the existing WorkRoot.
+    .DESCRIPTION
+        P01/P02 intentionally rebuild runtime objects from immutable config.
+        On -ResumeFromPhase P08/P09 that leaves monthly auxiliary entries in
+        their pre-P04 metadata-only state.  P09 therefore used to reject an
+        existing Setup DU even though the previous run had resolved, hashed,
+        downloaded, and applied it.
+
+        This function restores only identities that are independently bound by:
+          - one P04 Catalog row for the same OS, KB, and servicing type;
+          - one prior resolved-patch manifest row for the same file;
+          - one exact local file below <WorkRoot>\patches\<OS>;
+          - a SHA-256 match against the prior manifest.
+
+        Missing, duplicate, mismatched, non-HTTPS, unexpected-host, or
+        out-of-workspace evidence fails closed.  No network lookup is performed
+        and no payload is silently substituted during resume.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)][ValidateSet('P08','P09')][string]$PhaseId)
+
+    $catalogPath = Join-Path $Script:LogsDir 'P04_catalog_crosscheck.json'
+    $manifestPath = Join-Path $Script:LogsDir 'resolved_patch_manifest.json'
+    foreach ($requiredPath in @($catalogPath,$manifestPath)) {
+        if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+            throw ('Resume refused: required measured patch evidence is missing: {0}' -f $requiredPath)
+        }
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $Script:MarkersDir 'P04.ok') -PathType Leaf)) {
+        throw 'Resume refused: P04.ok is missing; resolved patch assets cannot be trusted.'
+    }
+
+    $catalogRows = @(Get-Content -LiteralPath $catalogPath -Raw -Encoding UTF8 | ConvertFrom-CanonicalJson)
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-CanonicalJson
+    if (-not $manifest -or -not $manifest.PSObject.Properties['Patches']) {
+        throw ('Resume refused: resolved patch manifest is invalid: {0}' -f $manifestPath)
+    }
+
+    $currentBaselineId = if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline) { [string]$Script:OsProfile.PatchBaseline.BaselineId } else { '' }
+    foreach ($identityCheck in @(
+        [pscustomobject]@{ Name='OsKey'; Expected=[string]$Script:OsVersion; Actual=[string]$manifest.OsKey },
+        [pscustomobject]@{ Name='OsLanguage'; Expected=[string]$Script:OsLanguage; Actual=[string]$manifest.OsLanguage },
+        [pscustomobject]@{ Name='BaselineId'; Expected=$currentBaselineId; Actual=[string]$manifest.BaselineId }
+    )) {
+        if ([string]::IsNullOrWhiteSpace($identityCheck.Actual) -or $identityCheck.Expected -ne $identityCheck.Actual) {
+            throw ('Resume refused: patch manifest {0} mismatch (expected="{1}" actual="{2}").' -f $identityCheck.Name,$identityCheck.Expected,$identityCheck.Actual)
+        }
+    }
+
+    $osPatchDir = Join-Path $Script:PatchesDir $Script:OsVersion
+    if (-not (Test-Path -LiteralPath $osPatchDir -PathType Container)) {
+        throw ('Resume refused: OS patch directory is missing: {0}' -f $osPatchDir)
+    }
+    $osPatchRoot = [System.IO.Path]::GetFullPath($osPatchDir).TrimEnd('\') + '\'
+    $restored = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($patch in @($Script:ResolvedPatches)) {
+        if (-not $patch -or [string]::IsNullOrWhiteSpace([string]$patch.KbId)) { continue }
+        $kbId = [string]$patch.KbId
+        $patchType = Get-PatchEntryType -Patch $patch
+        $catalogMatches = @($catalogRows | Where-Object {
+            [string]$_.KbId -eq $kbId -and [string]$_.Kind -eq $patchType -and
+            [string]$_.OsKey -eq [string]$Script:OsVersion
+        })
+        if ($catalogMatches.Count -ne 1) {
+            throw ('Resume refused: expected exactly one P04 Catalog evidence row for {0}/{1}; found {2}.' -f $patchType,$kbId,$catalogMatches.Count)
+        }
+        $catalog = $catalogMatches[0]
+        if ([bool]$catalog.MetadataOnly) {
+            throw ('Resume refused: P04 evidence still marks {0}/{1} as metadata-only.' -f $patchType,$kbId)
+        }
+
+        $fileName = [string]$catalog.FileName
+        if ([string]::IsNullOrWhiteSpace($fileName) -or [System.IO.Path]::GetFileName($fileName) -ne $fileName) {
+            throw ('Resume refused: unsafe or empty Catalog file name for {0}/{1}: "{2}".' -f $patchType,$kbId,$fileName)
+        }
+        $source = [string]$catalog.Source
+        try { $sourceUri = [uri]$source } catch { throw ('Resume refused: invalid Catalog source URI for {0}/{1}: {2}' -f $patchType,$kbId,$source) }
+        $host = $sourceUri.DnsSafeHost.ToLowerInvariant()
+        if ($sourceUri.Scheme -ne 'https' -or
+            ($host -notmatch '(^|\.)download\.windowsupdate\.com$' -and $host -notmatch '(^|\.)delivery\.mp\.microsoft\.com$')) {
+            throw ('Resume refused: untrusted Catalog source host for {0}/{1}: {2}' -f $patchType,$kbId,$sourceUri.Host)
+        }
+
+        $manifestMatches = @($manifest.Patches | Where-Object {
+            [string]$_.KbId -eq $kbId -and [string]$_.FileName -eq $fileName
+        })
+        if ($manifestMatches.Count -ne 1) {
+            throw ('Resume refused: expected exactly one prior manifest row for {0}/{1}/{2}; found {3}.' -f $patchType,$kbId,$fileName,$manifestMatches.Count)
+        }
+        $manifestRow = $manifestMatches[0]
+        $expectedAssetSha256 = [string]$manifestRow.LocalAssetSha256
+        if ($expectedAssetSha256 -notmatch '^[0-9a-fA-F]{64}$') {
+            throw ('Resume refused: prior manifest has no valid local SHA-256 for {0}/{1}.' -f $patchType,$kbId)
+        }
+        if ($catalog.PSObject.Properties['UpdateId'] -and $catalog.UpdateId -and
+            $manifestRow.PSObject.Properties['UpdateId'] -and $manifestRow.UpdateId -and
+            [string]$catalog.UpdateId -ne [string]$manifestRow.UpdateId) {
+            throw ('Resume refused: UpdateId mismatch between P04 and prior manifest for {0}/{1}.' -f $patchType,$kbId)
+        }
+        if ($patch.PSObject.Properties['UpdateId'] -and $patch.UpdateId -and $catalog.UpdateId -and
+            [string]$patch.UpdateId -ne [string]$catalog.UpdateId) {
+            throw ('Resume refused: current config UpdateId disagrees with measured P04 evidence for {0}/{1}.' -f $patchType,$kbId)
+        }
+
+        $preferredPath = Get-PatchLocalPath -Kind $patchType -FileName $fileName
+        $localMatches = @()
+        if (Test-Path -LiteralPath $preferredPath -PathType Leaf) {
+            $localMatches = @((Get-Item -LiteralPath $preferredPath -Force))
+        } else {
+            $localMatches = @(Get-ChildItem -LiteralPath $osPatchDir -Recurse -File -Force -ErrorAction Stop | Where-Object { $_.Name -ceq $fileName })
+        }
+        if ($localMatches.Count -ne 1) {
+            throw ('Resume refused: expected exactly one local payload for {0}/{1}/{2}; found {3}.' -f $patchType,$kbId,$fileName,$localMatches.Count)
+        }
+        $localPath = [System.IO.Path]::GetFullPath($localMatches[0].FullName)
+        if (-not $localPath.StartsWith($osPatchRoot,[System.StringComparison]::OrdinalIgnoreCase)) {
+            throw ('Resume refused: local payload escaped the OS patch workspace: {0}' -f $localPath)
+        }
+        $actualAssetSha256 = (Get-FileHash -LiteralPath $localPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actualAssetSha256 -ne $expectedAssetSha256.ToLowerInvariant()) {
+            throw ('Resume refused: local SHA-256 mismatch for {0}/{1}. expected={2} actual={3}' -f $patchType,$kbId,$expectedAssetSha256,$actualAssetSha256)
+        }
+
+        $hashes = @{}
+        if ($patch.PSObject.Properties['ExpectedHashes'] -and $patch.ExpectedHashes) {
+            foreach ($key in $patch.ExpectedHashes.Keys) { $hashes[$key] = $patch.ExpectedHashes[$key] }
+        }
+        $hashes['sha-256'] = $actualAssetSha256
+        Test-PatchIntegrity -FilePath $localPath -ExpectedHashes $hashes | Out-Null
+
+        Set-ResumePatchProperty -Patch $patch -Name 'Source' -Value $source
+        Set-ResumePatchProperty -Patch $patch -Name 'FileName' -Value $fileName
+        Set-ResumePatchProperty -Patch $patch -Name 'FileNameOrigin' -Value 'ResumeEvidence'
+        Set-ResumePatchProperty -Patch $patch -Name 'LocalPath' -Value $localPath
+        Set-ResumePatchProperty -Patch $patch -Name 'UpdateId' -Value ([string]$catalog.UpdateId)
+        Set-ResumePatchProperty -Patch $patch -Name 'ExpectedHashes' -Value $hashes
+        Set-ResumePatchProperty -Patch $patch -Name 'IsMetadataOnly' -Value $false
+        Set-ResumePatchProperty -Patch $patch -Name 'State' -Value 'ResolvedFromResumeEvidence'
+        foreach ($field in @('CatalogClassification','CatalogProducts','CatalogSelectionBasis','CatalogObservedMetadataStatus','CatalogScopedIdentityVerified','CatalogScopedIdentityBasis','CatalogScopedArchitecture','CatalogScopedRawSha256','CatalogScopedParseBasis')) {
+            if ($catalog.PSObject.Properties[$field]) {
+                Set-ResumePatchProperty -Patch $patch -Name $field -Value $catalog.$field
+            }
+        }
+        $restored.Add([pscustomobject][ordered]@{
+            PatchType=$patchType; KbId=$kbId; UpdateId=[string]$catalog.UpdateId
+            FileName=$fileName; LocalPath=$localPath; LocalAssetSha256=$actualAssetSha256
+            SourceHost=$sourceUri.Host
+        }) | Out-Null
+    }
+
+    if ($restored.Count -ne @($Script:ResolvedPatches).Count) {
+        throw ('Resume refused: restored patch count {0} does not equal runtime patch count {1}.' -f $restored.Count,@($Script:ResolvedPatches).Count)
+    }
+    $Script:PatchPlan = Build-PatchPlan -Patches $Script:ResolvedPatches
+    $result = [pscustomobject][ordered]@{
+        SchemaVersion='resume-patch-state/1.0'; PhaseId=$PhaseId
+        RestoredAtUtc=[datetime]::UtcNow.ToString('o')
+        OsKey=[string]$Script:OsVersion; OsLanguage=[string]$Script:OsLanguage
+        BaselineId=$currentBaselineId; CatalogEvidencePath=$catalogPath
+        PriorManifestPath=$manifestPath; RestoredPatchCount=$restored.Count
+        Patches=$restored.ToArray()
+    }
+    $resumePatchStatePath = Join-Path $Script:LogsDir ('resume-{0}-patch-state.json' -f $PhaseId.ToLowerInvariant())
+    Save-CanonicalJsonFile -InputObject $result -Path $resumePatchStatePath -Depth 10
+    Write-Ok ('Resume patch assets rehydrated and verified: {0} patch(es); evidence: {1}' -f $restored.Count,$resumePatchStatePath)
+    return $result
+}
+
 function Initialize-ResumeBuildState {
     [CmdletBinding()]
     param([Parameter(Mandatory)][ValidateSet('P08','P09')][string]$PhaseId)
@@ -17201,6 +17394,10 @@ function Initialize-ResumeBuildState {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw ('Resume prerequisite missing: {0}' -f $required) }
     }
     if (-not (Test-Path -LiteralPath (Join-Path $Script:MarkersDir 'P07.ok'))) { throw 'Resume refused: P07.ok is missing.' }
+
+    # Validate and restore patch state before changing any WIM or marker so a
+    # failed resume attempt leaves the previous measured build untouched.
+    $resumePatchState = Restore-ResolvedPatchAssetsForResume -PhaseId $PhaseId
 
     if ($PhaseId -eq 'P08') {
         $stateBackup = Join-Path $Script:StateDir 'p08-backup\boot.wim.pre-p08'
@@ -17244,6 +17441,8 @@ function Initialize-ResumeBuildState {
         Timestamp=(Get-Date).ToString('o'); ResumeFrom=$PhaseId; OsVersion=$Script:OsVersion
         InstallWimSha256=(Get-FileHash -LiteralPath $installWim -Algorithm SHA256).Hash.ToLower()
         BootWimSha256=(Get-FileHash -LiteralPath $bootWim -Algorithm SHA256).Hash.ToLower()
+        RestoredPatchStatePath=(Join-Path $Script:LogsDir ('resume-{0}-patch-state.json' -f $PhaseId.ToLowerInvariant()))
+        RestoredPatchCount=$resumePatchState.RestoredPatchCount
         Inventory=$Script:WimIndexInventory
     }) -Path $evPath -Depth 8
     Write-Ok ('Resume state validated: {0}' -f $evPath)
