@@ -246,10 +246,17 @@ def main() -> int:
                  and re.search(r"Get-DotNetRollupEvidence\s+-PackageNames", code) is not None
                  and "DotNetRollupApplied" in code,
                  "wired", p, f)
-    p, f = check("generic Kb_ rows survive ONLY behind the Server2016 guard",
-                 re.search(r"OsVersion -eq 'Server2016'[\s\S]{0,2500}Add-VRow -Check \('Kb_' \+ \$kb\)", code) is not None
-                 and code.count("Add-VRow -Check ('Kb_' + $kb)") == 1,
-                 "2016-only", p, f)
+    p, f = check("generic Kb_ rows survive ONLY behind the declared Server2016 evidence mode",
+                 # r12.45 moved the guard from the OS literal to the servicing
+                 # contract's declared Verification.KbIdentityEvidenceMode;
+                 # only the Server2016 contract declares 'Server2016InstallSsu'
+                 # (the other three declare 'None'), so the concern survives
+                 # strengthened: declaration-driven, still 2016-only.
+                 re.search(r"KbIdentityEvidenceMode -eq 'Server2016InstallSsu'[\s\S]{0,2500}Add-VRow -Check \('Kb_' \+ \$kb\)", code) is not None
+                 and code.count("Add-VRow -Check ('Kb_' + $kb)") == 1
+                 and code.count("KbIdentityEvidenceMode='Server2016InstallSsu'") == 1
+                 and code.count("KbIdentityEvidenceMode='None'") == 3,
+                 "declared-mode-guarded; 2016-only", p, f)
     p, f = check("the alias extractor is fully removed (no shims)",
                  "Get-KbAliasFromPatchPath" not in code,
                  "gone", p, f)

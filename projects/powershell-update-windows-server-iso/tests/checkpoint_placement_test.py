@@ -97,22 +97,49 @@ def main() -> int:
             {"KbId": "KB5094125", "PatchType": "LCU", "ApplyOrder": 2},
         ]
         plan = ps.invoke("Build-PatchPlan", Patches=patches)
+        # Routing is declaration-derived since the r12.45 servicing-contract
+        # layer: PatchType maps to a canonical role (Checkpoint ->
+        # CheckpointDependency, LCU -> FinalLCU) and the target set is the
+        # contract's declared RoleTargets (SHA-256 pinned by
+        # data/servicing-contract-baselines.json). Expected values are READ
+        # from the contract under test, never hardcoded.
+
+        def role_targets(role: str) -> list:
+            got = ps.invoke("Get-ServicingContractRoleTargets", Role=role)
+            if got is None:
+                return []
+            if isinstance(got, str):
+                return [got]
+            return [str(t) for t in got]
+
+        cp_targets = role_targets("CheckpointDependency")
+        lcu_targets = role_targets("FinalLCU")
+        expected = {}
+        for target in ("Install", "Boot", "WinRE", "Setup"):
+            kbs = []
+            if target in cp_targets:
+                kbs.append("KB5043080")   # Checkpoint, ApplyOrder 1
+            if target in lcu_targets:
+                kbs.append("KB5094125")   # LCU, ApplyOrder 2
+            expected[target] = kbs
         counts = plan.get("_TargetCounts") or {}
         passed, failed = check(
-            "Checkpoint routed to no target",
-            counts.get("Install") == 1 and counts.get("Boot") == 1
-            and counts.get("WinRE") == 0 and counts.get("Setup") == 0,
-            f"_TargetCounts={counts} (LCU-only in Install/Boot)", passed, failed)
+            "target counts conform to the declared RoleTargets",
+            bool(cp_targets) and bool(lcu_targets)
+            and all(counts.get(t) == len(expected[t]) for t in expected),
+            f"_TargetCounts={counts} declared: CheckpointDependency={cp_targets}"
+            f" FinalLCU={lcu_targets}", passed, failed)
         unknown = plan.get("_UnknownTypes") or []
         passed, failed = check(
             "Checkpoint is a KNOWN Type (no unknown-Type warning)",
             "Checkpoint" not in list(unknown),
             f"_UnknownTypes={unknown}", passed, failed)
-        install_kbs = [p.get("KbId") for p in (plan.get("Install") or [])]
+        slices = {t: [p.get("KbId") for p in (plan.get(t) or [])]
+                  for t in ("Install", "Boot", "WinRE", "Setup")}
         passed, failed = check(
-            "Install slice carries the LCU only",
-            install_kbs == ["KB5094125"],
-            f"Install={install_kbs}", passed, failed)
+            "each slice carries exactly the declared role members in ApplyOrder",
+            all(slices[t] == expected[t] for t in slices),
+            "; ".join(f"{t}={slices[t]}" for t in slices), passed, failed)
 
         print("=== 3. uup-checkpoint consistency rules ===")
         good_lines = [

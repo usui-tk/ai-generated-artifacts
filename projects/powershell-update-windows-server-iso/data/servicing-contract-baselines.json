@@ -1,23 +1,50 @@
 {
-  "SchemaVersion": "servicing-contract-baselines/1.0",
-  "EstablishedBy": "r12.44",
-  "Purpose": "Fail closed when any OS servicing contract changes without an explicit baseline update.",
+  "SchemaVersion": "servicing-contract-baselines/2.1",
+  "Purpose": "Fail closed when any OS-specific servicing contract, role target map, sequence, verification, observation, discovery, or .NET rule changes without an explicitly reviewed baseline update.",
   "Contracts": {
     "Server2016": {
-      "ContractRevision": "Server2016-r1",
-      "Sha256": "a92b7e37d8d0e835f706037e2591e222c35098f8e546c67a2de928fbcae3da46"
+      "ContractRevision": "Server2016-r3",
+      "Sha256": "4ac7df9becf1ea9b4a56afefc590a8408a71fcbbf165c32a099f9768387b2f95",
+      "ContractSha256": "4ac7df9becf1ea9b4a56afefc590a8408a71fcbbf165c32a099f9768387b2f95",
+      "TargetMapSha256": "8035d5f946e1e9dde0357bd44da0848daf6983e53e892a36c0e82062debcd4a2",
+      "SequenceSha256": "4baea8f20294967de9e64f75048b2fd613810cc01c85b58d0f97b78303951c75",
+      "VerificationSha256": "107aff0c8aeac27edf116eef553e7ff9a09903b3c4edb64a62c4e6104fda7515",
+      "ObservationSha256": "77bf86a203a6700f11cc88cbdd92ed6aee9f7471844eb220c40c014afa4f15df",
+      "DiscoverySha256": "ec8d48d340ce385d227a67513cfa1281c58f4bd426aea49b25af8c8b6db5fa66",
+      "DotNetSha256": "e5c0580cd9e00fa8fade253a391cb620274be334fadad6e3a1ca20de0f9f2582"
     },
     "Server2019": {
-      "ContractRevision": "Server2019-r1",
-      "Sha256": "d72bd096168cc74836d0b441d9bd03bb74e1f6e1d4eb5d2a3adc80b917830c0d"
+      "ContractRevision": "Server2019-r3",
+      "Sha256": "9ddeb5ac721fccf81df00697c121661dc93365e644fc8f2b6fb2c6125bda95b7",
+      "ContractSha256": "9ddeb5ac721fccf81df00697c121661dc93365e644fc8f2b6fb2c6125bda95b7",
+      "TargetMapSha256": "d4c3fffce09aa3d3a89aff2cb7df54a222467f13834e0b380d8b1b0d15088ad5",
+      "SequenceSha256": "292fe1867dde580ea580db51e8ca4cfaf5152a7a5e4e3cbbe03c70038c05030f",
+      "VerificationSha256": "a74e8671d4dc785be5cf84bacc11e3e86719667c8b761627fac7eb5699854f18",
+      "ObservationSha256": "13b4f32b3550fc47c0fa6bdf52db573486fa3ca9fee2589002902bdb0942d328",
+      "DiscoverySha256": "5299d46526c2198d6c32f324ddc2bea5f80f41c7265fcad705e8aec4d16e8848",
+      "DotNetSha256": "409f4d23ea7eaa8a224c0ff7db4c8aee89658713d9e63103538f1445a42be3d0"
     },
     "Server2022": {
-      "ContractRevision": "Server2022-r1",
-      "Sha256": "35e5617087fe98403895b6d3e4de0120635175dd7458e0cb5253ed87e9287e67"
+      "ContractRevision": "Server2022-r3",
+      "Sha256": "04a2bd0100c069b87a2dfa1575303028175e11a21c015a9918fbbadb6fa33a29",
+      "ContractSha256": "04a2bd0100c069b87a2dfa1575303028175e11a21c015a9918fbbadb6fa33a29",
+      "TargetMapSha256": "8035d5f946e1e9dde0357bd44da0848daf6983e53e892a36c0e82062debcd4a2",
+      "SequenceSha256": "4baea8f20294967de9e64f75048b2fd613810cc01c85b58d0f97b78303951c75",
+      "VerificationSha256": "563c80aa528363e86322f3a3ea861b682cc39edcd9c26d37d54e7c9017e4901b",
+      "ObservationSha256": "77bf86a203a6700f11cc88cbdd92ed6aee9f7471844eb220c40c014afa4f15df",
+      "DiscoverySha256": "5299d46526c2198d6c32f324ddc2bea5f80f41c7265fcad705e8aec4d16e8848",
+      "DotNetSha256": "e0eb99f9dec767fb1289d3277fc69a6c854791584b0433606257559b46d59749"
     },
     "Server2025": {
-      "ContractRevision": "Server2025-r1",
-      "Sha256": "f292004114beda533920ed4b5f980e7b9a11e2dddea52f50726fc918f85b9122"
+      "ContractRevision": "Server2025-r3",
+      "Sha256": "cd3265f45684cb6d333d16809a59f9af966b610b15c856617d83954844f9bb8b",
+      "ContractSha256": "cd3265f45684cb6d333d16809a59f9af966b610b15c856617d83954844f9bb8b",
+      "TargetMapSha256": "1cdfded2d110c14ceae357fef1ce14f5c33c125531b1981a01bc3a18737f498d",
+      "SequenceSha256": "4baea8f20294967de9e64f75048b2fd613810cc01c85b58d0f97b78303951c75",
+      "VerificationSha256": "f860e3e8722306abbbf97eab593dcc69346eeb2a26261fee96ba625c7c557e15",
+      "ObservationSha256": "77bf86a203a6700f11cc88cbdd92ed6aee9f7471844eb220c40c014afa4f15df",
+      "DiscoverySha256": "5299d46526c2198d6c32f324ddc2bea5f80f41c7265fcad705e8aec4d16e8848",
+      "DotNetSha256": "da96332fd55393a8e6ebd6f68c910f112c979eb0d4d02398a082783895e66097"
     }
   }
 }

@@ -1,0 +1,52 @@
+{
+  "SchemaVersion": "servicing-e2e-baselines/1.0",
+  "Purpose": "Compact measured baselines used to review OS-specific behavior without embedding ISO/WIM payloads. These records do not replace Windows E2E execution after shared-core changes.",
+  "Cases": {
+    "Server2016-ja-jp": {
+      "Status": "UserValidatedBootAndInstall",
+      "ImplementationBaseline": "r12.39",
+      "StaticVerificationStatus": "Pass",
+      "OutputIsoSha256": "22cc9f56b8424f2bc3be9ce9b60fcadcaf6aa24528db8e5a9a2d4c07215f34c6",
+      "InstallBuild": "14393.9339",
+      "BootBuild": "14393.9339",
+      "WinReSafeOsVersion": "14393.9339.1.14",
+      "BootUpdateModel": "FullLCU",
+      "EvidenceNote": "Successful Japanese Server 2016 ISO, Secure Boot boot, and installation were previously confirmed by the user."
+    },
+    "Server2016-en-us": {
+      "Status": "PendingE2E",
+      "ImplementationBaseline": "",
+      "StaticVerificationStatus": "NotPerformed",
+      "OutputIsoSha256": "",
+      "InstallBuild": "",
+      "BootBuild": "",
+      "WinReSafeOsVersion": "",
+      "BootUpdateModel": "FullLCU",
+      "EvidenceNote": "English Server 2016 remains the next language-comparison case."
+    },
+    "Server2019-en-us": {
+      "Status": "UserValidatedBootAndInstall",
+      "ImplementationBaseline": "r12.42-r12.43",
+      "StaticVerificationStatus": "UserValidatedAfterSafeOsDuModel",
+      "OutputIsoSha256": "",
+      "InstallBuild": "17763.9020",
+      "BootRegistryBuild": "17763.3650",
+      "BootSafeOsVersion": "17763.9020.1.13",
+      "ServicingStackVersion": "17763.9015",
+      "BootUpdateModel": "SafeOSDU",
+      "EvidenceNote": "English media booted and installed successfully with Secure Boot after the boot.wim model changed from full LCU to SafeOS DU."
+    },
+    "Server2019-ja-jp": {
+      "Status": "UserValidatedBootAndInstall",
+      "ImplementationBaseline": "r12.44",
+      "StaticVerificationStatus": "Pass",
+      "OutputIsoSha256": "c64add1e8e9a7ffd916e4e207f8894f4e26ae342f935c53b0a6c32f422199b84",
+      "InstallBuild": "17763.9020",
+      "BootRegistryBuild": "17763.3650",
+      "BootSafeOsVersion": "17763.9020.1.13",
+      "ServicingStackVersion": "17763.9015",
+      "BootUpdateModel": "SafeOSDU",
+      "EvidenceNote": "P11 passed with 35/35 rows; Hyper-V Generation 2 Secure Boot, Japanese Setup, and complete installation were confirmed by the user."
+    }
+  }
+}

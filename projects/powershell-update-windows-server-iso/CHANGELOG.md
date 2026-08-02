@@ -22,6 +22,70 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.29-r12.45] - 2026-08-02
+
+Tag retained: `safeos-p11-metadata-contract-isolation-stage1`.
+
+### Added
+
+- **Servicing-contract role-target layer**: patch routing is now read
+  from the per-OS servicing contract's declared `RoleTargets` map
+  instead of type-keyed code paths. New helpers
+  `Get-ServicingContractRoleTargets` and `Get-PatchTargetsForRole`
+  resolve a canonical role (e.g. `CheckpointDependency`, `FinalLCU`)
+  to its declared target set; `Test-PatchPlanAgainstServicingContract`
+  validates a built plan against the declaration; contract identity is
+  hashable via `Get-CanonicalObjectSha256` /
+  `Get-ServicingContractHash` /
+  `Get-ServicingContractComponentHashes`. Measured Server 2025
+  routing under the declaration: a Checkpoint entry targets
+  Install/Boot/WinRE and the final LCU targets Install/Boot.
+- **`data/servicing-e2e-baselines.json`** (new file, landed by
+  per-path adjudication): compact measured E2E baseline records for
+  four OS/language cases (Server 2016 ja-jp/en-us, Server 2019
+  en-us/ja-jp) — status, implementation baseline, output ISO SHA-256
+  where captured, measured install/boot builds and boot update model.
+  No ISO/WIM payloads are embedded; the records do not replace
+  Windows E2E execution after shared-core changes.
+
+### Changed
+
+- **Servicing-contract baselines advanced**:
+  `data/servicing-contract-baselines.json` schema
+  `servicing-contract-baselines/1.0` → `2.1`; all four per-OS
+  contract revisions `-r1` → `-r3` with re-pinned SHA-256 component
+  hashes (declared change; T45 17 → 21 asserts, matrix match).
+- **KB-identity evidence guard is declaration-driven**: the P11
+  generic `Kb_<id>` presence rows are now gated by the contract's
+  declared `Verification.KbIdentityEvidenceMode`
+  (`Server2016InstallSsu` on the Server 2016 contract; `None` on the
+  other three) instead of the `OsVersion -eq 'Server2016'` literal.
+
+### Tests
+
+- **T32 routing rows re-located to the declaration (T39-type event
+  #3, user-adjudicated)**: the `checkpoint_placement_test.py` routing
+  pins encoded the pre-r12.45 model (Checkpoint routed nowhere;
+  Install carries the LCU alone). Measured at the r12.46/r12.56/r12.57
+  frames, the new routing persists to the series terminal, so the
+  pins were revised to read the declared `RoleTargets` from the
+  contract under test and derive the expected slices (membership and
+  ApplyOrder), never hardcoding per-OS targets. 15 asserts.
+- **`media_inspection_test.py` Kb_-guard row follows the declared
+  mode**: asserts the single `Kb_` row site sits behind the declared
+  `KbIdentityEvidenceMode` check and that only the Server 2016
+  contract declares `Server2016InstallSsu` (the other three declare
+  `None`). 31 asserts.
+- **T40**: release pin advanced to `update-wsi-2026.07.29-r12.45`
+  (the tag is retained).
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/120/64/112 + T45 21. PSA committed 4E/109W/10I (raw sweep
+  4E/110W/10I: +1W is the PSA7002 LF artefact; declared series debt
+  per the no-fix-forward rule).
+
 ## [update-wsi-2026.07.29-r12.44] - 2026-08-02
 
 ScriptTag advanced to `safeos-p11-metadata-contract-isolation-stage1`.

@@ -703,7 +703,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.29-r12.44'
+$Script:ScriptVersion = 'update-wsi-2026.07.29-r12.45'
 # Validation marker: pwsh7-runtime-validated on PowerShell 7.6.4 Linux x64; Windows-native gates remain required.
 $Script:ScriptTag     = 'safeos-p11-metadata-contract-isolation-stage1'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
@@ -6388,6 +6388,10 @@ function ConvertTo-ConfigLines { # psa-disable-line PSA6003 -- returns the Lines
         [Parameter(Mandatory)][object]$OsResolved,   # one OS object: { os; lines[] }
         [Parameter(Mandatory)][string]$PatchModel
     )
+    $contract = Get-ServicingContract -OsKey ([string]$OsResolved.os)
+    if ([string]$contract.PatchModel -ne $PatchModel) {
+        throw ("ConvertTo-ConfigLines: PatchModel '{0}' does not match the {1} servicing contract '{2}'." -f $PatchModel,$OsResolved.os,$contract.PatchModel)
+    }
     $kindMap  = @{ 'LCU'='LCU'; 'SSU'='SSU'; 'Checkpoint'='Checkpoint'; '.NET'='DotNet'; 'SafeOSDU'='SafeOSDU'; 'SetupDU'='SetupDU' }
     $applyMap = @{
         'separate-ssu'    = @{ 'SSU'=10; 'LCU'=20; 'SafeOSDU'=40; 'DotNet'=60; 'SetupDU'=80 }
@@ -6438,23 +6442,7 @@ function ConvertTo-ConfigLines { # psa-disable-line PSA6003 -- returns the Lines
             }
             $targets = [ordered]@{}
             foreach ($role in $roles) {
-                $targets[$role] = switch ($role) {
-                    'ServicingStackCarrier' {
-                        if ($OsResolved.os -eq 'Server2019') { @('Install','WinRE') }
-                        else { @('Install','Boot','WinRE') }
-                    }
-                    'FinalLCU'              {
-                        if ($OsResolved.os -eq 'Server2019') { @('Install') }
-                        else { @('Install','Boot') }
-                    }
-                    'DotNetLeaf'            { @('Install') }
-                    'SafeOSDU'              {
-                        if ($OsResolved.os -eq 'Server2019') { @('Boot','WinRE') }
-                        else { @('WinRE') }
-                    }
-                    'SetupDU'               { @('Setup') }
-                    default                 { @() }
-                }
+                $targets[$role] = @(Get-ServicingContractRoleTargets -Role $role -Contract $contract)
             }
             $sha256Value = $(if ($f.PSObject.Properties.Name -contains 'sha256') { $f.sha256 } else { '' })
             $out.Add([pscustomobject]@{
@@ -6671,9 +6659,9 @@ function Invoke-CatalogPatchSetRefresh {
         [int]$MaxRetries = 3
     )
     $osKeyMap = @{ 'Server2016' = '2016'; 'Server2019' = '2019'; 'Server2022' = '2022'; 'Server2025' = '2025' }
-    $modelMap = @{ 'Server2016' = 'separate-ssu'; 'Server2019' = 'embedded-ssu'; 'Server2022' = 'embedded-ssu-du'; 'Server2025' = 'uup-checkpoint' }
     if (-not $osKeyMap.ContainsKey($OsVersion)) { throw ("Invoke-CatalogPatchSetRefresh: unknown OsVersion '{0}'." -f $OsVersion) }
-    $osk = $osKeyMap[$OsVersion]; $model = $modelMap[$OsVersion]
+    $refreshContract=Get-ServicingContract -OsKey $OsVersion
+    $osk = $osKeyMap[$OsVersion]; $model = [string]$refreshContract.PatchModel
     $parts = $PatchMonth.Split('-'); $year = [int]$parts[0]; $month = [int]$parts[1]
     # Layer 1: live seed-only Catalog acquisition. Individual HTTP requests
     # already retry transient network/429/503 inside Invoke-WebRequestWithRetry;
@@ -11095,7 +11083,98 @@ function Build-PatchPlan {
     $plan['InstallSequence'] = Build-InstallApplySequence -InstallPatches $plan.Install
     $plan['BootSequence']    = Build-BootApplySequence -BootPatches $plan.Boot
     $plan['WinReSequence']   = Build-WinReApplySequence -WinRePatches $plan.WinRE
+    $contractCheck=Test-PatchPlanAgainstServicingContract -Plan $plan -Patches $Patches
+    $plan['_ContractCheck']=$contractCheck
+    if(-not $contractCheck.Passed){
+        throw ('UnexpectedCrossOsBehaviorChange: resolved patch plan violates the selected {0} servicing contract: {1}' -f $contractCheck.OsKey,(($contractCheck.Issues)-join '; '))
+    }
+    if($Script:LogsDir -and (Test-Path -LiteralPath $Script:LogsDir -PathType Container)){
+        $contractDir=Join-Path $Script:LogsDir 'servicing-contract'
+        Initialize-RuntimeDirectories -Directory @($contractDir)
+        Save-CanonicalJsonFile -InputObject $contractCheck -Path (Join-Path $contractDir 'patch-plan-contract-check.json') -Depth 20
+    }
     return $plan
+}
+
+function Test-PatchPlanAgainstServicingContract {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][hashtable]$Plan,
+        [Parameter(Mandatory)][AllowEmptyCollection()][array]$Patches,
+        [AllowNull()]$Contract
+    )
+    if(-not $Contract){$Contract=$Script:ServicingContract}
+    if(-not $Contract -and $Script:OsVersion){$Contract=Get-ServicingContract -OsKey $Script:OsVersion}
+    if(-not $Contract){
+        return [pscustomobject][ordered]@{
+            SchemaVersion='patch-plan-contract-check/2.0'
+            CreatedAtUtc=[datetime]::UtcNow.ToString('o')
+            OsKey=''
+            ContractSha256=''
+            Passed=$true
+            Status='NotEvaluated'
+            RoleChecks=@()
+            SequenceChecks=@()
+            Issues=@()
+        }
+    }
+
+    $issues=[System.Collections.Generic.List[string]]::new()
+    $roleChecks=[System.Collections.Generic.List[object]]::new()
+    foreach($patch in @($Patches)){
+        if(-not $patch){continue}
+        $patchId=if($patch.PSObject.Properties['PackageId'] -and $patch.PackageId){[string]$patch.PackageId}elseif($patch.PSObject.Properties['KbId']){[string]$patch.KbId}else{'unknown'}
+        foreach($role in @(Get-PatchRoles -Patch $patch)){
+            $expected=@(Get-ServicingContractRoleTargets -Role $role -Contract $Contract | ForEach-Object { ConvertTo-PatchPlanTarget -Target ([string]$_) } | Sort-Object -Unique)
+            $actual=@(Get-PatchTargetsForRole -Patch $patch -Role $role | ForEach-Object { ConvertTo-PatchPlanTarget -Target ([string]$_) } | Sort-Object -Unique)
+            $expectedText=$expected -join ','
+            $actualText=$actual -join ','
+            $passed=($expectedText -eq $actualText)
+            $roleChecks.Add([pscustomobject][ordered]@{
+                PatchId=$patchId
+                KbId=$(if($patch.PSObject.Properties['KbId']){[string]$patch.KbId}else{''})
+                Role=[string]$role
+                ExpectedTargets=@($expected)
+                ActualTargets=@($actual)
+                Passed=$passed
+            })|Out-Null
+            if(-not $passed){$issues.Add(('role-target mismatch {0}/{1}: expected=[{2}], actual=[{3}]' -f $patchId,$role,$expectedText,$actualText))|Out-Null}
+        }
+    }
+
+    $sequenceChecks=[System.Collections.Generic.List[object]]::new()
+    foreach($spec in @(
+        [pscustomobject]@{Name='Install';PlanKey='InstallSequence'},
+        [pscustomobject]@{Name='Boot';PlanKey='BootSequence'},
+        [pscustomobject]@{Name='WinRE';PlanKey='WinReSequence'}
+    )){
+        $expected=@($Contract.Sequences.($spec.Name) | ForEach-Object {[string]$_})
+        $actual=@($Plan[$spec.PlanKey] | ForEach-Object {[string]$_.Name})
+        $passed=(($expected -join '|') -eq ($actual -join '|'))
+        $sequenceChecks.Add([pscustomobject][ordered]@{
+            Surface=$spec.Name
+            Expected=@($expected)
+            Actual=@($actual)
+            Passed=$passed
+        })|Out-Null
+        if(-not $passed){$issues.Add(('sequence mismatch {0}: expected=[{1}], actual=[{2}]' -f $spec.Name,($expected -join ','),($actual -join ',')))|Out-Null}
+    }
+
+    $componentHashes=Get-ServicingContractComponentHashes -Contract $Contract
+    return [pscustomobject][ordered]@{
+        SchemaVersion='patch-plan-contract-check/2.0'
+        CreatedAtUtc=[datetime]::UtcNow.ToString('o')
+        OsKey=[string]$Contract.OsKey
+        ContractSha256=[string]$componentHashes.ContractSha256
+        TargetMapSha256=[string]$componentHashes.TargetMapSha256
+        SequenceSha256=[string]$componentHashes.SequenceSha256
+        Passed=($issues.Count -eq 0)
+        Status=$(if($issues.Count -eq 0){'Pass'}else{'Fail'})
+        RoleChecks=@($roleChecks)
+        SequenceChecks=@($sequenceChecks)
+        Issues=@($issues)
+    }
 }
 
 function Get-PatchEntryType {
@@ -11134,6 +11213,7 @@ function Get-PatchRoles {
     return [string[]]@()
 }
 
+
 function Get-PatchTargetsForRole {
     [CmdletBinding()]
     [OutputType([string[]])]
@@ -11145,25 +11225,14 @@ function Get-PatchTargetsForRole {
         $prop = $Patch.TargetsByRole.PSObject.Properties[$Role]
         if ($prop -and $prop.Value) { return [string[]]@($prop.Value) }
     }
-    switch ($Role) {
-        'SourcePrerequisite'     { return (Get-PatchTargetsForType -PatchType (Get-PatchEntryType -Patch $Patch)) }
-        'ServicingStackCarrier'  { return [string[]]@('Install','Boot','WinRE') }
-        'FinalLCU'               { return [string[]]@('Install','Boot') }
-        'CheckpointDependency'   { return [string[]]@() }
-        'DotNetLeaf'             { return [string[]]@('Install') }
-        'SafeOSDU'               {
-            if ((Get-ConfiguredBootWimUpdateModel) -eq 'SafeOSDU') {
-                return [string[]]@('Boot','WinRE')
-            }
-            return [string[]]@('WinRE')
-        }
-        'SetupDU'                { return [string[]]@('Setup') }
-        'LanguagePack'           { return [string[]]@('Install','WinRE') }
-        'WinPeLanguagePack'      { return [string[]]@('Boot') }
-        'WinReLanguagePack'      { return [string[]]@('WinRE') }
-        'LXP'                    { return [string[]]@('Install') }
-        'DotNetLanguagePack'     { return [string[]]@('Install') }
-        'DynamicUpdateComponent'{ return [string[]]@('Install') }
+    if($Role -eq 'SourcePrerequisite' -and $Patch.PSObject.Properties['Targets'] -and $Patch.Targets){
+        return [string[]]@($Patch.Targets)
+    }
+    $contractTargets=Get-ServicingContractRoleTargets -Role $Role
+    if($contractTargets.Count -gt 0){return [string[]]@($contractTargets)}
+    if($Role -eq 'CheckpointDependency'){
+        # An empty target set is meaningful for non-checkpoint OS contracts.
+        return [string[]]@()
     }
     return [string[]]@()
 }
@@ -11173,12 +11242,17 @@ function Get-PatchTargetsForEntry {
     [OutputType([string[]])]
     param([Parameter(Mandatory)]$Patch)
     $targets = [System.Collections.Generic.List[string]]::new()
-    foreach ($role in (Get-PatchRoles -Patch $Patch)) {
+    $roles = @(Get-PatchRoles -Patch $Patch)
+    foreach ($role in $roles) {
         foreach ($target in (Get-PatchTargetsForRole -Patch $Patch -Role $role)) {
             if ($targets -notcontains $target) { $targets.Add($target) | Out-Null }
         }
     }
-    if ($targets.Count -eq 0) {
+    if ($roles.Count -eq 0) {
+        # Legacy entries without servicing roles may use the type map. An
+        # explicit role with an empty contract target set must remain empty;
+        # otherwise a non-applicable checkpoint or prerequisite could leak
+        # into another OS surface through the generic type fallback.
         $type = Get-PatchEntryType -Patch $Patch
         foreach ($target in (Get-PatchTargetsForType -PatchType $type)) {
             if ($targets -notcontains $target) { $targets.Add($target) | Out-Null }
@@ -12158,13 +12232,15 @@ function Get-BootWimPackageMode {
     [OutputType([string])]
     param()
     $mode = ''
-    if ($Script:OsProfile -and $Script:OsProfile.PSObject.Properties['Common'] -and
+    if ($Script:ServicingContract -and $Script:ServicingContract.Boot -and
+        $Script:ServicingContract.Boot.PSObject.Properties['PackageMode']) {
+        $mode = [string]$Script:ServicingContract.Boot.PackageMode
+    }
+    if ([string]::IsNullOrWhiteSpace($mode) -and $Script:OsProfile -and $Script:OsProfile.PSObject.Properties['Common'] -and
         $Script:OsProfile.Common -and $Script:OsProfile.Common.PSObject.Properties['BootWimPackageMode']) {
         $mode = [string]$Script:OsProfile.Common.BootWimPackageMode
     }
-    if ([string]::IsNullOrWhiteSpace($mode)) {
-        $mode = if ($Script:OsVersion -eq 'Server2019') { 'ExpandedCab' } else { 'DirectMsu' }
-    }
+    if ([string]::IsNullOrWhiteSpace($mode)) { $mode = 'DirectMsu' }
     if ($mode -notin @('DirectMsu','ExpandedCab')) {
         throw ('Unsupported Common.BootWimPackageMode: {0}' -f $mode)
     }
@@ -12384,6 +12460,7 @@ function Build-InstallApplySequence {
     return $seq.ToArray()
 }
 
+
 function Build-BootApplySequence {
     [CmdletBinding()]
     [OutputType([array])]
@@ -12395,26 +12472,33 @@ function Build-BootApplySequence {
     $lcu    = Get-PatchesForRole -Patches $BootPatches -Roles @('FinalLCU')
     $safeOs = Get-PatchesForRole -Patches $BootPatches -Roles @('SafeOSDU')
 
-    # A boot image must use one cumulative-update model at a time.  Server 2019
-    # uses the Microsoft-documented SafeOS CU alternative because the full
-    # KB5099538 transaction fails on both en-us and ja-jp evaluation-media
-    # boot.wim with the same deleted qps-ploc PXE component (0x80070032).
-    if ($safeOs.Count -gt 0 -and ($stack.Count -gt 0 -or $lcu.Count -gt 0)) {
-        throw ('boot.wim update plan is ambiguous: SafeOSDU={0}, ServicingStackCarrier={1}, FinalLCU={2}. Select one cumulative-update model.' -f $safeOs.Count,$stack.Count,$lcu.Count)
-    }
-    $actualBootUpdateModel = if ($safeOs.Count -gt 0) { 'SafeOSDU' } else { 'FullLCU' }
     $configuredBootUpdateModel = Get-ConfiguredBootWimUpdateModel
-    if (-not [string]::IsNullOrWhiteSpace($configuredBootUpdateModel) -and
-        $configuredBootUpdateModel -ne $actualBootUpdateModel) {
-        throw ('boot.wim update model mismatch: configured={0}; resolved-plan={1}. Refusing to service with a Catalog-refresh target regression.' -f $configuredBootUpdateModel,$actualBootUpdateModel)
+    $allowSyntheticEmptyPlan=([bool]$Script:SyntheticTestMode -and @($BootPatches).Count -eq 0)
+    if(-not $allowSyntheticEmptyPlan){
+    switch($configuredBootUpdateModel){
+        'SafeOSDU' {
+            if($safeOs.Count -eq 0 -or $stack.Count -gt 0 -or $lcu.Count -gt 0){
+                throw ('UnexpectedCrossOsBehaviorChange: SafeOSDU boot contract requires SafeOSDU>=1 and no ServicingStackCarrier/FinalLCU targets; SafeOSDU={0}, ServicingStackCarrier={1}, FinalLCU={2}.' -f $safeOs.Count,$stack.Count,$lcu.Count)
+            }
+        }
+        'FullLCU' {
+            if($safeOs.Count -gt 0 -or $lcu.Count -eq 0){
+                throw ('UnexpectedCrossOsBehaviorChange: FullLCU boot contract requires FinalLCU>=1 and no SafeOSDU target; SafeOSDU={0}, FinalLCU={1}.' -f $safeOs.Count,$lcu.Count)
+            }
+        }
+        default {
+            throw ('Unsupported boot update model in servicing contract: {0}' -f $configuredBootUpdateModel)
+        }
     }
+    }
+    $actualBootUpdateModel=$configuredBootUpdateModel
 
     $seq = [System.Collections.Generic.List[object]]::new()
     $seq.Add([pscustomobject]@{ Name='B0.SourcePrerequisite'; Description='Source-media prerequisite, conditionally injected'; Patches=$prereq; RequiresRemount=$false; BootUpdateModel=$actualBootUpdateModel }) | Out-Null
 
     $packageMode = Get-BootWimPackageMode
     $servicingStrategy = Get-BootWimServicingStrategy
-    if ($safeOs.Count -gt 0) {
+    if ($configuredBootUpdateModel -eq 'SafeOSDU') {
         $seq.Add([pscustomobject]@{ Name='B1.ServicingStack'; Description='Not required: selected SafeOS DU declares no prerequisite and is serviced as the boot-image cumulative package'; Patches=@(); RequiresRemount=$false; DuplicateApplySuppressed=$true; ServicingStrategy=$servicingStrategy; BootUpdateModel='SafeOSDU' }) | Out-Null
         $seq.Add([pscustomobject]@{ Name='B2.LanguagePack'; Description='WinPE language pack'; Patches=$lp; RequiresRemount=$false; ServicingStrategy=$servicingStrategy; BootUpdateModel='SafeOSDU' }) | Out-Null
         $seq.Add([pscustomobject]@{ Name='B3.BootCumulativeUpdate'; Description='Apply SafeOS cumulative update as the Microsoft-documented boot-image alternative to the full LCU'; Patches=$safeOs; RequiresRemount=$false; DuplicateApplySuppressed=$false; ServicingStrategy=$servicingStrategy; BootUpdateModel='SafeOSDU' }) | Out-Null
@@ -14105,16 +14189,17 @@ function Compare-MediaInspection {
     }
 }
 
+
 function Get-InspectionCrossChecks { # psa-disable-line PSA6003 -- "CrossChecks" is plural by design; returns the full findings list
     <#
     .SYNOPSIS
-        Pure observe-first comparator: measured state vs config
-        declarations. Emits findings only -- Level 'Warning' means the
-        declaration and the measurement disagree (recorded, NEVER
-        gated in this arc; measurement-driven gating is a next-arc
-        step after the inspection survives one E2E cycle
-        [user-adjudicated 2026-07-07]). Level 'Info' documents
-        consistency or an expected tolerate-path outcome.
+        Pure observe-first comparator: measured state vs config and
+        selected servicing-contract declarations.
+    .DESCRIPTION
+        FullLCU contracts expect the measured boot image build to advance.
+        SafeOSDU contracts intentionally validate installed SafeOS package,
+        kernel payload, P08 operation evidence, and pending state; the source
+        RollupFix/registry build may remain unchanged and is not a warning.
     .OUTPUTS
         Array of pscustomobject: Level / Kind / Message
     #>
@@ -14122,6 +14207,8 @@ function Get-InspectionCrossChecks { # psa-disable-line PSA6003 -- "CrossChecks"
     [OutputType([array])]
     param(
         [Parameter(Mandatory)] [string]$BootWimLcuPolicy,
+        [AllowEmptyString()] [string]$BootUpdateModel='',
+        [AllowEmptyString()] [string]$BootBuildExpectation='',
         [AllowNull()] [object]$BridgeMinimumStack,
         [AllowNull()] [object]$PreInstallBuild,
         [AllowNull()] [object]$PreBootBuild,
@@ -14137,32 +14224,48 @@ function Get-InspectionCrossChecks { # psa-disable-line PSA6003 -- "CrossChecks"
     $bootAdvanced = [bool]($preB -and $postB -and ($postB -gt $preB))
     $preS  = if ($preB)  { [string]$preB }  else { '(none)' }
     $postS = if ($postB) { [string]$postB } else { '(none)' }
-    switch ($BootWimLcuPolicy) {
-        'disabled' {
-            if ($bootAdvanced) {
-                & $add 'Warning' 'boot-policy' ('BootWimLcuPolicy=disabled but the measured boot.wim build ADVANCED ({0} -> {1}); declaration and measurement disagree.' -f $preS, $postS)
-            } else {
-                & $add 'Info' 'boot-policy' ('BootWimLcuPolicy=disabled and boot.wim build unchanged ({0}); declaration consistent with measurement.' -f $preS)
-            }
+
+    if($BootBuildExpectation -eq 'MayRemainSourceBuild' -or $BootUpdateModel -eq 'SafeOSDU'){
+        if($bootAdvanced){
+            & $add 'Info' 'boot-contract' ('Boot update model {0} advanced the measured boot.wim build ({1} -> {2}); this is acceptable, while package/kernel/operation evidence remains authoritative.' -f $BootUpdateModel,$preS,$postS)
+        }else{
+            & $add 'Info' 'boot-contract' ('Boot update model {0} permits the source RollupFix/registry build to remain unchanged ({1} -> {2}); SafeOS package, kernel payload, operation evidence, and pending state are authoritative.' -f $BootUpdateModel,$preS,$postS)
         }
-        'enabled' {
-            if (-not $bootAdvanced) {
-                & $add 'Warning' 'boot-policy' ('BootWimLcuPolicy=enabled but the measured boot.wim build did NOT advance ({0} -> {1}); declaration and measurement disagree.' -f $preS, $postS)
-            } else {
-                & $add 'Info' 'boot-policy' ('BootWimLcuPolicy=enabled and boot.wim build advanced ({0} -> {1}); declaration consistent with measurement.' -f $preS, $postS)
-            }
+    }elseif($BootBuildExpectation -eq 'Advance' -or $BootUpdateModel -eq 'FullLCU'){
+        if(-not $bootAdvanced){
+            & $add 'Warning' 'boot-contract' ('Boot update model {0} requires the measured boot.wim build to advance, but it did not ({1} -> {2}).' -f $BootUpdateModel,$preS,$postS)
+        }else{
+            & $add 'Info' 'boot-contract' ('Boot update model {0} advanced the measured boot.wim build ({1} -> {2}); contract and measurement agree.' -f $BootUpdateModel,$preS,$postS)
         }
-        'tolerate' {
-            if ($bootAdvanced) {
-                & $add 'Info' 'boot-policy' ('BootWimLcuPolicy=tolerate and boot.wim servicing SUCCEEDED ({0} -> {1}); measurement supports flipping this OS to enabled (user adjudication).' -f $preS, $postS)
-            } else {
-                & $add 'Info' 'boot-policy' ('BootWimLcuPolicy=tolerate and boot.wim build did not advance ({0} -> {1}); the tolerated-failure path was taken, boot.wim ships as-is.' -f $preS, $postS)
+    }else{
+        switch ($BootWimLcuPolicy) {
+            'disabled' {
+                if ($bootAdvanced) {
+                    & $add 'Warning' 'boot-policy' ('BootWimLcuPolicy=disabled but the measured boot.wim build ADVANCED ({0} -> {1}); declaration and measurement disagree.' -f $preS, $postS)
+                } else {
+                    & $add 'Info' 'boot-policy' ('BootWimLcuPolicy=disabled and boot.wim build unchanged ({0}); declaration consistent with measurement.' -f $preS)
+                }
             }
-        }
-        default {
-            & $add 'Warning' 'boot-policy' ('Unknown BootWimLcuPolicy value {0}; cannot cross-check.' -f $BootWimLcuPolicy)
+            'enabled' {
+                if (-not $bootAdvanced) {
+                    & $add 'Warning' 'boot-policy' ('Legacy BootWimLcuPolicy=enabled expects the measured boot.wim build to advance, but it did not ({0} -> {1}).' -f $preS, $postS)
+                } else {
+                    & $add 'Info' 'boot-policy' ('BootWimLcuPolicy=enabled and boot.wim build advanced ({0} -> {1}); declaration consistent with measurement.' -f $preS, $postS)
+                }
+            }
+            'tolerate' {
+                if ($bootAdvanced) {
+                    & $add 'Info' 'boot-policy' ('BootWimLcuPolicy=tolerate and boot.wim servicing SUCCEEDED ({0} -> {1}); measurement supports flipping this OS to enabled (user adjudication).' -f $preS, $postS)
+                } else {
+                    & $add 'Info' 'boot-policy' ('BootWimLcuPolicy=tolerate and boot.wim build did not advance ({0} -> {1}); the tolerated-failure path was taken, boot.wim ships as-is.' -f $preS, $postS)
+                }
+            }
+            default {
+                & $add 'Warning' 'boot-policy' ('Unknown BootWimLcuPolicy value {0}; cannot cross-check.' -f $BootWimLcuPolicy)
+            }
         }
     }
+
     if ($BridgeMinimumStack) {
         $floor = ConvertTo-TwoPartBuild -BuildString ([string]$BridgeMinimumStack)
         $preI  = ConvertFrom-InspectionBuildValue -Value $PreInstallBuild
@@ -15870,16 +15973,48 @@ function New-Server2016ServicingContract {
     [OutputType([pscustomobject])]
     param()
     return [pscustomobject][ordered]@{
-        SchemaVersion='servicing-contract/1.0'
-        ContractRevision='Server2016-r1'
+        SchemaVersion='servicing-contract/2.1'
+        ContractRevision='Server2016-r3'
         OsKey='Server2016'
         PatchModel='separate-ssu'
         VersionDecisionPolicy='StrictFailClosed'
         Install=[pscustomobject][ordered]@{UpdateModel='SeparateSSUThenFullLCU';VerificationMode='LcuBuildAndStandaloneSsu';PendingPolicy='Reject'}
-        Boot=[pscustomobject][ordered]@{UpdateModel='FullLCU';VerificationMode='FullLcuTarget';FailurePolicy='FailBuild';SmokeTestRequired=$false}
+        Boot=[pscustomobject][ordered]@{UpdateModel='FullLCU';PackageMode='DirectMsu';VerificationMode='FullLcuTarget';FailurePolicy='FailBuild';SmokeTestRequired=$false}
         WinRE=[pscustomobject][ordered]@{UpdateModel='SeparateSSUThenFullLCUPlusSafeOSDU';VerificationMode='RollupSafeOsAndSsuEvidence';DistributionPolicy='ServiceOnceCopyToAllInstallIndexes'}
         Ssu=[pscustomobject][ordered]@{StateResolver='InstalledPackageThenComponentDirectory';Monotonic=$true}
+        Discovery=[pscustomobject][ordered]@{ResolveStandaloneSsuMonthly=$true}
+        DotNet=[pscustomobject][ordered]@{SupportedRuntimeSelectors=@('4.8')}
         Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After'}
+        RoleTargets=[pscustomobject][ordered]@{
+            SourcePrerequisite=@('Install','Boot','WinRE')
+            ServicingStackCarrier=@('Install','Boot','WinRE')
+            FinalLCU=@('Install','Boot')
+            CheckpointDependency=@()
+            DotNetLeaf=@('Install')
+            SafeOSDU=@('WinRE')
+            SetupDU=@('Setup')
+            LanguagePack=@('Install','WinRE')
+            WinPeLanguagePack=@('Boot')
+            WinReLanguagePack=@('WinRE')
+            LXP=@('Install')
+            DotNetLanguagePack=@('Install')
+            DynamicUpdateComponent=@('Install')
+        }
+        Sequences=[pscustomobject][ordered]@{
+            Install=@('I0.SourcePrerequisite','I1.ServicingStack','I2.LanguageFodOptional','I3.FinalLCU','I4.DynamicUpdate.Component','I5.Cleanup','I6.DotNet')
+            Boot=@('B0.SourcePrerequisite','B1.ServicingStack','B2.LanguagePack','B3.FinalLCU','B4.Cleanup')
+            WinRE=@('W0.SourcePrerequisite','W1.ServicingStack','W2.LanguagePack','W3.SafeOsDU','W4.CleanupAndExport')
+        }
+        Verification=[pscustomobject][ordered]@{
+            InstallAuthority='LcuBuildAndStandaloneSsu'
+            BootAuthority='FullLcuTarget'
+            WinREAuthority='RollupSafeOsAndSsuEvidence'
+            KbIdentityEvidenceMode='Server2016InstallSsu'
+        }
+        Observation=[pscustomobject][ordered]@{
+            BootBuildExpectation='Advance'
+            BootBuildAuthority='RegistryKernelAndRollupFix'
+        }
     }
 }
 
@@ -15888,16 +16023,48 @@ function New-Server2019ServicingContract {
     [OutputType([pscustomobject])]
     param()
     return [pscustomobject][ordered]@{
-        SchemaVersion='servicing-contract/1.0'
-        ContractRevision='Server2019-r1'
+        SchemaVersion='servicing-contract/2.1'
+        ContractRevision='Server2019-r3'
         OsKey='Server2019'
         PatchModel='embedded-ssu'
         VersionDecisionPolicy='StrictFailClosed'
         Install=[pscustomobject][ordered]@{UpdateModel='EmbeddedSSUFullLCU';VerificationMode='LcuBuildAndEmbeddedSsu';PendingPolicy='Reject'}
-        Boot=[pscustomobject][ordered]@{UpdateModel='SafeOSDU';VerificationMode='SafeOsPackageKernelOperation';FailurePolicy='FailBuild';SmokeTestRequired=$true}
+        Boot=[pscustomobject][ordered]@{UpdateModel='SafeOSDU';PackageMode='DirectMsu';VerificationMode='SafeOsPackageKernelOperation';FailurePolicy='FailBuild';SmokeTestRequired=$true}
         WinRE=[pscustomobject][ordered]@{UpdateModel='EmbeddedSSUFullLCUThenSafeOSDU';VerificationMode='RollupSafeOsAndSsuEvidence';DistributionPolicy='ServiceOnceCopyToAllInstallIndexes'}
         Ssu=[pscustomobject][ordered]@{StateResolver='InstalledPackageIdentity';Monotonic=$true;LegacyPrerequisitePolicy='SkipWhenActiveSsuIsNewer'}
+        Discovery=[pscustomobject][ordered]@{ResolveStandaloneSsuMonthly=$false}
+        DotNet=[pscustomobject][ordered]@{SupportedRuntimeSelectors=@('4.7.2','4.8')}
         Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After'}
+        RoleTargets=[pscustomobject][ordered]@{
+            SourcePrerequisite=@('Install','WinRE')
+            ServicingStackCarrier=@('Install','WinRE')
+            FinalLCU=@('Install')
+            CheckpointDependency=@()
+            DotNetLeaf=@('Install')
+            SafeOSDU=@('Boot','WinRE')
+            SetupDU=@('Setup')
+            LanguagePack=@('Install','WinRE')
+            WinPeLanguagePack=@('Boot')
+            WinReLanguagePack=@('WinRE')
+            LXP=@('Install')
+            DotNetLanguagePack=@('Install')
+            DynamicUpdateComponent=@('Install')
+        }
+        Sequences=[pscustomobject][ordered]@{
+            Install=@('I0.SourcePrerequisite','I1.ServicingStack','I2.LanguageFodOptional','I3.FinalLCU','I4.DynamicUpdate.Component','I5.Cleanup','I6.DotNet')
+            Boot=@('B0.SourcePrerequisite','B1.ServicingStack','B2.LanguagePack','B3.BootCumulativeUpdate','B4.Cleanup')
+            WinRE=@('W0.SourcePrerequisite','W1.ServicingStack','W2.LanguagePack','W3.SafeOsDU','W4.CleanupAndExport')
+        }
+        Verification=[pscustomobject][ordered]@{
+            InstallAuthority='LcuBuildAndEmbeddedSsu'
+            BootAuthority='SafeOsPackageKernelOperation'
+            WinREAuthority='RollupSafeOsAndSsuEvidence'
+            KbIdentityEvidenceMode='None'
+        }
+        Observation=[pscustomobject][ordered]@{
+            BootBuildExpectation='MayRemainSourceBuild'
+            BootBuildAuthority='SafeOsPackageKernelAndOperationEvidence'
+        }
     }
 }
 
@@ -15906,16 +16073,48 @@ function New-Server2022ServicingContract {
     [OutputType([pscustomobject])]
     param()
     return [pscustomobject][ordered]@{
-        SchemaVersion='servicing-contract/1.0'
-        ContractRevision='Server2022-r1'
+        SchemaVersion='servicing-contract/2.1'
+        ContractRevision='Server2022-r3'
         OsKey='Server2022'
         PatchModel='embedded-ssu-du'
         VersionDecisionPolicy='StrictFailClosed'
         Install=[pscustomobject][ordered]@{UpdateModel='BridgeWhenRequiredThenEmbeddedSSUFullLCU';VerificationMode='LcuBuildAndEmbeddedSsu';PendingPolicy='Reject'}
-        Boot=[pscustomobject][ordered]@{UpdateModel='FullLCU';VerificationMode='FullLcuTarget';FailurePolicy='FailBuild';SmokeTestRequired=$false}
+        Boot=[pscustomobject][ordered]@{UpdateModel='FullLCU';PackageMode='DirectMsu';VerificationMode='FullLcuTarget';FailurePolicy='FailBuild';SmokeTestRequired=$false}
         WinRE=[pscustomobject][ordered]@{UpdateModel='EmbeddedSSUFullLCUThenSafeOSDU';VerificationMode='RollupSafeOsAndSsuEvidence';DistributionPolicy='ServiceOnceCopyToAllInstallIndexes'}
         Ssu=[pscustomobject][ordered]@{StateResolver='InstalledPackageIdentity';Monotonic=$true;BridgePolicy='CompareImageAndSsuFloors'}
+        Discovery=[pscustomobject][ordered]@{ResolveStandaloneSsuMonthly=$false}
+        DotNet=[pscustomobject][ordered]@{SupportedRuntimeSelectors=@('4.8','4.8.1')}
         Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After'}
+        RoleTargets=[pscustomobject][ordered]@{
+            SourcePrerequisite=@('Install','Boot','WinRE')
+            ServicingStackCarrier=@('Install','Boot','WinRE')
+            FinalLCU=@('Install','Boot')
+            CheckpointDependency=@()
+            DotNetLeaf=@('Install')
+            SafeOSDU=@('WinRE')
+            SetupDU=@('Setup')
+            LanguagePack=@('Install','WinRE')
+            WinPeLanguagePack=@('Boot')
+            WinReLanguagePack=@('WinRE')
+            LXP=@('Install')
+            DotNetLanguagePack=@('Install')
+            DynamicUpdateComponent=@('Install')
+        }
+        Sequences=[pscustomobject][ordered]@{
+            Install=@('I0.SourcePrerequisite','I1.ServicingStack','I2.LanguageFodOptional','I3.FinalLCU','I4.DynamicUpdate.Component','I5.Cleanup','I6.DotNet')
+            Boot=@('B0.SourcePrerequisite','B1.ServicingStack','B2.LanguagePack','B3.FinalLCU','B4.Cleanup')
+            WinRE=@('W0.SourcePrerequisite','W1.ServicingStack','W2.LanguagePack','W3.SafeOsDU','W4.CleanupAndExport')
+        }
+        Verification=[pscustomobject][ordered]@{
+            InstallAuthority='LcuBuildAndEmbeddedSsu'
+            BootAuthority='FullLcuTarget'
+            WinREAuthority='RollupSafeOsAndSsuEvidence'
+            KbIdentityEvidenceMode='None'
+        }
+        Observation=[pscustomobject][ordered]@{
+            BootBuildExpectation='Advance'
+            BootBuildAuthority='RegistryKernelAndRollupFix'
+        }
     }
 }
 
@@ -15924,16 +16123,48 @@ function New-Server2025ServicingContract {
     [OutputType([pscustomobject])]
     param()
     return [pscustomobject][ordered]@{
-        SchemaVersion='servicing-contract/1.0'
-        ContractRevision='Server2025-r1'
+        SchemaVersion='servicing-contract/2.1'
+        ContractRevision='Server2025-r3'
         OsKey='Server2025'
         PatchModel='uup-checkpoint'
         VersionDecisionPolicy='StrictFailClosed'
         Install=[pscustomobject][ordered]@{UpdateModel='CheckpointChainThenEmbeddedSSUFullLCU';VerificationMode='CheckpointChainAndLcuBuild';PendingPolicy='Reject'}
-        Boot=[pscustomobject][ordered]@{UpdateModel='FullLCU';VerificationMode='FullLcuTarget';FailurePolicy='FailBuild';SmokeTestRequired=$false}
+        Boot=[pscustomobject][ordered]@{UpdateModel='FullLCU';PackageMode='DirectMsu';VerificationMode='FullLcuTarget';FailurePolicy='FailBuild';SmokeTestRequired=$false}
         WinRE=[pscustomobject][ordered]@{UpdateModel='CheckpointAwareLCUThenSafeOSDU';VerificationMode='RollupSafeOsAndSsuEvidence';DistributionPolicy='ServiceOnceCopyToAllInstallIndexes'}
         Ssu=[pscustomobject][ordered]@{StateResolver='InstalledPackageIdentity';Monotonic=$true;CheckpointPolicy='ValidateOrderedCoLocatedChain'}
+        Discovery=[pscustomobject][ordered]@{ResolveStandaloneSsuMonthly=$false}
+        DotNet=[pscustomobject][ordered]@{SupportedRuntimeSelectors=@('4.8.1')}
         Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After'}
+        RoleTargets=[pscustomobject][ordered]@{
+            SourcePrerequisite=@('Install','Boot','WinRE')
+            ServicingStackCarrier=@('Install','Boot','WinRE')
+            FinalLCU=@('Install','Boot')
+            CheckpointDependency=@('Install','Boot','WinRE')
+            DotNetLeaf=@('Install')
+            SafeOSDU=@('WinRE')
+            SetupDU=@('Setup')
+            LanguagePack=@('Install','WinRE')
+            WinPeLanguagePack=@('Boot')
+            WinReLanguagePack=@('WinRE')
+            LXP=@('Install')
+            DotNetLanguagePack=@('Install')
+            DynamicUpdateComponent=@('Install')
+        }
+        Sequences=[pscustomobject][ordered]@{
+            Install=@('I0.SourcePrerequisite','I1.ServicingStack','I2.LanguageFodOptional','I3.FinalLCU','I4.DynamicUpdate.Component','I5.Cleanup','I6.DotNet')
+            Boot=@('B0.SourcePrerequisite','B1.ServicingStack','B2.LanguagePack','B3.FinalLCU','B4.Cleanup')
+            WinRE=@('W0.SourcePrerequisite','W1.ServicingStack','W2.LanguagePack','W3.SafeOsDU','W4.CleanupAndExport')
+        }
+        Verification=[pscustomobject][ordered]@{
+            InstallAuthority='CheckpointChainAndLcuBuild'
+            BootAuthority='FullLcuTarget'
+            WinREAuthority='RollupSafeOsAndSsuEvidence'
+            KbIdentityEvidenceMode='None'
+        }
+        Observation=[pscustomobject][ordered]@{
+            BootBuildExpectation='Advance'
+            BootBuildAuthority='RegistryKernelAndRollupFix'
+        }
     }
 }
 
@@ -15950,15 +16181,53 @@ function Get-ServicingContract {
     throw ('No servicing contract is defined for {0}.' -f $OsKey)
 }
 
-function Get-ServicingContractHash {
+
+function Get-CanonicalObjectSha256 {
     [CmdletBinding()]
     [OutputType([string])]
-    param([Parameter(Mandatory)]$Contract)
-    $json=ConvertTo-CanonicalJson -InputObject $Contract -Depth 12
+    param([Parameter(Mandatory)]$InputObject,[int]$Depth=20)
+    $json=ConvertTo-CanonicalJson -InputObject $InputObject -Depth $Depth
     $utf8=[System.Text.UTF8Encoding]::new($false)
     $sha=[System.Security.Cryptography.SHA256]::Create()
     try{$bytes=$sha.ComputeHash($utf8.GetBytes($json))}finally{$sha.Dispose()}
     return ([System.BitConverter]::ToString($bytes).Replace('-','').ToLowerInvariant())
+}
+
+function Get-ServicingContractHash {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)]$Contract)
+    return (Get-CanonicalObjectSha256 -InputObject $Contract -Depth 20)
+}
+
+function Get-ServicingContractComponentHashes {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)]$Contract)
+    return [pscustomobject][ordered]@{
+        ContractSha256=(Get-ServicingContractHash -Contract $Contract)
+        TargetMapSha256=(Get-CanonicalObjectSha256 -InputObject $Contract.RoleTargets -Depth 12)
+        SequenceSha256=(Get-CanonicalObjectSha256 -InputObject $Contract.Sequences -Depth 12)
+        VerificationSha256=(Get-CanonicalObjectSha256 -InputObject $Contract.Verification -Depth 12)
+        ObservationSha256=(Get-CanonicalObjectSha256 -InputObject $Contract.Observation -Depth 12)
+        DiscoverySha256=(Get-CanonicalObjectSha256 -InputObject $Contract.Discovery -Depth 12)
+        DotNetSha256=(Get-CanonicalObjectSha256 -InputObject $Contract.DotNet -Depth 12)
+    }
+}
+
+function Get-ServicingContractRoleTargets {
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory)][string]$Role,
+        [AllowNull()]$Contract
+    )
+    if(-not $Contract){$Contract=$Script:ServicingContract}
+    if(-not $Contract -and $Script:OsVersion){$Contract=Get-ServicingContract -OsKey $Script:OsVersion}
+    if(-not $Contract -or -not $Contract.RoleTargets){return [string[]]@()}
+    $prop=$Contract.RoleTargets.PSObject.Properties[$Role]
+    if(-not $prop){return [string[]]@()}
+    return [string[]]@($prop.Value | ForEach-Object { [string]$_ })
 }
 
 function Get-ConfiguredBootWimUpdateModel {
@@ -15982,12 +16251,15 @@ function Assert-ServicingContractProfileCompatibility {
     if([string]$Contract.PatchModel -ne [string]$Profile.PatchModel){$issues.Add(('PatchModel contract={0}, profile={1}' -f $Contract.PatchModel,$Profile.PatchModel))|Out-Null}
     $profileBoot=if($Profile.Common -and $Profile.Common.PSObject.Properties['BootWimUpdateModel']){[string]$Profile.Common.BootWimUpdateModel}else{'FullLCU'}
     if([string]$Contract.Boot.UpdateModel -ne $profileBoot){$issues.Add(('Boot.UpdateModel contract={0}, profile={1}' -f $Contract.Boot.UpdateModel,$profileBoot))|Out-Null}
+    $profilePackageMode=if($Profile.Common -and $Profile.Common.PSObject.Properties['BootWimPackageMode']){[string]$Profile.Common.BootWimPackageMode}else{'DirectMsu'}
+    if([string]$Contract.Boot.PackageMode -ne $profilePackageMode){$issues.Add(('Boot.PackageMode contract={0}, profile={1}' -f $Contract.Boot.PackageMode,$profilePackageMode))|Out-Null}
     $failurePolicy=if($Profile.Common -and $Profile.Common.PSObject.Properties['BootWimFailurePolicy']){[string]$Profile.Common.BootWimFailurePolicy}else{''}
     if($failurePolicy -and [string]$Contract.Boot.FailurePolicy -ne $failurePolicy){$issues.Add(('Boot.FailurePolicy contract={0}, profile={1}' -f $Contract.Boot.FailurePolicy,$failurePolicy))|Out-Null}
     $versionPolicy=if($Profile.Common -and $Profile.Common.PSObject.Properties['VersionDecisionPolicy']){[string]$Profile.Common.VersionDecisionPolicy}else{''}
     if($versionPolicy -and [string]$Contract.VersionDecisionPolicy -ne $versionPolicy){$issues.Add(('VersionDecisionPolicy contract={0}, profile={1}' -f $Contract.VersionDecisionPolicy,$versionPolicy))|Out-Null}
     if($issues.Count -gt 0){throw ('Servicing contract/profile mismatch: {0}' -f ($issues -join '; '))}
 }
+
 
 function Assert-AllServicingContractBaselines {
     [CmdletBinding()]
@@ -15999,15 +16271,42 @@ function Assert-AllServicingContractBaselines {
     $results=[System.Collections.Generic.List[object]]::new()
     foreach($os in @('Server2016','Server2019','Server2022','Server2025')){
         $contract=Get-ServicingContract -OsKey $os
-        $actual=Get-ServicingContractHash -Contract $contract
+        $actual=Get-ServicingContractComponentHashes -Contract $contract
         $prop=$baseline.Contracts.PSObject.Properties[$os]
-        $expected=if($prop){[string]$prop.Value.Sha256}else{''}
-        $pass=(-not [string]::IsNullOrWhiteSpace($expected) -and $actual -eq $expected)
-        $results.Add([pscustomobject][ordered]@{OsKey=$os;ExpectedSha256=$expected;ActualSha256=$actual;Passed=$pass})|Out-Null
+        $entry=if($prop){$prop.Value}else{$null}
+        $expectedContract=if($entry -and $entry.PSObject.Properties['ContractSha256']){[string]$entry.ContractSha256}elseif($entry -and $entry.PSObject.Properties['Sha256']){[string]$entry.Sha256}else{''}
+        $componentResults=[System.Collections.Generic.List[object]]::new()
+        foreach($field in @('ContractSha256','TargetMapSha256','SequenceSha256','VerificationSha256','ObservationSha256','DiscoverySha256','DotNetSha256')){
+            $expected=if($entry -and $entry.PSObject.Properties[$field]){[string]$entry.$field}elseif($field -eq 'ContractSha256'){$expectedContract}else{''}
+            $actualValue=[string]$actual.$field
+            $pass=(-not [string]::IsNullOrWhiteSpace($expected) -and $actualValue -eq $expected)
+            $componentResults.Add([pscustomobject][ordered]@{Component=$field;ExpectedSha256=$expected;ActualSha256=$actualValue;Passed=$pass})|Out-Null
+        }
+        $osPassed=(@($componentResults|Where-Object{-not $_.Passed}).Count -eq 0)
+        $results.Add([pscustomobject][ordered]@{
+            OsKey=$os
+            ExpectedSha256=$expectedContract
+            ActualSha256=[string]$actual.ContractSha256
+            Passed=$osPassed
+            Components=@($componentResults)
+        })|Out-Null
     }
     $failed=@($results|Where-Object{-not $_.Passed})
-    if($failed.Count -gt 0){throw ('UnexpectedCrossOsBehaviorChange: servicing contract baseline mismatch: {0}' -f (($failed|ForEach-Object{('{0}: expected={1}, actual={2}' -f $_.OsKey,$_.ExpectedSha256,$_.ActualSha256)}) -join '; '))}
-    return [pscustomobject][ordered]@{SchemaVersion='servicing-contract-baseline-check/1.0';BaselinePath=$path;Passed=$true;Results=@($results)}
+    if($failed.Count -gt 0){
+        $messages=[System.Collections.Generic.List[string]]::new()
+        foreach($item in $failed){
+            foreach($component in @($item.Components|Where-Object{-not $_.Passed})){
+                $messages.Add(('{0}/{1}: expected={2}, actual={3}' -f $item.OsKey,$component.Component,$component.ExpectedSha256,$component.ActualSha256))|Out-Null
+            }
+        }
+        throw ('UnexpectedCrossOsBehaviorChange: servicing contract baseline mismatch: {0}' -f ($messages -join '; '))
+    }
+    return [pscustomobject][ordered]@{
+        SchemaVersion='servicing-contract-baseline-check/2.1'
+        BaselinePath=$path
+        Passed=$true
+        Results=@($results)
+    }
 }
 
 function Initialize-ServicingContract {
@@ -16021,7 +16320,7 @@ function Initialize-ServicingContract {
         $dir=Join-Path $Script:LogsDir 'servicing-contract'
         Initialize-RuntimeDirectories -Directory @($dir)
         $selected=[pscustomobject][ordered]@{
-            SchemaVersion='selected-servicing-contract/1.0'
+            SchemaVersion='selected-servicing-contract/2.1'
             CreatedAtUtc=[datetime]::UtcNow.ToString('o')
             RunId=$Script:RunId
             OsKey=$Script:OsVersion
@@ -16515,13 +16814,8 @@ function Resolve-DotNetMonthlySelectorLines {
         if ($entry) { $selectedMonth=$month; $selectedEntry=$entry; break }
     }
     if (-not $selectedEntry) { throw ('.NET release notes did not contain an applicable entry for {0} at or before {1}.' -f $OsVersion, $BaselineMonth) }
-    $allowed = switch ($OsVersion) {
-        'Server2016' { @('4.8') }
-        'Server2019' { @('4.7.2','4.8') }
-        'Server2022' { @('4.8','4.8.1') }
-        'Server2025' { @('4.8.1') }
-        default { @() }
-    }
+    $dotNetContract=Get-ServicingContract -OsKey $OsVersion
+    $allowed=@($dotNetContract.DotNet.SupportedRuntimeSelectors | ForEach-Object {[string]$_})
     $lines = [System.Collections.Generic.List[object]]::new()
     foreach ($row in @($selectedEntry.Rows)) {
         if (-not $row.KbId) { continue }
@@ -16621,15 +16915,16 @@ function Update-MonthlyAuxiliaryResolvedPatchesAtFetch {
     if (-not $month) { throw 'ResolveMonthlyAuxiliariesAtFetch is enabled, but the baseline month could not be derived.' }
     Write-SubSection ('Step 0A: Resolve monthly auxiliary packages for {0}' -f $month)
     $osShort = $Script:OsVersion -replace '^Server',''
-    $modelMap = @{ Server2016='separate-ssu'; Server2019='embedded-ssu'; Server2022='embedded-ssu-du'; Server2025='uup-checkpoint' }
+    $auxContract=if($Script:ServicingContract){$Script:ServicingContract}else{Get-ServicingContract -OsKey $Script:OsVersion}
+    $patchModel=[string]$auxContract.PatchModel
 
     # Use ordinary PowerShell arrays here.  Windows PowerShell 5.1 and pwsh
     # 7.6 bind Generic.List[object] differently inside @(...), which caused
     # "Argument types do not match" at the conversion loop in r12.08.
     $freshConfigLines = @()
-    if ($Script:OsVersion -eq 'Server2016') {
+    if ([bool]$auxContract.Discovery.ResolveStandaloneSsuMonthly) {
         $rawSsu = Resolve-Ssu2016 -BaselineMonth $month
-        $convertedSsu = @(ConvertTo-ConfigLines -OsResolved ([pscustomobject]@{os=$Script:OsVersion;lines=@($rawSsu)}) -PatchModel $modelMap[$Script:OsVersion])
+        $convertedSsu = @(ConvertTo-ConfigLines -OsResolved ([pscustomobject]@{os=$Script:OsVersion;lines=@($rawSsu)}) -PatchModel $patchModel)
         foreach ($x in (ConvertTo-StableObjectArray -InputObject $convertedSsu)) { $freshConfigLines += ,$x }
     }
     $duResults = @(
@@ -16637,7 +16932,7 @@ function Update-MonthlyAuxiliaryResolvedPatchesAtFetch {
         (Resolve-SetupDu -OsKey $osShort -BaselineMonth $month)
     )
     foreach ($rawDu in $duResults) {
-        $convertedDu = @(ConvertTo-ConfigLines -OsResolved ([pscustomobject]@{os=$Script:OsVersion;lines=@($rawDu)}) -PatchModel $modelMap[$Script:OsVersion])
+        $convertedDu = @(ConvertTo-ConfigLines -OsResolved ([pscustomobject]@{os=$Script:OsVersion;lines=@($rawDu)}) -PatchModel $patchModel)
         foreach ($x in (ConvertTo-StableObjectArray -InputObject $convertedDu)) { $freshConfigLines += ,$x }
     }
     $dotNetLines = @(Resolve-DotNetMonthlySelectorLines -OsVersion $Script:OsVersion -BaselineMonth $month)
@@ -18783,7 +19078,9 @@ function Test-LcuTargetApplied {
     $measured = ConvertFrom-InspectionBuildValue -Value $Evidence.Build
     $applied = $false
     $indeterminate = $false
-    if ($OsKey -eq 'Server2016') {
+    $lcuContract=Get-ServicingContract -OsKey $OsKey
+    $usesKbIdentity=([string]$lcuContract.Verification.KbIdentityEvidenceMode -eq 'Server2016InstallSsu')
+    if ($usesKbIdentity) {
         # Membership match: SSU and LCU can share the top build, so
         # the evidence carries a KB SET (KbIdsAtBuild), not one id.
         $evKbs = @($Evidence.KbIdsAtBuild)
@@ -18799,7 +19096,7 @@ function Test-LcuTargetApplied {
     }
     $measStr = if ($measured) { [string]$measured } else { '(none)' }
     $evKbSet = @($Evidence.KbIdsAtBuild)
-    if ($OsKey -eq 'Server2016' -and ($evKbSet -contains $ExpectedKbId)) {
+    if ($usesKbIdentity -and ($evKbSet -contains $ExpectedKbId)) {
         $otherKb = @($evKbSet | Where-Object { $_ -ne $ExpectedKbId }) -join ','
         $evKbStr = if ($otherKb) { ('{0} (expected LCU; co-versioned packages: {1})' -f $ExpectedKbId, $otherKb) } else { $ExpectedKbId }
     } else {
@@ -19492,7 +19789,7 @@ function Invoke-VerifyPhase11_StaticVerify {
                         -Actual 'documented' -Status 'Pass' `
                         -Notes 'LCU/Checkpoint via LcuTargetApplied (measured build); DotNet via DotNetRollupApplied; SafeOSDU (WinRE and, for Server2019, boot.wim payload) and SetupDU (sources files) are not verifiable as install.wim packages; Server2016 additionally verifies KB-named packages.'
 
-                    if ($Script:OsVersion -eq 'Server2016') {
+                    if ($Script:ServicingContract -and [string]$Script:ServicingContract.Verification.KbIdentityEvidenceMode -eq 'Server2016InstallSsu') {
                         # Server 2016 SSU/source-prerequisite package identities
                         # normally retain their KB ids and provide useful direct
                         # evidence. LCU/Bridge/Checkpoint identity is intentionally
@@ -19984,7 +20281,9 @@ function Invoke-ReportPhase13_FinalReport {
                 $preInstall0 = @($preObj.InstallWim.Indexes) | Select-Object -First 1
                 $preBoot0    = @($preObj.BootWim.Indexes) | Select-Object -First 1
                 $postBoot0   = @($postObj.BootWim.Indexes) | Select-Object -First 1
-                $findings = Get-InspectionCrossChecks -BootWimLcuPolicy $obsPolicy -BridgeMinimumStack $obsBridgeMin `
+                $obsBootUpdateModel=if($Script:ServicingContract -and $Script:ServicingContract.Boot){[string]$Script:ServicingContract.Boot.UpdateModel}else{Get-ConfiguredBootWimUpdateModel}
+                $obsBootBuildExpectation=if($Script:ServicingContract -and $Script:ServicingContract.Observation){[string]$Script:ServicingContract.Observation.BootBuildExpectation}else{''}
+                $findings = Get-InspectionCrossChecks -BootWimLcuPolicy $obsPolicy -BootUpdateModel $obsBootUpdateModel -BootBuildExpectation $obsBootBuildExpectation -BridgeMinimumStack $obsBridgeMin `
                     -PreInstallBuild $(if ($preInstall0 -and $preInstall0.Evidence) { $preInstall0.Evidence.Build } else { $null }) `
                     -PreBootBuild $(if ($preBoot0 -and $preBoot0.Evidence) { $preBoot0.Evidence.Build } else { $null }) `
                     -PostBootBuild $(if ($postBoot0 -and $postBoot0.Evidence) { $postBoot0.Evidence.Build } else { $null })
