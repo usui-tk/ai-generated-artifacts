@@ -168,7 +168,7 @@
     Optional display date for serviced install.wim indexes, in yyyy-MM-dd
     format. The Windows Setup edition list uses the WIM IMAGE CREATIONTIME
     field on the measured Server 2016 and Server 2022 media. When specified,
-    r12.29 writes noon UTC on the requested calendar date. When omitted, each
+    r12.30 writes noon UTC on the requested calendar date. When omitted, each
     serviced IMAGE copies its own LASTMODIFICATIONTIME FILETIME to CREATIONTIME.
     Only indexes that P07 actually services are changed. The update preserves
     raw XML byte length, encoding, BOM, terminators, resource descriptors and
@@ -699,8 +699,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.24-r12.29'
-$Script:ScriptTag     = 'rawxml-creationtime-integrity-integration'
+$Script:ScriptVersion = 'update-wsi-2026.07.25-r12.30'
+$Script:ScriptTag     = 'rawxml-filetime-conversion-regression-fix'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -7295,7 +7295,7 @@ function Get-DismExportArgumentList {
 }
 
 # ============================================================
-# install.wim display-date metadata (r12.29 raw XML + integrity integration)
+# install.wim display-date metadata (r12.30 FILETIME conversion regression fix)
 # ============================================================
 # Measured Server 2016/2022 evidence proves that Windows Setup's edition-list
 # "Modified" / "更新日" column maps to IMAGE/CREATIONTIME on the tested media.
@@ -7368,10 +7368,25 @@ function ConvertTo-WimFileTimeParts {
     else {
         $DateTime.ToUniversalTime()
     }
-    $value = [uint64]$utc.ToFileTimeUtc()
+    if (-not [System.BitConverter]::IsLittleEndian) {
+        throw 'WIM FILETIME conversion requires a little-endian Windows host.'
+    }
+
+    $fileTime = [int64]$utc.ToFileTimeUtc()
+    if ($fileTime -lt 0) {
+        throw ('WIM FILETIME cannot represent UTC time before 1601-01-01: {0}' -f $utc.ToString('o'))
+    }
+
+    # Do not cast an unsuffixed all-bits hexadecimal mask to UInt64 here. PowerShell parses the
+    # hexadecimal literal as signed Int32 -1 before attempting the UInt64 cast,
+    # which throws in both Windows PowerShell 5.1 and PowerShell 7.x.
+    [byte[]]$bytes = [System.BitConverter]::GetBytes($fileTime)
+    $low = [System.BitConverter]::ToUInt32($bytes, 0)
+    $high = [System.BitConverter]::ToUInt32($bytes, 4)
+
     [pscustomobject][ordered]@{
-        HighPart = ('0x{0:X8}' -f [uint32]($value -shr 32))
-        LowPart = ('0x{0:X8}' -f [uint32]($value -band [uint64]0xFFFFFFFF))
+        HighPart = ('0x{0:X8}' -f $high)
+        LowPart = ('0x{0:X8}' -f $low)
         UtcDateTime = $utc.ToString('o')
     }
 }
@@ -7384,16 +7399,55 @@ function ConvertFrom-WimFileTimeParts {
         [Parameter(Mandatory)][string]$LowPart
     )
 
-    $high = [uint64]::Parse(
+    if (-not [System.BitConverter]::IsLittleEndian) {
+        throw 'WIM FILETIME conversion requires a little-endian Windows host.'
+    }
+
+    $high = [uint32]::Parse(
         ($HighPart -replace '^0x', ''),
         [System.Globalization.NumberStyles]::HexNumber,
         [System.Globalization.CultureInfo]::InvariantCulture)
-    $low = [uint64]::Parse(
+    $low = [uint32]::Parse(
         ($LowPart -replace '^0x', ''),
         [System.Globalization.NumberStyles]::HexNumber,
         [System.Globalization.CultureInfo]::InvariantCulture)
-    $value = [int64](($high -shl 32) -bor $low)
-    return [datetime]::FromFileTimeUtc($value)
+
+    [byte[]]$bytes = [byte[]]::new(8)
+    [byte[]]$lowBytes = [System.BitConverter]::GetBytes($low)
+    [byte[]]$highBytes = [System.BitConverter]::GetBytes($high)
+    [System.Array]::Copy($lowBytes, 0, $bytes, 0, 4)
+    [System.Array]::Copy($highBytes, 0, $bytes, 4, 4)
+    $fileTime = [System.BitConverter]::ToInt64($bytes, 0)
+    return [datetime]::FromFileTimeUtc($fileTime)
+}
+
+function Test-WimFileTimeConversionRoundTrip {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)][datetime]$DateTime)
+
+    $utc = if ($DateTime.Kind -eq [System.DateTimeKind]::Utc) {
+        $DateTime
+    }
+    else {
+        $DateTime.ToUniversalTime()
+    }
+    $parts = ConvertTo-WimFileTimeParts -DateTime $utc
+    $roundTrip = ConvertFrom-WimFileTimeParts -HighPart $parts.HighPart -LowPart $parts.LowPart
+    if ($roundTrip.Ticks -ne $utc.Ticks) {
+        throw ('WIM FILETIME round-trip mismatch: input={0}; output={1}; high={2}; low={3}.' -f
+            $utc.ToString('o'), $roundTrip.ToString('o'), $parts.HighPart, $parts.LowPart)
+    }
+
+    [pscustomobject][ordered]@{
+        Passed = $true
+        UtcDateTime = $utc.ToString('o')
+        HighPart = $parts.HighPart
+        LowPart = $parts.LowPart
+        RoundTripUtcDateTime = $roundTrip.ToString('o')
+        PowerShellEdition = [string]$PSVersionTable.PSEdition
+        PowerShellVersion = [string]$PSVersionTable.PSVersion
+    }
 }
 
 function Get-WimImageMetadataInvariantFingerprint {
@@ -8760,6 +8814,16 @@ function Invoke-WimDisplayDateNativePreflight {
     $copy = Join-Path $TemporaryPath 'rawxml-display-date-preflight.wim'
     Copy-Item -LiteralPath $ProbeWimPath -Destination $copy -Force
     Set-ItemProperty -LiteralPath $copy -Name IsReadOnly -Value $false -ErrorAction Stop
+
+    $fileTimeConversion = $null
+    if ([string]$DateDecision.Mode -eq 'ExplicitUtcNoon') {
+        $conversionUtc = [datetime]::Parse(
+            [string]$DateDecision.EffectiveUtcDateTime,
+            [System.Globalization.CultureInfo]::InvariantCulture,
+            [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+        $fileTimeConversion = Test-WimFileTimeConversionRoundTrip -DateTime $conversionUtc
+    }
+
     try {
         $inventory = @(Get-WimIndexInventory -WimPath $copy)
         $index = [int](@($inventory | Sort-Object ImageIndex | Select-Object -First 1).ImageIndex)
@@ -8799,6 +8863,7 @@ function Invoke-WimDisplayDateNativePreflight {
             SourceWimPath = $ProbeWimPath
             ProbeIndex = $index
             DateDecision = $DateDecision
+            FileTimeConversion = $fileTimeConversion
             Transition = $transition
             WriteResult = $writeResult
             ReadOnlyMount = [pscustomobject][ordered]@{
@@ -20355,6 +20420,24 @@ try {
         }
     } else {
         $phaseList = Get-PhaseListByAction -ActionName $Action
+    }
+
+    # r12.30 fail-fast guard: exercise the explicit DateTime -> FILETIME path
+    # before downloads, ISO extraction, or DISM inspection can consume time.
+    $Script:InstallWimDisplayDateStartupPreflight = $null
+    if (($phaseList -contains 'P07') -and -not [string]::IsNullOrWhiteSpace($Script:ImageDisplayDate)) {
+        $startupDateDecision = Resolve-InstallWimDisplayDateDecision `
+            -RequestedDate $Script:ImageDisplayDate `
+            -ReferenceLocalTime (Get-Date)
+        $startupUtc = [datetime]::Parse(
+            [string]$startupDateDecision.EffectiveUtcDateTime,
+            [System.Globalization.CultureInfo]::InvariantCulture,
+            [System.Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+        $Script:InstallWimDisplayDateStartupPreflight = Test-WimFileTimeConversionRoundTrip -DateTime $startupUtc
+        Write-Ok ('Explicit install.wim display-date FILETIME startup preflight passed: {0} high={1} low={2}' -f `
+            $Script:InstallWimDisplayDateStartupPreflight.UtcDateTime, `
+            $Script:InstallWimDisplayDateStartupPreflight.HighPart, `
+            $Script:InstallWimDisplayDateStartupPreflight.LowPart)
     }
 
     # Opt-in Defender exclusions for the servicing run (fail-closed; removed

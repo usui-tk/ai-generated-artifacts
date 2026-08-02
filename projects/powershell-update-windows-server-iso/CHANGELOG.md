@@ -22,6 +22,32 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.25-r12.30] - 2026-08-02
+
+Tag: `rawxml-filetime-conversion-regression-fix` (the tag advances;
+the version date component moves 07.24 → 07.25). The raw-XML FILETIME
+split stops relying on a PowerShell hex-literal cast.
+
+### Fixed
+
+- **FILETIME low/high split via `BitConverter`**: the r12.29 path
+  cast an unsuffixed all-bits hexadecimal mask, which PowerShell
+  parses as signed Int32 `-1` before the UInt64 cast — corrupting the
+  HIGHPART/LOWPART split. The conversion now takes the `Int64`
+  `ToFileTimeUtc()` value (rejecting pre-1601 dates), splits it
+  through `BitConverter` byte access, requires a little-endian host,
+  and a new `Test-WimFileTimeConversionRoundTrip` self-check verifies
+  the round trip before any write. Script-only change.
+- **T40**: release pin advanced to `update-wsi-2026.07.25-r12.30`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **5E/73W/8I** on
+the committed tree — one warning joins the debt; committed verbatim
+per the no-fix-forward rule.
+
 ## [update-wsi-2026.07.24-r12.29] - 2026-08-02
 
 Tag: `rawxml-creationtime-integrity-integration` (the tag advances;
