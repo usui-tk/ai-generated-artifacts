@@ -22,6 +22,75 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.30-r12.46] - 2026-08-02
+
+Tag retained: `safeos-p11-metadata-contract-isolation-stage1`.
+
+### Changed
+
+- **LCU evidence is declaration-driven**: each per-OS servicing
+  contract (advanced to `-r4`) now declares
+  `Verification.LcuEvidenceMode` — `RollupFixAndMeasuredBuild` on the
+  Server 2016 contract, `MeasuredBuild` on Server 2019/2022/2025 —
+  and `Test-LcuTargetApplied` reads the declared mode from the
+  contract under test (defaulting to `MeasuredBuild` when absent)
+  instead of branching on a per-OS KB-identity fork. Under
+  `RollupFixAndMeasuredBuild`, package, registry and kernel evidence
+  must each reach the expected build; failures are reported
+  per-source.
+- **Server 2016 LCU authority corrected**: the authoritative
+  cumulative-update package on 14393 is `Package_for_RollupFix`
+  (build parsed from the package name), while KB-named packages
+  remain standalone SSU/prerequisite evidence and are never treated
+  as the LCU identity — selecting the highest KB-named package could
+  mislabel the SSU as the LCU (observed with KB5099542 / KB5099535).
+  The evidence object gains `LcuEvidenceMode`, `RelatedKbIds` and
+  `RelatedKbPackageNames` so related KB packages stay visible without
+  claiming LCU authority.
+- **boot.wim compatibility smoke test generalized**: the
+  Server 2019-specific wording in the P06 smoke-test decision and
+  step messages is replaced by contract-driven text keyed on the
+  selected OS, preparing the same gate for the other OS families
+  without behavioural change where the contract does not require the
+  test.
+- **Servicing-contract baselines advanced**:
+  `data/servicing-contract-baselines.json` schema `2.1` → `2.2`; all
+  four per-OS contract revisions `-r3` → `-r4` with re-pinned SHA-256
+  component hashes (declared change tracking the `LcuEvidenceMode`
+  addition; T45 totals unchanged at 21).
+- **E2E baselines advanced to the r12.45 static builds**:
+  `data/servicing-e2e-baselines.json` schema `1.0` → `1.1`; all four
+  cases (Server 2016 ja-jp/en-us, Server 2019 en-us/ja-jp) carry
+  r12.45 static-build evidence — statuses upgraded, output ISO
+  SHA-256 values re-pinned, four-part servicing-stack versions, and
+  measured P11/P06/operation-evidence counts. The Server 2016 en-us
+  case moves from `PendingE2E` to `R1245StaticBuildValidated`.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.07.30-r12.46`
+  (the tag is retained). No terminal D-contract required an edit for
+  this revision: the `-r4` contract advance is absorbed by
+  declaration reading (measured pass-through on the contract axis).
+
+### Distribution note
+
+- The r12.46 distribution ships its own validation additions
+  (`tests/Test-R1246Server2016LcuEvidenceAndServer2022Readiness.ps1`,
+  `tests/validate_r1246_static.py`,
+  `validation-summary-r12.46.json`, and the R12.46 analysis /
+  test-plan / validation-report documents). Per the standing ruling
+  these are input-only and are not committed in-series.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/120/64/112 + T45 21. PSA committed 4E/109W/10I (raw sweep
+  4E/110W/10I: +1W is the PSA7002 LF artefact; declared series debt
+  per the no-fix-forward rule). The snapshot script remains
+  BOM-absent at r12.46 (the O1 watch for the BOM-return revision
+  continues).
+
 ## [update-wsi-2026.07.29-r12.45] - 2026-08-02
 
 Tag retained: `safeos-p11-metadata-contract-isolation-stage1`.

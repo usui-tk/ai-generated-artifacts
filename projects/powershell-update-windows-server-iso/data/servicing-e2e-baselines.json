@@ -1,52 +1,66 @@
 {
-  "SchemaVersion": "servicing-e2e-baselines/1.0",
-  "Purpose": "Compact measured baselines used to review OS-specific behavior without embedding ISO/WIM payloads. These records do not replace Windows E2E execution after shared-core changes.",
+  "SchemaVersion": "servicing-e2e-baselines/1.1",
+  "Purpose": "Compact measured baselines used to review OS- and language-specific behavior without embedding ISO/WIM payloads. r12.45 completed static ISO creation for Server 2016/2019 in ja-jp and en-us. These records do not replace Windows E2E execution after shared-core changes.",
   "Cases": {
     "Server2016-ja-jp": {
-      "Status": "UserValidatedBootAndInstall",
-      "ImplementationBaseline": "r12.39",
+      "Status": "UserValidatedBootAndInstallPlusR1245StaticBuild",
+      "ImplementationBaseline": "r12.45",
       "StaticVerificationStatus": "Pass",
-      "OutputIsoSha256": "22cc9f56b8424f2bc3be9ce9b60fcadcaf6aa24528db8e5a9a2d4c07215f34c6",
+      "OutputIsoSha256": "7c719820a1d04e8f06728bc5730290425a7332908a08067598673d45f061aeb8",
       "InstallBuild": "14393.9339",
       "BootBuild": "14393.9339",
       "WinReSafeOsVersion": "14393.9339.1.14",
+      "ServicingStackVersion": "14393.9337.1.5",
       "BootUpdateModel": "FullLCU",
-      "EvidenceNote": "Successful Japanese Server 2016 ISO, Secure Boot boot, and installation were previously confirmed by the user."
+      "P11PassCount": 29,
+      "P06DecisionCount": 34,
+      "OperationEvidenceCount": 21,
+      "EvidenceNote": "Latest r12.45 Japanese static build passed. Secure Boot boot and installation were previously confirmed by the user."
     },
     "Server2016-en-us": {
-      "Status": "PendingE2E",
-      "ImplementationBaseline": "",
-      "StaticVerificationStatus": "NotPerformed",
-      "OutputIsoSha256": "",
-      "InstallBuild": "",
-      "BootBuild": "",
-      "WinReSafeOsVersion": "",
+      "Status": "R1245StaticBuildValidated",
+      "ImplementationBaseline": "r12.45",
+      "StaticVerificationStatus": "Pass",
+      "OutputIsoSha256": "f445ab790cf0faae4fc3fa663376148b23448ca61505252e517717083193f610",
+      "InstallBuild": "14393.9339",
+      "BootBuild": "14393.9339",
+      "WinReSafeOsVersion": "14393.9339.1.14",
+      "ServicingStackVersion": "14393.9337.1.5",
       "BootUpdateModel": "FullLCU",
-      "EvidenceNote": "English Server 2016 remains the next language-comparison case."
+      "P11PassCount": 29,
+      "P06DecisionCount": 34,
+      "OperationEvidenceCount": 21,
+      "EvidenceNote": "English Server 2016 ISO creation completed with the same semantic patch plan and target builds as ja-jp. External boot/install validation is still separate."
     },
     "Server2019-en-us": {
-      "Status": "UserValidatedBootAndInstall",
-      "ImplementationBaseline": "r12.42-r12.43",
-      "StaticVerificationStatus": "UserValidatedAfterSafeOsDuModel",
-      "OutputIsoSha256": "",
+      "Status": "UserValidatedBootAndInstallPlusR1245StaticBuild",
+      "ImplementationBaseline": "r12.45",
+      "StaticVerificationStatus": "Pass",
+      "OutputIsoSha256": "67c9b65808a68da5a1b00fcef2f65c05a35c93bc141fe17322397909ecdce69d",
       "InstallBuild": "17763.9020",
       "BootRegistryBuild": "17763.3650",
       "BootSafeOsVersion": "17763.9020.1.13",
-      "ServicingStackVersion": "17763.9015",
+      "ServicingStackVersion": "17763.9015.1.3",
       "BootUpdateModel": "SafeOSDU",
-      "EvidenceNote": "English media booted and installed successfully with Secure Boot after the boot.wim model changed from full LCU to SafeOS DU."
+      "P11PassCount": 35,
+      "P06DecisionCount": 30,
+      "OperationEvidenceCount": 14,
+      "EvidenceNote": "Latest r12.45 English static build passed. Secure Boot boot and complete installation were confirmed by the user for the SafeOS DU boot model."
     },
     "Server2019-ja-jp": {
-      "Status": "UserValidatedBootAndInstall",
-      "ImplementationBaseline": "r12.44",
+      "Status": "UserValidatedBootAndInstallPlusR1245StaticBuild",
+      "ImplementationBaseline": "r12.45",
       "StaticVerificationStatus": "Pass",
-      "OutputIsoSha256": "c64add1e8e9a7ffd916e4e207f8894f4e26ae342f935c53b0a6c32f422199b84",
+      "OutputIsoSha256": "7174606a1e568718ccb391808fecf95c596c512399e0b897559b0f47405639fe",
       "InstallBuild": "17763.9020",
       "BootRegistryBuild": "17763.3650",
       "BootSafeOsVersion": "17763.9020.1.13",
-      "ServicingStackVersion": "17763.9015",
+      "ServicingStackVersion": "17763.9015.1.3",
       "BootUpdateModel": "SafeOSDU",
-      "EvidenceNote": "P11 passed with 35/35 rows; Hyper-V Generation 2 Secure Boot, Japanese Setup, and complete installation were confirmed by the user."
+      "P11PassCount": 35,
+      "P06DecisionCount": 30,
+      "OperationEvidenceCount": 14,
+      "EvidenceNote": "Latest r12.45 Japanese static build passed. Hyper-V Generation 2 Secure Boot, Japanese Setup, and complete installation were confirmed by the user."
     }
   }
 }

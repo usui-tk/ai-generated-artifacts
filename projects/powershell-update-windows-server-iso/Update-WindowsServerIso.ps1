@@ -703,7 +703,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.29-r12.45'
+$Script:ScriptVersion = 'update-wsi-2026.07.30-r12.46'
 # Validation marker: pwsh7-runtime-validated on PowerShell 7.6.4 Linux x64; Windows-native gates remain required.
 $Script:ScriptTag     = 'safeos-p11-metadata-contract-isolation-stage1'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
@@ -13645,6 +13645,9 @@ function New-LcuEvidenceObject {
         [Parameter(Mandatory)] [version]$FloorBuild,
         [int]$PackageCount = 0,
         [AllowEmptyCollection()] [string[]]$KbIdsAtBuild = @(),
+        [string]$LcuEvidenceMode = 'RollupFix',
+        [AllowEmptyCollection()] [string[]]$RelatedKbIds = @(),
+        [AllowEmptyCollection()] [string[]]$RelatedKbPackageNames = @(),
         [string]$Notes = ''
     )
     $sources = @(@($BuildFromRegistry, $BuildFromPackages, $BuildFromKernel) | Where-Object { $null -ne $_ })
@@ -13658,6 +13661,9 @@ function New-LcuEvidenceObject {
         LcuPackageName     = $(if ([string]::IsNullOrEmpty($LcuPackageName)) { $null } else { $LcuPackageName })
         LcuKbId            = $(if ([string]::IsNullOrEmpty($LcuKbId)) { $null } else { $LcuKbId })
         KbIdsAtBuild       = @($KbIdsAtBuild)
+        LcuEvidenceMode    = $LcuEvidenceMode
+        RelatedKbIds       = @($RelatedKbIds)
+        RelatedKbPackageNames = @($RelatedKbPackageNames)
         BuildFromPackages  = $BuildFromPackages
         BuildFromRegistry  = $BuildFromRegistry
         BuildFromKernel    = $BuildFromKernel
@@ -13682,10 +13688,12 @@ function New-LcuEvidenceObject {
 function Resolve-LcuEvidence_Server2016 {
     <#
     .SYNOPSIS
-        Server 2016 (1607 / 14393) LCU evidence. LCU packages carry the
-        KB id AND the build in the package name:
-        'Package_for_KB5094141~31bf3856ad364e35~amd64~~14393.9234.1.x'.
-        2024-4B floor: KB5036899 = 14393.6897 (MS, April 9 2024 page).
+        Server 2016 (1607 / 14393) LCU evidence. The authoritative
+        cumulative-update package is Package_for_RollupFix, while the
+        standalone servicing stack remains a Package_for_KB identity.
+        Treating the highest KB-named package as the LCU can incorrectly
+        label the SSU as LCU evidence (observed with KB5099542 / KB5099535).
+        2024-4B floor: KB5036899 = 14393.6897.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -13695,34 +13703,46 @@ function Resolve-LcuEvidence_Server2016 {
         [AllowNull()] [string]$KernelBuild
     )
     $floor = [version]'14393.6897'
-    # SSU and LCU are BOTH KB-named on 2016 and can land at the SAME
-    # build (2026-07-08 E2E: KB5094141 SSU and KB5094122 LCU at
-    # 14393.9234), so single-KB selection misidentifies the LCU.
-    # Collect every match; the evidence carries ALL KB ids at the
-    # top build and the comparator matches by membership.
-    $matches16 = @()
+
+    $rollupMatches = @()
+    $kbMatches = @()
     foreach ($pn in @($PackageNames)) {
         if ([string]::IsNullOrWhiteSpace($pn)) { continue }
-        $m = [regex]::Match($pn, '^Package_for_KB(\d{6,7})~31bf3856ad364e35~amd64~~(14393\.[0-9.]+)$')
-        if (-not $m.Success) { continue }
-        $b = ConvertTo-TwoPartBuild -BuildString $m.Groups[2].Value
-        if ($null -eq $b) { continue }
-        $matches16 += [pscustomobject]@{ KbId = ('KB{0}' -f $m.Groups[1].Value); Build = $b; Name = $pn }
+        $rm = [regex]::Match($pn, '^Package_for_RollupFix~31bf3856ad364e35~amd64~~(14393\.[0-9.]+)$')
+        if ($rm.Success) {
+            $rb = ConvertTo-TwoPartBuild -BuildString $rm.Groups[1].Value
+            if ($null -ne $rb) { $rollupMatches += [pscustomobject]@{ Build=$rb; Name=$pn } }
+            continue
+        }
+        $km = [regex]::Match($pn, '^Package_for_KB(\d{6,7})~31bf3856ad364e35~amd64~~(14393\.[0-9.]+)$')
+        if ($km.Success) {
+            $kb = ConvertTo-TwoPartBuild -BuildString $km.Groups[2].Value
+            if ($null -ne $kb) {
+                $kbMatches += [pscustomobject]@{ KbId=('KB{0}' -f $km.Groups[1].Value); Build=$kb; Name=$pn }
+            }
+        }
     }
-    $bestBuild = $null; $bestName = $null; $bestKb = $null; $kbsAtBest = @()
-    if ($matches16.Count -gt 0) {
-        $bestBuild = ($matches16 | ForEach-Object { $_.Build } | Sort-Object -Descending)[0]
-        $atBest    = @($matches16 | Where-Object { $_.Build -eq $bestBuild })
-        $bestName  = $atBest[0].Name
-        $bestKb    = $atBest[0].KbId
-        $kbsAtBest = @($atBest | ForEach-Object { $_.KbId })
+
+    $bestRollupBuild=$null; $bestRollupName=$null
+    if ($rollupMatches.Count -gt 0) {
+        $bestRollup = @($rollupMatches | Sort-Object Build -Descending | Select-Object -First 1)[0]
+        $bestRollupBuild = $bestRollup.Build
+        $bestRollupName = $bestRollup.Name
     }
-    return New-LcuEvidenceObject -OsKey 'Server2016' -LcuPackageName $bestName -LcuKbId $bestKb `
-        -BuildFromPackages $bestBuild `
+    $relatedKbIds=@($kbMatches | Sort-Object KbId -Unique | ForEach-Object { $_.KbId })
+    $relatedKbNames=@($kbMatches | Sort-Object Name -Unique | ForEach-Object { $_.Name })
+    $kbIdsAtRollupBuild=@()
+    if ($null -ne $bestRollupBuild) {
+        $kbIdsAtRollupBuild=@($kbMatches | Where-Object { $_.Build -eq $bestRollupBuild } | ForEach-Object { $_.KbId } | Sort-Object -Unique)
+    }
+
+    return New-LcuEvidenceObject -OsKey 'Server2016' -LcuPackageName $bestRollupName -LcuKbId $null `
+        -BuildFromPackages $bestRollupBuild `
         -BuildFromRegistry (ConvertTo-TwoPartBuild -BuildString $RegistryBuild) `
         -BuildFromKernel (ConvertTo-TwoPartBuild -BuildString $KernelBuild) `
-        -FloorBuild $floor -PackageCount @($PackageNames).Count -KbIdsAtBuild $kbsAtBest `
-        -Notes 'LCU naming: Package_for_KB<id>~~14393.<rev>; SSU and LCU can share the top build, all KB ids at that build are carried'
+        -FloorBuild $floor -PackageCount @($PackageNames).Count -KbIdsAtBuild $kbIdsAtRollupBuild `
+        -LcuEvidenceMode 'RollupFixAndMeasuredBuild' -RelatedKbIds $relatedKbIds -RelatedKbPackageNames $relatedKbNames `
+        -Notes 'LCU authority: Package_for_RollupFix~~14393.<rev>; KB-named packages are retained only as related prerequisite/SSU evidence'
 }
 
 function Resolve-LcuEvidence_Server2019 {
@@ -15974,7 +15994,7 @@ function New-Server2016ServicingContract {
     param()
     return [pscustomobject][ordered]@{
         SchemaVersion='servicing-contract/2.1'
-        ContractRevision='Server2016-r3'
+        ContractRevision='Server2016-r4'
         OsKey='Server2016'
         PatchModel='separate-ssu'
         VersionDecisionPolicy='StrictFailClosed'
@@ -16009,6 +16029,7 @@ function New-Server2016ServicingContract {
             InstallAuthority='LcuBuildAndStandaloneSsu'
             BootAuthority='FullLcuTarget'
             WinREAuthority='RollupSafeOsAndSsuEvidence'
+            LcuEvidenceMode='RollupFixAndMeasuredBuild'
             KbIdentityEvidenceMode='Server2016InstallSsu'
         }
         Observation=[pscustomobject][ordered]@{
@@ -16024,7 +16045,7 @@ function New-Server2019ServicingContract {
     param()
     return [pscustomobject][ordered]@{
         SchemaVersion='servicing-contract/2.1'
-        ContractRevision='Server2019-r3'
+        ContractRevision='Server2019-r4'
         OsKey='Server2019'
         PatchModel='embedded-ssu'
         VersionDecisionPolicy='StrictFailClosed'
@@ -16059,6 +16080,7 @@ function New-Server2019ServicingContract {
             InstallAuthority='LcuBuildAndEmbeddedSsu'
             BootAuthority='SafeOsPackageKernelOperation'
             WinREAuthority='RollupSafeOsAndSsuEvidence'
+            LcuEvidenceMode='MeasuredBuild'
             KbIdentityEvidenceMode='None'
         }
         Observation=[pscustomobject][ordered]@{
@@ -16074,12 +16096,12 @@ function New-Server2022ServicingContract {
     param()
     return [pscustomobject][ordered]@{
         SchemaVersion='servicing-contract/2.1'
-        ContractRevision='Server2022-r3'
+        ContractRevision='Server2022-r4'
         OsKey='Server2022'
         PatchModel='embedded-ssu-du'
         VersionDecisionPolicy='StrictFailClosed'
         Install=[pscustomobject][ordered]@{UpdateModel='BridgeWhenRequiredThenEmbeddedSSUFullLCU';VerificationMode='LcuBuildAndEmbeddedSsu';PendingPolicy='Reject'}
-        Boot=[pscustomobject][ordered]@{UpdateModel='FullLCU';PackageMode='DirectMsu';VerificationMode='FullLcuTarget';FailurePolicy='FailBuild';SmokeTestRequired=$false}
+        Boot=[pscustomobject][ordered]@{UpdateModel='FullLCU';PackageMode='DirectMsu';VerificationMode='FullLcuTarget';FailurePolicy='FailBuild';SmokeTestRequired=$true}
         WinRE=[pscustomobject][ordered]@{UpdateModel='EmbeddedSSUFullLCUThenSafeOSDU';VerificationMode='RollupSafeOsAndSsuEvidence';DistributionPolicy='ServiceOnceCopyToAllInstallIndexes'}
         Ssu=[pscustomobject][ordered]@{StateResolver='InstalledPackageIdentity';Monotonic=$true;BridgePolicy='CompareImageAndSsuFloors'}
         Discovery=[pscustomobject][ordered]@{ResolveStandaloneSsuMonthly=$false}
@@ -16109,6 +16131,7 @@ function New-Server2022ServicingContract {
             InstallAuthority='LcuBuildAndEmbeddedSsu'
             BootAuthority='FullLcuTarget'
             WinREAuthority='RollupSafeOsAndSsuEvidence'
+            LcuEvidenceMode='MeasuredBuild'
             KbIdentityEvidenceMode='None'
         }
         Observation=[pscustomobject][ordered]@{
@@ -16124,7 +16147,7 @@ function New-Server2025ServicingContract {
     param()
     return [pscustomobject][ordered]@{
         SchemaVersion='servicing-contract/2.1'
-        ContractRevision='Server2025-r3'
+        ContractRevision='Server2025-r4'
         OsKey='Server2025'
         PatchModel='uup-checkpoint'
         VersionDecisionPolicy='StrictFailClosed'
@@ -16159,6 +16182,7 @@ function New-Server2025ServicingContract {
             InstallAuthority='CheckpointChainAndLcuBuild'
             BootAuthority='FullLcuTarget'
             WinREAuthority='RollupSafeOsAndSsuEvidence'
+            LcuEvidenceMode='MeasuredBuild'
             KbIdentityEvidenceMode='None'
         }
         Observation=[pscustomobject][ordered]@{
@@ -17412,7 +17436,7 @@ function Invoke-BootWimServicingSmokeTest {
             OsLanguage=$Script:OsLanguage
             Required=$false
             Status='NotRequired'
-            Reason='The compatibility smoke test is currently mandatory for Server2019 boot.wim cumulative servicing.'
+            Reason=('The selected {0} servicing contract does not require a boot.wim compatibility smoke test.' -f $Script:OsVersion)
         }
         Save-CanonicalJsonFile -InputObject $notRequired -Path $evidencePath -Depth 12
         return $notRequired
@@ -17467,7 +17491,7 @@ function Invoke-BootWimServicingSmokeTest {
             $copyHash=(Get-FileHash -LiteralPath $smokeWim -Algorithm SHA256).Hash.ToLowerInvariant()
             if($sourceHash -ne $copyHash){throw ('P06 boot.wim smoke-test copy hash mismatch for index {0}: source={1}; copy={2}' -f $index,$sourceHash,$copyHash)}
 
-            Write-Step ('P06 boot.wim servicing smoke test: Server2019 index {0} on verified disposable copy; update model={1}.' -f $index,$bootUpdateModel)
+            Write-Step ('P06 boot.wim servicing smoke test: {0} index {1} on verified disposable copy; update model={2}.' -f $Script:OsVersion,$index,$bootUpdateModel)
             $smokeStage='Mount'
             Invoke-WimMountSafe -ImagePath $smokeWim -Index $index -Path $mount -LogDir $Script:LogsDir -LogPath $mountLogPath|Out-Null
             $mounted=$true
@@ -19051,9 +19075,10 @@ function Test-LcuTargetApplied {
         KB-name-only predecessor was structurally blind on the
         RollupFix-named OSes and would have hard-failed 2019/2022/2025
         media whose LCU HAD applied):
-          - Server2016: the LCU package name carries the KB id --
-            applied when Evidence.LcuKbId equals the expected KB, or
-            the measured build reaches the expected build.
+          - Server2016: require Package_for_RollupFix, registry, and
+            kernel evidence to reach the expected build. KB-named
+            packages are standalone SSU/prerequisite evidence and are
+            never treated as the LCU identity.
           - Server2019/2022/2025: no KB id exists in package names;
             applied when the measured build reaches the expected
             TargetBuildAfterUpdate (two-part compare). Without an
@@ -19079,32 +19104,39 @@ function Test-LcuTargetApplied {
     $applied = $false
     $indeterminate = $false
     $lcuContract=Get-ServicingContract -OsKey $OsKey
-    $usesKbIdentity=([string]$lcuContract.Verification.KbIdentityEvidenceMode -eq 'Server2016InstallSsu')
-    if ($usesKbIdentity) {
-        # Membership match: SSU and LCU can share the top build, so
-        # the evidence carries a KB SET (KbIdsAtBuild), not one id.
-        $evKbs = @($Evidence.KbIdsAtBuild)
-        $kbHit = (($Evidence.LcuKbId -and ($Evidence.LcuKbId -eq $ExpectedKbId)) -or ($evKbs -contains $ExpectedKbId))
-        $buildHit = ($expB -and $measured -and ($measured -ge $expB))
-        $applied = ($kbHit -or $buildHit)
-    } else {
-        if ($expB) {
-            $applied = [bool]($measured -and ($measured -ge $expB))
-        } else {
-            $indeterminate = $true
+    $lcuEvidenceMode=$(if($lcuContract.Verification.PSObject.Properties['LcuEvidenceMode']){[string]$lcuContract.Verification.LcuEvidenceMode}else{'MeasuredBuild'})
+    $packageBuild=ConvertFrom-InspectionBuildValue -Value $Evidence.BuildFromPackages
+    $registryBuild=ConvertFrom-InspectionBuildValue -Value $Evidence.BuildFromRegistry
+    $kernelBuild=ConvertFrom-InspectionBuildValue -Value $Evidence.BuildFromKernel
+    $sourceFailures=[System.Collections.Generic.List[string]]::new()
+
+    if ($lcuEvidenceMode -eq 'RollupFixAndMeasuredBuild') {
+        if (-not $expB) { $indeterminate=$true }
+        else {
+            foreach($source in @(
+                [pscustomobject]@{Name='RollupFix';Value=$packageBuild},
+                [pscustomobject]@{Name='Registry';Value=$registryBuild},
+                [pscustomobject]@{Name='Kernel';Value=$kernelBuild}
+            )) {
+                if($null -eq $source.Value){$sourceFailures.Add(($source.Name + '=missing'))|Out-Null}
+                elseif($source.Value -lt $expB){$sourceFailures.Add(('{0}={1} below {2}' -f $source.Name,$source.Value,$expB))|Out-Null}
+            }
+            $applied=($sourceFailures.Count -eq 0)
         }
-    }
-    $measStr = if ($measured) { [string]$measured } else { '(none)' }
-    $evKbSet = @($Evidence.KbIdsAtBuild)
-    if ($usesKbIdentity -and ($evKbSet -contains $ExpectedKbId)) {
-        $otherKb = @($evKbSet | Where-Object { $_ -ne $ExpectedKbId }) -join ','
-        $evKbStr = if ($otherKb) { ('{0} (expected LCU; co-versioned packages: {1})' -f $ExpectedKbId, $otherKb) } else { $ExpectedKbId }
     } else {
-        $joinedKb = $evKbSet -join ','
-        $evKbStr = if ($joinedKb) { $joinedKb } elseif ($Evidence.LcuKbId) { [string]$Evidence.LcuKbId } else { '(none)' }
+        if ($expB) { $applied=[bool]($measured -and ($measured -ge $expB)) }
+        else { $indeterminate=$true }
     }
-    $notes = ('OsKey={0}; measured build={1}; TargetBuildAfterUpdate={2}; evidence KB={3}; registry/kernel are authoritative for OS build, servicing-stack package revisions are separate evidence' -f `
-        $OsKey, $measStr, $(if ($ExpectedBuild) { $ExpectedBuild } else { '(none)' }), $evKbStr)
+
+    $measStr = if ($measured) { [string]$measured } else { '(none)' }
+    $pkgStr = if ($packageBuild) { [string]$packageBuild } else { '(none)' }
+    $regStr = if ($registryBuild) { [string]$registryBuild } else { '(none)' }
+    $kerStr = if ($kernelBuild) { [string]$kernelBuild } else { '(none)' }
+    $relatedKbs=@()
+    if($Evidence.PSObject.Properties['RelatedKbIds']){$relatedKbs=@($Evidence.RelatedKbIds)}
+    $notes = ('OsKey={0}; LcuEvidenceMode={1}; measured={2}; RollupFix={3}; registry={4}; kernel={5}; TargetBuildAfterUpdate={6}; related KB packages={7}' -f `
+        $OsKey,$lcuEvidenceMode,$measStr,$pkgStr,$regStr,$kerStr,$(if($ExpectedBuild){$ExpectedBuild}else{'(none)'}),$(if($relatedKbs.Count -gt 0){$relatedKbs -join ','}else{'(none)'}))
+    if($sourceFailures.Count -gt 0){$notes += ('; failed evidence: ' + ($sourceFailures -join '; '))}
     if ($indeterminate) {
         return [pscustomobject]@{
             Applied  = $false
