@@ -699,7 +699,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.25-r12.33'
+$Script:ScriptVersion = 'update-wsi-2026.07.25-r12.34'
 # Validation marker: pwsh7-runtime-validated on PowerShell 7.6.4 Linux x64; Windows-native gates remain required.
 $Script:ScriptTag     = 'rawxml-filetime-conversion-regression-fix'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
@@ -7296,7 +7296,7 @@ function Get-DismExportArgumentList {
 }
 
 # ============================================================
-# install.wim display-date metadata (r12.33 final-WIM evidence boundary fix)
+# install.wim display-date metadata (r12.34 resume-manifest lifecycle fix; r12.33 final-WIM boundary retained)
 # ============================================================
 # Measured Server 2016/2022 evidence proves that Windows Setup's edition-list
 # "Modified" / "更新日" column maps to IMAGE/CREATIONTIME on the tested media.
@@ -11214,7 +11214,9 @@ function Read-ReleaseJsonFile {
 function New-ResolvedPatchEvidenceManifest {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
-    param()
+    param(
+        [string]$EvidenceOrigin='P04ResolvedAssets'
+    )
     $items = [System.Collections.Generic.List[object]]::new()
     foreach ($p in @($Script:ResolvedPatches | Sort-Object -Property @('Kind','KbId','PackageId'))) {
         $localPath = if ($p.PSObject.Properties['LocalPath']) { [string]$p.LocalPath } else { '' }
@@ -11246,7 +11248,8 @@ function New-ResolvedPatchEvidenceManifest {
         }) | Out-Null
     }
     return [pscustomobject][ordered]@{
-        SchemaVersion='release-patch-manifest/1.2'
+        SchemaVersion='release-patch-manifest/1.3'
+        EvidenceOrigin=$EvidenceOrigin
         RunId=$Script:RunId
         OsKey=[string]$Script:OsVersion
         OsLanguage=[string]$Script:OsLanguage
@@ -11254,6 +11257,66 @@ function New-ResolvedPatchEvidenceManifest {
         CreatedAtUtc=([datetime]::UtcNow.ToString('o'))
         Patches=$items.ToArray()
     }
+}
+
+
+function Get-CatalogPayloadSha1FromFileName {
+    <#
+    .SYNOPSIS
+        Extract the Microsoft Update Catalog payload SHA-1 embedded in a CAB/MSU file name.
+    .DESCRIPTION
+        Catalog payload file names end in _<40-hex-SHA1>.cab or .msu.  The digest
+        is independent evidence that allows a legacy WorkRoot whose
+        resolved_patch_manifest.json is missing to be repaired without trusting
+        the current file contents alone.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][string]$FileName)
+    $leaf = [System.IO.Path]::GetFileName($FileName)
+    $match = [System.Text.RegularExpressions.Regex]::Match(
+        $leaf,
+        '_([0-9a-fA-F]{40})\.(?:cab|msu)$',
+        [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+    )
+    if (-not $match.Success) { return '' }
+    return $match.Groups[1].Value.ToLowerInvariant()
+}
+
+function Write-ResolvedPatchEvidenceManifest {
+    <#
+    .SYNOPSIS
+        Persist the resolved patch manifest as soon as P04 has verified all payloads.
+    .DESCRIPTION
+        The manifest is a resume prerequisite and must exist before long-running
+        P07/P08 servicing begins.  r12.33 wrote it only after P11 passed, which
+        made P09 resume impossible after a P11 failure.  This helper validates
+        every local payload SHA-256, writes atomically, then reads the file back.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([string]$EvidenceOrigin='P04ResolvedAssets')
+
+    $manifestPath = Join-Path $Script:LogsDir 'resolved_patch_manifest.json'
+    $manifest = New-ResolvedPatchEvidenceManifest -EvidenceOrigin $EvidenceOrigin
+    $expectedCount = @($Script:ResolvedPatches).Count
+    if (@($manifest.Patches).Count -ne $expectedCount) {
+        throw ('Resolved patch manifest count mismatch before persistence: expected={0} actual={1}.' -f $expectedCount,@($manifest.Patches).Count)
+    }
+    foreach ($row in @($manifest.Patches)) {
+        if (-not [bool]$row.IsMetadataOnly) {
+            if ([string]$row.LocalAssetSha256 -notmatch '^[0-9a-f]{64}$') {
+                throw ('Resolved patch manifest cannot be persisted because local SHA-256 is missing for {0}/{1}: {2}' -f $row.PatchType,$row.KbId,$row.LocalPath)
+            }
+        }
+    }
+    Save-CanonicalJsonFile -InputObject $manifest -Path $manifestPath -Depth 16
+    $roundTrip = Read-ReleaseJsonFile -Path $manifestPath
+    if (-not $roundTrip -or -not $roundTrip.PSObject.Properties['Patches'] -or @($roundTrip.Patches).Count -ne $expectedCount) {
+        throw ('Resolved patch manifest read-back validation failed: {0}' -f $manifestPath)
+    }
+    Write-Ok ('Resolved patch manifest persisted ({0}; {1} patch(es)): {2}' -f $EvidenceOrigin,$expectedCount,$manifestPath)
+    return $roundTrip
 }
 
 function Get-ReleaseEvidenceIdentity {
@@ -15631,7 +15694,10 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
             Set-DebugStep -Step 'synthetic-iso-build'
             New-SyntheticTestIso -WorkRoot $Script:WorkRoot -OutputIsoPath $Script:IsoLocalPath | Out-Null
             Write-Ok ('Synthetic ISO created: {0}' -f $Script:IsoLocalPath)
-            New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P04.ok') -Force | Out-Null
+            # Resume-critical evidence must be durable before the P04 completion marker.
+        # A later P11 failure must never make P08/P09 resume impossible.
+        $null = Write-ResolvedPatchEvidenceManifest -EvidenceOrigin 'P04ResolvedAssets'
+        New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P04.ok') -Force | Out-Null
             return
         }
 
@@ -18107,7 +18173,7 @@ function Invoke-VerifyPhase11_StaticVerify {
         $p11Status=$(if($policyExceptionRows.Count -gt 0){'PolicyException'}else{'Pass'})
 
         $patchManifestPath = Join-Path $Script:LogsDir 'resolved_patch_manifest.json'
-        Save-CanonicalJsonFile -InputObject (New-ResolvedPatchEvidenceManifest) -Path $patchManifestPath -Depth 16
+        $null = Write-ResolvedPatchEvidenceManifest -EvidenceOrigin 'P11FinalVerification'
         $identity = Get-ReleaseEvidenceIdentity
         $p11EvidencePath = Join-Path $Script:LogsDir 'P11_static_verification.json'
         # Do not wrap Generic.List[object] in @(...). PowerShell issue #27558
@@ -19618,6 +19684,153 @@ function Set-ResumePatchProperty {
     }
 }
 
+
+function Repair-ResolvedPatchManifestForResume {
+    <#
+    .SYNOPSIS
+        Repair a legacy WorkRoot that completed P04 but lacks resolved_patch_manifest.json.
+    .DESCRIPTION
+        This is a fail-closed compatibility path for r12.33 and earlier WorkRoots.
+        It performs no network access.  Every runtime patch must match exactly one
+        measured P04 Catalog row, that row must carry verified scoped identity,
+        the source must be a trusted Microsoft Catalog payload host, and the
+        retained local CAB/MSU SHA-1 must match the digest embedded in the measured
+        Catalog file name.  The resulting SHA-256-bound manifest is then persisted
+        and independently consumed by the normal resume path.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)][ValidateSet('P08','P09')][string]$PhaseId)
+
+    $catalogPath = Join-Path $Script:LogsDir 'P04_catalog_crosscheck.json'
+    $manifestPath = Join-Path $Script:LogsDir 'resolved_patch_manifest.json'
+    if (Test-Path -LiteralPath $manifestPath -PathType Leaf) {
+        return (Read-ReleaseJsonFile -Path $manifestPath)
+    }
+    if (-not (Test-Path -LiteralPath $catalogPath -PathType Leaf)) {
+        throw ('Resume refused: resolved patch manifest is missing and P04 Catalog evidence is unavailable: {0}' -f $catalogPath)
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $Script:MarkersDir 'P04.ok') -PathType Leaf)) {
+        throw 'Resume refused: P04.ok is missing; a legacy patch manifest cannot be repaired.'
+    }
+
+    $catalogRows = @(Get-Content -LiteralPath $catalogPath -Raw -Encoding UTF8 | ConvertFrom-CanonicalJson)
+    $osPatchDir = Join-Path $Script:PatchesDir $Script:OsVersion
+    if (-not (Test-Path -LiteralPath $osPatchDir -PathType Container)) {
+        throw ('Resume refused: OS patch directory is missing: {0}' -f $osPatchDir)
+    }
+    $trimChars = [char[]]@([System.IO.Path]::DirectorySeparatorChar,[System.IO.Path]::AltDirectorySeparatorChar)
+    $osPatchRoot = [System.IO.Path]::GetFullPath($osPatchDir).TrimEnd($trimChars) + [System.IO.Path]::DirectorySeparatorChar
+    $repaired = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($patch in @($Script:ResolvedPatches)) {
+        if (-not $patch -or [string]::IsNullOrWhiteSpace([string]$patch.KbId)) { continue }
+        $kbId = [string]$patch.KbId
+        $patchType = Get-PatchEntryType -Patch $patch
+        $matches = @($catalogRows | Where-Object {
+            [string]$_.OsKey -eq [string]$Script:OsVersion -and
+            [string]$_.Kind -eq $patchType -and
+            [string]$_.KbId -eq $kbId
+        })
+        if ($matches.Count -ne 1) {
+            throw ('Resume refused: cannot repair manifest; expected exactly one measured P04 row for {0}/{1}, found {2}.' -f $patchType,$kbId,$matches.Count)
+        }
+        $catalog = $matches[0]
+        if ([bool]$catalog.MetadataOnly) {
+            throw ('Resume refused: cannot repair manifest; P04 row is metadata-only for {0}/{1}.' -f $patchType,$kbId)
+        }
+        if (-not ($catalog.PSObject.Properties['CatalogScopedIdentityVerified'] -and [bool]$catalog.CatalogScopedIdentityVerified)) {
+            throw ('Resume refused: cannot repair manifest; scoped Catalog identity was not verified for {0}/{1}.' -f $patchType,$kbId)
+        }
+        if ([string]$catalog.CatalogScopedRawSha256 -notmatch '^[0-9a-fA-F]{64}$') {
+            throw ('Resume refused: cannot repair manifest; scoped Catalog evidence hash is invalid for {0}/{1}.' -f $patchType,$kbId)
+        }
+        $fileName = [string]$catalog.FileName
+        if ([string]::IsNullOrWhiteSpace($fileName) -or [System.IO.Path]::GetFileName($fileName) -ne $fileName) {
+            throw ('Resume refused: unsafe or empty measured Catalog file name for {0}/{1}: "{2}".' -f $patchType,$kbId,$fileName)
+        }
+        $catalogSha1 = Get-CatalogPayloadSha1FromFileName -FileName $fileName
+        if ($catalogSha1 -notmatch '^[0-9a-f]{40}$') {
+            throw ('Resume refused: measured Catalog file name has no recoverable SHA-1 digest for {0}/{1}: {2}' -f $patchType,$kbId,$fileName)
+        }
+        $source = [string]$catalog.Source
+        try { $sourceUri = [uri]$source } catch { throw ('Resume refused: invalid measured Catalog URI for {0}/{1}: {2}' -f $patchType,$kbId,$source) }
+        $sourceHost = $sourceUri.DnsSafeHost.ToLowerInvariant()
+        if ($sourceUri.Scheme -ne 'https' -or
+            ($sourceHost -notmatch '(^|\.)download\.windowsupdate\.com$' -and $sourceHost -notmatch '(^|\.)delivery\.mp\.microsoft\.com$')) {
+            throw ('Resume refused: untrusted measured Catalog host for {0}/{1}: {2}' -f $patchType,$kbId,$sourceUri.Host)
+        }
+        if ($patch.PSObject.Properties['UpdateId'] -and $patch.UpdateId -and $catalog.UpdateId -and
+            [string]$patch.UpdateId -ne [string]$catalog.UpdateId) {
+            throw ('Resume refused: current config UpdateId disagrees with measured P04 evidence for {0}/{1}.' -f $patchType,$kbId)
+        }
+
+        $preferredPath = Get-PatchLocalPath -Kind $patchType -FileName $fileName
+        $localMatches = @()
+        if (Test-Path -LiteralPath $preferredPath -PathType Leaf) {
+            $localMatches = @((Get-Item -LiteralPath $preferredPath -Force))
+        } else {
+            $localMatches = @(Get-ChildItem -LiteralPath $osPatchDir -Recurse -File -Force -ErrorAction Stop | Where-Object { $_.Name -ceq $fileName })
+        }
+        if ($localMatches.Count -ne 1) {
+            throw ('Resume refused: cannot repair manifest; expected exactly one local payload for {0}/{1}/{2}, found {3}.' -f $patchType,$kbId,$fileName,$localMatches.Count)
+        }
+        $localPath = [System.IO.Path]::GetFullPath($localMatches[0].FullName)
+        if (-not $localPath.StartsWith($osPatchRoot,[System.StringComparison]::OrdinalIgnoreCase)) {
+            throw ('Resume refused: local payload escaped the OS patch workspace: {0}' -f $localPath)
+        }
+        $actualSha1 = (Get-FileHash -LiteralPath $localPath -Algorithm SHA1).Hash.ToLowerInvariant()
+        if ($actualSha1 -ne $catalogSha1) {
+            throw ('Resume refused: retained payload SHA-1 does not match the measured Catalog file name for {0}/{1}. expected={2} actual={3}' -f $patchType,$kbId,$catalogSha1,$actualSha1)
+        }
+        $actualSha256 = (Get-FileHash -LiteralPath $localPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $hashes = @{}
+        if ($patch.PSObject.Properties['ExpectedHashes'] -and $patch.ExpectedHashes) {
+            foreach ($key in $patch.ExpectedHashes.Keys) { $hashes[$key] = $patch.ExpectedHashes[$key] }
+        }
+        $hashes['sha-1'] = $actualSha1
+        $hashes['sha-256'] = $actualSha256
+        Test-PatchIntegrity -FilePath $localPath -ExpectedHashes $hashes | Out-Null
+
+        Set-ResumePatchProperty -Patch $patch -Name 'Source' -Value $source
+        Set-ResumePatchProperty -Patch $patch -Name 'FileName' -Value $fileName
+        Set-ResumePatchProperty -Patch $patch -Name 'FileNameOrigin' -Value 'ResumeP04MeasuredEvidence'
+        Set-ResumePatchProperty -Patch $patch -Name 'LocalPath' -Value $localPath
+        Set-ResumePatchProperty -Patch $patch -Name 'UpdateId' -Value ([string]$catalog.UpdateId)
+        Set-ResumePatchProperty -Patch $patch -Name 'ExpectedHashes' -Value $hashes
+        Set-ResumePatchProperty -Patch $patch -Name 'IsMetadataOnly' -Value $false
+        Set-ResumePatchProperty -Patch $patch -Name 'State' -Value 'ManifestRepairedFromP04Evidence'
+        foreach ($field in @('CatalogClassification','CatalogProducts','CatalogSelectionBasis','CatalogObservedMetadataStatus','CatalogScopedIdentityVerified','CatalogScopedIdentityBasis','CatalogScopedArchitecture','CatalogScopedRawSha256','CatalogScopedParseBasis')) {
+            if ($catalog.PSObject.Properties[$field]) {
+                Set-ResumePatchProperty -Patch $patch -Name $field -Value $catalog.$field
+            }
+        }
+        $repaired.Add([pscustomobject][ordered]@{
+            PatchType=$patchType; KbId=$kbId; UpdateId=[string]$catalog.UpdateId
+            FileName=$fileName; LocalPath=$localPath
+            CatalogFileNameSha1=$catalogSha1; LocalAssetSha1=$actualSha1; LocalAssetSha256=$actualSha256
+            CatalogScopedRawSha256=[string]$catalog.CatalogScopedRawSha256
+        }) | Out-Null
+    }
+    if ($repaired.Count -ne @($Script:ResolvedPatches).Count) {
+        throw ('Resume refused: repaired patch count {0} does not equal runtime patch count {1}.' -f $repaired.Count,@($Script:ResolvedPatches).Count)
+    }
+    $Script:PatchPlan = Build-PatchPlan -Patches $Script:ResolvedPatches
+    $manifest = Write-ResolvedPatchEvidenceManifest -EvidenceOrigin 'ResumeRepairedFromP04CatalogAndLocalDigest'
+    $repairEvidencePath = Join-Path $Script:LogsDir ('resume-{0}-patch-manifest-repair.json' -f $PhaseId.ToLowerInvariant())
+    $repairEvidence = [pscustomobject][ordered]@{
+        SchemaVersion='resume-patch-manifest-repair/1.0'
+        PhaseId=$PhaseId; RepairedAtUtc=[datetime]::UtcNow.ToString('o')
+        OsKey=[string]$Script:OsVersion; OsLanguage=[string]$Script:OsLanguage
+        CatalogEvidencePath=$catalogPath; CatalogEvidenceSha256=(Get-FileSha256OrEmpty -Path $catalogPath)
+        ManifestPath=$manifestPath; ManifestSha256=(Get-FileSha256OrEmpty -Path $manifestPath)
+        PatchCount=$repaired.Count; NetworkAccessPerformed=$false; Patches=$repaired.ToArray()
+    }
+    Save-CanonicalJsonFile -InputObject $repairEvidence -Path $repairEvidencePath -Depth 12
+    Write-Caution ('Legacy WorkRoot repair: reconstructed missing resolved patch manifest from measured P04 Catalog identity and retained payload digests: {0}' -f $repairEvidencePath)
+    return $manifest
+}
+
 function Restore-ResolvedPatchAssetsForResume {
     <#
     .SYNOPSIS
@@ -19646,13 +19859,17 @@ function Restore-ResolvedPatchAssetsForResume {
 
     $catalogPath = Join-Path $Script:LogsDir 'P04_catalog_crosscheck.json'
     $manifestPath = Join-Path $Script:LogsDir 'resolved_patch_manifest.json'
-    foreach ($requiredPath in @($catalogPath,$manifestPath)) {
-        if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
-            throw ('Resume refused: required measured patch evidence is missing: {0}' -f $requiredPath)
-        }
+    if (-not (Test-Path -LiteralPath $catalogPath -PathType Leaf)) {
+        throw ('Resume refused: required measured patch evidence is missing: {0}' -f $catalogPath)
     }
     if (-not (Test-Path -LiteralPath (Join-Path $Script:MarkersDir 'P04.ok') -PathType Leaf)) {
         throw 'Resume refused: P04.ok is missing; resolved patch assets cannot be trusted.'
+    }
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        $null = Repair-ResolvedPatchManifestForResume -PhaseId $PhaseId
+    }
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+        throw ('Resume refused: required measured patch evidence is still missing after repair: {0}' -f $manifestPath)
     }
 
     $catalogRows = @(Get-Content -LiteralPath $catalogPath -Raw -Encoding UTF8 | ConvertFrom-CanonicalJson)
@@ -19676,7 +19893,8 @@ function Restore-ResolvedPatchAssetsForResume {
     if (-not (Test-Path -LiteralPath $osPatchDir -PathType Container)) {
         throw ('Resume refused: OS patch directory is missing: {0}' -f $osPatchDir)
     }
-    $osPatchRoot = [System.IO.Path]::GetFullPath($osPatchDir).TrimEnd('\') + '\'
+    $trimChars = [char[]]@([System.IO.Path]::DirectorySeparatorChar,[System.IO.Path]::AltDirectorySeparatorChar)
+    $osPatchRoot = [System.IO.Path]::GetFullPath($osPatchDir).TrimEnd($trimChars) + [System.IO.Path]::DirectorySeparatorChar
     $restored = [System.Collections.Generic.List[object]]::new()
 
     foreach ($patch in @($Script:ResolvedPatches)) {

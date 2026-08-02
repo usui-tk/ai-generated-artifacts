@@ -22,6 +22,33 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.25-r12.34] - 2026-08-02
+
+Tag: `rawxml-filetime-conversion-regression-fix` (the tag is
+retained). The resolved-patch manifest gains a resume-safe lifecycle.
+
+### Fixed
+
+- **Resume-manifest lifecycle**: `resolved_patch_manifest.json`
+  (schema `release-patch-manifest/1.3`) is persisted as soon as P04
+  has verified all payloads — previously it was written late enough
+  that a P11 failure made P09 resume impossible. Three new helpers
+  carry the lifecycle: `Write-ResolvedPatchEvidenceManifest`
+  (early persistence), `Repair-ResolvedPatchManifestForResume`
+  (rebuilds a missing manifest from measured evidence without
+  trusting mutable state) and `Get-CatalogPayloadSha1FromFileName`
+  (recovers the expected digest from the Catalog payload naming
+  convention `_<40-hex-SHA1>.cab/.msu`). Script-only change.
+- **T40**: release pin advanced to `update-wsi-2026.07.25-r12.34`
+  (tag retained per the deliverable).
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **5E/89W/8I** on
+the committed tree — fourteen warnings join the debt; committed
+verbatim per the no-fix-forward rule, draining post-series.
+
 ## [update-wsi-2026.07.25-r12.33] - 2026-08-02
 
 Tag: `rawxml-filetime-conversion-regression-fix` (the tag is
