@@ -22,6 +22,30 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.19-r12.24] - 2026-08-02
+
+Tag: `evidence-audit-and-pca2023-verdict-provenance` (the tag
+advances). PCA2023 verdicts carry their measurement provenance.
+
+### Changed
+
+- **PCA2023 verdict provenance**: the signature-evidence record is
+  widened to state how each verdict was reached — X.509 chain fields
+  (`X509IsPca2023` / `X509IsPca2011`) are kept distinct from parsed
+  signtool embedded-signature provenance (`Embedded*`), and boot-file
+  verdicts carry a `BootX64VerdictMethod`. An audit consumer can now
+  distinguish a chain-derived verdict from an embedded-signature one
+  instead of reading a single collapsed boolean. Script-only change.
+- **T40**: release pin advanced to `update-wsi-2026.07.19-r12.24`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/123/64/112 with T45 NOT-YET (unchanged). PSA **5E/48W/7I** on
+the committed tree — unchanged from r12.23; committed verbatim per
+the no-fix-forward rule.
+
 ## [update-wsi-2026.07.19-r12.23] - 2026-08-02
 
 Tag: `resume-automatic-variable-safety` (the tag advances). The resume

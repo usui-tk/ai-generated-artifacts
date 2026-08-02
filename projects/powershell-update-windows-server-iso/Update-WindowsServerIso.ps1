@@ -669,8 +669,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.19-r12.23'
-$Script:ScriptTag     = 'resume-automatic-variable-safety'
+$Script:ScriptVersion = 'update-wsi-2026.07.19-r12.24'
+$Script:ScriptTag     = 'evidence-audit-and-pca2023-verdict-provenance'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -9663,15 +9663,18 @@ function Save-ReleaseEvidenceIndex {
     [CmdletBinding()]
     param()
     $identity = Get-ReleaseEvidenceIdentity
+    $p11Path = Join-Path $Script:LogsDir 'P11_static_verification.json'
+    $p12Path = Join-Path $Script:LogsDir 'P12_release_assessment.json'
+    $p14Path = Join-Path $Script:LogsDir 'P14_hyperv_validation.json'
     $index = [pscustomobject][ordered]@{
-        SchemaVersion='release-evidence-index/1.0'
+        SchemaVersion='release-evidence-index/1.1'
         UpdatedAtUtc=([datetime]::UtcNow.ToString('o'))
         Identity=$identity
         ReleaseEligibility=$Script:ReleaseEligibility
         Evidence=[pscustomobject][ordered]@{
-            P11=(Join-Path $Script:LogsDir 'P11_static_verification.json')
-            P12=(Join-Path $Script:LogsDir 'P12_release_assessment.json')
-            P14=(Join-Path $Script:LogsDir 'P14_hyperv_validation.json')
+            P11=$(if (Test-Path -LiteralPath $p11Path -PathType Leaf) { $p11Path } else { $null })
+            P12=$(if (Test-Path -LiteralPath $p12Path -PathType Leaf) { $p12Path } else { $null })
+            P14=$(if (Test-Path -LiteralPath $p14Path -PathType Leaf) { $p14Path } else { $null })
         }
     }
     Save-CanonicalJsonFile -InputObject $index -Path (Join-Path $Script:LogsDir 'release_evidence_index.json') -Depth 16
@@ -11398,7 +11401,8 @@ function Get-SignToolEmbeddedClass {
         PCA2023 boot manager (SPEC.md B.16.3 / B.22.22).
 
     .OUTPUTS
-        [pscustomobject] .Parsed .IsPca2023 .IsPca2011 .SigCount .Error
+        [pscustomobject] .Parsed .IsPca2023 .IsPca2011 .SigCount
+                         .Subjects .Error
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -11411,6 +11415,7 @@ function Get-SignToolEmbeddedClass {
         IsPca2023 = $false
         IsPca2011 = $false
         SigCount  = 0
+        Subjects  = @()
         Error     = $null
     }
     try {
@@ -11438,6 +11443,7 @@ function Get-SignToolEmbeddedClass {
         if ($t -match 'Windows UEFI CA 2023') { $res.IsPca2023 = $true }
         if ($t -match 'PCA 2011')             { $res.IsPca2011 = $true }
     }
+    $res.Subjects = @($tokens | Select-Object -Unique)
     if ($tokens.Count -gt 0) {
         $res.Parsed = $true
     } elseif ($text -match 'No signature found' -or $text -match 'is not signed') {
@@ -11503,6 +11509,10 @@ function Test-Pca2023AuthenticodeChain {
           .Method        - which method set the 2023/2011 verdict:
                            'signtool /v /all /pa (embedded)' (preferred)
                            or 'X509Chain (Get-AuthenticodeSignature)'.
+          .X509IsPca2023 / .X509IsPca2011
+                         - the catalog/cross-cert X509-chain classification.
+          .Embedded*     - parsed signtool embedded-signature provenance,
+                           including subjects and signature count.
 
         The 2023/2011 verdict prefers the EMBEDDED signature read by
         signtool '/v /all /pa'. Get-AuthenticodeSignature + X509Chain
@@ -11520,14 +11530,22 @@ function Test-Pca2023AuthenticodeChain {
     )
 
     $result = [pscustomobject]@{
-        Available     = $false
-        ErrorMessage  = $null
-        SignerName    = $null
-        RootChain     = $null
-        ChainTokens   = @()
-        IsPca2023     = $false
-        IsPca2011     = $false
-        Method        = 'X509Chain (Get-AuthenticodeSignature)'
+        Available                 = $false
+        ErrorMessage              = $null
+        SignerName                = $null
+        RootChain                 = $null
+        ChainTokens               = @()
+        IsPca2023                 = $false
+        IsPca2011                 = $false
+        Method                    = 'X509Chain (Get-AuthenticodeSignature)'
+        X509IsPca2023             = $false
+        X509IsPca2011             = $false
+        EmbeddedParsed            = $false
+        EmbeddedIsPca2023         = $false
+        EmbeddedIsPca2011         = $false
+        EmbeddedSignatureCount    = 0
+        EmbeddedSubjects          = @()
+        EmbeddedError             = $null
     }
 
     if (-not (Test-Path -LiteralPath $Path)) {
@@ -11576,6 +11594,8 @@ function Test-Pca2023AuthenticodeChain {
     if (-not $result.IsPca2023 -and $result.SignerName -match 'Windows UEFI CA 2023') {
         $result.IsPca2023 = $true
     }
+    $result.X509IsPca2023 = $result.IsPca2023
+    $result.X509IsPca2011 = $result.IsPca2011
 
     # Prefer the EMBEDDED signature for the 2023/2011 verdict. The X509Chain
     # walk above follows the catalog / cross-cert path, which under-reports the
@@ -11587,6 +11607,12 @@ function Test-Pca2023AuthenticodeChain {
     $signTool = Get-ResolvedSignToolExe
     if ($signTool) {
         $embedded = Get-SignToolEmbeddedClass -SignTool $signTool -Path $Path
+        $result.EmbeddedParsed         = $embedded.Parsed
+        $result.EmbeddedIsPca2023      = $embedded.IsPca2023
+        $result.EmbeddedIsPca2011      = $embedded.IsPca2011
+        $result.EmbeddedSignatureCount = $embedded.SigCount
+        $result.EmbeddedSubjects       = @($embedded.Subjects)
+        $result.EmbeddedError          = $embedded.Error
         if ($embedded.Parsed) {
             $result.IsPca2023 = $embedded.IsPca2023
             $result.IsPca2011 = $embedded.IsPca2011
@@ -11636,6 +11662,15 @@ function Get-IsoBootCertReadiness {
         BootX64IsPca2011           = $null
         BootX64ChainTokens         = @()
         BootX64Available           = $false
+        BootX64VerdictMethod       = $null
+        BootX64X509IsPca2023       = $null
+        BootX64X509IsPca2011       = $null
+        BootX64EmbeddedParsed      = $null
+        BootX64EmbeddedIsPca2023   = $null
+        BootX64EmbeddedIsPca2011   = $null
+        BootX64EmbeddedSignatureCount = 0
+        BootX64EmbeddedSubjects    = @()
+        BootX64EmbeddedError       = $null
         # LCU level integrated in install.wim (read via Get-WindowsPackage)
         InstallWimHighestKb        = $null
         InstallWimBuild            = $null
@@ -11749,7 +11784,16 @@ function Get-IsoBootCertReadiness {
             $inv.BootX64IsPca2023  = $authResult.IsPca2023
             $inv.BootX64IsPca2011  = $authResult.IsPca2011
             $inv.BootX64ChainTokens = @($authResult.ChainTokens)
-            Write-Step ('         bootx64.efi signer: {0}' -f $authResult.SignerName)
+            $inv.BootX64VerdictMethod = $authResult.Method
+            $inv.BootX64X509IsPca2023 = $authResult.X509IsPca2023
+            $inv.BootX64X509IsPca2011 = $authResult.X509IsPca2011
+            $inv.BootX64EmbeddedParsed = $authResult.EmbeddedParsed
+            $inv.BootX64EmbeddedIsPca2023 = $authResult.EmbeddedIsPca2023
+            $inv.BootX64EmbeddedIsPca2011 = $authResult.EmbeddedIsPca2011
+            $inv.BootX64EmbeddedSignatureCount = $authResult.EmbeddedSignatureCount
+            $inv.BootX64EmbeddedSubjects = @($authResult.EmbeddedSubjects)
+            $inv.BootX64EmbeddedError = $authResult.EmbeddedError
+            Write-Step ('         bootx64.efi signer: {0}; verdict={1}' -f $authResult.SignerName, $authResult.Method)
         }
     }
 
@@ -11914,7 +11958,10 @@ function Test-OutputIsoPca2023Readiness {
                                       'Warning' / 'Fail' / 'Unknown'
           .TargetChecks  [object[]] - array of per-target pscustomobject:
               .Label, .Path, .ExpectedSignature, .ActualSignature,
-              .IsPca2023, .IsPca2011, .Status, .Notes
+              .IsPca2023, .IsPca2011, .VerdictMethod, .X509IsPca2023,
+              .X509IsPca2011, .EmbeddedParsed, .EmbeddedIsPca2023,
+              .EmbeddedIsPca2011, .EmbeddedSignatureCount,
+              .EmbeddedSubjects, .Status, .Notes
           .Reasons       [string[]] - human-readable bullets summarising
                                       the non-Pass findings, always
                                       ending with a SCOPE clarifier
@@ -12028,6 +12075,15 @@ function Test-OutputIsoPca2023Readiness {
             ActualSignature   = $actualSig
             IsPca2023         = $chain1.IsPca2023
             IsPca2011         = $chain1.IsPca2011
+            VerdictMethod     = $chain1.Method
+            X509IsPca2023     = $chain1.X509IsPca2023
+            X509IsPca2011     = $chain1.X509IsPca2011
+            EmbeddedParsed    = $chain1.EmbeddedParsed
+            EmbeddedIsPca2023 = $chain1.EmbeddedIsPca2023
+            EmbeddedIsPca2011 = $chain1.EmbeddedIsPca2011
+            EmbeddedSignatureCount = $chain1.EmbeddedSignatureCount
+            EmbeddedSubjects  = @($chain1.EmbeddedSubjects)
+            EmbeddedError     = $chain1.EmbeddedError
             Status            = $status1
             Notes             = $notes1
         }) | Out-Null
@@ -12061,6 +12117,15 @@ function Test-OutputIsoPca2023Readiness {
             ActualSignature   = $actualSig2
             IsPca2023         = $chain2.IsPca2023
             IsPca2011         = $chain2.IsPca2011
+            VerdictMethod     = $chain2.Method
+            X509IsPca2023     = $chain2.X509IsPca2023
+            X509IsPca2011     = $chain2.X509IsPca2011
+            EmbeddedParsed    = $chain2.EmbeddedParsed
+            EmbeddedIsPca2023 = $chain2.EmbeddedIsPca2023
+            EmbeddedIsPca2011 = $chain2.EmbeddedIsPca2011
+            EmbeddedSignatureCount = $chain2.EmbeddedSignatureCount
+            EmbeddedSubjects  = @($chain2.EmbeddedSubjects)
+            EmbeddedError     = $chain2.EmbeddedError
             Status            = 'PassWithNotes'
             Notes             = 'Per Make2023BootableMedia.ps1 (v1.6.5 / v1.6.5-signed / commit 798cdc5; script Version 1.4 dated 2026-03-13), bootmgr_EX.efi is copied to the ISO root when present even though Microsoft notes that this file is technically not signed with the Windows UEFI CA 2023 certificate. This is therefore PassWithNotes, while bootx64.efi remains the mandatory PCA2023 target.'
         }) | Out-Null
@@ -12261,7 +12326,7 @@ function Get-Pca2023ReadinessSnapshot {
         }
     } elseif ($isPca2023) {
         $health = 'Healthy'
-        $reasons.Add('bootx64.efi is signed via the "Windows UEFI CA 2023" certificate chain. ISO can boot under PCA2023-only Secure Boot firmware (post 2026-06 cert refresh).') | Out-Null
+        $reasons.Add('Static signature evidence shows that the UEFI critical boot manager contains a Windows UEFI CA 2023 embedded signature. Actual boot on PCA2023-only Secure Boot firmware remains unverified until P14 or equivalent hardware/VM validation succeeds.') | Out-Null
         if (-not $hasEfiEx -and $hasInstallEfiEx) {
             # The install.wim-fallback configuration (2026-07-08 E2E,
             # Server 2019): the media was converted from the serviced
@@ -15584,16 +15649,17 @@ function Invoke-VerifyPhase11_StaticVerify {
                         -Notes 'LCU/Checkpoint via LcuTargetApplied (measured build); DotNet via DotNetRollupApplied; SafeOSDU (WinRE payload) and SetupDU (sources files) are not verifiable as install.wim packages; Server2016 additionally verifies KB-named packages.'
 
                     if ($Script:OsVersion -eq 'Server2016') {
-                        # 2016 alone carries KB ids in package names -- the
-                        # presence rows are real signal there and stay.
-                        # Only package kinds that are expected to materialize as
-                        # install.wim packages are checked here. SafeOSDU belongs
-                        # to WinRE, SetupDU belongs to media\sources, and a .NET
-                        # leaf is checked separately only when its runtime selector
-                        # matches the inspected index.
+                        # Server 2016 SSU/source-prerequisite package identities
+                        # normally retain their KB ids and provide useful direct
+                        # evidence. LCU/Bridge/Checkpoint identity is intentionally
+                        # excluded: after component cleanup/ResetBase the KB token
+                        # may disappear even when the authoritative registry/kernel
+                        # build proves the target LCU. LCU is already hard-gated by
+                        # LcuTargetApplied above. SafeOSDU belongs to WinRE, SetupDU
+                        # belongs to media\sources, and .NET is checked separately.
                         $expectedKbList = @($Script:ResolvedPatches | Where-Object {
                             $_.KbId -ne 'Unknown' -and
-                            $_.PatchType -in @('SSU','LCU','BridgeLcu','Checkpoint') -and
+                            $_.PatchType -eq 'SSU' -and
                             ((Get-PatchTargetsForEntry -Patch $_) -contains 'Install')
                         } | ForEach-Object { $_.KbId } | Sort-Object -Unique)
                         foreach ($kb in $expectedKbList) {
@@ -15900,7 +15966,7 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
         $releaseEligible = $staticEligible -and $bootValidation.Eligible
         $releaseStatus = if ($releaseEligible) { 'ReleaseReady' } elseif ($staticEligible -and $bootValidation.Status -eq 'ReviewRequired') { 'BootEvidenceReviewRequired' } elseif ($staticEligible) { 'Candidate-BootTestRequired' } else { 'NotEligible' }
         $Script:ReleaseEligibility = [pscustomobject][ordered]@{
-            SchemaVersion='release-eligibility/1.2'
+            SchemaVersion='release-eligibility/1.3'
             RunId=$Script:RunId
             BuildSucceeded=$true
             StaticVerificationStatus=$staticVerification.Status
@@ -15913,6 +15979,7 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
             StaticEligible=$staticEligible
             BootTestStatus=$bootValidation.Status
             BootTestEligible=$bootValidation.Eligible
+            BootValidationRequired=($staticEligible -and -not $bootValidation.Eligible)
             ReleaseStatus=$releaseStatus
             ReleaseEligible=$releaseEligible
             Reasons=$reasons.ToArray()
@@ -15920,7 +15987,7 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
         $identity = Get-ReleaseEvidenceIdentity
         $assessmentPath = Join-Path $Script:LogsDir 'P12_release_assessment.json'
         $assessment = [pscustomobject][ordered]@{
-            SchemaVersion='P12-release-assessment/1.1'
+            SchemaVersion='P12-release-assessment/1.2'
             CreatedAtUtc=([datetime]::UtcNow.ToString('o'))
             Identity=$identity
             StaticVerification=$staticVerification
@@ -16010,6 +16077,7 @@ function Invoke-ReportPhase13_FinalReport {
             Write-Step ('StaticEligible          : {0}' -f $Script:ReleaseEligibility.StaticEligible)
             Write-Step ('BootTestStatus          : {0}' -f $Script:ReleaseEligibility.BootTestStatus)
             Write-Step ('BootTestEligible        : {0}' -f $Script:ReleaseEligibility.BootTestEligible)
+            if ($Script:ReleaseEligibility.PSObject.Properties['BootValidationRequired']) { Write-Step ('BootValidationRequired  : {0}' -f $Script:ReleaseEligibility.BootValidationRequired) }
             Write-Step ('ReleaseStatus           : {0}' -f $Script:ReleaseEligibility.ReleaseStatus)
             Write-Step ('ReleaseEligible         : {0}' -f $Script:ReleaseEligibility.ReleaseEligible)
             if ($Script:ReleaseEligibility.PSObject.Properties['HyperVValidation']) {
@@ -17737,6 +17805,7 @@ function Invoke-VerifyPhase14_HyperVValidation {
             $Script:ReleaseEligibility | Add-Member -NotePropertyName HyperVValidation -NotePropertyValue 'BootEvidenceApproved' -Force
             $Script:ReleaseEligibility.BootTestStatus='Pass'
             $Script:ReleaseEligibility.BootTestEligible=$true
+            $Script:ReleaseEligibility | Add-Member -NotePropertyName BootValidationRequired -NotePropertyValue $false -Force
             $Script:ReleaseEligibility.ReleaseEligible=[bool]$Script:ReleaseEligibility.StaticEligible
             $Script:ReleaseEligibility.ReleaseStatus=$(if($Script:ReleaseEligibility.ReleaseEligible){'ReleaseReady'}else{'NotEligible'})
             $Script:ReleaseEligibility.Reasons=@($Script:ReleaseEligibility.Reasons | Where-Object { $_ -notlike '*boot/install validation*' -and $_ -notlike '*Boot evidence*' })
@@ -17762,6 +17831,7 @@ function Invoke-VerifyPhase14_HyperVValidation {
                 $Script:ReleaseEligibility | Add-Member -NotePropertyName HyperVValidation -NotePropertyValue 'BootEvidenceCaptured' -Force
                 $Script:ReleaseEligibility.BootTestStatus='ReviewRequired'
                 $Script:ReleaseEligibility.BootTestEligible=$false
+                $Script:ReleaseEligibility | Add-Member -NotePropertyName BootValidationRequired -NotePropertyValue $true -Force
                 $Script:ReleaseEligibility.ReleaseEligible=$false
                 $Script:ReleaseEligibility.ReleaseStatus=$(if($Script:ReleaseEligibility.StaticEligible){'BootEvidenceReviewRequired'}else{'NotEligible'})
                 $Script:ReleaseEligibility.Reasons=@($Script:ReleaseEligibility.Reasons | Where-Object { $_ -notlike '*boot/install validation*' }) + @('BootOnly screenshots require explicit operator approval before release.')
@@ -17774,6 +17844,7 @@ function Invoke-VerifyPhase14_HyperVValidation {
                 $Script:ReleaseEligibility | Add-Member -NotePropertyName HyperVValidation -NotePropertyValue 'InstallValidated' -Force
                 $Script:ReleaseEligibility.BootTestStatus='Pass'
                 $Script:ReleaseEligibility.BootTestEligible=$true
+                $Script:ReleaseEligibility | Add-Member -NotePropertyName BootValidationRequired -NotePropertyValue $false -Force
                 $Script:ReleaseEligibility.ReleaseEligible=[bool]$Script:ReleaseEligibility.StaticEligible
                 $Script:ReleaseEligibility.ReleaseStatus=$(if($Script:ReleaseEligibility.ReleaseEligible){'ReleaseReady'}else{'NotEligible'})
                 $Script:ReleaseEligibility.Reasons=@($Script:ReleaseEligibility.Reasons | Where-Object { $_ -notlike '*boot/install validation*' -and $_ -notlike '*BootOnly screenshots*' })
