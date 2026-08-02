@@ -22,6 +22,36 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.25-r12.33] - 2026-08-02
+
+Tag: `rawxml-filetime-conversion-regression-fix` (the tag is
+retained). Display-date persistence is verified on the final media
+WIM, not only the servicing workspace copy.
+
+### Fixed
+
+- **Final-WIM evidence boundary**: four new helpers
+  (`Test-WimIntegrityTableAgainstFile`,
+  `Test-InstallWimDisplayDatePersistence`,
+  `Test-InstallWimFinalEvidenceBinding`,
+  `New-InstallWimFinalMetadataEvidence`) bind the display-date
+  evidence to the final install.wim as placed on the media — the
+  final snapshot must carry the P07-serviced index set without
+  duplicates, the persisted CREATIONTIME values must match the
+  requested transition, and the integrity table is re-validated
+  against the final file bytes. Evidence of the servicing-workspace
+  copy alone no longer counts as persistence proof. Script-only
+  change.
+- **T40**: release pin advanced to `update-wsi-2026.07.25-r12.33`
+  (tag retained per the deliverable).
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **5E/75W/8I** on
+the committed tree — two warnings join the debt; committed verbatim
+per the no-fix-forward rule.
+
 ## [update-wsi-2026.07.25-r12.32] - 2026-08-02
 
 Tag: `rawxml-filetime-conversion-regression-fix` (the tag is

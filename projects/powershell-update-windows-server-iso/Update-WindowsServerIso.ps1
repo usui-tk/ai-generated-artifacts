@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Build an updated Windows Server ISO by integrating SSU/LCU/Dynamic Updates
     into the install.wim, boot.wim, and winre.wim, then repackaging the media.
@@ -168,7 +168,7 @@
     Optional display date for serviced install.wim indexes, in yyyy-MM-dd
     format. The Windows Setup edition list uses the WIM IMAGE CREATIONTIME
     field on the measured Server 2016 and Server 2022 media. When specified,
-    r12.32 writes noon UTC on the requested calendar date. When omitted, each
+    r12.33 writes noon UTC on the requested calendar date. When omitted, each
     serviced IMAGE copies its own LASTMODIFICATIONTIME FILETIME to CREATIONTIME.
     Only indexes that P07 actually services are changed. The update preserves
     raw XML byte length, encoding, BOM, terminators, resource descriptors and
@@ -699,7 +699,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.25-r12.32'
+$Script:ScriptVersion = 'update-wsi-2026.07.25-r12.33'
 # Validation marker: pwsh7-runtime-validated on PowerShell 7.6.4 Linux x64; Windows-native gates remain required.
 $Script:ScriptTag     = 'rawxml-filetime-conversion-regression-fix'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
@@ -7296,7 +7296,7 @@ function Get-DismExportArgumentList {
 }
 
 # ============================================================
-# install.wim display-date metadata (r12.32 native-preflight subset inventory fix)
+# install.wim display-date metadata (r12.33 final-WIM evidence boundary fix)
 # ============================================================
 # Measured Server 2016/2022 evidence proves that Windows Setup's edition-list
 # "Modified" / "更新日" column maps to IMAGE/CREATIONTIME on the tested media.
@@ -8291,6 +8291,176 @@ function New-WimIntegrityTableBytes {
         CheckedEndOffsetExclusive = $CheckedEndOffsetExclusive
         CheckedByteCount = $checkedByteCount
         RawTableSha256 = Get-WimByteArraySha256 -Bytes $tableBytes
+    }
+}
+
+
+function Test-WimIntegrityTableAgainstFile {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$WimPath,
+        [Parameter(Mandatory)]$RawEvidence,
+        [Parameter(Mandatory)]$IntegrityEvidence
+    )
+    $issues = [System.Collections.Generic.List[string]]::new()
+    if (-not [bool]$IntegrityEvidence.Present) {
+        return [pscustomobject][ordered]@{
+            SchemaVersion='wim-integrity-file-validation/1.0';Passed=$true
+            Action='NoneRequired';RecalculationExecuted=$false
+            Actual=(ConvertTo-WimIntegrityTablePublicEvidence -Evidence $IntegrityEvidence)
+            Rebuilt=$null;Issues=@()
+        }
+    }
+    $rebuilt=New-WimIntegrityTableBytes -WimPath $WimPath `
+        -CheckedEndOffsetExclusive ([uint64]$IntegrityEvidence.CheckedEndOffsetExclusive) `
+        -ChunkSize ([uint32]$IntegrityEvidence.ChunkSize)
+    foreach($property in @('TableSize','NumberOfEntries','ChunkSize','CheckedStartOffset','CheckedEndOffsetExclusive','CheckedByteCount','RawTableSha256')){
+        if([string]$IntegrityEvidence.$property -ne [string]$rebuilt.$property){
+            $issues.Add(('integrity {0} mismatch: actual={1}; rebuilt={2}' -f $property,$IntegrityEvidence.$property,$rebuilt.$property))|Out-Null
+        }
+    }
+    [pscustomobject][ordered]@{
+        SchemaVersion='wim-integrity-file-validation/1.0';Passed=($issues.Count -eq 0)
+        Action='RecalculateAndCompare';RecalculationExecuted=$true
+        Actual=(ConvertTo-WimIntegrityTablePublicEvidence -Evidence $IntegrityEvidence)
+        Rebuilt=[pscustomobject][ordered]@{
+            TableSize=[uint32]$rebuilt.TableSize;NumberOfEntries=[uint32]$rebuilt.NumberOfEntries
+            ChunkSize=[uint32]$rebuilt.ChunkSize;CheckedStartOffset=[uint64]$rebuilt.CheckedStartOffset
+            CheckedEndOffsetExclusive=[uint64]$rebuilt.CheckedEndOffsetExclusive
+            CheckedByteCount=[uint64]$rebuilt.CheckedByteCount;RawTableSha256=[string]$rebuilt.RawTableSha256
+        }
+        Issues=$issues.ToArray()
+    }
+}
+
+function Test-InstallWimDisplayDatePersistence {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)]$P07Evidence,[Parameter(Mandatory)]$FinalSnapshot)
+    $issues=[System.Collections.Generic.List[string]]::new()
+    $expectedImages=@($P07Evidence.Snapshot.Images)
+    $actualImages=@($FinalSnapshot.Images)
+    $targetIndexes=@($P07Evidence.TargetImageIndexes|ForEach-Object{[int]$_})
+    $expectedIndexes=@($expectedImages|ForEach-Object{[int]$_.ImageIndex}|Sort-Object -Unique)
+    $actualIndexes=@($actualImages|ForEach-Object{[int]$_.ImageIndex}|Sort-Object -Unique)
+    if($expectedIndexes.Count -ne $expectedImages.Count){$issues.Add('P07 snapshot contains duplicate image indexes.')|Out-Null}
+    if($actualIndexes.Count -ne $actualImages.Count){$issues.Add('Final snapshot contains duplicate image indexes.')|Out-Null}
+    if(($expectedIndexes -join ',') -ne ($actualIndexes -join ',')){
+        $issues.Add(('Final image indexes differ from P07 snapshot: expected=[{0}]; actual=[{1}].' -f ($expectedIndexes -join ','),($actualIndexes -join ',')))|Out-Null
+    }
+    foreach($targetIndex in $targetIndexes){
+        if($expectedIndexes -notcontains [int]$targetIndex){$issues.Add(('Target image index {0} is absent from the P07 snapshot.' -f $targetIndex))|Out-Null}
+    }
+    $targetDates=[System.Collections.Generic.List[string]]::new()
+    foreach($expectedImage in $expectedImages){
+        $index=[int]$expectedImage.ImageIndex
+        $actualImage=@($actualImages|Where-Object{[int]$_.ImageIndex -eq $index})|Select-Object -First 1
+        if(-not $actualImage){$issues.Add(('Final snapshot is missing image index {0}.' -f $index))|Out-Null;continue}
+        if([string]$actualImage.CreationTimeHighPart -ne [string]$expectedImage.CreationTimeHighPart -or
+           [string]$actualImage.CreationTimeLowPart -ne [string]$expectedImage.CreationTimeLowPart){
+            $issues.Add(('index {0} CREATIONTIME FILETIME changed after P07.' -f $index))|Out-Null
+        }
+        if($targetIndexes -contains $index){$targetDates.Add(('{0}:{1}' -f $index,[string]$expectedImage.CreationTimeDateUtc))|Out-Null}
+    }
+    [pscustomobject][ordered]@{
+        SchemaVersion='install-wim-display-date-persistence/1.0';Passed=($issues.Count -eq 0)
+        P07WimSha256=[string]$P07Evidence.Snapshot.WimSha256;FinalWimSha256=[string]$FinalSnapshot.WimSha256
+        WimChangedAfterP07=([string]$P07Evidence.Snapshot.WimSha256 -ne [string]$FinalSnapshot.WimSha256)
+        MutationBoundary='P08 WinRE distribution may legitimately change WIM hash, resource offsets, integrity-table presence, LASTMODIFICATIONTIME, and invariant metadata.'
+        ExpectedImageIndexes=$expectedIndexes;FinalImageIndexes=$actualIndexes;TargetImageIndexes=$targetIndexes
+        TargetDisplayDates=$targetDates.ToArray();Issues=$issues.ToArray()
+    }
+}
+
+function Test-InstallWimFinalEvidenceBinding {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)]$FinalEvidence,[Parameter(Mandatory)]$ActualSnapshot,[Parameter(Mandatory)]$ActualRaw,[Parameter(Mandatory)]$ActualIntegrity)
+    $issues=[System.Collections.Generic.List[string]]::new()
+    if([string]$FinalEvidence.SchemaVersion -ne 'P08-installwim-final-metadata/1.0'){$issues.Add(('Unsupported final install.wim evidence schema: {0}' -f $FinalEvidence.SchemaVersion))|Out-Null}
+    if(-not [bool]$FinalEvidence.Passed){$issues.Add('Final install.wim evidence is not marked Passed.')|Out-Null}
+    if([string]$ActualSnapshot.WimSha256 -ne [string]$FinalEvidence.Snapshot.WimSha256){
+        $issues.Add(('install.wim SHA-256 mismatch against final evidence: actual={0}; evidence={1}' -f $ActualSnapshot.WimSha256,$FinalEvidence.Snapshot.WimSha256))|Out-Null
+    }
+    if([string]$ActualRaw.WimSha256 -ne [string]$FinalEvidence.RawEvidence.WimSha256){
+        $issues.Add(('raw WIM SHA-256 mismatch against final evidence: actual={0}; evidence={1}' -f $ActualRaw.WimSha256,$FinalEvidence.RawEvidence.WimSha256))|Out-Null
+    }
+    foreach($descriptorName in @('XmlResource','BlobTableResource','IntegrityResource')){
+        $expectedDescriptor=$FinalEvidence.RawEvidence.$descriptorName;$actualDescriptor=$ActualRaw.$descriptorName
+        foreach($property in @('Offset','SizeInWim','OriginalSize','Flags')){
+            if([string]$actualDescriptor.$property -ne [string]$expectedDescriptor.$property){
+                $issues.Add(('{0}.{1} mismatch against final evidence: actual={2}; evidence={3}' -f $descriptorName,$property,$actualDescriptor.$property,$expectedDescriptor.$property))|Out-Null
+            }
+        }
+    }
+    $expectedIntegrity=$FinalEvidence.IntegrityEvidence
+    if([bool]$ActualIntegrity.Present -ne [bool]$expectedIntegrity.Present){
+        $issues.Add(('integrity presence mismatch against final evidence: actual={0}; evidence={1}' -f $ActualIntegrity.Present,$expectedIntegrity.Present))|Out-Null
+    }elseif([bool]$ActualIntegrity.Present){
+        foreach($property in @('TableSize','NumberOfEntries','ChunkSize','CheckedStartOffset','CheckedEndOffsetExclusive','CheckedByteCount','RawTableSha256')){
+            if([string]$ActualIntegrity.$property -ne [string]$expectedIntegrity.$property){
+                $issues.Add(('integrity {0} mismatch against final evidence: actual={1}; evidence={2}' -f $property,$ActualIntegrity.$property,$expectedIntegrity.$property))|Out-Null
+            }
+        }
+    }
+    $expectedImages=@($FinalEvidence.Snapshot.Images);$actualImages=@($ActualSnapshot.Images)
+    $expectedIndexes=@($expectedImages|ForEach-Object{[int]$_.ImageIndex}|Sort-Object -Unique)
+    $actualIndexes=@($actualImages|ForEach-Object{[int]$_.ImageIndex}|Sort-Object -Unique)
+    if(($expectedIndexes -join ',') -ne ($actualIndexes -join ',')){
+        $issues.Add(('Final evidence image indexes differ: expected=[{0}]; actual=[{1}].' -f ($expectedIndexes -join ','),($actualIndexes -join ',')))|Out-Null
+    }
+    foreach($expectedImage in $expectedImages){
+        $index=[int]$expectedImage.ImageIndex
+        $actualImage=@($actualImages|Where-Object{[int]$_.ImageIndex -eq $index})|Select-Object -First 1
+        if(-not $actualImage){$issues.Add(('Output install.wim is missing image index {0}.' -f $index))|Out-Null;continue}
+        foreach($property in @('CreationTimeHighPart','CreationTimeLowPart','LastModificationTimeHighPart','LastModificationTimeLowPart','InvariantXmlSha256')){
+            if([string]$actualImage.$property -ne [string]$expectedImage.$property){$issues.Add(('index {0} {1} mismatch against final evidence.' -f $index,$property))|Out-Null}
+        }
+    }
+    [pscustomobject][ordered]@{
+        SchemaVersion='install-wim-final-evidence-binding/1.0';Passed=($issues.Count -eq 0)
+        ExpectedWimSha256=[string]$FinalEvidence.Snapshot.WimSha256;ActualWimSha256=[string]$ActualSnapshot.WimSha256
+        ExpectedImageIndexes=$expectedIndexes;ActualImageIndexes=$actualIndexes;Issues=$issues.ToArray()
+    }
+}
+
+function New-InstallWimFinalMetadataEvidence {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$WimPath,[Parameter(Mandatory)][string]$P07EvidencePath,
+        [Parameter(Mandatory)][string]$TemporaryPath,
+        [ValidateSet('P08PostWinRe','P11ResumeRehydrated')][string]$EvidenceOrigin='P08PostWinRe'
+    )
+    $p07Evidence=Read-ReleaseJsonFile -Path $P07EvidencePath
+    if(-not $p07Evidence){throw 'P07 display metadata evidence could not be parsed while creating final install.wim evidence.'}
+    if([string]$p07Evidence.SchemaVersion -ne 'P07-installwim-display-metadata/2.0'){throw ('Unsupported P07 display metadata evidence schema: {0}' -f $p07Evidence.SchemaVersion)}
+    if([string]$p07Evidence.WriteStrategy -ne 'RawXmlResourceRebuildIntegrity'){throw ('Unexpected P07 display metadata write strategy: {0}' -f $p07Evidence.WriteStrategy)}
+    if(-not [bool]$p07Evidence.RawWriteEvidence.Passed -or -not [bool]$p07Evidence.WimgapiReread.Passed -or -not [bool]$p07Evidence.DismGetWimInfo.Passed){
+        throw 'P07 raw XML/integrity evidence did not pass all write-time validation gates.'
+    }
+    $snapshotIndexes=@($p07Evidence.SnapshotImageIndexes|ForEach-Object{[int]$_})
+    if($snapshotIndexes.Count -eq 0){$snapshotIndexes=@($p07Evidence.Snapshot.Images|ForEach-Object{[int]$_.ImageIndex})}
+    if($snapshotIndexes.Count -eq 0){throw 'P07 display metadata evidence contains no snapshot image indexes.'}
+    $snapshot=Get-WimImageMetadataSnapshot -WimPath $WimPath -ImageIndexes $snapshotIndexes -TemporaryPath $TemporaryPath
+    $raw=Get-WimRawXmlResource -WimPath $WimPath
+    $integrity=Get-WimIntegrityTableEvidence -WimPath $WimPath -WimEvidence $raw
+    $persistence=Test-InstallWimDisplayDatePersistence -P07Evidence $p07Evidence -FinalSnapshot $snapshot
+    $integrityValidation=Test-WimIntegrityTableAgainstFile -WimPath $WimPath -RawEvidence $raw -IntegrityEvidence $integrity
+    if(-not $persistence.Passed){throw ('install.wim CREATIONTIME did not persist across the P07-to-P08 mutation boundary: {0}' -f ($persistence.Issues -join '; '))}
+    if(-not $integrityValidation.Passed){throw ('Final install.wim integrity table does not match the file contents: {0}' -f ($integrityValidation.Issues -join '; '))}
+    [pscustomobject][ordered]@{
+        SchemaVersion='P08-installwim-final-metadata/1.0';Passed=$true;EvidenceOrigin=$EvidenceOrigin
+        CreatedAtUtc=[datetime]::UtcNow.ToString('o');ScriptVersion=$Script:ScriptVersion;ScriptHash=$Script:ScriptHash
+        RunId=$Script:RunId;OsKey=$Script:OsVersion;OsLanguage=$Script:OsLanguage
+        SourceP07EvidencePath=$P07EvidencePath;SourceP07EvidenceSha256=(Get-FileSha256OrEmpty -Path $P07EvidencePath)
+        DateDecision=$p07Evidence.DateDecision;WriteStrategy='RawXmlResourceRebuildIntegrity'
+        TargetImageIndexes=@($p07Evidence.TargetImageIndexes|ForEach-Object{[int]$_});SnapshotImageIndexes=$snapshotIndexes
+        PersistenceValidation=$persistence;IntegrityValidation=$integrityValidation
+        RawEvidence=(ConvertTo-WimRawXmlPublicEvidence -Evidence $raw)
+        IntegrityEvidence=(ConvertTo-WimIntegrityTablePublicEvidence -Evidence $integrity)
+        Snapshot=$snapshot
     }
 }
 
@@ -16506,6 +16676,28 @@ function Invoke-BuildPhase08_PatchBootWim {
             }
         }
 
+        # P08 is the last phase allowed to mutate install.wim. WinRE
+        # distribution commits each selected install.wim index and can
+        # legitimately relocate WIM resources, create an integrity table,
+        # and update LASTMODIFICATIONTIME/invariant metadata after the P07
+        # CREATIONTIME transaction. Capture and validate the final WIM here
+        # so P11 binds the output ISO to the correct post-P08 boundary.
+        if ($Script:Execute -and -not $Script:SyntheticTestMode) {
+            Set-DebugStep -Step 'install-wim-final-metadata-evidence'
+            $p07DisplayEvidencePath = Join-Path $Script:LogsDir 'P07_installwim_display_metadata_after.json'
+            if (-not (Test-Path -LiteralPath $p07DisplayEvidencePath -PathType Leaf)) {
+                throw ('P07 display metadata evidence is missing before P08 final install.wim validation: {0}' -f $p07DisplayEvidencePath)
+            }
+            $finalInstallWim = Join-Path $Script:ExtractedDir 'sources\install.wim'
+            $p08FinalEvidence = New-InstallWimFinalMetadataEvidence -WimPath $finalInstallWim `
+                -P07EvidencePath $p07DisplayEvidencePath `
+                -TemporaryPath (Join-Path $Script:TempDir 'p08_final_installwim_metadata') `
+                -EvidenceOrigin 'P08PostWinRe'
+            $p08FinalEvidencePath = Join-Path $Script:LogsDir 'P08_installwim_final_metadata.json'
+            Save-CanonicalJsonFile -InputObject $p08FinalEvidence -Path $p08FinalEvidencePath -Depth 28
+            Write-Ok ('Final post-P08 install.wim metadata/integrity evidence passed: {0}' -f $p08FinalEvidencePath)
+        }
+
         New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P08.ok') -Force | Out-Null
         $p08Succeeded = $true
     } finally {
@@ -16523,6 +16715,7 @@ function Invoke-BuildPhase08_PatchBootWim {
             }
             Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P08.ok') -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P08S.ok') -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath (Join-Path $Script:LogsDir 'P08_installwim_final_metadata.json') -Force -ErrorAction SilentlyContinue
         }
         Stop-DebugTrace
     }
@@ -17522,11 +17715,17 @@ function Invoke-VerifyPhase11_StaticVerify {
             Write-Step ('setup.exe present  : {0}' -f $hasSetup)
 
             # install.wim edition-selection display metadata (CREATIONTIME).
-            # P11 binds the shipped WIM to the complete P07 raw XML/integrity
-            # evidence instead of trusting only semantic WIMGAPI readback.
+            # P07 is the write-time transaction boundary. P08 subsequently
+            # distributes the serviced WinRE payload into install.wim and is
+            # therefore allowed to change the WIM hash, resource offsets,
+            # integrity-table presence, LASTMODIFICATIONTIME, and invariant
+            # metadata. P11 must bind the ISO to the final post-P08 evidence,
+            # while separately proving that the P07 CREATIONTIME values
+            # persisted across that legitimate mutation boundary.
             $displayMetadataEvidencePath=Join-Path $Script:LogsDir 'P07_installwim_display_metadata_after.json'
+            $finalMetadataEvidencePath=Join-Path $Script:LogsDir 'P08_installwim_final_metadata.json'
             if (-not (Test-Path -LiteralPath $displayMetadataEvidencePath -PathType Leaf)) {
-                Add-VRow -Check 'InstallWimDisplayDate' -Expected 'P07 raw XML/integrity metadata evidence bound to the output install.wim' -Actual 'missing' -Status 'Fail' -Notes $displayMetadataEvidencePath
+                Add-VRow -Check 'InstallWimDisplayDate' -Expected 'P07 raw XML/integrity metadata evidence' -Actual 'missing' -Status 'Fail' -Notes $displayMetadataEvidencePath
             } elseif (-not $hasInst) {
                 Add-VRow -Check 'InstallWimDisplayDate' -Expected 'output install.wim readable' -Actual 'install.wim missing' -Status 'Fail' -Notes ''
             } else {
@@ -17539,89 +17738,75 @@ function Invoke-VerifyPhase11_StaticVerify {
                     if ([string]$displayEvidence.WriteStrategy -ne 'RawXmlResourceRebuildIntegrity') {
                         throw ('Unexpected P07 display metadata write strategy: {0}' -f $displayEvidence.WriteStrategy)
                     }
-                    $expectedImages=@($displayEvidence.Snapshot.Images)
-                    $targetDisplayIndexes=@($displayEvidence.TargetImageIndexes | ForEach-Object { [int]$_ })
-                    $displayIndexes=@($expectedImages | ForEach-Object { [int]$_.ImageIndex })
-                    if ($displayIndexes.Count -eq 0) { throw 'P07 display metadata evidence contains no image indexes.' }
+
+                    # Resume compatibility for a completed r12.32 P08 run:
+                    # create the missing final-boundary evidence from the
+                    # current extracted install.wim, after independently
+                    # recalculating its integrity table and proving P07
+                    # CREATIONTIME persistence. Future clean runs create this
+                    # evidence in P08 before P08.ok.
+                    if (-not (Test-Path -LiteralPath $finalMetadataEvidencePath -PathType Leaf)) {
+                        $workingInstallWim=Join-Path $Script:ExtractedDir 'sources\install.wim'
+                        if (-not (Test-Path -LiteralPath $workingInstallWim -PathType Leaf)) {
+                            throw ('P08 final install.wim evidence is missing and cannot be rehydrated because the extracted install.wim is unavailable: {0}' -f $workingInstallWim)
+                        }
+                        Write-Caution ('P08 final install.wim evidence is missing; rehydrating it from the completed extracted media for resume compatibility: {0}' -f $workingInstallWim)
+                        $rehydratedFinalEvidence=New-InstallWimFinalMetadataEvidence -WimPath $workingInstallWim `
+                            -P07EvidencePath $displayMetadataEvidencePath `
+                            -TemporaryPath (Join-Path $Script:TempDir 'p11_final_installwim_evidence_rehydrate') `
+                            -EvidenceOrigin 'P11ResumeRehydrated'
+                        Save-CanonicalJsonFile -InputObject $rehydratedFinalEvidence -Path $finalMetadataEvidencePath -Depth 28
+                    }
+
+                    $finalEvidence=Read-ReleaseJsonFile -Path $finalMetadataEvidencePath
+                    if (-not $finalEvidence) { throw 'P08 final install.wim evidence could not be parsed.' }
+                    if ([string]$finalEvidence.SchemaVersion -ne 'P08-installwim-final-metadata/1.0') {
+                        throw ('Unsupported final install.wim evidence schema: {0}' -f $finalEvidence.SchemaVersion)
+                    }
+
+                    $displayIndexes=@($finalEvidence.SnapshotImageIndexes | ForEach-Object { [int]$_ })
+                    if ($displayIndexes.Count -eq 0) { throw 'Final install.wim evidence contains no image indexes.' }
                     $actualDisplaySnapshot=Get-WimImageMetadataSnapshot -WimPath $installWim -ImageIndexes $displayIndexes `
                         -TemporaryPath (Join-Path $Script:TempDir 'p11_wimgapi_metadata_readback')
                     $actualRaw=Get-WimRawXmlResource -WimPath $installWim
                     $actualIntegrity=Get-WimIntegrityTableEvidence -WimPath $installWim -WimEvidence $actualRaw
+                    $persistence=Test-InstallWimDisplayDatePersistence -P07Evidence $displayEvidence -FinalSnapshot $actualDisplaySnapshot
+                    $finalBinding=Test-InstallWimFinalEvidenceBinding -FinalEvidence $finalEvidence `
+                        -ActualSnapshot $actualDisplaySnapshot -ActualRaw $actualRaw -ActualIntegrity $actualIntegrity
                     $displayIssues=[System.Collections.Generic.List[string]]::new()
 
-                    if ([string]$actualDisplaySnapshot.WimSha256 -ne [string]$displayEvidence.Snapshot.WimSha256) {
-                        $displayIssues.Add(('install.wim SHA-256 mismatch: actual={0}; snapshot={1}' -f $actualDisplaySnapshot.WimSha256,$displayEvidence.Snapshot.WimSha256)) | Out-Null
-                    }
-                    if ([string]$actualRaw.WimSha256 -ne [string]$displayEvidence.RawWriteEvidence.After.WimSha256) {
-                        $displayIssues.Add(('install.wim SHA-256 mismatch against raw write evidence: actual={0}; rawEvidence={1}' -f $actualRaw.WimSha256,$displayEvidence.RawWriteEvidence.After.WimSha256)) | Out-Null
-                    }
                     if (-not [bool]$displayEvidence.RawWriteEvidence.Passed) {
                         $displayIssues.Add('P07 raw write evidence is not marked Passed.') | Out-Null
                     }
                     if (-not [bool]$displayEvidence.WimgapiReread.Passed -or -not [bool]$displayEvidence.DismGetWimInfo.Passed) {
                         $displayIssues.Add('P07 WIMGAPI reread or DISM verification is not marked Passed.') | Out-Null
                     }
+                    if (-not [bool]$finalEvidence.Passed) {
+                        $displayIssues.Add('P08 final install.wim evidence is not marked Passed.') | Out-Null
+                    }
+                    if (-not [bool]$finalEvidence.IntegrityValidation.Passed) {
+                        $displayIssues.Add(('P08 final integrity validation failed: {0}' -f ($finalEvidence.IntegrityValidation.Issues -join '; '))) | Out-Null
+                    }
+                    $currentP07Sha256=Get-FileSha256OrEmpty -Path $displayMetadataEvidencePath
+                    if ([string]$finalEvidence.SourceP07EvidenceSha256 -ne [string]$currentP07Sha256) {
+                        $displayIssues.Add(('P08 final evidence is not bound to the current P07 evidence: final={0}; current={1}' -f
+                                $finalEvidence.SourceP07EvidenceSha256,$currentP07Sha256)) | Out-Null
+                    }
+                    foreach($issue in @($persistence.Issues)){$displayIssues.Add([string]$issue)|Out-Null}
+                    foreach($issue in @($finalBinding.Issues)){$displayIssues.Add([string]$issue)|Out-Null}
 
-                    foreach ($descriptorName in @('XmlResource','BlobTableResource','IntegrityResource')) {
-                        $expectedDescriptor=$displayEvidence.RawWriteEvidence.After.$descriptorName
-                        $actualDescriptor=$actualRaw.$descriptorName
-                        foreach ($property in @('Offset','SizeInWim','OriginalSize','Flags')) {
-                            if ([string]$actualDescriptor.$property -ne [string]$expectedDescriptor.$property) {
-                                $displayIssues.Add(('{0}.{1} mismatch: actual={2}; evidence={3}' -f $descriptorName,$property,$actualDescriptor.$property,$expectedDescriptor.$property)) | Out-Null
-                            }
-                        }
-                    }
-
-                    $expectedIntegrity=$displayEvidence.RawWriteEvidence.IntegrityHandling.After
-                    if ([bool]$actualIntegrity.Present -ne [bool]$expectedIntegrity.Present) {
-                        $displayIssues.Add(('integrity presence mismatch: actual={0}; evidence={1}' -f $actualIntegrity.Present,$expectedIntegrity.Present)) | Out-Null
-                    }
-                    elseif ([bool]$actualIntegrity.Present) {
-                        foreach ($property in @('TableSize','NumberOfEntries','ChunkSize','CheckedStartOffset','CheckedEndOffsetExclusive','CheckedByteCount','RawTableSha256')) {
-                            if ([string]$actualIntegrity.$property -ne [string]$expectedIntegrity.$property) {
-                                $displayIssues.Add(('integrity {0} mismatch: actual={1}; evidence={2}' -f $property,$actualIntegrity.$property,$expectedIntegrity.$property)) | Out-Null
-                            }
-                        }
-                        if (-not [bool]$displayEvidence.RawWriteEvidence.IntegrityHandling.RecalculationExecuted) {
-                            $displayIssues.Add('P07 evidence did not record mandatory integrity-table recalculation.') | Out-Null
-                        }
-                    }
-                    elseif ([string]$displayEvidence.RawWriteEvidence.IntegrityAction -ne 'NoneRequired') {
-                        $displayIssues.Add(('P07 integrity action is {0}; expected NoneRequired for a WIM without an integrity table.' -f $displayEvidence.RawWriteEvidence.IntegrityAction)) | Out-Null
-                    }
-
-                    $targetDates=[System.Collections.Generic.List[string]]::new()
-                    foreach ($expectedImage in $expectedImages) {
-                        $actualImage=@($actualDisplaySnapshot.Images | Where-Object { [int]$_.ImageIndex -eq [int]$expectedImage.ImageIndex }) | Select-Object -First 1
-                        if (-not $actualImage) {
-                            $displayIssues.Add(('index {0} missing' -f $expectedImage.ImageIndex)) | Out-Null
-                            continue
-                        }
-                        $isTarget=($targetDisplayIndexes -contains [int]$expectedImage.ImageIndex)
-                        if ($isTarget) {
-                            $targetDates.Add(('{0}:{1}' -f $expectedImage.ImageIndex,$expectedImage.CreationTimeDateUtc)) | Out-Null
-                        }
-                        if ([string]$actualImage.CreationTimeHighPart -ne [string]$expectedImage.CreationTimeHighPart -or
-                            [string]$actualImage.CreationTimeLowPart -ne [string]$expectedImage.CreationTimeLowPart) {
-                            $displayIssues.Add(('index {0} CREATIONTIME FILETIME mismatch' -f $expectedImage.ImageIndex)) | Out-Null
-                        }
-                        if ([string]$actualImage.LastModificationTimeHighPart -ne [string]$expectedImage.LastModificationTimeHighPart -or
-                            [string]$actualImage.LastModificationTimeLowPart -ne [string]$expectedImage.LastModificationTimeLowPart) {
-                            $displayIssues.Add(('index {0} LASTMODIFICATIONTIME FILETIME mismatch' -f $expectedImage.ImageIndex)) | Out-Null
-                        }
-                        if ([string]$actualImage.InvariantXmlSha256 -ne [string]$expectedImage.InvariantXmlSha256) {
-                            $displayIssues.Add(('index {0} invariant metadata mismatch' -f $expectedImage.ImageIndex)) | Out-Null
-                        }
-                    }
-                    $expectedSummary=if($targetDates.Count -gt 0){$targetDates.ToArray() -join ','}else{'target image evidence'}
+                    $targetDates=@($persistence.TargetDisplayDates)
+                    $expectedSummary=if($targetDates.Count -gt 0){$targetDates -join ','}else{'target image evidence'}
                     if ($displayIssues.Count -eq 0) {
-                        Add-VRow -Check 'InstallWimDisplayDate' -Expected $expectedSummary -Actual $expectedSummary -Status 'Pass' -Notes ('strategy=RawXmlResourceRebuildIntegrity; targetIndexes=' + ($targetDisplayIndexes -join ',') + '; allIndexes=' + ($displayIndexes -join ',') + '; evidence=' + $displayMetadataEvidencePath)
-                        Write-Ok ('install.wim raw XML/integrity display metadata verified in output ISO: {0}.' -f $expectedSummary)
+                        Add-VRow -Check 'InstallWimDisplayDate' -Expected $expectedSummary -Actual $expectedSummary -Status 'Pass' `
+                            -Notes ('strategy=RawXmlResourceRebuildIntegrity; boundary=P07-write->P08-final; finalEvidenceOrigin=' +
+                                [string]$finalEvidence.EvidenceOrigin + '; finalEvidence=' + $finalMetadataEvidencePath)
+                        Write-Ok ('install.wim display metadata persisted and output ISO matches final post-P08 evidence: {0}.' -f $expectedSummary)
                     } else {
                         Add-VRow -Check 'InstallWimDisplayDate' -Expected $expectedSummary -Actual 'mismatch' -Status 'Fail' -Notes ($displayIssues.ToArray() -join '; ')
                     }
                 } catch {
-                    Add-VRow -Check 'InstallWimDisplayDate' -Expected 'valid P07 raw XML/integrity evidence and readable output WIM metadata' -Actual 'error' -Status 'Fail' -Notes $_.Exception.Message
+                    Add-VRow -Check 'InstallWimDisplayDate' -Expected 'P07 CREATIONTIME persistence plus exact final post-P08 WIM binding' -Actual 'error' -Status 'Fail' -Notes $_.Exception.Message
                 }
             }
 
@@ -20509,7 +20694,7 @@ try {
         $phaseList = Get-PhaseListByAction -ActionName $Action
     }
 
-    # r12.32 fail-fast guard: exercise the explicit DateTime -> FILETIME path
+    # r12.33 fail-fast guard: exercise the explicit DateTime -> FILETIME path
     # before downloads, ISO extraction, or DISM inspection can consume time.
     $Script:InstallWimDisplayDateStartupPreflight = $null
     if (($phaseList -contains 'P07') -and -not [string]::IsNullOrWhiteSpace($Script:ImageDisplayDate)) {
