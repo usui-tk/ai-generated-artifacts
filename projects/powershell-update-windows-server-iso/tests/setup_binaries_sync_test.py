@@ -182,8 +182,8 @@ def main() -> int:
         "SetupBinarySync_" in code and "-Actual 'MISMATCH' -Status 'Fail'" in code,
         "P11 pin failed", passed, failed)
     passed, failed = check(
-        "version bumped to r12.30 rawxml-filetime-conversion-regression-fix",
-        "update-wsi-2026.07.25-r12.30" in code and "'rawxml-filetime-conversion-regression-fix'" in code,
+        "version bumped to r12.31 (tag retained: rawxml-filetime-conversion-regression-fix)",
+        "update-wsi-2026.07.25-r12.31" in code and "'rawxml-filetime-conversion-regression-fix'" in code,
         "bump pin failed", passed, failed)
 
     print(f"\n  Summary: {passed} passed, {failed} failed, {passed + failed} total")

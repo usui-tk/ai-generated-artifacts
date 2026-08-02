@@ -168,7 +168,7 @@
     Optional display date for serviced install.wim indexes, in yyyy-MM-dd
     format. The Windows Setup edition list uses the WIM IMAGE CREATIONTIME
     field on the measured Server 2016 and Server 2022 media. When specified,
-    r12.30 writes noon UTC on the requested calendar date. When omitted, each
+    r12.31 writes noon UTC on the requested calendar date. When omitted, each
     serviced IMAGE copies its own LASTMODIFICATIONTIME FILETIME to CREATIONTIME.
     Only indexes that P07 actually services are changed. The update preserves
     raw XML byte length, encoding, BOM, terminators, resource descriptors and
@@ -699,7 +699,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.25-r12.30'
+$Script:ScriptVersion = 'update-wsi-2026.07.25-r12.31'
+# Validation marker: pwsh7-runtime-validated on PowerShell 7.6.4 Linux x64; Windows-native gates remain required.
 $Script:ScriptTag     = 'rawxml-filetime-conversion-regression-fix'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
@@ -7295,7 +7296,7 @@ function Get-DismExportArgumentList {
 }
 
 # ============================================================
-# install.wim display-date metadata (r12.30 FILETIME conversion regression fix)
+# install.wim display-date metadata (r12.31 pwsh7-runtime-validated FILETIME fix)
 # ============================================================
 # Measured Server 2016/2022 evidence proves that Windows Setup's edition-list
 # "Modified" / "更新日" column maps to IMAGE/CREATIONTIME on the tested media.
@@ -20422,7 +20423,7 @@ try {
         $phaseList = Get-PhaseListByAction -ActionName $Action
     }
 
-    # r12.30 fail-fast guard: exercise the explicit DateTime -> FILETIME path
+    # r12.31 fail-fast guard: exercise the explicit DateTime -> FILETIME path
     # before downloads, ISO extraction, or DISM inspection can consume time.
     $Script:InstallWimDisplayDateStartupPreflight = $null
     if (($phaseList -contains 'P07') -and -not [string]::IsNullOrWhiteSpace($Script:ImageDisplayDate)) {

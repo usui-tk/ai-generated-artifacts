@@ -22,6 +22,29 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.25-r12.31] - 2026-08-02
+
+Tag: `rawxml-filetime-conversion-regression-fix` (the tag is
+retained). Runtime-validation identity revision.
+
+### Changed
+
+- **PowerShell 7 runtime validation recorded**: a validation marker
+  states the r12.30 FILETIME layer as
+  pwsh7-runtime-validated (PowerShell 7.6.4, Linux x64), with
+  Windows-native gates still required; revision-anchored comments
+  advance. Script-only identity/annotation revision (+1 net line);
+  no behavioural change.
+- **T40**: release pin advanced to `update-wsi-2026.07.25-r12.31`
+  (tag retained per the deliverable).
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **5E/73W/8I** on
+the committed tree — unchanged from r12.30; committed verbatim per
+the no-fix-forward rule.
+
 ## [update-wsi-2026.07.25-r12.30] - 2026-08-02
 
 Tag: `rawxml-filetime-conversion-regression-fix` (the tag advances;
