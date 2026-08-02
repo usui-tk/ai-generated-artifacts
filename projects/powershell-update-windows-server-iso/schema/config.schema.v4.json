@@ -140,6 +140,14 @@
             "ExpandedCombinedCab",
             "ExpandedSplitCab"
           ]
+        },
+        "VersionDecisionPolicy": {
+          "enum": [
+            "StrictFailClosed"
+          ]
+        },
+        "VersionDecisionEvidenceSchema": {
+          "type": "string"
         }
       },
       "additionalProperties": true
@@ -390,6 +398,9 @@
         },
         "Evidence": {
           "$ref": "#/$defs/evidence"
+        },
+        "VersionPolicy": {
+          "$ref": "#/$defs/versionPolicy"
         }
       },
       "additionalProperties": false
@@ -562,6 +573,9 @@
         },
         "Evidence": {
           "$ref": "#/$defs/evidence"
+        },
+        "VersionPolicy": {
+          "$ref": "#/$defs/versionPolicy"
         }
       },
       "additionalProperties": false
@@ -662,6 +676,77 @@
         },
         "LanguageSpecificPatches": {
           "type": "object"
+        }
+      },
+      "additionalProperties": true
+    },
+    "versionPolicy": {
+      "type": "object",
+      "required": [
+        "DecisionMode",
+        "RejectDowngrade",
+        "UnknownStateDecision",
+        "MetadataRequired"
+      ],
+      "properties": {
+        "DecisionMode": {
+          "enum": [
+            "CompareServicingStack",
+            "CompareBridgeFloor",
+            "CompareTargetBuild",
+            "ComparePackageFamily",
+            "ValidateCheckpointDependency",
+            "CompareSetupFileSet",
+            "LegacyApplicability",
+            "ValidateCheckpointChain"
+          ]
+        },
+        "RejectDowngrade": {
+          "type": "boolean"
+        },
+        "UnknownStateDecision": {
+          "enum": [
+            "ManualReviewRequired"
+          ]
+        },
+        "MetadataRequired": {
+          "type": "boolean"
+        },
+        "TargetVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "EmbeddedServicingStackVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "MinimumImageBuild": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "MinimumServicingStackVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "PackageFamily": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ComparisonPhase": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "additionalProperties": true

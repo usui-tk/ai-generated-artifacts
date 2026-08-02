@@ -27,7 +27,10 @@
     "BootWimFailurePolicy": "FailBuild",
     "_VerifiedDate": "2026-07-11T00:00:00+09:00",
     "_VerifiedBy": "research:data-model-v4",
-    "BootWimPackageMode": "DirectMsu"
+    "BootWimPackageMode": "DirectMsu",
+    "VersionDecisionPolicy": "StrictFailClosed",
+    "VersionDecisionEvidenceSchema": "patch-version-decision/1.0",
+    "BootWimServicingStrategy": "DirectMsu"
   },
   "ServicingModel": {
     "MonthlyServicingStyle": "SeparateSSU",
@@ -351,10 +354,10 @@
           "WinRE"
         ],
         "Condition": {
-          "Mode": "IfLatestSsuNotApplicableOrPackageAbsent",
+          "Mode": "IfServicingStackBelow",
           "Detection": [
             "Get-WindowsPackage",
-            "TrialApplicability"
+            "CompareActiveServicingStackVersion"
           ],
           "RequiresE4": true
         },
@@ -384,6 +387,12 @@
           "Notes": [
             "Legacy prerequisite shown in Microsoft monthly Server image composition; applicability must be determined from the source ISO."
           ]
+        },
+        "VersionPolicy": {
+          "RejectDowngrade": true,
+          "UnknownStateDecision": "ManualReviewRequired",
+          "MetadataRequired": true,
+          "DecisionMode": "CompareServicingStack"
         }
       }
     ],
@@ -450,6 +459,12 @@
           "Notes": [
             "KB5099542 is required/recommended before KB5099535 for offline Catalog servicing."
           ]
+        },
+        "VersionPolicy": {
+          "RejectDowngrade": true,
+          "UnknownStateDecision": "ManualReviewRequired",
+          "MetadataRequired": true,
+          "DecisionMode": "CompareServicingStack"
         }
       },
       {
@@ -515,6 +530,14 @@
           "Notes": [
             "Target OS build 14393.9339. Exact Catalog asset is re-resolved at P04."
           ]
+        },
+        "VersionPolicy": {
+          "RejectDowngrade": true,
+          "UnknownStateDecision": "ManualReviewRequired",
+          "MetadataRequired": true,
+          "DecisionMode": "CompareTargetBuild",
+          "TargetVersion": "14393.9339",
+          "EmbeddedServicingStackVersion": ""
         }
       },
       {
@@ -579,6 +602,13 @@
             "2026-07 standalone .NET Framework 4.8 security CU for Windows Server 2016; exact Catalog asset is resolved at P04.",
             "Exact Catalog asset identity is resolved and integrity-checked at P04."
           ]
+        },
+        "VersionPolicy": {
+          "RejectDowngrade": true,
+          "UnknownStateDecision": "ManualReviewRequired",
+          "MetadataRequired": true,
+          "DecisionMode": "ComparePackageFamily",
+          "PackageFamily": "DotNetRollup"
         }
       },
       {
@@ -641,6 +671,13 @@
             "July 2026 Safe OS Dynamic Update for Windows 10 version 1607 and Windows Server 2016.",
             "The July 2026 Server image inventory is the authoritative month-to-KB cross-check; exact Catalog asset identity is resolved and integrity-checked at P04."
           ]
+        },
+        "VersionPolicy": {
+          "RejectDowngrade": true,
+          "UnknownStateDecision": "ManualReviewRequired",
+          "MetadataRequired": true,
+          "DecisionMode": "ComparePackageFamily",
+          "PackageFamily": "SafeOSDU"
         }
       },
       {
@@ -703,6 +740,13 @@
             "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07.",
             "The July 2026 Server image inventory confirms that this Setup DU remains current for this OS family."
           ]
+        },
+        "VersionPolicy": {
+          "RejectDowngrade": true,
+          "UnknownStateDecision": "ManualReviewRequired",
+          "MetadataRequired": false,
+          "DecisionMode": "CompareSetupFileSet",
+          "ComparisonDeferredTo": "P09"
         }
       }
     ],

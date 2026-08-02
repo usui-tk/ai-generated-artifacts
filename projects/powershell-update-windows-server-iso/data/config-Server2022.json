@@ -24,10 +24,13 @@
     "EnableWinREUpdate": true,
     "UpdateAllInstallWimIndexes": true,
     "WinReDistributionPolicy": "ServiceOnceCopyToAllInstallIndexes",
-    "BootWimFailurePolicy": "ResearchTolerateNotReleaseEligible",
+    "BootWimFailurePolicy": "FailBuild",
     "_VerifiedDate": "2026-07-11T00:00:00+09:00",
     "_VerifiedBy": "research:data-model-v4",
-    "BootWimPackageMode": "DirectMsu"
+    "BootWimPackageMode": "DirectMsu",
+    "VersionDecisionPolicy": "StrictFailClosed",
+    "VersionDecisionEvidenceSchema": "patch-version-decision/1.0",
+    "BootWimServicingStrategy": "DirectMsu"
   },
   "ServicingModel": {
     "MonthlyServicingStyle": "CombinedSSULCU",
@@ -325,12 +328,13 @@
           "WinRE"
         ],
         "Condition": {
-          "Mode": "IfSourceBelowFloor",
+          "Mode": "IfImageOrServicingStackBelowFloor",
           "MinimumImageBuild": "20348.1970",
           "MinimumServicingStack": "20348.1960",
           "Detection": [
+            "Get-WindowsImage",
             "Get-WindowsPackage",
-            "Get-WindowsImage"
+            "CompareActiveServicingStackVersion"
           ],
           "WinRePolicy": "ApplyWhenSourceBelowFloor_E2EConfirmed_0x800f0823"
         },
@@ -362,6 +366,14 @@
             "Apply only when the source image is below Microsoft's documented servicing floor.",
             "2026-07-12 E2E: WinRE SSU 20348.557 rejected KB5094128, which requires SSU 20348.1960 (0x800f0823)."
           ]
+        },
+        "VersionPolicy": {
+          "RejectDowngrade": true,
+          "UnknownStateDecision": "ManualReviewRequired",
+          "MetadataRequired": true,
+          "DecisionMode": "CompareBridgeFloor",
+          "MinimumImageBuild": "20348.1970",
+          "MinimumServicingStackVersion": "20348.1960"
         }
       }
     ],
@@ -436,6 +448,14 @@
             "Target OS build 20348.5386. Exact Catalog asset is re-resolved at P04.",
             "Embedded SSU KB5120210 build 20348.5384."
           ]
+        },
+        "VersionPolicy": {
+          "RejectDowngrade": true,
+          "UnknownStateDecision": "ManualReviewRequired",
+          "MetadataRequired": true,
+          "DecisionMode": "CompareTargetBuild",
+          "TargetVersion": "20348.5386",
+          "EmbeddedServicingStackVersion": "20348.5384"
         }
       },
       {
@@ -502,6 +522,13 @@
             "2026-07 leaf security CU for the default Server 2022 .NET Framework 4.8 media state; exact Catalog asset is resolved at P04.",
             "Exact Catalog asset identity is resolved and integrity-checked at P04."
           ]
+        },
+        "VersionPolicy": {
+          "RejectDowngrade": true,
+          "UnknownStateDecision": "ManualReviewRequired",
+          "MetadataRequired": true,
+          "DecisionMode": "ComparePackageFamily",
+          "PackageFamily": "DotNetRollup"
         }
       },
       {
@@ -568,6 +595,13 @@
             "2026-07 leaf security CU selected when .NET Framework 4.8.1 is detected on Server 2022; exact Catalog asset is resolved at P04.",
             "Exact Catalog asset identity is resolved and integrity-checked at P04."
           ]
+        },
+        "VersionPolicy": {
+          "RejectDowngrade": true,
+          "UnknownStateDecision": "ManualReviewRequired",
+          "MetadataRequired": true,
+          "DecisionMode": "ComparePackageFamily",
+          "PackageFamily": "DotNetRollup"
         }
       },
       {
@@ -630,6 +664,13 @@
             "July 2026 Safe OS Dynamic Update for Windows Server 2022.",
             "The July 2026 Server image inventory is the authoritative month-to-KB cross-check; exact Catalog asset identity is resolved and integrity-checked at P04."
           ]
+        },
+        "VersionPolicy": {
+          "RejectDowngrade": true,
+          "UnknownStateDecision": "ManualReviewRequired",
+          "MetadataRequired": true,
+          "DecisionMode": "ComparePackageFamily",
+          "PackageFamily": "SafeOSDU"
         }
       },
       {
@@ -692,6 +733,13 @@
             "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07.",
             "The July 2026 Server image inventory confirms that this Setup DU remains current for this OS family."
           ]
+        },
+        "VersionPolicy": {
+          "RejectDowngrade": true,
+          "UnknownStateDecision": "ManualReviewRequired",
+          "MetadataRequired": false,
+          "DecisionMode": "CompareSetupFileSet",
+          "ComparisonDeferredTo": "P09"
         }
       }
     ],

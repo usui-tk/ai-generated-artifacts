@@ -661,6 +661,8 @@ $Script:LogsDir           = Join-Path $Script:WorkRoot 'logs'
 $Script:DiagDir           = Join-Path $Script:WorkRoot 'diag'
 $Script:MarkersDir        = Join-Path $Script:WorkRoot '.markers'
 $Script:StateDir          = Join-Path $Script:WorkRoot 'state'
+$Script:VersionDecisionDir = Join-Path $Script:LogsDir 'version-decision'
+$Script:PatchAssetMetadataCache = @{}
 
 # >>> CANONICAL unit_id=pwsh.helper.initialize-runtimedirectories version=1.0.0 hash=30bff32f7d40fca8 policy=canonical binding=follow-latest >>>
 function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical unit_id retained; noun stays plural by design
@@ -700,9 +702,9 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.27-r12.36'
+$Script:ScriptVersion = 'update-wsi-2026.07.27-r12.37'
 # Validation marker: pwsh7-runtime-validated on PowerShell 7.6.4 Linux x64; Windows-native gates remain required.
-$Script:ScriptTag     = 'offline-servicing-failure-forensics'
+$Script:ScriptTag     = 'all-os-version-decision-hardening'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -3064,6 +3066,8 @@ function Get-ConfigProfile {
         WinReDistributionPolicy   = $(if ($json.Common.PSObject.Properties['WinReDistributionPolicy']) { [string]$json.Common.WinReDistributionPolicy } else { 'ServiceOnceCopyToAllInstallIndexes' })
         BootWimFailurePolicy      = Resolve-BootWimFailurePolicyValue -RawValue $(if ($json.Common.PSObject.Properties['BootWimFailurePolicy']) { [string]$json.Common.BootWimFailurePolicy } else { 'LegacyPolicy' })
         BootWimServicingStrategy  = Resolve-BootWimServicingStrategyValue -RawValue $(if ($json.Common.PSObject.Properties['BootWimServicingStrategy']) { [string]$json.Common.BootWimServicingStrategy } else { '' }) -PackageMode $(if ($json.Common.PSObject.Properties['BootWimPackageMode']) { [string]$json.Common.BootWimPackageMode } else { 'DirectMsu' })
+        VersionDecisionPolicy     = $(if ($json.Common.PSObject.Properties['VersionDecisionPolicy']) { [string]$json.Common.VersionDecisionPolicy } else { 'LegacyApplicability' })
+        VersionDecisionEvidenceSchema = $(if ($json.Common.PSObject.Properties['VersionDecisionEvidenceSchema']) { [string]$json.Common.VersionDecisionEvidenceSchema } else { 'patch-version-decision/1.0' })
         Common                    = $json.Common
         ServicingModel            = $(if ($json.PSObject.Properties['ServicingModel']) { $json.ServicingModel } else { $null })
         DiscoveryPolicy           = $(if ($json.PSObject.Properties['DiscoveryPolicy']) { $json.DiscoveryPolicy } else { $null })
@@ -7015,216 +7019,6 @@ function Invoke-WimDismountSafe {
     }
 }
 
-function Copy-ServicingEvidenceFile {
-    <# Copy one evidence file without allowing collection failure to hide the original servicing error. #>
-    [CmdletBinding()]
-    [OutputType([pscustomobject])]
-    param(
-        [Parameter(Mandatory)][string]$SourcePath,
-        [Parameter(Mandatory)][string]$DestinationPath
-    )
-    try {
-        if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
-            return [pscustomobject]@{ SourcePath=$SourcePath; DestinationPath=$DestinationPath; Status='NotPresent'; LengthBytes=0; Sha256='' }
-        }
-        $parent=Split-Path -Parent $DestinationPath
-        if($parent){New-Item -ItemType Directory -Path $parent -Force|Out-Null}
-        Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force -ErrorAction Stop
-        $item=Get-Item -LiteralPath $DestinationPath -Force -ErrorAction Stop
-        return [pscustomobject]@{
-            SourcePath=$SourcePath;DestinationPath=$DestinationPath;Status='Copied'
-            LengthBytes=[long]$item.Length
-            Sha256=(Get-FileHash -LiteralPath $DestinationPath -Algorithm SHA256).Hash.ToLowerInvariant()
-        }
-    } catch {
-        return [pscustomobject]@{ SourcePath=$SourcePath; DestinationPath=$DestinationPath; Status='CopyFailed'; LengthBytes=0; Sha256=''; Error=$_.Exception.Message }
-    }
-}
-
-function Copy-ServicingLogTailEvidence {
-    <# Capture a bounded tail from a live host servicing log that may be locked for append. #>
-    [CmdletBinding()]
-    [OutputType([pscustomobject])]
-    param(
-        [Parameter(Mandatory)][string]$SourcePath,
-        [Parameter(Mandatory)][string]$DestinationPath,
-        [int]$TailLines=50000
-    )
-    try {
-        if(-not(Test-Path -LiteralPath $SourcePath -PathType Leaf)){
-            return [pscustomobject]@{SourcePath=$SourcePath;DestinationPath=$DestinationPath;Status='NotPresent';TailLines=$TailLines;LengthBytes=0;Sha256=''}
-        }
-        $parent=Split-Path -Parent $DestinationPath
-        if($parent){New-Item -ItemType Directory -Path $parent -Force|Out-Null}
-        Get-Content -LiteralPath $SourcePath -Tail $TailLines -ErrorAction Stop|Set-Content -LiteralPath $DestinationPath -Encoding UTF8
-        $item=Get-Item -LiteralPath $DestinationPath -Force
-        return [pscustomobject]@{
-            SourcePath=$SourcePath;DestinationPath=$DestinationPath;Status='TailCopied';TailLines=$TailLines
-            LengthBytes=[long]$item.Length;Sha256=(Get-FileHash -LiteralPath $DestinationPath -Algorithm SHA256).Hash.ToLowerInvariant()
-        }
-    } catch {
-        return [pscustomobject]@{SourcePath=$SourcePath;DestinationPath=$DestinationPath;Status='CopyFailed';TailLines=$TailLines;LengthBytes=0;Sha256='';Error=$_.Exception.Message}
-    }
-}
-
-function Export-OfflineServicingFailureEvidence {
-    <#
-    .SYNOPSIS
-        Capture the mounted image's servicing transaction state before
-        the caller discards the failed mount.
-    .DESCRIPTION
-        The evidence is deliberately limited to logs, XML/text metadata,
-        inventories, hashes, and targeted COMPONENTS registry queries.
-        WIM/MSU/CAB/CAT and registry-hive payloads are never copied.
-        Collection is best-effort and never replaces the original DISM
-        exception.
-    #>
-    [CmdletBinding()]
-    [OutputType([pscustomobject])]
-    param(
-        [Parameter(Mandatory)][string]$MountPath,
-        [Parameter(Mandatory)][string]$PackagePath,
-        [AllowEmptyString()][string]$DismLogPath='',
-        [hashtable]$Metadata=@{},
-        [AllowNull()][object]$Exception
-    )
-    $imageLabel=if($Metadata.ContainsKey('ImageLabel')){[string]$Metadata.ImageLabel}else{'offline-image'}
-    $kbId=if($Metadata.ContainsKey('KbId')){[string]$Metadata.KbId}else{''}
-    $safeLabel=(($imageLabel+'-'+$kbId)-replace '[^A-Za-z0-9._-]','_').Trim('_')
-    if([string]::IsNullOrWhiteSpace($safeLabel)){$safeLabel='offline-image'}
-    $stamp=[datetime]::UtcNow.ToString('yyyyMMdd-HHmmssfff')
-    $root=Join-Path $Script:LogsDir ('servicing-failure-evidence\{0}-{1}' -f $stamp,$safeLabel)
-    New-Item -ItemType Directory -Path $root -Force|Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $root 'pending') -Force|Out-Null
-    $issues=[System.Collections.Generic.List[string]]::new()
-    $copies=[System.Collections.Generic.List[object]]::new()
-
-    try {
-        $sourceSpecs=@(
-            [pscustomobject]@{Source=(Join-Path $MountPath 'Windows\WinSxS\pending.xml');Relative='pending\Windows-WinSxS-pending.xml'},
-            [pscustomobject]@{Source=(Join-Path $MountPath 'Windows\WinSxS\pending.xml.bad');Relative='pending\Windows-WinSxS-pending.xml.bad'},
-            [pscustomobject]@{Source=(Join-Path $MountPath 'Windows\WinSxS\cleanup.xml');Relative='pending\Windows-WinSxS-cleanup.xml'},
-            [pscustomobject]@{Source=(Join-Path $MountPath 'Windows\WinSxS\reboot.xml');Relative='pending\Windows-WinSxS-reboot.xml'},
-            [pscustomobject]@{Source=(Join-Path $MountPath 'Windows\servicing\RebootPending.xml');Relative='pending\Windows-servicing-RebootPending.xml'}
-        )
-        if($DismLogPath){
-            $sourceSpecs+= [pscustomobject]@{Source=$DismLogPath;Relative='host-dism\operation.log'}
-        }
-        foreach($spec in $sourceSpecs){
-            $copies.Add((Copy-ServicingEvidenceFile -SourcePath $spec.Source -DestinationPath (Join-Path $root $spec.Relative)))|Out-Null
-        }
-        if($env:windir){
-            $copies.Add((Copy-ServicingLogTailEvidence -SourcePath (Join-Path $env:windir 'Logs\CBS\CBS.log') -DestinationPath (Join-Path $root 'host-servicing-log-tail\CBS.log')))|Out-Null
-            $copies.Add((Copy-ServicingLogTailEvidence -SourcePath (Join-Path $env:windir 'Logs\DISM\dism.log') -DestinationPath (Join-Path $root 'host-servicing-log-tail\dism.log')))|Out-Null
-        }
-
-        foreach($logArea in @(
-            [pscustomobject]@{Source=(Join-Path $MountPath 'Windows\Logs\CBS');Relative='image-logs\CBS'},
-            [pscustomobject]@{Source=(Join-Path $MountPath 'Windows\Logs\DISM');Relative='image-logs\DISM'}
-        )){
-            if(Test-Path -LiteralPath $logArea.Source -PathType Container){
-                foreach($file in @(Get-ChildItem -LiteralPath $logArea.Source -File -Recurse -ErrorAction SilentlyContinue|Where-Object{$_.Extension -in @('.log','.txt','.xml')})){
-                    $rel=$file.FullName.Substring($logArea.Source.Length).TrimStart([char[]]@('\','/'))
-                    $copies.Add((Copy-ServicingEvidenceFile -SourcePath $file.FullName -DestinationPath (Join-Path (Join-Path $root $logArea.Relative) $rel)))|Out-Null
-                }
-            }
-        }
-
-        $sessionsRoot=Join-Path $MountPath 'Windows\servicing\Sessions'
-        if(Test-Path -LiteralPath $sessionsRoot -PathType Container){
-            foreach($file in @(Get-ChildItem -LiteralPath $sessionsRoot -File -Recurse -ErrorAction SilentlyContinue|Where-Object{$_.Extension -in @('.xml','.txt','.log')})){
-                $rel=$file.FullName.Substring($sessionsRoot.Length).TrimStart([char[]]@('\','/'))
-                $copies.Add((Copy-ServicingEvidenceFile -SourcePath $file.FullName -DestinationPath (Join-Path (Join-Path $root 'sessions') $rel)))|Out-Null
-            }
-        }
-
-        foreach($pendingDir in @('Windows\WinSxS\Temp\PendingDeletes','Windows\WinSxS\Temp\PendingRenames')){
-            $full=Join-Path $MountPath $pendingDir
-            $rows=@()
-            if(Test-Path -LiteralPath $full -PathType Container){
-                $rows=@(Get-ChildItem -LiteralPath $full -Force -Recurse -ErrorAction SilentlyContinue|ForEach-Object{
-                    [pscustomobject]@{RelativePath=$_.FullName.Substring($full.Length).TrimStart([char[]]@('\','/'));IsDirectory=$_.PSIsContainer;LengthBytes=$(if($_.PSIsContainer){0}else{[long]$_.Length});LastWriteTimeUtc=$_.LastWriteTimeUtc.ToString('o')}
-                })
-            }
-            Save-CanonicalJsonFile -InputObject $rows -Path (Join-Path $root (('pending\{0}-inventory.json' -f (($pendingDir -replace '[\\/]','-'))))) -Depth 8
-        }
-
-        try {
-            $packages=@(Invoke-DismCmdlet -CommandName 'Get-WindowsPackage' -Parameters @{Path=$MountPath;ErrorAction='Stop'}|ForEach-Object{
-                [pscustomobject]@{PackageName=[string]$_.PackageName;PackageIdentity=[string]$_.PackageIdentity;PackageState=[string]$_.PackageState;ReleaseType=[string]$_.ReleaseType;InstallTime=$(if($_.InstallTime){$_.InstallTime.ToString('o')}else{''})}
-            })
-            Save-CanonicalJsonFile -InputObject $packages -Path (Join-Path $root 'packages-after-failure.json') -Depth 8
-        } catch {$issues.Add(('Get-WindowsPackage: '+$_.Exception.Message))|Out-Null}
-
-        try {
-            $features=@(Invoke-DismCmdlet -CommandName 'Get-WindowsOptionalFeature' -Parameters @{Path=$MountPath;ErrorAction='Stop'}|ForEach-Object{
-                [pscustomobject]@{FeatureName=[string]$_.FeatureName;State=[string]$_.State}
-            })
-            Save-CanonicalJsonFile -InputObject $features -Path (Join-Path $root 'optional-features-after-failure.json') -Depth 6
-        } catch {$issues.Add(('Get-WindowsOptionalFeature: '+$_.Exception.Message))|Out-Null}
-
-        $componentNeedles=@('BootEnvironment-PXE.Resources','qps-ploc')
-        $componentRows=[System.Collections.Generic.List[object]]::new()
-        foreach($baseRel in @('Windows\WinSxS\Manifests','Windows\servicing\Packages')){
-            $base=Join-Path $MountPath $baseRel
-            if(-not(Test-Path -LiteralPath $base -PathType Container)){continue}
-            foreach($file in @(Get-ChildItem -LiteralPath $base -File -Recurse -ErrorAction SilentlyContinue|Where-Object{
-                $name=$_.Name;@($componentNeedles|Where-Object{$name -match [regex]::Escape($_)}).Count -gt 0
-            })){
-                $hash=''
-                try{$hash=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}catch{$issues.Add(('Hash '+$file.FullName+': '+$_.Exception.Message))|Out-Null}
-                $componentRows.Add([pscustomobject]@{RelativePath=$file.FullName.Substring($MountPath.Length).TrimStart([char[]]@('\','/'));LengthBytes=[long]$file.Length;Sha256=$hash})|Out-Null
-                if($file.Extension -in @('.manifest','.mum')){
-                    $dest=Join-Path $root ('component-text\'+$file.Name)
-                    $copies.Add((Copy-ServicingEvidenceFile -SourcePath $file.FullName -DestinationPath $dest))|Out-Null
-                }
-            }
-        }
-        Save-CanonicalJsonFile -InputObject $componentRows.ToArray() -Path (Join-Path $root 'pxe-qps-component-files.json') -Depth 8
-
-        $componentsHive=Join-Path $MountPath 'Windows\System32\Config\COMPONENTS'
-        $regRoot=('WSI_COMPONENTS_{0}_{1}' -f $PID,[Guid]::NewGuid().ToString('N'))
-        $loaded=$false
-        try {
-            if(Test-Path -LiteralPath $componentsHive -PathType Leaf){
-                $regLoadLog=Join-Path $root 'components-registry-load.txt'
-                & reg.exe load ('HKLM\'+$regRoot) $componentsHive 2>&1|Set-Content -LiteralPath $regLoadLog -Encoding UTF8
-                if($LASTEXITCODE -eq 0){
-                    $loaded=$true
-                    foreach($needle in $componentNeedles){
-                        $safeNeedle=$needle -replace '[^A-Za-z0-9._-]','_'
-                        & reg.exe query ('HKLM\'+$regRoot) /f $needle /s 2>&1|Set-Content -LiteralPath (Join-Path $root ('components-registry-'+$safeNeedle+'.txt')) -Encoding UTF8
-                    }
-                }else{$issues.Add(('COMPONENTS reg load exit code '+$LASTEXITCODE))|Out-Null}
-            }else{$issues.Add('COMPONENTS hive is not present.')|Out-Null}
-        } catch {$issues.Add(('COMPONENTS query: '+$_.Exception.Message))|Out-Null}
-        finally {
-            if($loaded){
-                [gc]::Collect();[gc]::WaitForPendingFinalizers()
-                $regUnloadLog=Join-Path $root 'components-registry-unload.txt'
-                & reg.exe unload ('HKLM\'+$regRoot) 2>&1|Set-Content -LiteralPath $regUnloadLog -Encoding UTF8
-            }
-        }
-    } catch {$issues.Add(('Collector: '+$_.Exception.Message))|Out-Null}
-
-    $packageItem=$null
-    try{$packageItem=Get-Item -LiteralPath $PackagePath -Force -ErrorAction Stop}catch{$issues.Add(('Package stat: '+$_.Exception.Message))|Out-Null}
-    $summary=[pscustomobject][ordered]@{
-        SchemaVersion='offline-servicing-failure-evidence/1.0';CreatedAtUtc=[datetime]::UtcNow.ToString('o')
-        ScriptVersion=$Script:ScriptVersion;RunId=[string]$Script:RunId;OsKey=[string]$Script:OsVersion
-        MountPath=$MountPath;ImageLabel=$imageLabel;KbId=$kbId
-        Package=[pscustomobject]@{Path=$PackagePath;FileName=[System.IO.Path]::GetFileName($PackagePath);LengthBytes=$(if($packageItem){[long]$packageItem.Length}else{0});Sha256=$(if($packageItem){(Get-FileHash -LiteralPath $PackagePath -Algorithm SHA256).Hash.ToLowerInvariant()}else{''})}
-        DismLogPath=$DismLogPath;ExceptionType=$(if($Exception){$Exception.GetType().FullName}else{''})
-        ExceptionMessage=$(if($Exception){[string]$Exception.Message}else{''})
-        HResult=$(if($Exception){'0x{0:X8}' -f (([int64]$Exception.HResult)-band 4294967295)}else{''})
-        Metadata=$Metadata;CopiedFiles=$copies.ToArray();CollectionIssues=$issues.ToArray()
-        EvidenceRoot=$root;Passed=($issues.Count -eq 0)
-    }
-    Save-CanonicalJsonFile -InputObject $summary -Path (Join-Path $root 'summary.json') -Depth 12
-    Write-Caution ('Offline servicing failure evidence captured before discard: {0}' -f $root)
-    return $summary
-}
-
 function Add-WindowsPackageWithRetry {
     <#
     .SYNOPSIS
@@ -7292,14 +7086,12 @@ function Add-WindowsPackageWithRetry {
             } catch {
                 $logPathUsed = if ($extraArg.ContainsKey('LogPath')) { [string]$extraArg['LogPath'] } else { '' }
                 Write-DismLogClassificationEvidence -LogPath $logPathUsed -OperationStatus 'Fail' -Context ([System.IO.Path]::GetFileName($PackagePath)) -Metadata $EvidenceMetadata -Exception $_.Exception -DoNotThrow | Out-Null
-                try { Export-OfflineServicingFailureEvidence -MountPath $MountPath -PackagePath $PackagePath -DismLogPath $logPathUsed -Metadata $EvidenceMetadata -Exception $_.Exception | Out-Null } catch { Write-Caution ('Failure-evidence collection also failed: {0}' -f $_.Exception.Message) }
                 throw
             }
         }
         # All other errors propagate, but failure evidence is always persisted first.
         $logPathUsed = if ($extraArg.ContainsKey('LogPath')) { [string]$extraArg['LogPath'] } else { '' }
         Write-DismLogClassificationEvidence -LogPath $logPathUsed -OperationStatus 'Fail' -Context ([System.IO.Path]::GetFileName($PackagePath)) -Metadata $EvidenceMetadata -Exception $_.Exception -DoNotThrow | Out-Null
-        try { Export-OfflineServicingFailureEvidence -MountPath $MountPath -PackagePath $PackagePath -DismLogPath $logPathUsed -Metadata $EvidenceMetadata -Exception $_.Exception | Out-Null } catch { Write-Caution ('Failure-evidence collection also failed: {0}' -f $_.Exception.Message) }
         throw
     }
 }
@@ -11004,6 +10796,11 @@ function ConvertTo-BridgeLcuResolvedPatch {
         PatchType      = 'BridgeLcu'
         ApplyOrder     = 0
         ExpectedHashes = $expectedHashes
+        Applicability  = $(if ($BridgeLcu.PSObject.Properties['Condition']) { $BridgeLcu.Condition } else { $null })
+        VersionPolicy  = $(if ($BridgeLcu.PSObject.Properties['VersionPolicy']) { $BridgeLcu.VersionPolicy } else { $null })
+        InScope        = $null
+        Architecture   = 'x64'
+        Products       = $null
     }
 }
 
@@ -11085,11 +10882,14 @@ function ConvertTo-ResolvedPatchFromBaselineLine {
         Applicability    = $applicability
         RuntimeSelector  = $runtimeSelector
         Dependencies     = $dependencies
+        InScope          = $(if ($Line.PSObject.Properties['InScope']) { $Line.InScope } else { $null })
+        VersionPolicy    = $(if ($Line.PSObject.Properties['VersionPolicy']) { $Line.VersionPolicy } else { $null })
+        Architecture     = $(if ($Line.PSObject.Properties['Architecture']) { [string]$Line.Architecture } else { '' })
+        Products         = $(if ($Line.PSObject.Properties['Products']) { $Line.Products } else { $null })
         BaselineState    = $(if ($Line.PSObject.Properties['State']) { [string]$Line.State } else { 'LegacyResolved' })
         State            = $(if ($Line.PSObject.Properties['State']) { [string]$Line.State } else { 'LegacyResolved' })
         ReleaseDate      = $(if ($Line.PSObject.Properties['ReleaseDate']) { [string]$Line.ReleaseDate } else { '' })
         Title            = $(if ($Line.PSObject.Properties['Title']) { [string]$Line.Title } else { '' })
-        Products         = $(if ($Line.PSObject.Properties['Products']) { $Line.Products } else { $null })
         IsMetadataOnly   = ([string]::IsNullOrWhiteSpace([string]$Line.DownloadUrl) -or [string]::IsNullOrWhiteSpace($fileName))
     }
 }
@@ -11144,6 +10944,10 @@ function ConvertTo-SourcePrerequisiteResolvedPatch {
         Applicability    = $Prerequisite.Condition
         RuntimeSelector  = $null
         Dependencies     = @()
+        InScope          = $null
+        VersionPolicy    = $(if ($Prerequisite.PSObject.Properties['VersionPolicy']) { $Prerequisite.VersionPolicy } else { $null })
+        Architecture     = $(if ($asset -and $asset.PSObject.Properties['Architecture']) { [string]$asset.Architecture } else { 'x64' })
+        Products         = $null
         BaselineState    = [string]$Prerequisite.State
         IsMetadataOnly   = (-not $asset -or -not $fileName -or -not $source)
     }
@@ -11440,6 +11244,9 @@ function New-ResolvedPatchEvidenceManifest {
             elseif ($p.Integrity.Sha256.PSObject.Properties['Value']) { $integritySha = [string]$p.Integrity.Sha256.Value }
         }
         $entryType = Get-PatchEntryType -Patch $p
+        $versionPolicy = if ($p.PSObject.Properties['VersionPolicy'] -and $p.VersionPolicy) { $p.VersionPolicy } else { $null }
+        $assetMetadata = $null
+        try { $assetMetadata = Get-PatchAssetMetadata -Patch $p } catch { $assetMetadata = [pscustomobject]@{ MetadataStatus='Error'; Errors=@($_.Exception.Message) } }
         $items.Add([pscustomobject][ordered]@{
             PackageId=[string]$p.PackageId
             Kind=$entryType
@@ -11458,10 +11265,17 @@ function New-ResolvedPatchEvidenceManifest {
             SizeBytes=$(if ($p.PSObject.Properties['SizeBytes'] -and $null -ne $p.SizeBytes) { [long]$p.SizeBytes } else { $null })
             DeclaredSha256=$integritySha
             LocalAssetSha256=(Get-FileSha256OrEmpty -Path $localPath)
+            VersionPolicy=$versionPolicy
+            VersionDecisionMode=$(if($versionPolicy -and $versionPolicy.PSObject.Properties['DecisionMode']){[string]$versionPolicy.DecisionMode}else{''})
+            AssetMetadataStatus=$(if($assetMetadata -and $assetMetadata.PSObject.Properties['MetadataStatus']){[string]$assetMetadata.MetadataStatus}else{''})
+            CandidatePackageVersion=$(if($assetMetadata -and $assetMetadata.PSObject.Properties['CandidatePackageVersion']){[string]$assetMetadata.CandidatePackageVersion}else{''})
+            EmbeddedServicingStackVersion=$(if($assetMetadata -and $assetMetadata.PSObject.Properties['EmbeddedServicingStackVersion']){[string]$assetMetadata.EmbeddedServicingStackVersion}else{''})
+            TargetVersion=$(if($assetMetadata -and $assetMetadata.PSObject.Properties['TargetVersion']){[string]$assetMetadata.TargetVersion}else{''})
+            AssetMetadataEvidence=$(if($Script:VersionDecisionDir){Join-Path (Join-Path $Script:VersionDecisionDir 'patch-metadata') ((Get-SafeEvidenceFileName -Value ([string]$p.PackageId))+'.json')}else{''})
         }) | Out-Null
     }
     return [pscustomobject][ordered]@{
-        SchemaVersion='release-patch-manifest/1.3'
+        SchemaVersion='release-patch-manifest/1.4'
         EvidenceOrigin=$EvidenceOrigin
         RunId=$Script:RunId
         OsKey=[string]$Script:OsVersion
@@ -12159,6 +11973,164 @@ function Get-SetupDuFileManifest {
     return $rows.ToArray()
 }
 
+
+function Get-SetupDuFileVersionDecision {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)]$ManifestRow,
+        [Parameter(Mandatory)][string]$KbId,
+        [string]$BootWimSetupBinaryStash=''
+    )
+    $sourcePath=[string]$ManifestRow.SourcePath
+    $destinationPath=[string]$ManifestRow.DestinationPath
+    $relativePath=[string]$ManifestRow.RelativePath
+    $sourceVersion=[string]$ManifestRow.FileVersion
+    $sourceHash=[string]$ManifestRow.Sha256
+    $extension=[System.IO.Path]::GetExtension($relativePath).ToLowerInvariant()
+    $leaf=[System.IO.Path]::GetFileName($relativePath)
+    $versionedExtensions=@('.exe','.dll','.sys','.ocx','.cpl','.mui')
+    $isVersionedBinary=($extension -in $versionedExtensions)
+    $isBootWimOverride=($leaf -in @('setup.exe','setuphost.exe')) -and (-not [string]::IsNullOrWhiteSpace($BootWimSetupBinaryStash)) -and (Test-Path -LiteralPath (Join-Path $BootWimSetupBinaryStash $leaf) -PathType Leaf)
+    $destinationPresent=Test-Path -LiteralPath $destinationPath -PathType Leaf
+    $destinationVersion=''
+    $destinationHash=''
+    $destinationSize=$null
+    if($destinationPresent){
+        $destItem=Get-Item -LiteralPath $destinationPath -ErrorAction Stop
+        $destinationSize=[long]$destItem.Length
+        $destinationHash=(Get-FileHash -LiteralPath $destinationPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        try{$destinationVersion=[string]$destItem.VersionInfo.FileVersion}catch{$destinationVersion=''}
+    }
+    $decision='Apply'
+    $reasonCode='NewFile'
+    $reason='Destination file is absent.'
+    if($isBootWimOverride){
+        $decision='SkipOverriddenByBootWim'
+        $reasonCode='BootWimSetupBinaryWins'
+        $reason='This Setup DU binary is intentionally replaced by the serviced boot.wim copy after overlay.'
+    }elseif($destinationPresent -and $destinationHash -eq $sourceHash){
+        $decision='SkipAlreadyCurrent'
+        $reasonCode='IdenticalContent'
+        $reason='Source and destination SHA-256 are identical.'
+    }elseif($destinationPresent){
+        $comparison=Compare-ComparableVersion -Current $destinationVersion -Candidate $sourceVersion
+        if($comparison.Comparable){
+            if($comparison.Result -gt 0){
+                $decision='RejectDowngrade'
+                $reasonCode='SetupDuSourceOlderThanDestination'
+                $reason=('Setup DU source version {0} is older than destination version {1}.' -f $sourceVersion,$destinationVersion)
+            }elseif($comparison.Result -eq 0){
+                $decision='ManualReviewRequired'
+                $reasonCode='SameVersionDifferentContent'
+                $reason=('Source and destination both report version {0}, but SHA-256 differs.' -f $sourceVersion)
+            }else{
+                $decision='Apply'
+                $reasonCode='SetupDuFileUpgrade'
+                $reason=('Destination version {0} will be upgraded to {1}.' -f $destinationVersion,$sourceVersion)
+            }
+        }elseif($isVersionedBinary){
+            $decision='ManualReviewRequired'
+            $reasonCode='BinaryVersionNotComparable'
+            $reason=('Cannot safely compare versioned binary: source={0}; destination={1}.' -f $sourceVersion,$destinationVersion)
+        }else{
+            $decision='Apply'
+            $reasonCode='NonVersionedFileChanged'
+            $reason='Non-versioned file differs; apply with hash verification.'
+        }
+    }
+    return [pscustomobject][ordered]@{
+        SchemaVersion='setupdu-file-decision/1.0'
+        TimestampUtc=[datetime]::UtcNow.ToString('o')
+        OsKey=[string]$Script:OsVersion
+        KbId=$KbId
+        RelativePath=$relativePath
+        SourcePath=$sourcePath
+        DestinationPath=$destinationPath
+        Extension=$extension
+        IsVersionedBinary=$isVersionedBinary
+        OverriddenByBootWim=$isBootWimOverride
+        SourceSizeBytes=[long]$ManifestRow.SizeBytes
+        SourceSha256=$sourceHash
+        SourceFileVersion=$sourceVersion
+        DestinationPresent=$destinationPresent
+        DestinationSizeBytes=$destinationSize
+        DestinationSha256Before=$destinationHash
+        DestinationFileVersionBefore=$destinationVersion
+        Decision=$decision
+        ReasonCode=$reasonCode
+        Reason=$reason
+    }
+}
+
+function Write-SetupDuFileDecisionEvidence {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object[]]$Decisions)
+    Initialize-RuntimeDirectories -Directory @($Script:VersionDecisionDir)
+    $jsonPath=Join-Path $Script:VersionDecisionDir 'P09_setupdu_file_decisions.json'
+    $csvPath=Join-Path $Script:VersionDecisionDir 'P09_setupdu_file_decisions.csv'
+    Save-CanonicalJsonFile -InputObject ([pscustomobject][ordered]@{
+        SchemaVersion='setupdu-file-decision-set/1.0'
+        CreatedAtUtc=[datetime]::UtcNow.ToString('o')
+        OsKey=[string]$Script:OsVersion
+        Decisions=@($Decisions)
+    }) -Path $jsonPath -Depth 12
+    @($Decisions)|Select-Object KbId,RelativePath,SourceFileVersion,DestinationFileVersionBefore,Decision,ReasonCode,SourceSha256,DestinationSha256Before,OverriddenByBootWim|Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
+    return [pscustomobject]@{JsonPath=$jsonPath;CsvPath=$csvPath}
+}
+
+function Invoke-SetupDuVersionAwareOverlay {
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param(
+        [Parameter(Mandatory)][object[]]$SourceManifest,
+        [Parameter(Mandatory)][string]$KbId
+    )
+    $stashDir=Join-Path $Script:WorkRoot 'work\p08s_setup_binaries'
+    $decisions=@()
+    foreach($row in @($SourceManifest)){
+        $decisions+=,(Get-SetupDuFileVersionDecision -ManifestRow $row -KbId $KbId -BootWimSetupBinaryStash $stashDir)
+    }
+    $evidence=Write-SetupDuFileDecisionEvidence -Decisions $decisions
+    $blocking=@($decisions|Where-Object{$_.Decision -in @('RejectDowngrade','ManualReviewRequired')})
+    if($blocking.Count -gt 0){
+        $summary=($blocking|Select-Object -First 10|ForEach-Object{('{0}: {1} ({2})' -f $_.RelativePath,$_.Decision,$_.ReasonCode)}) -join '; '
+        throw ('Setup DU version decision blocked overlay before any file was copied. blocking={0}; {1}; evidence={2}' -f $blocking.Count,$summary,$evidence.JsonPath)
+    }
+    $records=[System.Collections.Generic.List[object]]::new()
+    foreach($d in @($decisions)){
+        $copied=$false
+        if($d.Decision -eq 'Apply'){
+            $parent=Split-Path -Parent ([string]$d.DestinationPath)
+            if($parent){New-Item -ItemType Directory -Path $parent -Force|Out-Null}
+            if(Test-Path -LiteralPath $d.DestinationPath -PathType Leaf){
+                $destItem=Get-Item -LiteralPath $d.DestinationPath
+                if($destItem.IsReadOnly){$destItem.IsReadOnly=$false}
+            }
+            Copy-Item -LiteralPath $d.SourcePath -Destination $d.DestinationPath -Force
+            $copied=$true
+        }
+        $afterPresent=Test-Path -LiteralPath $d.DestinationPath -PathType Leaf
+        $afterHash=if($afterPresent){(Get-FileHash -LiteralPath $d.DestinationPath -Algorithm SHA256).Hash.ToLowerInvariant()}else{''}
+        $expectedHash=if($d.Decision -eq 'Apply'){$d.SourceSha256}else{$d.DestinationSha256Before}
+        $records.Add([pscustomobject][ordered]@{
+            KbId=$KbId;RelativePath=$d.RelativePath;Decision=$d.Decision;ReasonCode=$d.ReasonCode
+            Copied=$copied;DestinationPresentAfter=$afterPresent;DestinationSha256After=$afterHash
+            ExpectedSha256After=$expectedHash;MatchAfter=($afterPresent -and $afterHash -eq $expectedHash)
+            SourceFileVersion=$d.SourceFileVersion;DestinationFileVersionBefore=$d.DestinationFileVersionBefore
+            OverriddenByBootWim=$d.OverriddenByBootWim
+        })|Out-Null
+    }
+    $failed=@($records|Where-Object{-not $_.MatchAfter})
+    $overlayPath=Join-Path $Script:LogsDir 'setupdu_overlay_manifest.json'
+    Save-CanonicalJsonFile -InputObject ([pscustomobject][ordered]@{
+        SchemaVersion='setupdu-overlay/2.0';CreatedAtUtc=[datetime]::UtcNow.ToString('o');OsKey=[string]$Script:OsVersion;KbId=$KbId
+        DecisionEvidence=$evidence;Records=$records.ToArray()
+    }) -Path $overlayPath -Depth 12
+    if($failed.Count -gt 0){throw ('Setup DU overlay verification failed for {0} file(s); evidence={1}' -f $failed.Count,$overlayPath)}
+    return $records.ToArray()
+}
+
 function Get-BootWimPackageMode {
     [CmdletBinding()]
     [OutputType([string])]
@@ -12189,110 +12161,6 @@ function Get-BootWimServicingStrategy {
         $raw=[string]$Script:OsProfile.Common.BootWimServicingStrategy
     }
     return (Resolve-BootWimServicingStrategyValue -RawValue $raw -PackageMode $mode)
-}
-
-function Export-ExpandedMsuMetadataEvidence {
-    <#
-    .SYNOPSIS
-        Persist an evidence-only analysis of an expanded MSU and its package MUMs.
-    .DESCRIPTION
-        CAB/MSU/CAT payload bytes remain outside Logs. Evidence contains hashes,
-        package/parent identities, the outer XML/TXT metadata, and raw MUM text
-        only for PXE/qps-ploc-relevant components.
-    #>
-    [CmdletBinding()]
-    [OutputType([pscustomobject])]
-    param(
-        [Parameter(Mandatory)][string]$MsuPath,
-        [Parameter(Mandatory)][string]$KbId,
-        [Parameter(Mandatory)][string]$PayloadRoot,
-        [Parameter(Mandatory)][object[]]$CabPlan,
-        [Parameter(Mandatory)][string]$WorkingRoot
-    )
-    $safeName=([System.IO.Path]::GetFileNameWithoutExtension($MsuPath)-replace '[^A-Za-z0-9._-]','_')
-    $root=Join-Path $Script:LogsDir ('package-metadata\'+$safeName)
-    $mumTextRoot=Join-Path $root 'relevant-mum'
-    New-Item -ItemType Directory -Path $mumTextRoot -Force|Out-Null
-    $issues=[System.Collections.Generic.List[string]]::new()
-    $cabRows=[System.Collections.Generic.List[object]]::new()
-    $mumRows=[System.Collections.Generic.List[object]]::new()
-
-    foreach($entry in @($CabPlan)){
-        $cabPath=[string]$entry.CabPath
-        $cabItem=$null
-        try{$cabItem=Get-Item -LiteralPath $cabPath -Force -ErrorAction Stop}catch{$issues.Add(('CAB stat: '+$_.Exception.Message))|Out-Null;continue}
-        $cabHash=''
-        try{$cabHash=(Get-FileHash -LiteralPath $cabPath -Algorithm SHA256).Hash.ToLowerInvariant()}catch{$issues.Add(('CAB hash: '+$_.Exception.Message))|Out-Null}
-        $cabRows.Add([pscustomobject]@{FileName=$cabItem.Name;Role=[string]$entry.Role;LengthBytes=[long]$cabItem.Length;Sha256=$cabHash;PayloadRetainedInEvidence=$false})|Out-Null
-        $mumRoot=Join-Path $WorkingRoot ('evidence-mum-'+[Guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path $mumRoot -Force|Out-Null
-        try {
-            & expand.exe -F:*.mum $cabPath $mumRoot | Out-Null
-            if($LASTEXITCODE -ne 0){$issues.Add(('MUM expansion failed for '+$cabItem.Name+' with exit code '+$LASTEXITCODE))|Out-Null;continue}
-            foreach($mum in @(Get-ChildItem -LiteralPath $mumRoot -File -Recurse -Filter '*.mum' -ErrorAction SilentlyContinue)){
-                $raw=''
-                try{$raw=Get-Content -LiteralPath $mum.FullName -Raw -ErrorAction Stop}catch{$issues.Add(('MUM read '+$mum.Name+': '+$_.Exception.Message))|Out-Null}
-                $identity=$null;$parents=@();$parseStatus='Parsed'
-                try {
-                    [xml]$doc=$raw
-                    $identityNode=$doc.SelectSingleNode("/*[local-name()='assembly']/*[local-name()='assemblyIdentity']")
-                    if(-not $identityNode){$identityNode=$doc.SelectSingleNode("//*[local-name()='package']/*[local-name()='assemblyIdentity']")}
-                    if($identityNode){
-                        $identity=[pscustomobject]@{Name=[string]$identityNode.name;Version=[string]$identityNode.version;ProcessorArchitecture=[string]$identityNode.processorArchitecture;Language=[string]$identityNode.language;PublicKeyToken=[string]$identityNode.publicKeyToken}
-                    }
-                    $parents=@($doc.SelectNodes("//*[local-name()='parent']//*[local-name()='assemblyIdentity']")|ForEach-Object{
-                        [pscustomobject]@{Name=[string]$_.name;Version=[string]$_.version;ProcessorArchitecture=[string]$_.processorArchitecture;Language=[string]$_.language;PublicKeyToken=[string]$_.publicKeyToken}
-                    })
-                } catch {$parseStatus='ParseFailed';$issues.Add(('MUM XML '+$mum.Name+': '+$_.Exception.Message))|Out-Null}
-                $relevant=($mum.Name -match '(?i)BootEnvironment-PXE|qps-ploc' -or $raw -match '(?i)BootEnvironment-PXE|qps-ploc')
-                $rawEvidencePath=''
-                if($relevant){
-                    $cabEvidenceRoot=Join-Path $mumTextRoot (($cabItem.BaseName)-replace '[^A-Za-z0-9._-]','_')
-                    New-Item -ItemType Directory -Path $cabEvidenceRoot -Force|Out-Null
-                    $dest=Join-Path $cabEvidenceRoot $mum.Name
-                    $copy=Copy-ServicingEvidenceFile -SourcePath $mum.FullName -DestinationPath $dest
-                    if($copy.Status -eq 'Copied'){$rawEvidencePath=$dest}else{$issues.Add(('Relevant MUM copy '+$mum.Name+': '+$copy.Status))|Out-Null}
-                }
-                $mumRows.Add([pscustomobject]@{
-                    CabFileName=$cabItem.Name;MumFileName=$mum.Name
-                    Sha256=$(try{(Get-FileHash -LiteralPath $mum.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}catch{''})
-                    ParseStatus=$parseStatus;Identity=$identity;Parents=$parents;RelevantToPxeQps=$relevant
-                    RawEvidencePath=$rawEvidencePath
-                })|Out-Null
-            }
-        } finally {Remove-Item -LiteralPath $mumRoot -Recurse -Force -ErrorAction SilentlyContinue}
-    }
-
-    $outerRows=[System.Collections.Generic.List[object]]::new()
-    foreach($file in @(Get-ChildItem -LiteralPath $PayloadRoot -File -Recurse -ErrorAction SilentlyContinue)){
-        $rel=$file.FullName.Substring($PayloadRoot.Length).TrimStart([char[]]@('\','/'))
-        $hash=''
-        try{$hash=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}catch{$issues.Add(('Payload hash '+$file.Name+': '+$_.Exception.Message))|Out-Null}
-        $copiedPath=''
-        if($file.Extension -in @('.xml','.txt','.mum')){
-            $dest=Join-Path (Join-Path $root 'outer-metadata') $rel
-            $copy=Copy-ServicingEvidenceFile -SourcePath $file.FullName -DestinationPath $dest
-            if($copy.Status -eq 'Copied'){$copiedPath=$dest}
-        }
-        $outerRows.Add([pscustomobject]@{RelativePath=$rel;Extension=$file.Extension;LengthBytes=[long]$file.Length;Sha256=$hash;PayloadRetainedInEvidence=($copiedPath-ne'');EvidencePath=$copiedPath})|Out-Null
-    }
-
-    $sig=[pscustomobject]@{Capability='Get-AuthenticodeSignature';Status='CapabilityNotAvailable';SignerSubject='';StatusMessage=''}
-    try {
-        $auth=Get-AuthenticodeSignature -LiteralPath $MsuPath -ErrorAction Stop
-        $sig=[pscustomobject]@{Capability='Get-AuthenticodeSignature';Status=[string]$auth.Status;SignerSubject=$(if($auth.SignerCertificate){[string]$auth.SignerCertificate.Subject}else{''});StatusMessage=[string]$auth.StatusMessage}
-    } catch {$sig.StatusMessage=$_.Exception.Message}
-    $msuItem=Get-Item -LiteralPath $MsuPath -Force
-    $evidence=[pscustomobject][ordered]@{
-        SchemaVersion='expanded-msu-package-metadata/1.0';CreatedAtUtc=[datetime]::UtcNow.ToString('o')
-        ScriptVersion=$Script:ScriptVersion;OsKey=[string]$Script:OsVersion;KbId=$KbId
-        Msu=[pscustomobject]@{FileName=$msuItem.Name;LengthBytes=[long]$msuItem.Length;Sha256=(Get-FileHash -LiteralPath $MsuPath -Algorithm SHA256).Hash.ToLowerInvariant();Authenticode=$sig;PayloadRetainedInEvidence=$false}
-        CabPayloads=$cabRows.ToArray();OuterPayloadInventory=$outerRows.ToArray();MumPackages=$mumRows.ToArray()
-        RelevantMumCount=@($mumRows.ToArray()|Where-Object RelevantToPxeQps).Count
-        CollectionIssues=$issues.ToArray();EvidenceRoot=$root
-    }
-    Save-CanonicalJsonFile -InputObject $evidence -Path (Join-Path $root 'package-metadata.json') -Depth 16
-    return $evidence
 }
 
 function Get-ExpandedMsuCabPlan {
@@ -12358,13 +12226,7 @@ function Get-ExpandedMsuCabPlan {
         $ordered = @($plan.ToArray() | Sort-Object Order,FileName)
         Save-CanonicalJsonFile -InputObject $ordered -Path $manifestPath -Depth 8
     }
-    $resolvedPlan=@((Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json))
-    $metadataEvidencePath=Join-Path $Script:LogsDir ('package-metadata\{0}\package-metadata.json' -f $safeName)
-    if(-not(Test-Path -LiteralPath $metadataEvidencePath -PathType Leaf)){
-        Write-Step ('    Capturing MSU/package MUM metadata evidence: {0}' -f [System.IO.Path]::GetFileName($MsuPath))
-        Export-ExpandedMsuMetadataEvidence -MsuPath $MsuPath -KbId $KbId -PayloadRoot $payloadRoot -CabPlan $resolvedPlan -WorkingRoot $expandRoot|Out-Null
-    }
-    return $resolvedPlan
+    return @((Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json))
 }
 
 function Add-WindowsPackageFromExpandedMsu {
@@ -12705,16 +12567,329 @@ function Test-PatchServicingReadinessOnMount {
     return $false
 }
 
+function ConvertTo-ComparableVersion {
+    [CmdletBinding()]
+    [OutputType([version])]
+    param([AllowNull()][object]$Value)
+    if ($null -eq $Value) { return $null }
+    $text = [string]$Value
+    if ([string]::IsNullOrWhiteSpace($text)) { return $null }
+    $m = [regex]::Match($text, '(?<!\d)(\d+\.\d+(?:\.\d+){0,2})(?!\d)')
+    if (-not $m.Success) { return $null }
+    try { return [version]$m.Groups[1].Value } catch { return $null }
+}
+
+function Compare-ComparableVersion {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([AllowNull()][object]$Current,[AllowNull()][object]$Candidate)
+    $a=ConvertTo-ComparableVersion -Value $Current
+    $b=ConvertTo-ComparableVersion -Value $Candidate
+    if (-not $a -or -not $b) {
+        return [pscustomobject]@{Comparable=$false;Current=$a;Candidate=$b;Result=$null;Relation='Unknown'}
+    }
+    $cmp=$a.CompareTo($b)
+    return [pscustomobject]@{
+        Comparable=$true;Current=$a;Candidate=$b;Result=$cmp
+        Relation=$(if($cmp -lt 0){'CurrentOlder'}elseif($cmp -gt 0){'CurrentNewer'}else{'Equal'})
+    }
+}
+
+function Get-PackageIdentityText {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([AllowNull()]$Package)
+    if (-not $Package) { return '' }
+    foreach($name in @('PackageIdentity','PackageName','Name')) {
+        if($Package.PSObject.Properties[$name] -and $Package.$name){return [string]$Package.$name}
+    }
+    return [string]$Package
+}
+
+function Get-PackageVersionFromIdentity {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([AllowEmptyString()][string]$Identity='')
+    if([string]::IsNullOrWhiteSpace($Identity)){return ''}
+    $matches=[regex]::Matches($Identity,'(?<!\d)(\d+\.\d+(?:\.\d+){0,2})(?!\d)')
+    if($matches.Count -eq 0){return ''}
+    return [string]$matches[$matches.Count-1].Groups[1].Value
+}
+
+function Get-PackageFamilyFromIdentity {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([AllowEmptyString()][string]$Identity='')
+    if($Identity -match '(?i)ServicingStack'){return 'ServicingStack'}
+    if($Identity -match '(?i)RollupFix'){return 'RollupFix'}
+    if($Identity -match '(?i)SafeOSDU|SafeOS'){return 'SafeOSDU'}
+    if($Identity -match '(?i)DotNetRollup|NetFx|\.NET'){return 'DotNetRollup'}
+    if($Identity -match '(?i)Checkpoint'){return 'Checkpoint'}
+    return 'Other'
+}
+
+function Get-HighestPackageVersion {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [AllowEmptyCollection()][object[]]$Records,
+        [Parameter(Mandatory)][string]$Family,
+        [string[]]$AllowedStates=@('Installed')
+    )
+    $best=$null
+    foreach($r in @($Records | Where-Object { $_.Family -eq $Family })) {
+        $state=[string]$r.State
+        if($AllowedStates.Count -gt 0 -and $state -notin $AllowedStates){continue}
+        $v=ConvertTo-ComparableVersion -Value $r.Version
+        if($v -and (-not $best -or $v -gt $best)){$best=$v}
+    }
+    return $(if($best){[string]$best}else{''})
+}
+
+function Get-OfflineServicingInventory {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([AllowEmptyCollection()][object[]]$Packages)
+    $records=[System.Collections.Generic.List[object]]::new()
+    foreach($pkg in @($Packages)) {
+        if(-not $pkg){continue}
+        $identity=Get-PackageIdentityText -Package $pkg
+        $state=if($pkg.PSObject.Properties['PackageState']){[string]$pkg.PackageState}else{''}
+        $records.Add([pscustomobject][ordered]@{
+            Identity=$identity
+            State=$state
+            Version=(Get-PackageVersionFromIdentity -Identity $identity)
+            Family=(Get-PackageFamilyFromIdentity -Identity $identity)
+            KbIds=@([regex]::Matches($identity,'(?i)KB\d{6,8}')|ForEach-Object{$_.Value.ToUpperInvariant()}|Sort-Object -Unique)
+        })|Out-Null
+    }
+    $array=$records.ToArray()
+    $pending=@($array|Where-Object{$_.State -match 'Pending'})
+    $staged=@($array|Where-Object{$_.State -eq 'Staged'})
+    return [pscustomobject][ordered]@{
+        SchemaVersion='offline-servicing-state/1.1'
+        PackageCount=$array.Count
+        Records=$array
+        PendingPackages=$pending
+        PendingPackageCount=$pending.Count
+        StagedPackages=$staged
+        StagedPackageCount=$staged.Count
+        # Only Installed packages define the active servicing level. A staged
+        # SSU from a failed transaction must never be mistaken for the active stack.
+        ServicingStackVersion=(Get-HighestPackageVersion -Records $array -Family 'ServicingStack' -AllowedStates @('Installed'))
+        StagedServicingStackVersion=(Get-HighestPackageVersion -Records $array -Family 'ServicingStack' -AllowedStates @('Staged'))
+        RollupFixVersion=(Get-HighestPackageVersion -Records $array -Family 'RollupFix' -AllowedStates @('Installed'))
+        StagedRollupFixVersion=(Get-HighestPackageVersion -Records $array -Family 'RollupFix' -AllowedStates @('Staged'))
+        SafeOsVersion=(Get-HighestPackageVersion -Records $array -Family 'SafeOSDU' -AllowedStates @('Installed'))
+        StagedSafeOsVersion=(Get-HighestPackageVersion -Records $array -Family 'SafeOSDU' -AllowedStates @('Staged'))
+        DotNetRollupVersion=(Get-HighestPackageVersion -Records $array -Family 'DotNetRollup' -AllowedStates @('Installed'))
+        StagedDotNetRollupVersion=(Get-HighestPackageVersion -Records $array -Family 'DotNetRollup' -AllowedStates @('Staged'))
+    }
+}
+
+function Get-PatchVersionPolicy {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)]$Patch)
+    if($Patch.PSObject.Properties['VersionPolicy'] -and $Patch.VersionPolicy){return $Patch.VersionPolicy}
+    $type=Get-PatchEntryType -Patch $Patch
+    $roles=Get-PatchRoles -Patch $Patch
+    $mode=switch($type){
+        'SSU'{'CompareServicingStack'}
+        'BridgeLcu'{'CompareBridgeFloor'}
+        'LCU'{'CompareTargetBuild'}
+        'Checkpoint'{'ValidateCheckpointDependency'}
+        'DotNet'{'ComparePackageFamily'}
+        'SafeOSDU'{'ComparePackageFamily'}
+        'SetupDU'{'CompareSetupFileSet'}
+        default{if($roles -contains 'SourcePrerequisite'){'ComparePackageFamily'}else{'LegacyApplicability'}}
+    }
+    return [pscustomobject]@{DecisionMode=$mode;RejectDowngrade=$true;UnknownStateDecision='ManualReviewRequired';MetadataRequired=$true}
+}
+
+function Get-SafeEvidenceFileName {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([AllowEmptyString()][string]$Value='')
+    $s=if([string]::IsNullOrWhiteSpace($Value)){'unnamed'}else{$Value}
+    return ([regex]::Replace($s,'[^A-Za-z0-9._-]','_')).Trim('_')
+}
+
+function Get-PreferredPackageVersionFromIdentities {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([AllowEmptyCollection()][object[]]$Identities,[AllowEmptyString()][string]$PatchType='')
+    $patterns=switch($PatchType){
+        'SSU' {@('(?i)ServicingStack')}
+        'BridgeLcu' {@('(?i)RollupFix')}
+        'LCU' {@('(?i)RollupFix')}
+        'DotNet' {@('(?i)DotNetRollup','(?i)NetFx')}
+        'SafeOSDU' {@('(?i)SafeOSDU','(?i)SafeOS')}
+        default {@()}
+    }
+    $pool=@($Identities)
+    if($patterns.Count -gt 0){
+        $preferred=@($pool|Where-Object{
+            $name=[string]$_.Name
+            @($patterns|Where-Object{$name -match $_}).Count -gt 0
+        })
+        if($preferred.Count -gt 0){$pool=$preferred}
+    }
+    $best=$null
+    foreach($id in $pool){
+        $v=ConvertTo-ComparableVersion -Value $id.Version
+        if($v -and (-not $best -or $v -gt $best)){$best=$v}
+    }
+    return $(if($best){[string]$best}else{''})
+}
+
+function Expand-PatchMetadataEnvelope {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$PackagePath,
+        [Parameter(Mandatory)][string]$OutputRoot,
+        [Parameter(Mandatory)][string]$ExpandExe
+    )
+    if(Test-Path -LiteralPath $OutputRoot){Remove-Item -LiteralPath $OutputRoot -Recurse -Force -ErrorAction SilentlyContinue}
+    New-Item -ItemType Directory -Path $OutputRoot -Force|Out-Null
+    $entries=[System.Collections.Generic.List[string]]::new()
+    $errors=[System.Collections.Generic.List[string]]::new()
+    $cabFiles=@()
+    try{
+        foreach($line in @(& $ExpandExe -D $PackagePath 2>&1|ForEach-Object{[string]$_})){$entries.Add($line)|Out-Null}
+        $ext=[IO.Path]::GetExtension($PackagePath).ToLowerInvariant()
+        if($ext -eq '.msu'){
+            $containerDir=Join-Path $OutputRoot 'container'
+            New-Item -ItemType Directory -Path $containerDir -Force|Out-Null
+            $null=& $ExpandExe '-F:*.cab' $PackagePath $containerDir 2>&1
+            if($LASTEXITCODE -ne 0){$errors.Add(('MSU CAB extraction exit code {0}' -f $LASTEXITCODE))|Out-Null}
+            $null=& $ExpandExe '-F:*.mum' $PackagePath $containerDir 2>&1
+            $cabFiles=@(Get-ChildItem -LiteralPath $containerDir -Filter '*.cab' -File -Recurse -ErrorAction SilentlyContinue)
+        }elseif($ext -eq '.cab'){
+            $cabFiles=@(Get-Item -LiteralPath $PackagePath -ErrorAction Stop)
+        }else{
+            $errors.Add(('Unsupported metadata envelope extension: {0}' -f $ext))|Out-Null
+        }
+        $index=0
+        foreach($cab in @($cabFiles)){
+            $index++
+            $cabDir=Join-Path $OutputRoot ('cab-{0:D3}-{1}' -f $index,(Get-SafeEvidenceFileName -Value $cab.BaseName))
+            New-Item -ItemType Directory -Path $cabDir -Force|Out-Null
+            foreach($line in @(& $ExpandExe -D $cab.FullName 2>&1|ForEach-Object{[string]$_})){$entries.Add(('{0}: {1}' -f $cab.Name,$line))|Out-Null}
+            $null=& $ExpandExe '-F:*.mum' $cab.FullName $cabDir 2>&1
+            if($LASTEXITCODE -ne 0){$errors.Add(('{0} MUM extraction exit code {1}' -f $cab.Name,$LASTEXITCODE))|Out-Null}
+        }
+        return [pscustomobject][ordered]@{
+            CabFiles=@($cabFiles|ForEach-Object{[pscustomobject]@{Name=$_.Name;FullName=$_.FullName;SizeBytes=[long]$_.Length}})
+            MumFiles=@(Get-ChildItem -LiteralPath $OutputRoot -Filter '*.mum' -File -Recurse -ErrorAction SilentlyContinue)
+            ContainerEntries=$entries.ToArray()
+            Errors=$errors.ToArray()
+        }
+    }catch{
+        $errors.Add($_.Exception.Message)|Out-Null
+        return [pscustomobject][ordered]@{CabFiles=@();MumFiles=@();ContainerEntries=$entries.ToArray();Errors=$errors.ToArray()}
+    }
+}
+
+function Get-PatchAssetMetadata {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)]$Patch,[switch]$Refresh)
+    $packageId=if($Patch.PSObject.Properties['PackageId'] -and $Patch.PackageId){[string]$Patch.PackageId}else{[string]$Patch.KbId}
+    $path=if($Patch.PSObject.Properties['LocalPath']){[string]$Patch.LocalPath}else{''}
+    $cacheKey=('{0}|{1}' -f $packageId,$path)
+    if(-not $Refresh -and $Script:PatchAssetMetadataCache.ContainsKey($cacheKey)){return $Script:PatchAssetMetadataCache[$cacheKey]}
+    $policy=Get-PatchVersionPolicy -Patch $Patch
+    $targetVersion=''
+    if($policy.PSObject.Properties['TargetVersion']){$targetVersion=[string]$policy.TargetVersion}
+    if(-not $targetVersion -and $Patch.PSObject.Properties['InScope'] -and $Patch.InScope -and $Patch.InScope.PSObject.Properties['build']){$targetVersion=[string]$Patch.InScope.build}
+    $embeddedSsu=if($policy.PSObject.Properties['EmbeddedServicingStackVersion']){[string]$policy.EmbeddedServicingStackVersion}else{''}
+    $patchType=Get-PatchEntryType -Patch $Patch
+    $record=[ordered]@{
+        SchemaVersion='patch-asset-metadata/1.1';PackageId=$packageId;KbId=[string]$Patch.KbId
+        PatchType=$patchType;LocalPath=$path;FileName=$(if($path){[IO.Path]::GetFileName($path)}else{''})
+        Exists=$false;SizeBytes=$null;Sha256='';MetadataStatus='Missing';DecisionMode=[string]$policy.DecisionMode
+        TargetVersion=$targetVersion;CandidatePackageVersion='';EmbeddedServicingStackVersion=$embeddedSsu
+        ContainerEntries=@();ContainerCabFiles=@();AssemblyIdentities=@();Errors=@();Architecture=$(if($Patch.PSObject.Properties['Architecture']){[string]$Patch.Architecture}else{''})
+    }
+    $tmp=''
+    if(-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path -LiteralPath $path -PathType Leaf)){
+        $record.Exists=$true
+        $item=Get-Item -LiteralPath $path
+        $record.SizeBytes=[long]$item.Length
+        $record.Sha256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+        $record.MetadataStatus='Basic'
+        $expand=Join-Path $env:SystemRoot 'System32\expand.exe'
+        if(Test-Path -LiteralPath $expand -PathType Leaf){
+            try{
+                $safe=Get-SafeEvidenceFileName -Value $packageId
+                $tmp=Join-Path $Script:TempDir ('package-metadata\'+$safe)
+                $expanded=Expand-PatchMetadataEnvelope -PackagePath $path -OutputRoot $tmp -ExpandExe $expand
+                $record.ContainerEntries=@($expanded.ContainerEntries)
+                $record.ContainerCabFiles=@($expanded.CabFiles|ForEach-Object{[pscustomobject]@{Name=$_.Name;SizeBytes=$_.SizeBytes}})
+                $record.Errors+=@($expanded.Errors)
+                foreach($cab in @($expanded.CabFiles)){
+                    $m=[regex]::Match([string]$cab.Name,'(?i)SSU[-_](\d+\.\d+(?:\.\d+){0,2})')
+                    if($m.Success -and [string]::IsNullOrWhiteSpace([string]$record.EmbeddedServicingStackVersion)){$record.EmbeddedServicingStackVersion=$m.Groups[1].Value}
+                }
+                foreach($mum in @($expanded.MumFiles)){
+                    try{
+                        [xml]$xml=Get-Content -LiteralPath $mum.FullName -Raw -ErrorAction Stop
+                        $nodes=@($xml.SelectNodes('//*[local-name()="assemblyIdentity"]'))
+                        foreach($node in $nodes){
+                            $id=[pscustomobject]@{Name=[string]$node.name;Version=[string]$node.version;Architecture=[string]$node.processorArchitecture;Language=[string]$node.language;SourceFile=$mum.Name}
+                            $record.AssemblyIdentities+=,$id
+                        }
+                    }catch{$record.Errors+=('MUM parse failed {0}: {1}' -f $mum.Name,$_.Exception.Message)}
+                }
+                $record.CandidatePackageVersion=Get-PreferredPackageVersionFromIdentities -Identities $record.AssemblyIdentities -PatchType $patchType
+                if($patchType -eq 'SSU' -and [string]::IsNullOrWhiteSpace([string]$record.EmbeddedServicingStackVersion)){$record.EmbeddedServicingStackVersion=[string]$record.CandidatePackageVersion}
+                if([string]::IsNullOrWhiteSpace([string]$record.Architecture)){
+                    $arch=@($record.AssemblyIdentities|ForEach-Object{[string]$_.Architecture}|Where-Object{$_}|Sort-Object -Unique)
+                    if($arch.Count -eq 1){$record.Architecture=$arch[0]}
+                }
+                $record.MetadataStatus=$(if($record.AssemblyIdentities.Count -gt 0){'Parsed'}else{'Partial'})
+            }catch{
+                $record.Errors+=($_.Exception.Message)
+                $record.MetadataStatus='Partial'
+            }finally{
+                if($tmp -and (Test-Path -LiteralPath $tmp)){Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue}
+            }
+        }else{$record.Errors+='expand.exe not available';$record.MetadataStatus='Basic'}
+    }
+    $obj=[pscustomobject]$record
+    $Script:PatchAssetMetadataCache[$cacheKey]=$obj
+    if($Script:VersionDecisionDir){
+        $dir=Join-Path $Script:VersionDecisionDir 'patch-metadata'
+        Initialize-RuntimeDirectories -Directory @($dir)
+        Save-CanonicalJsonFile -InputObject $obj -Path (Join-Path $dir ((Get-SafeEvidenceFileName -Value $packageId)+'.json')) -Depth 16
+    }
+    return $obj
+}
+
+function Write-AllPatchAssetMetadataEvidence {
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param()
+    Initialize-RuntimeDirectories -Directory @($Script:VersionDecisionDir,(Join-Path $Script:VersionDecisionDir 'patch-metadata'))
+    $rows=@()
+    foreach($p in @($Script:ResolvedPatches)){$rows+=,(Get-PatchAssetMetadata -Patch $p -Refresh)}
+    Save-CanonicalJsonFile -InputObject ([pscustomobject][ordered]@{SchemaVersion='patch-asset-metadata-set/1.0';CreatedAtUtc=[datetime]::UtcNow.ToString('o');OsKey=$Script:OsVersion;BaselineId=[string]$Script:OsProfile.PatchBaseline.BaselineId;Items=$rows}) -Path (Join-Path $Script:VersionDecisionDir 'patch-asset-metadata.json') -Depth 20
+    $rows|Select-Object PackageId,KbId,PatchType,FileName,Exists,SizeBytes,Sha256,MetadataStatus,TargetVersion,CandidatePackageVersion,EmbeddedServicingStackVersion,DecisionMode|Export-Csv -LiteralPath (Join-Path $Script:VersionDecisionDir 'patch-asset-metadata.csv') -NoTypeInformation -Encoding UTF8
+    return $rows
+}
+
 function Get-OfflineWindowsState {
-    <# Read build and .NET Framework state from an offline mounted image. #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param([Parameter(Mandatory)][string]$MountPath)
-
+    $packages=@()
+    try{$packages=@(Invoke-DismCmdlet -CommandName 'Get-WindowsPackage' -Parameters @{Path=$MountPath;ErrorAction='Stop'})}catch{throw ('Unable to inventory packages for mounted image {0}: {1}' -f $MountPath,$_.Exception.Message)}
+    $inventory=Get-OfflineServicingInventory -Packages $packages
     $softwareHive = Join-Path $MountPath 'Windows\System32\Config\SOFTWARE'
-    if (-not (Test-Path -LiteralPath $softwareHive)) {
-        return [pscustomobject]@{ Build=''; Ubr=0; Version=''; DotNetRelease=0; DotNetVersion='Unknown' }
-    }
+    $base=[ordered]@{Build='';Ubr=0;Version='';DotNetRelease=0;DotNetVersion='Unknown';PackageInventory=$inventory;ServicingStackVersion=$inventory.ServicingStackVersion;StagedServicingStackVersion=$inventory.StagedServicingStackVersion;RollupFixVersion=$inventory.RollupFixVersion;StagedRollupFixVersion=$inventory.StagedRollupFixVersion;SafeOsVersion=$inventory.SafeOsVersion;StagedSafeOsVersion=$inventory.StagedSafeOsVersion;DotNetRollupVersion=$inventory.DotNetRollupVersion;StagedDotNetRollupVersion=$inventory.StagedDotNetRollupVersion;PendingPackages=$inventory.PendingPackages;PendingPackageCount=$inventory.PendingPackageCount;StagedPackages=$inventory.StagedPackages;StagedPackageCount=$inventory.StagedPackageCount}
+    if (-not (Test-Path -LiteralPath $softwareHive)) { return [pscustomobject]$base }
     $mountName = ('WSI_{0}_{1}' -f $PID, ([Guid]::NewGuid().ToString('N')))
     $regRoot = ('Registry::HKEY_LOCAL_MACHINE\' + $mountName)
     $loaded = $false
@@ -12723,44 +12898,32 @@ function Get-OfflineWindowsState {
         if ($LASTEXITCODE -ne 0) { throw ('reg.exe load failed with exit code {0}' -f $LASTEXITCODE) }
         $loaded = $true
         $cv = Get-ItemProperty -LiteralPath (Join-Path $regRoot 'Microsoft\Windows NT\CurrentVersion') -ErrorAction Stop
-        $build = [string]$cv.CurrentBuildNumber
-        $ubr = 0
-        if ($cv.PSObject.Properties['UBR']) { $ubr = [int]$cv.UBR }
-        $release = 0
+        $base.Build=[string]$cv.CurrentBuildNumber
+        if ($cv.PSObject.Properties['UBR']) { $base.Ubr=[int]$cv.UBR }
+        if($base.Build){$base.Version=('{0}.{1}' -f $base.Build,$base.Ubr)}
         $netPath = Join-Path $regRoot 'Microsoft\NET Framework Setup\NDP\v4\Full'
         if (Test-Path -LiteralPath $netPath) {
             $net = Get-ItemProperty -LiteralPath $netPath -ErrorAction SilentlyContinue
-            if ($net -and $net.PSObject.Properties['Release']) { $release = [int]$net.Release }
+            if ($net -and $net.PSObject.Properties['Release']) { $base.DotNetRelease=[int]$net.Release }
         }
-        $dotNetVersion = 'Unknown'
-        if ($release -ge 533320) { $dotNetVersion = '4.8.1' }
-        elseif ($release -ge 528040) { $dotNetVersion = '4.8' }
-        elseif ($release -ge 461808) { $dotNetVersion = '4.7.2' }
-        elseif ($release -ge 394802) { $dotNetVersion = '4.6.2' }
-        return [pscustomobject]@{
-            Build         = $build
-            Ubr           = $ubr
-            Version       = $(if ($build) { ('{0}.{1}' -f $build, $ubr) } else { '' })
-            DotNetRelease = $release
-            DotNetVersion = $dotNetVersion
-        }
+        if ($base.DotNetRelease -ge 533320) { $base.DotNetVersion='4.8.1' }
+        elseif ($base.DotNetRelease -ge 528040) { $base.DotNetVersion='4.8' }
+        elseif ($base.DotNetRelease -ge 461808) { $base.DotNetVersion='4.7.2' }
+        elseif ($base.DotNetRelease -ge 394802) { $base.DotNetVersion='4.6.2' }
+        return [pscustomobject]$base
     } finally {
-        if ($loaded) {
-            [gc]::Collect()
-            [gc]::WaitForPendingFinalizers()
-            & reg.exe unload ('HKLM\' + $mountName) *> $null
-        }
+        if ($loaded) {[gc]::Collect();[gc]::WaitForPendingFinalizers();& reg.exe unload ('HKLM\' + $mountName) *> $null}
     }
 }
 
 function Test-KbPresentOnMount {
     [CmdletBinding()]
     [OutputType([bool])]
-    param([Parameter(Mandatory)][string]$MountPath, [Parameter(Mandatory)][string]$KbId)
-    if (-not $KbId) { return $false }
-    $packages = @(Invoke-DismCmdlet -CommandName 'Get-WindowsPackage' -Parameters @{ Path=$MountPath; ErrorAction='Stop' })
-    foreach ($pkg in $packages) {
-        if ([string]$pkg.PackageIdentity -like ('*' + $KbId + '*')) { return $true }
+    param([Parameter(Mandatory)][string]$MountPath,[Parameter(Mandatory)][string]$KbId,[AllowNull()]$OfflineState)
+    if(-not $KbId){return $false}
+    $records=if($OfflineState -and $OfflineState.PSObject.Properties['PackageInventory']){@($OfflineState.PackageInventory.Records)}else{@((Get-OfflineServicingInventory -Packages @(Invoke-DismCmdlet -CommandName 'Get-WindowsPackage' -Parameters @{Path=$MountPath;ErrorAction='Stop'})).Records)}
+    foreach($r in $records){
+        if([string]$r.Identity -like ('*'+$KbId+'*') -and [string]$r.State -eq 'Installed'){return $true}
     }
     return $false
 }
@@ -12768,64 +12931,242 @@ function Test-KbPresentOnMount {
 function Test-DotNetRuntimeSelector {
     [CmdletBinding()]
     [OutputType([bool])]
-    param([AllowNull()]$Selector, [Parameter(Mandatory)]$OfflineState)
+    param([AllowNull()]$Selector,[Parameter(Mandatory)]$OfflineState)
     if (-not $Selector) { return $true }
-    $actual = [string]$OfflineState.DotNetVersion
-    if ($Selector.PSObject.Properties['NetFx4Release'] -and $Selector.NetFx4Release) {
-        return ($actual -eq [string]$Selector.NetFx4Release)
-    }
-    if ($Selector.PSObject.Properties['NetFx4ReleaseRange'] -and $Selector.NetFx4ReleaseRange) {
-        $range = ([string]$Selector.NetFx4ReleaseRange).Split('-')
-        if ($range.Count -eq 2) {
-            try {
-                return (([version]$actual -ge [version]$range[0]) -and ([version]$actual -le [version]$range[1]))
-            } catch { return $false }
-        }
+    $actual=[string]$OfflineState.DotNetVersion
+    if($Selector.PSObject.Properties['NetFx4Release'] -and $Selector.NetFx4Release){return ($actual -eq [string]$Selector.NetFx4Release)}
+    if($Selector.PSObject.Properties['NetFx4ReleaseRange'] -and $Selector.NetFx4ReleaseRange){
+        $range=([string]$Selector.NetFx4ReleaseRange).Split('-')
+        if($range.Count -eq 2){try{return (([version]$actual -ge [version]$range[0])-and([version]$actual -le [version]$range[1]))}catch{return $false}}
     }
     return $true
+}
+
+
+function Test-PatchProductMatchesOs {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([Parameter(Mandatory)]$Patch)
+    $products=@()
+    if($Patch.PSObject.Properties['Products'] -and $Patch.Products){$products=@($Patch.Products|ForEach-Object{[string]$_})}
+    if($products.Count -eq 0){return $true}
+    $type=Get-PatchEntryType -Patch $Patch
+    if($type -in @('SafeOSDU','SetupDU')){return (@($products|Where-Object{$_ -match '(?i)Dynamic Update|Safe OS'}).Count -gt 0)}
+    $patterns=@{
+        Server2016='(?i)Windows Server 2016'
+        Server2019='(?i)Windows Server 2019'
+        Server2022='(?i)Server operating system-21H2|Windows Server 2022'
+        Server2025='(?i)Server Operating System-24H2|Windows Server 2025'
+    }
+    $pattern=[string]$patterns[[string]$Script:OsVersion]
+    if(-not $pattern){return $true}
+    return (@($products|Where-Object{$_ -match $pattern}).Count -gt 0)
+}
+
+function Get-MissingPatchDependencies {
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param([Parameter(Mandatory)]$Patch)
+    $missing=[System.Collections.Generic.List[string]]::new()
+    $deps=if($Patch.PSObject.Properties['Dependencies']){@($Patch.Dependencies)}else{@()}
+    foreach($dep in $deps){
+        $depId=[string]$dep
+        if([string]::IsNullOrWhiteSpace($depId)){continue}
+        $match=@($Script:ResolvedPatches|Where-Object{($_.PSObject.Properties['PackageId'] -and [string]$_.PackageId -eq $depId) -or ($_.PSObject.Properties['KbId'] -and [string]$_.KbId -eq $depId)})
+        if($match.Count -eq 0){$missing.Add($depId)|Out-Null;continue}
+        $valid=@($match|Where-Object{$_.PSObject.Properties['LocalPath'] -and -not [string]::IsNullOrWhiteSpace([string]$_.LocalPath) -and (Test-Path -LiteralPath ([string]$_.LocalPath) -PathType Leaf)})
+        if($valid.Count -eq 0){$missing.Add($depId)|Out-Null}
+    }
+    return $missing.ToArray()
+}
+
+function New-PatchVersionDecision {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)]$Patch,[Parameter(Mandatory)][string]$Decision,[Parameter(Mandatory)][string]$ReasonCode,[string]$Reason='', [AllowNull()]$OfflineState,[AllowNull()]$AssetMetadata,[string]$ImageLabel='')
+    return [pscustomobject][ordered]@{
+        SchemaVersion='patch-version-decision/1.0';Timestamp=[datetime]::UtcNow.ToString('o');RunId=$Script:RunId;OsKey=$Script:OsVersion;OsLanguage=$Script:OsLanguage
+        ImageLabel=$ImageLabel;PackageId=$(if($Patch.PSObject.Properties['PackageId']){[string]$Patch.PackageId}else{''});KbId=[string]$Patch.KbId;PatchType=(Get-PatchEntryType -Patch $Patch)
+        Decision=$Decision;ReasonCode=$ReasonCode;Reason=$Reason
+        CurrentImageVersion=$(if($OfflineState){[string]$OfflineState.Version}else{''});CurrentServicingStackVersion=$(if($OfflineState){[string]$OfflineState.ServicingStackVersion}else{''})
+        CurrentRollupFixVersion=$(if($OfflineState){[string]$OfflineState.RollupFixVersion}else{''});CurrentSafeOsVersion=$(if($OfflineState){[string]$OfflineState.SafeOsVersion}else{''});CurrentDotNetRollupVersion=$(if($OfflineState){[string]$OfflineState.DotNetRollupVersion}else{''})
+        PendingPackageCount=$(if($OfflineState){[int]$OfflineState.PendingPackageCount}else{0})
+        CandidateTargetVersion=$(if($AssetMetadata){[string]$AssetMetadata.TargetVersion}else{''});CandidatePackageVersion=$(if($AssetMetadata){[string]$AssetMetadata.CandidatePackageVersion}else{''});CandidateServicingStackVersion=$(if($AssetMetadata){[string]$AssetMetadata.EmbeddedServicingStackVersion}else{''})
+        AssetSha256=$(if($AssetMetadata){[string]$AssetMetadata.Sha256}else{''});AssetMetadataStatus=$(if($AssetMetadata){[string]$AssetMetadata.MetadataStatus}else{''})
+    }
+}
+
+function Get-PatchVersionDecision {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)]$Patch,[Parameter(Mandatory)]$OfflineState,[Parameter(Mandatory)]$AssetMetadata,[string]$ImageLabel='')
+    $policy=Get-PatchVersionPolicy -Patch $Patch
+    $mode=[string]$policy.DecisionMode
+    $type=Get-PatchEntryType -Patch $Patch
+    $kb=[string]$Patch.KbId
+    $candidateArch=[string]$AssetMetadata.Architecture
+    if($candidateArch -and $candidateArch -notmatch '^(?i:x64|amd64)$'){
+        return New-PatchVersionDecision -Patch $Patch -Decision 'RejectWrongProductOrArchitecture' -ReasonCode 'CandidateArchitectureMismatch' -Reason ('candidate architecture {0} does not match required x64/amd64.' -f $candidateArch) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel
+    }
+    if(-not (Test-PatchProductMatchesOs -Patch $Patch)){
+        return New-PatchVersionDecision -Patch $Patch -Decision 'RejectWrongProductOrArchitecture' -ReasonCode 'CandidateProductMismatch' -Reason ('candidate product list does not match {0}.' -f $Script:OsVersion) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel
+    }
+    $missingDependencies=@(Get-MissingPatchDependencies -Patch $Patch)
+    if($missingDependencies.Count -gt 0){
+        return New-PatchVersionDecision -Patch $Patch -Decision 'RejectMissingDependency' -ReasonCode 'DependencyAssetMissing' -Reason ('missing dependency asset(s): {0}' -f ($missingDependencies -join ',')) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel
+    }
+    if($OfflineState.PendingPackageCount -gt 0 -and $type -in @('SSU','BridgeLcu','LCU','DotNet','SafeOSDU')){
+        return New-PatchVersionDecision -Patch $Patch -Decision 'RejectPendingState' -ReasonCode 'PendingPackagesPresent' -Reason ('{0} pending package(s) exist.' -f $OfflineState.PendingPackageCount) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel
+    }
+    $stagedExact=@($OfflineState.PackageInventory.Records|Where-Object{[string]$_.State -eq 'Staged' -and [string]$_.Identity -like ('*'+$kb+'*')})
+    if($kb -and $stagedExact.Count -gt 0){
+        return New-PatchVersionDecision -Patch $Patch -Decision 'RejectPendingState' -ReasonCode 'ExactPackageStagedNotInstalled' -Reason ('{0} is staged but not installed; preserve the image for CBS transaction analysis.' -f $kb) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel
+    }
+    if($kb -and (Test-KbPresentOnMount -MountPath '.' -KbId $kb -OfflineState $OfflineState)){
+        return New-PatchVersionDecision -Patch $Patch -Decision 'SkipAlreadyCurrent' -ReasonCode 'ExactKbPresent' -Reason ('{0} is already present.' -f $kb) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel
+    }
+    if($type -eq 'DotNet' -and -not (Test-DotNetRuntimeSelector -Selector $Patch.RuntimeSelector -OfflineState $OfflineState)){
+        return New-PatchVersionDecision -Patch $Patch -Decision 'SkipSupersededPrerequisite' -ReasonCode 'RuntimeNotApplicable' -Reason ('Detected .NET runtime {0} does not match selector.' -f $OfflineState.DotNetVersion) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel
+    }
+    switch($mode){
+        'CompareServicingStack' {
+            $current=[string]$OfflineState.ServicingStackVersion
+            $candidate=[string]$AssetMetadata.EmbeddedServicingStackVersion
+            if(-not $candidate){$candidate=[string]$AssetMetadata.CandidatePackageVersion}
+            $cmp=Compare-ComparableVersion -Current $current -Candidate $candidate
+            if(-not $cmp.Comparable){return New-PatchVersionDecision -Patch $Patch -Decision 'ManualReviewRequired' -ReasonCode 'ServicingStackVersionUnknown' -Reason ('current={0}; candidate={1}' -f $current,$candidate) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel}
+            if($cmp.Result -gt 0){return New-PatchVersionDecision -Patch $Patch -Decision 'SkipSupersededPrerequisite' -ReasonCode 'CandidateSsuOlderThanCurrent' -Reason ('candidate SSU {0} is older than current SSU {1}.' -f $candidate,$current) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel}
+            if($cmp.Result -eq 0){return New-PatchVersionDecision -Patch $Patch -Decision 'SkipAlreadyCurrent' -ReasonCode 'ServicingStackAlreadyCurrent' -Reason ('SSU version {0} is already current.' -f $current) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel}
+            return New-PatchVersionDecision -Patch $Patch -Decision 'Apply' -ReasonCode 'ServicingStackUpgrade' -Reason ('SSU {0} -> {1}.' -f $current,$candidate) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel
+        }
+        'CompareBridgeFloor' {
+            $floorBuild=if($policy.PSObject.Properties['MinimumImageBuild']){[string]$policy.MinimumImageBuild}elseif($Patch.Applicability.PSObject.Properties['MinimumImageBuild']){[string]$Patch.Applicability.MinimumImageBuild}else{''}
+            $floorSsu=if($policy.PSObject.Properties['MinimumServicingStackVersion']){[string]$policy.MinimumServicingStackVersion}elseif($Patch.Applicability.PSObject.Properties['MinimumServicingStack']){[string]$Patch.Applicability.MinimumServicingStack}else{''}
+            $buildCmp=Compare-ComparableVersion -Current $OfflineState.Version -Candidate $floorBuild
+            $ssuCmp=Compare-ComparableVersion -Current $OfflineState.ServicingStackVersion -Candidate $floorSsu
+            if(-not $buildCmp.Comparable -or -not $ssuCmp.Comparable){return New-PatchVersionDecision -Patch $Patch -Decision 'ManualReviewRequired' -ReasonCode 'BridgeFloorStateUnknown' -Reason ('image={0}/{1}; floors={2}/{3}' -f $OfflineState.Version,$OfflineState.ServicingStackVersion,$floorBuild,$floorSsu) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel}
+            if($buildCmp.Result -ge 0 -and $ssuCmp.Result -ge 0){return New-PatchVersionDecision -Patch $Patch -Decision 'SkipSupersededPrerequisite' -ReasonCode 'BridgeFloorAlreadyMet' -Reason ('image build {0} and SSU {1} meet floors {2}/{3}.' -f $OfflineState.Version,$OfflineState.ServicingStackVersion,$floorBuild,$floorSsu) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel}
+            return New-PatchVersionDecision -Patch $Patch -Decision 'NeedsBridge' -ReasonCode 'BridgeFloorNotMet' -Reason ('image build {0}, SSU {1}; required floors {2}/{3}.' -f $OfflineState.Version,$OfflineState.ServicingStackVersion,$floorBuild,$floorSsu) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel
+        }
+        'CompareTargetBuild' {
+            $target=[string]$AssetMetadata.TargetVersion
+            $cmp=Compare-ComparableVersion -Current $OfflineState.Version -Candidate $target
+            if(-not $cmp.Comparable){return New-PatchVersionDecision -Patch $Patch -Decision 'ManualReviewRequired' -ReasonCode 'TargetBuildUnknown' -Reason ('current={0}; target={1}' -f $OfflineState.Version,$target) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel}
+            if($cmp.Result -gt 0){return New-PatchVersionDecision -Patch $Patch -Decision 'RejectDowngrade' -ReasonCode 'CandidateBuildOlderThanImage' -Reason ('candidate target {0} is older than image {1}.' -f $target,$OfflineState.Version) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel}
+            if($cmp.Result -eq 0){return New-PatchVersionDecision -Patch $Patch -Decision 'SkipAlreadyCurrent' -ReasonCode 'TargetBuildAlreadyCurrent' -Reason ('image already at target build {0}.' -f $target) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel}
+            return New-PatchVersionDecision -Patch $Patch -Decision 'Apply' -ReasonCode 'TargetBuildUpgrade' -Reason ('image {0} -> target {1}; embedded SSU {2}.' -f $OfflineState.Version,$target,$AssetMetadata.EmbeddedServicingStackVersion) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel
+        }
+        'ComparePackageFamily' {
+            $family=if($policy.PSObject.Properties['PackageFamily']){[string]$policy.PackageFamily}elseif($type -eq 'SafeOSDU'){'SafeOSDU'}else{'DotNetRollup'}
+            $current=if($family -eq 'SafeOSDU'){[string]$OfflineState.SafeOsVersion}else{[string]$OfflineState.DotNetRollupVersion}
+            $candidate=[string]$AssetMetadata.CandidatePackageVersion
+            if($current -and $candidate){
+                $cmp=Compare-ComparableVersion -Current $current -Candidate $candidate
+                if($cmp.Comparable -and $cmp.Result -gt 0){return New-PatchVersionDecision -Patch $Patch -Decision 'RejectDowngrade' -ReasonCode 'CandidatePackageOlderThanImage' -Reason ('{0} candidate {1} is older than current {2}.' -f $family,$candidate,$current) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel}
+                if($cmp.Comparable -and $cmp.Result -eq 0){return New-PatchVersionDecision -Patch $Patch -Decision 'SkipAlreadyCurrent' -ReasonCode 'PackageFamilyAlreadyCurrent' -Reason ('{0} version {1} is already current.' -f $family,$current) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel}
+            }
+            if(-not $candidate -and $policy.MetadataRequired){return New-PatchVersionDecision -Patch $Patch -Decision 'ManualReviewRequired' -ReasonCode 'CandidatePackageVersionUnknown' -Reason ('Could not derive candidate package version for {0}.' -f $family) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel}
+            return New-PatchVersionDecision -Patch $Patch -Decision 'Apply' -ReasonCode 'PackageFamilyUpgradeOrAbsent' -Reason ('{0} current={1}; candidate={2}.' -f $family,$current,$candidate) -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel
+        }
+        'ValidateCheckpointDependency' {return New-PatchVersionDecision -Patch $Patch -Decision 'NeedsCheckpointChain' -ReasonCode 'CheckpointCoLocatedDependency' -Reason 'Checkpoint payload is dependency evidence and is co-located with the target LCU.' -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel}
+        'CompareSetupFileSet' {return New-PatchVersionDecision -Patch $Patch -Decision 'Apply' -ReasonCode 'DeferredSetupFileSetComparison' -Reason 'Per-file version comparison is enforced during P09 overlay.' -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel}
+        default {return New-PatchVersionDecision -Patch $Patch -Decision 'Apply' -ReasonCode 'LegacyApplicability' -Reason 'No version-specific policy was declared.' -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel}
+    }
+}
+
+function Write-PatchVersionDecisionEvidence {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Decision)
+    Initialize-RuntimeDirectories -Directory @($Script:VersionDecisionDir)
+    $jsonl=Join-Path $Script:VersionDecisionDir 'patch-decisions.jsonl'
+    $Decision|ConvertTo-Json -Depth 10 -Compress|Add-Content -LiteralPath $jsonl -Encoding UTF8
+}
+
+
+function Write-PatchOperationEvidence {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$Phase,
+        [Parameter(Mandatory)][string]$ImageLabel,
+        [Parameter(Mandatory)][string]$SubPhase,
+        [Parameter(Mandatory)]$Patch,
+        [Parameter(Mandatory)]$Decision,
+        [Parameter(Mandatory)]$BeforeState,
+        [AllowNull()]$AfterState,
+        [Parameter(Mandatory)][string]$ApplyStatus,
+        [AllowEmptyString()][string]$ErrorMessage='',
+        [AllowNull()]$AssetMetadata
+    )
+    $root=Join-Path $Script:VersionDecisionDir 'operations'
+    $phaseDir=Join-Path $root (Get-SafeEvidenceFileName -Value $Phase)
+    $imageDir=Join-Path $phaseDir (Get-SafeEvidenceFileName -Value $ImageLabel)
+    Initialize-RuntimeDirectories -Directory @($root,$phaseDir,$imageDir)
+    $kb=if($Patch.PSObject.Properties['KbId']){[string]$Patch.KbId}else{'unknown-kb'}
+    $fileName=('{0}_{1}_{2}.json' -f (Get-SafeEvidenceFileName -Value $SubPhase),(Get-SafeEvidenceFileName -Value $kb),([datetime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')))
+    $path=Join-Path $imageDir $fileName
+    $record=[pscustomobject][ordered]@{
+        SchemaVersion='patch-operation-evidence/1.0'
+        CreatedAtUtc=[datetime]::UtcNow.ToString('o')
+        RunId=[string]$Script:RunId
+        OsKey=[string]$Script:OsVersion
+        OsLanguage=[string]$Script:OsLanguage
+        Phase=$Phase
+        ImageLabel=$ImageLabel
+        SubPhase=$SubPhase
+        KbId=$kb
+        PatchType=(Get-PatchEntryType -Patch $Patch)
+        PackageId=$(if($Patch.PSObject.Properties['PackageId']){[string]$Patch.PackageId}else{''})
+        PackagePath=$(if($Patch.PSObject.Properties['LocalPath']){[string]$Patch.LocalPath}else{''})
+        PackageSha256=$(if($AssetMetadata -and $AssetMetadata.PSObject.Properties['Sha256']){[string]$AssetMetadata.Sha256}else{''})
+        Decision=$Decision
+        ApplyStatus=$ApplyStatus
+        ErrorMessage=$ErrorMessage
+        BeforeState=$BeforeState
+        AfterState=$AfterState
+        VersionDelta=[pscustomobject][ordered]@{
+            ImageVersionBefore=$(if($BeforeState){[string]$BeforeState.Version}else{''})
+            ImageVersionAfter=$(if($AfterState){[string]$AfterState.Version}else{''})
+            ServicingStackVersionBefore=$(if($BeforeState){[string]$BeforeState.ServicingStackVersion}else{''})
+            ServicingStackVersionAfter=$(if($AfterState){[string]$AfterState.ServicingStackVersion}else{''})
+            StagedServicingStackVersionBefore=$(if($BeforeState){[string]$BeforeState.StagedServicingStackVersion}else{''})
+            StagedServicingStackVersionAfter=$(if($AfterState){[string]$AfterState.StagedServicingStackVersion}else{''})
+            RollupFixVersionBefore=$(if($BeforeState){[string]$BeforeState.RollupFixVersion}else{''})
+            RollupFixVersionAfter=$(if($AfterState){[string]$AfterState.RollupFixVersion}else{''})
+            StagedRollupFixVersionBefore=$(if($BeforeState){[string]$BeforeState.StagedRollupFixVersion}else{''})
+            StagedRollupFixVersionAfter=$(if($AfterState){[string]$AfterState.StagedRollupFixVersion}else{''})
+            DotNetRollupVersionBefore=$(if($BeforeState){[string]$BeforeState.DotNetRollupVersion}else{''})
+            DotNetRollupVersionAfter=$(if($AfterState){[string]$AfterState.DotNetRollupVersion}else{''})
+            SafeOsVersionBefore=$(if($BeforeState){[string]$BeforeState.SafeOsVersion}else{''})
+            SafeOsVersionAfter=$(if($AfterState){[string]$AfterState.SafeOsVersion}else{''})
+            PendingPackageCountBefore=$(if($BeforeState){[int]$BeforeState.PendingPackageCount}else{0})
+            PendingPackageCountAfter=$(if($AfterState){[int]$AfterState.PendingPackageCount}else{0})
+        }
+    }
+    Save-CanonicalJsonFile -InputObject $record -Path $path -Depth 24
+    return $path
+}
+
+function Test-PatchDecisionAllowsApply {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([Parameter(Mandatory)]$Decision)
+    if([string]$Decision.Decision -in @('Apply','NeedsBridge')){return $true}
+    if([string]$Decision.Decision -in @('SkipAlreadyCurrent','SkipSupersededPrerequisite','NeedsCheckpointChain')){return $false}
+    throw ('Patch version decision blocked servicing: {0}/{1} decision={2} reason={3} ({4})' -f $Decision.PatchType,$Decision.KbId,$Decision.Decision,$Decision.ReasonCode,$Decision.Reason)
 }
 
 function Get-PatchApplicabilityDecision {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
-    param(
-        [Parameter(Mandatory)]$Patch,
-        [Parameter(Mandatory)][string]$MountPath,
-        [Parameter(Mandatory)]$OfflineState
-    )
-    $mode = 'Always'
-    $rule = $null
-    if ($Patch.PSObject.Properties['Applicability'] -and $Patch.Applicability) {
-        $rule = $Patch.Applicability
-        if ($rule.PSObject.Properties['Mode'] -and $rule.Mode) { $mode = [string]$rule.Mode }
-    }
-    if ((Get-PatchRoles -Patch $Patch) -contains 'DotNetLeaf') {
-        $matches = Test-DotNetRuntimeSelector -Selector $Patch.RuntimeSelector -OfflineState $OfflineState
-        return [pscustomobject]@{ Applicable=$matches; Reason=$(if ($matches) { 'runtime matched' } else { 'runtime did not match' }); Mode='IfRuntimeDetectedPerInstallIndex' }
-    }
-    switch ($mode) {
-        'IfPackageAbsent' {
-            $present = Test-KbPresentOnMount -MountPath $MountPath -KbId ([string]$Patch.KbId)
-            return [pscustomobject]@{ Applicable=(-not $present); Reason=$(if ($present) { 'KB already present' } else { 'KB absent' }); Mode=$mode }
-        }
-        'IfSourceBelowFloor' {
-            $minimum = ''
-            if ($rule.PSObject.Properties['MinimumImageBuild']) { $minimum = [string]$rule.MinimumImageBuild }
-            if (-not $minimum -and $rule.PSObject.Properties['MinimumServicingStack']) { $minimum = [string]$rule.MinimumServicingStack }
-            if (-not $minimum -or -not $OfflineState.Version) {
-                return [pscustomobject]@{ Applicable=$true; Reason='source floor could not be proven; fail-safe apply'; Mode=$mode }
-            }
-            return [pscustomobject]@{ Applicable=([version]$OfflineState.Version -lt [version]$minimum); Reason=('source={0}; floor={1}' -f $OfflineState.Version, $minimum); Mode=$mode }
-        }
-        'IfLatestSsuNotApplicableOrPackageAbsent' {
-            $present = Test-KbPresentOnMount -MountPath $MountPath -KbId ([string]$Patch.KbId)
-            return [pscustomobject]@{ Applicable=(-not $present); Reason=$(if ($present) { 'legacy prerequisite already present' } else { 'legacy prerequisite absent' }); Mode=$mode }
-        }
-        default {
-            return [pscustomobject]@{ Applicable=$true; Reason='unconditional or resolver-selected asset'; Mode=$mode }
-        }
-    }
+    param([Parameter(Mandatory)]$Patch,[Parameter(Mandatory)][string]$MountPath,[Parameter(Mandatory)]$OfflineState,[AllowNull()]$AssetMetadata,[string]$ImageLabel='')
+    if(-not $AssetMetadata){$AssetMetadata=Get-PatchAssetMetadata -Patch $Patch}
+    $decision=Get-PatchVersionDecision -Patch $Patch -OfflineState $OfflineState -AssetMetadata $AssetMetadata -ImageLabel $ImageLabel
+    Write-PatchVersionDecisionEvidence -Decision $decision
+    $applicable=Test-PatchDecisionAllowsApply -Decision $decision
+    return [pscustomobject]@{Applicable=$applicable;Reason=[string]$decision.Reason;Mode=[string](Get-PatchVersionPolicy -Patch $Patch).DecisionMode;Decision=$decision}
 }
+
 
 function Invoke-PatchSubPhase {
     <#
@@ -12879,14 +13220,25 @@ function Invoke-PatchSubPhase {
         # display '?' when neither field is populated.
         $type    = Get-PatchEntryType -Patch $p
         if ([string]::IsNullOrEmpty($type)) { $type = '?' }
+        $afterState=$null
+        $afterStateError=''
+        $operationEvidencePath=''
 
         $offlineState = Get-OfflineWindowsState -MountPath $MountPath
-        $decision = Get-PatchApplicabilityDecision -Patch $p -MountPath $MountPath -OfflineState $offlineState
+        $assetMetadata = Get-PatchAssetMetadata -Patch $p
+        $decision = Get-PatchApplicabilityDecision -Patch $p -MountPath $MountPath -OfflineState $offlineState -AssetMetadata $assetMetadata -ImageLabel $ImageLabel
         if (-not $decision.Applicable) {
-            Write-Step ('    [SKIP] {0}/{1}: {2}' -f $type, $kb, $decision.Reason)
+            Write-Step ('    [SKIP] {0}/{1}: decision={2}; {3}' -f $type, $kb, $decision.Decision.Decision, $decision.Reason)
             $rows.Add([pscustomobject]@{
                 SubPhase=$SubPhase.Name; ImageLabel=$ImageLabel; PatchType=$type; KbId=$kb
                 FilePath=$pkgPath; ApplyStatus='NotApplicable'; ElapsedSec=0
+                VersionDecision=$decision.Decision.Decision;ReasonCode=$decision.Decision.ReasonCode
+                CurrentImageVersion=$decision.Decision.CurrentImageVersion;CurrentServicingStackVersion=$decision.Decision.CurrentServicingStackVersion
+                CandidateTargetVersion=$decision.Decision.CandidateTargetVersion;CandidatePackageVersion=$decision.Decision.CandidatePackageVersion
+                CandidateServicingStackVersion=$decision.Decision.CandidateServicingStackVersion
+                AfterImageVersion=$(if($afterState){[string]$afterState.Version}else{''});AfterServicingStackVersion=$(if($afterState){[string]$afterState.ServicingStackVersion}else{''})
+                AfterRollupFixVersion=$(if($afterState){[string]$afterState.RollupFixVersion}else{''});AfterPendingPackageCount=$(if($afterState){[int]$afterState.PendingPackageCount}else{$null})
+                OperationEvidencePath=$operationEvidencePath
             }) | Out-Null
             continue
         }
@@ -12909,6 +13261,13 @@ function Invoke-PatchSubPhase {
                 FilePath     = $pkgPath
                 ApplyStatus  = 'Planned'
                 ElapsedSec   = $sw.Elapsed.TotalSeconds
+                VersionDecision=$decision.Decision.Decision;ReasonCode=$decision.Decision.ReasonCode
+                CurrentImageVersion=$decision.Decision.CurrentImageVersion;CurrentServicingStackVersion=$decision.Decision.CurrentServicingStackVersion
+                CandidateTargetVersion=$decision.Decision.CandidateTargetVersion;CandidatePackageVersion=$decision.Decision.CandidatePackageVersion
+                CandidateServicingStackVersion=$decision.Decision.CandidateServicingStackVersion
+                AfterImageVersion=$(if($afterState){[string]$afterState.Version}else{''});AfterServicingStackVersion=$(if($afterState){[string]$afterState.ServicingStackVersion}else{''})
+                AfterRollupFixVersion=$(if($afterState){[string]$afterState.RollupFixVersion}else{''});AfterPendingPackageCount=$(if($afterState){[int]$afterState.PendingPackageCount}else{$null})
+                OperationEvidencePath=$operationEvidencePath
             }) | Out-Null
             continue
         }
@@ -12916,29 +13275,34 @@ function Invoke-PatchSubPhase {
         if (-not $pkgPath -or -not (Test-Path -LiteralPath $pkgPath)) {
             $sw.Stop()
             $errMsg = ('LocalPath missing or empty for {0}/{1}; cannot apply' -f $type, $kb)
-            Write-Caution ('    [skip] ' + $errMsg)
+            Write-Caution ('    [BLOCK] ' + $errMsg)
             $rows.Add([pscustomobject]@{
                 SubPhase     = $SubPhase.Name
                 ImageLabel   = $ImageLabel
                 PatchType    = $type
                 KbId         = $kb
                 FilePath     = $pkgPath
-                ApplyStatus  = 'Skip'
+                ApplyStatus  = 'Fail'
                 ElapsedSec   = $sw.Elapsed.TotalSeconds
                 Error        = $errMsg
+                VersionDecision=$decision.Decision.Decision;ReasonCode='ResolvedAssetMissing'
             }) | Out-Null
-            continue
+            throw $errMsg
         }
 
         Set-DebugStep -Step ('add-pkg:{0}:{1}' -f $SubPhase.Name, $kb)
         Write-Step ('    Applying {0}/{1} ({2})' -f $type, $kb, [System.IO.Path]::GetFileName($pkgPath))
+        $phaseForEvidence = if ($ImageLabel -like 'install.wim:*') { 'P07' } else { 'P08' }
         try {
-            $phaseForEvidence = if ($ImageLabel -like 'install.wim:*') { 'P07' } else { 'P08' }
             $evidenceMetadata = @{
                 Phase=$phaseForEvidence; ImageLabel=$ImageLabel; SubPhase=[string]$SubPhase.Name
                 KbId=$kb; PatchType=$type; PackagePath=$pkgPath
             }
-            $allowWinReKnownError = (
+            $strictVersionPolicy = ($Script:OsProfile -and (
+                ($Script:OsProfile.PSObject.Properties['VersionDecisionPolicy'] -and [string]$Script:OsProfile.VersionDecisionPolicy -eq 'StrictFailClosed') -or
+                ($Script:OsProfile.PSObject.Properties['Common'] -and $Script:OsProfile.Common -and $Script:OsProfile.Common.PSObject.Properties['VersionDecisionPolicy'] -and [string]$Script:OsProfile.Common.VersionDecisionPolicy -eq 'StrictFailClosed')
+            ))
+            $allowWinReKnownError = (-not $strictVersionPolicy) -and (
                 $ImageLabel -eq 'winre.wim' -and
                 $type -in @('LCU','BridgeLcu') -and
                 ((Test-PatchHasRole -Patch $p -Role 'ServicingStackCarrier') -or
@@ -12961,6 +13325,8 @@ function Invoke-PatchSubPhase {
                     -AllowWinReCombinedLcuKnownError:$allowWinReKnownError -EvidenceMetadata $evidenceMetadata
             }
             Write-Ok ('      status={0}' -f $status)
+            try{$afterState=Get-OfflineWindowsState -MountPath $MountPath}catch{$afterStateError=$_.Exception.Message}
+            $operationEvidencePath=Write-PatchOperationEvidence -Phase $phaseForEvidence -ImageLabel $ImageLabel -SubPhase ([string]$SubPhase.Name) -Patch $p -Decision $decision.Decision -BeforeState $offlineState -AfterState $afterState -ApplyStatus ([string]$status) -ErrorMessage $afterStateError -AssetMetadata $assetMetadata
         } catch {
             $errMsg = $_.Exception.Message
             $status = 'Fail'
@@ -12972,6 +13338,8 @@ function Invoke-PatchSubPhase {
                 kb       = $kb
                 type     = $type
             }
+            try{$afterState=Get-OfflineWindowsState -MountPath $MountPath}catch{$afterStateError=$_.Exception.Message}
+            try{$operationEvidencePath=Write-PatchOperationEvidence -Phase $phaseForEvidence -ImageLabel $ImageLabel -SubPhase ([string]$SubPhase.Name) -Patch $p -Decision $decision.Decision -BeforeState $offlineState -AfterState $afterState -ApplyStatus 'Fail' -ErrorMessage ($errMsg + $(if($afterStateError){' | after-state: '+$afterStateError}else{''})) -AssetMetadata $assetMetadata}catch{$null=$_}
             $sw.Stop()
             $rows.Add([pscustomobject]@{
                 SubPhase     = $SubPhase.Name
@@ -12982,6 +13350,13 @@ function Invoke-PatchSubPhase {
                 ApplyStatus  = 'Fail'
                 ElapsedSec   = $sw.Elapsed.TotalSeconds
                 Error        = $errMsg
+                VersionDecision=$decision.Decision.Decision;ReasonCode=$decision.Decision.ReasonCode
+                CurrentImageVersion=$decision.Decision.CurrentImageVersion;CurrentServicingStackVersion=$decision.Decision.CurrentServicingStackVersion
+                CandidateTargetVersion=$decision.Decision.CandidateTargetVersion;CandidatePackageVersion=$decision.Decision.CandidatePackageVersion
+                CandidateServicingStackVersion=$decision.Decision.CandidateServicingStackVersion
+                AfterImageVersion=$(if($afterState){[string]$afterState.Version}else{''});AfterServicingStackVersion=$(if($afterState){[string]$afterState.ServicingStackVersion}else{''})
+                AfterRollupFixVersion=$(if($afterState){[string]$afterState.RollupFixVersion}else{''});AfterPendingPackageCount=$(if($afterState){[int]$afterState.PendingPackageCount}else{$null})
+                OperationEvidencePath=$operationEvidencePath
             }) | Out-Null
             throw
         }
@@ -12994,6 +13369,13 @@ function Invoke-PatchSubPhase {
             FilePath     = $pkgPath
             ApplyStatus  = $status
             ElapsedSec   = $sw.Elapsed.TotalSeconds
+            VersionDecision=$decision.Decision.Decision;ReasonCode=$decision.Decision.ReasonCode
+            CurrentImageVersion=$decision.Decision.CurrentImageVersion;CurrentServicingStackVersion=$decision.Decision.CurrentServicingStackVersion
+            CandidateTargetVersion=$decision.Decision.CandidateTargetVersion;CandidatePackageVersion=$decision.Decision.CandidatePackageVersion
+            CandidateServicingStackVersion=$decision.Decision.CandidateServicingStackVersion
+            AfterImageVersion=$(if($afterState){[string]$afterState.Version}else{''});AfterServicingStackVersion=$(if($afterState){[string]$afterState.ServicingStackVersion}else{''})
+            AfterRollupFixVersion=$(if($afterState){[string]$afterState.RollupFixVersion}else{''});AfterPendingPackageCount=$(if($afterState){[int]$afterState.PendingPackageCount}else{$null})
+            OperationEvidencePath=$operationEvidencePath
         }) | Out-Null
     }
     return $rows.ToArray()
@@ -16243,6 +16625,12 @@ function Invoke-FetchPhase04_FetchAssets { # psa-disable-line PSA6003 -- "Assets
             }
         }
 
+        Write-SubSection 'Step 3: Package version intelligence'
+        Set-DebugStep -Step 'patch-version-metadata'
+        $metadataRows=@(Write-AllPatchAssetMetadataEvidence)
+        Write-Ok ('Patch metadata evidence written: {0} asset(s).' -f $metadataRows.Count)
+        $null = Write-ResolvedPatchEvidenceManifest -EvidenceOrigin 'P04ResolvedAssetsWithVersionMetadata'
+
         New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P04.ok') -Force | Out-Null
     } finally {
         Stop-DebugTrace
@@ -16399,6 +16787,112 @@ function Invoke-PlanPhase05_ExpandIso {
 # Real servicing readiness is still validated on-mount during the build by
 # Test-PatchServicingReadinessOnMount (P07/P08).
 
+function Get-PatchDecisionRowsForMountedImage {
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param([Parameter(Mandatory)][string]$MountPath,[Parameter(Mandatory)][string]$ImageLabel,[AllowEmptyCollection()][object[]]$Patches)
+    $state=Get-OfflineWindowsState -MountPath $MountPath
+    $stateDir=Join-Path $Script:VersionDecisionDir 'image-state'
+    Initialize-RuntimeDirectories -Directory @($stateDir)
+    $stateEvidence=[pscustomobject][ordered]@{
+        SchemaVersion='offline-image-version-state/1.0';Timestamp=[datetime]::UtcNow.ToString('o');RunId=$Script:RunId
+        OsKey=$Script:OsVersion;OsLanguage=$Script:OsLanguage;ImageLabel=$ImageLabel;MountPath=$MountPath
+        Build=$state.Build;Ubr=$state.Ubr;Version=$state.Version;DotNetRelease=$state.DotNetRelease;DotNetVersion=$state.DotNetVersion
+        ServicingStackVersion=$state.ServicingStackVersion;RollupFixVersion=$state.RollupFixVersion;SafeOsVersion=$state.SafeOsVersion;DotNetRollupVersion=$state.DotNetRollupVersion
+        PendingPackageCount=$state.PendingPackageCount;PendingPackages=$state.PendingPackages;Packages=$state.PackageInventory.Records
+    }
+    Save-CanonicalJsonFile -InputObject $stateEvidence -Path (Join-Path $stateDir ((Get-SafeEvidenceFileName -Value $ImageLabel)+'.json')) -Depth 20
+    $rows=@()
+    foreach($patch in @($Patches)){
+        if(-not $patch){continue}
+        $meta=Get-PatchAssetMetadata -Patch $patch
+        $d=Get-PatchVersionDecision -Patch $patch -OfflineState $state -AssetMetadata $meta -ImageLabel $ImageLabel
+        Write-PatchVersionDecisionEvidence -Decision $d
+        $rows+=,$d
+    }
+    return $rows
+}
+
+function Test-VersionDecisionIsBlocking {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([Parameter(Mandatory)]$Decision)
+    return ([string]$Decision.Decision -in @('RejectDowngrade','RejectMissingDependency','RejectWrongProductOrArchitecture','RejectPendingState','RejectUnsupportedComponentState','ManualReviewRequired'))
+}
+
+function Invoke-VersionDecisionPreflight {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param()
+    Initialize-RuntimeDirectories -Directory @($Script:VersionDecisionDir,(Join-Path $Script:VersionDecisionDir 'image-state'))
+    $plan=Get-OrInitPatchPlan
+    $rows=[System.Collections.Generic.List[object]]::new()
+    $mount=Join-Path $Script:WorkRoot 'work\version_decision_mount'
+    $parentMount=Join-Path $Script:WorkRoot 'work\version_decision_parent'
+    $tempWinRe=Join-Path $Script:TempDir 'version-decision-winre.wim'
+    $installWim=Join-Path $Script:ExtractedDir 'sources\install.wim'
+    $bootWim=Join-Path $Script:ExtractedDir 'sources\boot.wim'
+    if(Test-Path -LiteralPath $installWim -PathType Leaf){
+        $installInv=Get-WimIndexInventory -WimPath $installWim
+        $targets=Resolve-InstallWimTargetIndexes -Inventory $installInv
+        foreach($img in @($targets)){
+            $mounted=$false
+            try{
+                if(Test-Path -LiteralPath $mount){Remove-Item -LiteralPath $mount -Recurse -Force -ErrorAction SilentlyContinue}
+                New-Item -ItemType Directory -Path $mount -Force|Out-Null
+                Invoke-DismCmdlet -CommandName 'Mount-WindowsImage' -Parameters @{ImagePath=$installWim;Index=[int]$img.ImageIndex;Path=$mount;ReadOnly=$true;ErrorAction='Stop';LogPath=(Join-Path $Script:LogsDir ('P06_version_mount_install_idx{0}.log' -f $img.ImageIndex))}|Out-Null
+                $mounted=$true
+                foreach($r in @(Get-PatchDecisionRowsForMountedImage -MountPath $mount -ImageLabel ('install.wim:idx{0}' -f $img.ImageIndex) -Patches @($plan.Install))){$rows.Add($r)|Out-Null}
+                $winRePath=Join-Path $mount 'Windows\System32\Recovery\Winre.wim'
+                if(Test-Path -LiteralPath $winRePath -PathType Leaf){Copy-Item -LiteralPath $winRePath -Destination $tempWinRe -Force}
+                else{throw ('WinRE is missing from install.wim index {0}.' -f $img.ImageIndex)}
+            }finally{
+                if($mounted){Invoke-DismCmdlet -CommandName 'Dismount-WindowsImage' -Parameters @{Path=$mount;Discard=$true;ErrorAction='SilentlyContinue';LogPath=(Join-Path $Script:LogsDir ('P06_version_dismount_install_idx{0}.log' -f $img.ImageIndex))}|Out-Null}
+            }
+            $winMounted=$false
+            try{
+                if(Test-Path -LiteralPath $mount){Remove-Item -LiteralPath $mount -Recurse -Force -ErrorAction SilentlyContinue}
+                New-Item -ItemType Directory -Path $mount -Force|Out-Null
+                Invoke-DismCmdlet -CommandName 'Mount-WindowsImage' -Parameters @{ImagePath=$tempWinRe;Index=1;Path=$mount;ReadOnly=$true;ErrorAction='Stop';LogPath=(Join-Path $Script:LogsDir ('P06_version_mount_winre_parentidx{0}.log' -f $img.ImageIndex))}|Out-Null
+                $winMounted=$true
+                foreach($r in @(Get-PatchDecisionRowsForMountedImage -MountPath $mount -ImageLabel ('winre.wim:parentidx{0}' -f $img.ImageIndex) -Patches @($plan.WinRE))){$rows.Add($r)|Out-Null}
+            }finally{
+                if($winMounted){Invoke-DismCmdlet -CommandName 'Dismount-WindowsImage' -Parameters @{Path=$mount;Discard=$true;ErrorAction='SilentlyContinue';LogPath=(Join-Path $Script:LogsDir ('P06_version_dismount_winre_parentidx{0}.log' -f $img.ImageIndex))}|Out-Null}
+                Remove-Item -LiteralPath $tempWinRe -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+    if(Test-Path -LiteralPath $bootWim -PathType Leaf){
+        $bootIndexes=@($Script:OsProfile.BootWimIndexes);if($bootIndexes.Count -eq 0){$bootIndexes=@(1,2)}
+        foreach($idx in $bootIndexes){
+            $mounted=$false
+            try{
+                if(Test-Path -LiteralPath $mount){Remove-Item -LiteralPath $mount -Recurse -Force -ErrorAction SilentlyContinue}
+                New-Item -ItemType Directory -Path $mount -Force|Out-Null
+                Invoke-DismCmdlet -CommandName 'Mount-WindowsImage' -Parameters @{ImagePath=$bootWim;Index=[int]$idx;Path=$mount;ReadOnly=$true;ErrorAction='Stop';LogPath=(Join-Path $Script:LogsDir ('P06_version_mount_boot_idx{0}.log' -f $idx))}|Out-Null
+                $mounted=$true
+                foreach($r in @(Get-PatchDecisionRowsForMountedImage -MountPath $mount -ImageLabel ('boot.wim:idx{0}' -f $idx) -Patches @($plan.Boot))){$rows.Add($r)|Out-Null}
+            }finally{
+                if($mounted){Invoke-DismCmdlet -CommandName 'Dismount-WindowsImage' -Parameters @{Path=$mount;Discard=$true;ErrorAction='SilentlyContinue';LogPath=(Join-Path $Script:LogsDir ('P06_version_dismount_boot_idx{0}.log' -f $idx))}|Out-Null}
+            }
+        }
+    }
+    $array=$rows.ToArray()
+    $blocking=@($array|Where-Object{Test-VersionDecisionIsBlocking -Decision $_})
+    $summary=[pscustomobject][ordered]@{
+        SchemaVersion='P06-patch-version-decision-plan/1.0';CreatedAtUtc=[datetime]::UtcNow.ToString('o');RunId=$Script:RunId
+        OsKey=$Script:OsVersion;OsLanguage=$Script:OsLanguage;Policy='StrictFailClosed';DecisionCount=$array.Count;BlockingDecisionCount=$blocking.Count
+        BlockingDecisions=$blocking;Decisions=$array
+    }
+    $json=Join-Path $Script:VersionDecisionDir 'P06_patch_version_decision_plan.json'
+    $csv=Join-Path $Script:VersionDecisionDir 'P06_patch_version_decision_plan.csv'
+    Save-CanonicalJsonFile -InputObject $summary -Path $json -Depth 24
+    $array|Select-Object ImageLabel,PackageId,KbId,PatchType,Decision,ReasonCode,Reason,CurrentImageVersion,CurrentServicingStackVersion,CurrentRollupFixVersion,CurrentSafeOsVersion,CurrentDotNetRollupVersion,CandidateTargetVersion,CandidatePackageVersion,CandidateServicingStackVersion,PendingPackageCount,AssetSha256,AssetMetadataStatus|Export-Csv -LiteralPath $csv -NoTypeInformation -Encoding UTF8
+    if($blocking.Count -gt 0){throw ('P06 version-decision gate blocked servicing with {0} decision(s). See {1}.' -f $blocking.Count,$json)}
+    return $summary
+}
+
+
 function Invoke-PlanPhase06_ValidatePatchServicing {
     <#
     .OUTPUTS
@@ -16419,6 +16913,15 @@ function Invoke-PlanPhase06_ValidatePatchServicing {
             throw ("P06 ValidatePatchServicing FAILED for {0} (PatchModel '{1}'): {2}." -f $p06OsKey, $p06Model, ($p06.Errors -join '; '))
         }
         Write-Ok ("P06 ValidatePatchServicing: {0} PatchModel '{1}' consistent ({2} Lines)." -f $p06OsKey, $p06Model, $p06Lines.Count)
+
+        if ($Script:Execute -and -not $Script:SyntheticTestMode) {
+            Write-SubSection 'Strict patch-version decision preflight'
+            Set-DebugStep -Step 'version-decision-preflight'
+            $decisionSummary=Invoke-VersionDecisionPreflight
+            Write-Ok ('P06 version-decision gate passed: {0} decision(s), blocking=0.' -f $decisionSummary.DecisionCount)
+        } else {
+            Write-Step 'P06 version-decision preflight skipped (requires -Execute and real WIM media).'
+        }
 
         # ---- Pre-servicing media inspection [user-adjudicated 2026-07-07] ----
         # Records the state of EVERY WIM index BEFORE any patch is
@@ -17435,29 +17938,9 @@ function Invoke-BuildPhase09_AssembleIso {
                 if ($LASTEXITCODE -eq 0) {
                     $setupDestRoot = Join-Path $Script:ExtractedDir 'sources'
                     $sourceManifest = @(Get-SetupDuFileManifest -Root $tmpExtract -DestinationRoot $setupDestRoot)
-                    # -Path (not -LiteralPath) is required when the
-                    # source contains a wildcard. -LiteralPath would
-                    # look for a file literally named '*' and fail
-                    # with 'Cannot find path'.
-                    Copy-Item -Path (Join-Path $tmpExtract '*') `
-                        -Destination $setupDestRoot -Recurse -Force
-                    $overlayRecords = [System.Collections.Generic.List[object]]::new()
-                    foreach ($mr in $sourceManifest) {
-                        $destPresent = Test-Path -LiteralPath $mr.DestinationPath
-                        $destHash = if ($destPresent) { (Get-FileHash -LiteralPath $mr.DestinationPath -Algorithm SHA256).Hash.ToLower() } else { $null }
-                        $isSetupBinary = ([System.IO.Path]::GetFileName($mr.RelativePath) -in @('setup.exe','setuphost.exe'))
-                        $overlayRecords.Add([pscustomobject]@{
-                            KbId=$p.KbId; RelativePath=$mr.RelativePath; DestinationPath=$mr.DestinationPath
-                            SourceSizeBytes=$mr.SizeBytes; SourceSha256=$mr.Sha256; SourceFileVersion=$mr.FileVersion
-                            DestinationPresent=$destPresent; DestinationSha256AfterOverlay=$destHash
-                            MatchAfterOverlay=($destPresent -and $destHash -eq $mr.Sha256)
-                            OverriddenByBootWim=$isSetupBinary
-                        }) | Out-Null
-                    }
+                    $overlayRecords = @(Invoke-SetupDuVersionAwareOverlay -SourceManifest $sourceManifest -KbId $p.KbId)
                     $setupEvidencePath = Join-Path $Script:LogsDir 'setupdu_overlay_manifest.json'
-                    [pscustomobject]@{ Schema='setupdu-overlay/1'; Timestamp=(Get-Date).ToString('o'); OsKey=$Script:OsVersion; KbId=$p.KbId; Records=$overlayRecords.ToArray() } |
-                        ConvertTo-Json -Depth 7 | Set-Content -LiteralPath $setupEvidencePath -Encoding UTF8
-                    Write-Ok ('Overlay applied: {0}; evidence: {1}' -f $p.KbId, $setupEvidencePath)
+                    Write-Ok ('Version-aware Setup DU overlay completed: {0}; records={1}; evidence: {2}' -f $p.KbId,$overlayRecords.Count,$setupEvidencePath)
                 } else {
                     throw ('expand.exe failed for required Setup DU {0} with exit code {1}.' -f $p.KbId,$LASTEXITCODE)
                 }
@@ -21918,7 +22401,7 @@ if ($Script:CleanWorkRoot -and (Test-Path -LiteralPath $Script:WorkRoot)) {
     Remove-Item -LiteralPath $Script:WorkRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-Initialize-RuntimeDirectories -Directory @($Script:WorkRoot, $Script:OutputDir, $Script:SourceDir, $Script:IsoSourceDir, $Script:ExtractedDir, $Script:PatchesDir, $Script:ManifestsDir, (Join-Path $Script:WorkRoot 'work'), $Script:TempDir, $Script:ScratchDir, $Script:LogsDir, $Script:DiagDir, $Script:MarkersDir, $Script:StateDir, $script:CatCache)
+Initialize-RuntimeDirectories -Directory @($Script:WorkRoot, $Script:OutputDir, $Script:SourceDir, $Script:IsoSourceDir, $Script:ExtractedDir, $Script:PatchesDir, $Script:ManifestsDir, (Join-Path $Script:WorkRoot 'work'), $Script:TempDir, $Script:ScratchDir, $Script:LogsDir, $Script:DiagDir, $Script:MarkersDir, $Script:StateDir, $Script:VersionDecisionDir, $script:CatCache)
 Start-RunTranscript
 Show-EntryBanner
 

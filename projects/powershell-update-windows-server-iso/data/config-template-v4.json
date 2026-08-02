@@ -27,7 +27,10 @@
     "BootWimFailurePolicy": "FailBuild",
     "_VerifiedDate": "2026-07-11T00:00:00+09:00",
     "_VerifiedBy": "research:data-model-v4",
-    "BootWimPackageMode": "DirectMsu"
+    "BootWimPackageMode": "DirectMsu",
+    "BootWimServicingStrategy": "DirectMsu",
+    "VersionDecisionPolicy": "StrictFailClosed",
+    "VersionDecisionEvidenceSchema": "patch-version-decision/1.0"
   },
   "ServicingModel": {
     "MonthlyServicingStyle": "CombinedSSULCU",
@@ -343,6 +346,12 @@
           "Notes": [
             "Replace with the OS-specific prerequisite rule."
           ]
+        },
+        "VersionPolicy": {
+          "RejectDowngrade": true,
+          "UnknownStateDecision": "ManualReviewRequired",
+          "MetadataRequired": true,
+          "DecisionMode": "CompareBridgeFloor"
         }
       }
     ],
@@ -410,6 +419,12 @@
           "Notes": [
             "Populate UpdateId, revision, file identity and SHA-256 before Freeze."
           ]
+        },
+        "VersionPolicy": {
+          "RejectDowngrade": true,
+          "UnknownStateDecision": "ManualReviewRequired",
+          "MetadataRequired": true,
+          "DecisionMode": "CompareTargetBuild"
         }
       },
       {
@@ -464,6 +479,13 @@
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
           "Notes": []
+        },
+        "VersionPolicy": {
+          "RejectDowngrade": true,
+          "UnknownStateDecision": "ManualReviewRequired",
+          "MetadataRequired": true,
+          "DecisionMode": "ComparePackageFamily",
+          "PackageFamily": "SafeOSDU"
         }
       },
       {
@@ -518,6 +540,13 @@
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
           "Notes": []
+        },
+        "VersionPolicy": {
+          "RejectDowngrade": true,
+          "UnknownStateDecision": "ManualReviewRequired",
+          "MetadataRequired": false,
+          "DecisionMode": "CompareSetupFileSet",
+          "ComparisonPhase": "P09"
         }
       },
       {
@@ -574,6 +603,13 @@
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
           "Notes": []
+        },
+        "VersionPolicy": {
+          "RejectDowngrade": true,
+          "UnknownStateDecision": "ManualReviewRequired",
+          "MetadataRequired": true,
+          "DecisionMode": "ComparePackageFamily",
+          "PackageFamily": "DotNetRollup"
         }
       }
     ],
