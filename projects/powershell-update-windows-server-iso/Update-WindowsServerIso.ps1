@@ -702,7 +702,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.27-r12.38'
+$Script:ScriptVersion = 'update-wsi-2026.07.27-r12.39'
 # Validation marker: pwsh7-runtime-validated on PowerShell 7.6.4 Linux x64; Windows-native gates remain required.
 $Script:ScriptTag     = 'all-os-version-decision-hardening'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
@@ -18768,7 +18768,15 @@ function Invoke-VerifyPhase11_StaticVerify {
                     $isoDest=Join-Path $mountedDrive ('sources\' + ([string]$mrec.RelativePath))
                     if (-not (Test-Path -LiteralPath $isoDest)) { $setupFailures++; continue }
                     $isoHash=(Get-FileHash -LiteralPath $isoDest -Algorithm SHA256).Hash.ToLower()
-                    if ($isoHash -ne [string]$mrec.SourceSha256) { $setupFailures++ }
+                    $expectedHash = if (-not [string]::IsNullOrWhiteSpace([string]$mrec.ExpectedSha256After)) {
+                        ([string]$mrec.ExpectedSha256After).ToLowerInvariant()
+                    } elseif (-not [string]::IsNullOrWhiteSpace([string]$mrec.SourceSha256)) {
+                        # Backward compatibility with setupdu-overlay/1.x evidence.
+                        ([string]$mrec.SourceSha256).ToLowerInvariant()
+                    } else {
+                        ''
+                    }
+                    if ([string]::IsNullOrWhiteSpace($expectedHash) -or $isoHash -ne $expectedHash) { $setupFailures++ }
                 }
                 Add-VRow -Check 'SetupDuFinalManifest' -Expected ('all ' + $setupChecked + ' non-overridden files present and matching') -Actual $(if ($setupFailures -eq 0) { 'match' } else { ($setupFailures.ToString() + ' mismatch/missing') }) -Status $(if ($setupFailures -eq 0) { 'Pass' } else { 'Fail' }) -Notes $setupManifestPath
             } elseif (@($Script:ResolvedPatches | Where-Object { $_.PatchType -eq 'SetupDU' }).Count -gt 0) {
