@@ -82,6 +82,11 @@
     the remaining build/verification phases without re-downloading or
     re-servicing install.wim.
 
+.PARAMETER ResumePreflightOnly
+    Validate an existing P08/P09 resume workspace and rehydrate all measured
+    patch assets, but stop before any build phase runs. Requires
+    -ResumeFromPhase. This is a non-destructive preflight for resume.
+
 .PARAMETER OsVersion
     One of: Server2016 / Server2019 / Server2022 / Server2025.
 
@@ -244,6 +249,7 @@ param(
 
     [ValidateSet('P08','P09')]
     [string]   $ResumeFromPhase,
+    [switch]   $ResumePreflightOnly,
 
     [ValidateSet('Server2016','Server2019','Server2022','Server2025')]
     [string]   $OsVersion,
@@ -390,6 +396,7 @@ $Script:PatchRefreshModeExplicit = if ($PSBoundParameters.ContainsKey('PatchRefr
 # and PowerShell 7. Keep the operator-facing parameter untouched and copy
 # only its normalized state to a separate, unconstrained internal variable.
 $Script:RequestedResumeFromPhase  = if ($PSBoundParameters.ContainsKey('ResumeFromPhase')) { [string]$ResumeFromPhase } else { $null }
+$Script:ResumePreflightOnly        = [bool]$ResumePreflightOnly
 
 # -----------------
 # Parameter validation
@@ -419,6 +426,9 @@ if ($ResumeFromPhase -and $OnlyPhases) {
 }
 if ($ResumeFromPhase -and $Action -notin @('Build','PrepareBuildVerify')) {
     throw '-ResumeFromPhase is supported only with -Action Build or PrepareBuildVerify.'
+}
+if ($ResumePreflightOnly -and -not $ResumeFromPhase) {
+    throw '-ResumePreflightOnly requires -ResumeFromPhase P08 or P09.'
 }
 
 # ---- mutual exclusivity / format validation (P03 / P06 params) ----
@@ -659,8 +669,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.19-r12.22'
-$Script:ScriptTag     = 'resume-asset-state-rehydration'
+$Script:ScriptVersion = 'update-wsi-2026.07.19-r12.23'
+$Script:ScriptTag     = 'resume-automatic-variable-safety'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -17290,9 +17300,11 @@ function Restore-ResolvedPatchAssetsForResume {
         }
         $source = [string]$catalog.Source
         try { $sourceUri = [uri]$source } catch { throw ('Resume refused: invalid Catalog source URI for {0}/{1}: {2}' -f $patchType,$kbId,$source) }
-        $host = $sourceUri.DnsSafeHost.ToLowerInvariant()
+        # PowerShell variable names are case-insensitive.  Do not use `$host`
+        # here because it collides with the read-only automatic variable `$Host`.
+        $sourceHost = $sourceUri.DnsSafeHost.ToLowerInvariant()
         if ($sourceUri.Scheme -ne 'https' -or
-            ($host -notmatch '(^|\.)download\.windowsupdate\.com$' -and $host -notmatch '(^|\.)delivery\.mp\.microsoft\.com$')) {
+            ($sourceHost -notmatch '(^|\.)download\.windowsupdate\.com$' -and $sourceHost -notmatch '(^|\.)delivery\.mp\.microsoft\.com$')) {
             throw ('Resume refused: untrusted Catalog source host for {0}/{1}: {2}' -f $patchType,$kbId,$sourceUri.Host)
         }
 
@@ -17383,7 +17395,10 @@ function Restore-ResolvedPatchAssetsForResume {
 
 function Initialize-ResumeBuildState {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][ValidateSet('P08','P09')][string]$PhaseId)
+    param(
+        [Parameter(Mandatory)][ValidateSet('P08','P09')][string]$PhaseId,
+        [switch]$ValidateOnly
+    )
     Write-SubSection ('Resume validation: {0}' -f $PhaseId)
     $mounted = @(Invoke-DismCmdlet -CommandName 'Get-WindowsImage' -Parameters @{ Mounted=$true; ErrorAction='SilentlyContinue' })
     if ($mounted.Count -gt 0) { throw 'Resume refused: one or more WIM images are currently mounted. Run DISM /Cleanup-Wim first.' }
@@ -17401,30 +17416,47 @@ function Initialize-ResumeBuildState {
 
     if ($PhaseId -eq 'P08') {
         $stateBackup = Join-Path $Script:StateDir 'p08-backup\boot.wim.pre-p08'
-        if (Test-Path -LiteralPath $stateBackup) {
-            Write-Step 'Restoring boot.wim from the P08 transaction backup.'
-            Copy-Item -LiteralPath $stateBackup -Destination $bootWim -Force
-        } else {
-            Write-Step 'No P08 backup exists; restoring boot.wim from the source ISO.'
-            Restore-BootWimFromSourceIso -DestinationPath $bootWim
+        $canRestoreFromBackup = Test-Path -LiteralPath $stateBackup -PathType Leaf
+        if (-not $canRestoreFromBackup) {
+            # Validate that the source ISO needed by Restore-BootWimFromSourceIso
+            # still exists before a real resume is allowed to mutate boot.wim.
+            $sourceIsoCandidate = [string]$Script:IsoPathResolved
+            if ([string]::IsNullOrWhiteSpace($sourceIsoCandidate) -or -not (Test-Path -LiteralPath $sourceIsoCandidate -PathType Leaf)) {
+                throw ('Resume refused: neither the P08 boot.wim backup nor the source ISO is available. backup={0}; iso={1}' -f $stateBackup,$sourceIsoCandidate)
+            }
         }
-        Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P08.ok') -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P08S.ok') -Force -ErrorAction SilentlyContinue
+        if ($ValidateOnly) {
+            Write-Step $(if ($canRestoreFromBackup) { 'Resume preflight: P08 boot.wim transaction backup is available; no restore was performed.' } else { 'Resume preflight: source ISO is available for P08 boot.wim restore; no restore was performed.' })
+        } else {
+            if ($canRestoreFromBackup) {
+                Write-Step 'Restoring boot.wim from the P08 transaction backup.'
+                Copy-Item -LiteralPath $stateBackup -Destination $bootWim -Force
+            } else {
+                Write-Step 'No P08 backup exists; restoring boot.wim from the source ISO.'
+                Restore-BootWimFromSourceIso -DestinationPath $bootWim
+            }
+            Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P08.ok') -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P08S.ok') -Force -ErrorAction SilentlyContinue
+        }
     } else {
         if (-not (Test-Path -LiteralPath (Join-Path $Script:MarkersDir 'P08.ok'))) {
             throw 'Resume refused: P08.ok is missing.'
         }
         $syncEvidence = Join-Path $Script:LogsDir 'setup_binaries_sync.json'
-        if (-not (Test-Path -LiteralPath $syncEvidence)) {
+        if (-not (Test-Path -LiteralPath $syncEvidence -PathType Leaf)) {
             throw 'Resume refused: setup_binaries_sync.json is missing.'
         }
         $p08sMarker = Join-Path $Script:MarkersDir 'P08S.ok'
-        if (-not (Test-Path -LiteralPath $p08sMarker)) {
+        if (-not (Test-Path -LiteralPath $p08sMarker -PathType Leaf)) {
             # r12.04 wrote the authoritative JSON evidence but did not create
-            # a P08S marker. Accept that measured legacy state once and
-            # normalize it for all subsequent resumes.
-            Write-Caution 'P08S.ok is absent, but setup_binaries_sync.json exists; accepting r12.04 legacy evidence and creating the marker.'
-            New-Item -ItemType File -Path $p08sMarker -Force | Out-Null
+            # a P08S marker. Preflight reports the normalization without
+            # changing the workspace; the real resume creates it once.
+            if ($ValidateOnly) {
+                Write-Caution 'Resume preflight: P08S.ok is absent, but setup_binaries_sync.json exists. A real resume will create the compatibility marker.'
+            } else {
+                Write-Caution 'P08S.ok is absent, but setup_binaries_sync.json exists; accepting r12.04 legacy evidence and creating the marker.'
+                New-Item -ItemType File -Path $p08sMarker -Force | Out-Null
+            }
         }
     }
 
@@ -18262,9 +18294,13 @@ try {
     if ($phaseList.Count -gt 0) {
         if ($Script:RequestedResumeFromPhase) {
             Invoke-PhaseRunner -PhaseIds @('P01','P02')
-            Initialize-ResumeBuildState -PhaseId $Script:RequestedResumeFromPhase
-            $remaining = @($phaseList | Where-Object { $_ -notin @('P01','P02') })
-            if ($remaining.Count -gt 0) { Invoke-PhaseRunner -PhaseIds $remaining }
+            Initialize-ResumeBuildState -PhaseId $Script:RequestedResumeFromPhase -ValidateOnly:$Script:ResumePreflightOnly
+            if ($Script:ResumePreflightOnly) {
+                Write-Ok ('Resume preflight passed for {0}; no build phase was executed.' -f $Script:RequestedResumeFromPhase)
+            } else {
+                $remaining = @($phaseList | Where-Object { $_ -notin @('P01','P02') })
+                if ($remaining.Count -gt 0) { Invoke-PhaseRunner -PhaseIds $remaining }
+            }
         } else {
             Invoke-PhaseRunner -PhaseIds $phaseList
         }

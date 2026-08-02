@@ -22,6 +22,37 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.19-r12.23] - 2026-08-02
+
+Tag: `resume-automatic-variable-safety` (the tag advances). The resume
+path stops colliding with PowerShell automatic variables and gains a
+non-destructive preflight.
+
+### Added
+
+- **`-ResumePreflightOnly` switch**: validates an existing P08/P09
+  resume workspace and rehydrates all measured state without mutating
+  anything (requires `-ResumeFromPhase P08|P09`); resume is refused
+  when neither the P08 boot.wim transaction backup nor the source ISO
+  is available.
+
+### Fixed
+
+- **Automatic-variable collision removed**: a resume-path local that
+  collided with the read-only automatic variable `$Host` is renamed
+  (one PSA2002 shadowing warning resolved by the deliverable).
+- **T40**: release pin advanced to `update-wsi-2026.07.19-r12.23`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/123/64/112 with T45 NOT-YET (unchanged). PSA **5E/48W/7I** on
+the committed tree — one error joins the debt (1× PSA2013:
+`$Script:IsoPathResolved` read but never assigned) and one PSA2002
+warning is resolved; committed verbatim per the no-fix-forward rule,
+draining post-series.
+
 ## [update-wsi-2026.07.19-r12.22] - 2026-08-02
 
 Tag: `resume-asset-state-rehydration` (the tag advances). Resumed runs
