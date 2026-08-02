@@ -22,6 +22,43 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.26-r12.35] - 2026-08-02
+
+Tag: `resume-checkpoint-evidence-hardening` (the tag advances; the
+version date component moves 07.25 → 07.26). Resume becomes a
+verified, checkpointed evidence transaction.
+
+### Changed
+
+- **Resume checkpoint/evidence layer**: twenty new helpers build a
+  session-scoped resume transaction — critical evidence files are
+  enumerated by relative path, copied with per-file verification,
+  backed up into an `evidence-history` under the session root, and
+  tree manifests (`Get-ResumeTreeManifest` /
+  `Test-ResumeTreeManifestMatch`) prove checkpoint integrity.
+  Media checkpoints (`New-ResumeMediaCheckpoint`), downstream-state
+  reset, verified transaction backups and
+  `Ensure-P08FinalInstallWimEvidenceForResume` make P08/P09 resume a
+  fail-closed, evidence-bound operation with a recorded session
+  action log. Script-only change (+737 net lines).
+- **T40**: release pin advanced to `update-wsi-2026.07.26-r12.35`
+  with the measured tag. The P08S wiring pin (a token-count proxy) is
+  updated 4 → 5 lists by adjudication: the resume layer legitimately
+  adds a fifth `'P08','P08S',…` site (the downstream-cleanup prefix
+  list); the four original lists are intact and the count is measured
+  stable at 5 through the series terminal.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **2E/94W/9I** on
+the committed tree — the deliverable resolves three long-standing
+errors (two PSA2012 positional `Save-CanonicalJsonFile` calls and the
+PSA2013 never-assigned read); the remaining errors are one PSA2012
+and the PSA2010 `Resolve-OscdimgPath` forward reference. Five
+warnings and one info join the debt; committed verbatim per the
+no-fix-forward rule.
+
 ## [update-wsi-2026.07.25-r12.34] - 2026-08-02
 
 Tag: `rawxml-filetime-conversion-regression-fix` (the tag is

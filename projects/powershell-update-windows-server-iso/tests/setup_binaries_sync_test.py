@@ -137,10 +137,10 @@ def main() -> int:
         "P08S registered between P08 and P09 (Build group)",
         bool(reg), "registry order pin failed", passed, failed)
     lists_ok = (
-        code.count("'P08','P08S','P09'") == 4  # two standardFull variants + Build action + the r12.05 ResumeFromPhase list
+        code.count("'P08','P08S','P09'") == 5  # two standardFull variants + Build action + the r12.05 ResumeFromPhase list + the r12.35 resume downstream-cleanup prefix list
     )
     passed, failed = check(
-        "P08S wired into the standard pipelines, the Build action and the ResumeFromPhase list (4 lists, r12.05)",
+        "P08S wired into the standard pipelines, the Build action, the ResumeFromPhase list and the resume downstream-cleanup prefix list (5 lists, r12.05 + r12.35)",
         lists_ok, f"count={code.count(chr(39) + 'P08' + chr(39) + ',' + chr(39) + 'P08S' + chr(39))}", passed, failed)
 
     print("=== 5. Structure pins: explicit-sync contract ===")
@@ -182,8 +182,8 @@ def main() -> int:
         "SetupBinarySync_" in code and "-Actual 'MISMATCH' -Status 'Fail'" in code,
         "P11 pin failed", passed, failed)
     passed, failed = check(
-        "version bumped to r12.34 (tag retained: rawxml-filetime-conversion-regression-fix)",
-        "update-wsi-2026.07.25-r12.34" in code and "'rawxml-filetime-conversion-regression-fix'" in code,
+        "version bumped to r12.35 resume-checkpoint-evidence-hardening",
+        "update-wsi-2026.07.26-r12.35" in code and "'resume-checkpoint-evidence-hardening'" in code,
         "bump pin failed", passed, failed)
 
     print(f"\n  Summary: {passed} passed, {failed} failed, {passed + failed} total")

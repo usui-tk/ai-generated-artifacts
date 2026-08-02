@@ -411,6 +411,7 @@ $Script:PatchRefreshModeExplicit = if ($PSBoundParameters.ContainsKey('PatchRefr
 # only its normalized state to a separate, unconstrained internal variable.
 $Script:RequestedResumeFromPhase  = if ($PSBoundParameters.ContainsKey('ResumeFromPhase')) { [string]$ResumeFromPhase } else { $null }
 $Script:ResumePreflightOnly        = [bool]$ResumePreflightOnly
+$Script:ResumeSession              = $null
 
 # -----------------
 # Parameter validation
@@ -699,9 +700,9 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.25-r12.34'
+$Script:ScriptVersion = 'update-wsi-2026.07.26-r12.35'
 # Validation marker: pwsh7-runtime-validated on PowerShell 7.6.4 Linux x64; Windows-native gates remain required.
-$Script:ScriptTag     = 'rawxml-filetime-conversion-regression-fix'
+$Script:ScriptTag     = 'resume-checkpoint-evidence-hardening'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -11310,6 +11311,7 @@ function Write-ResolvedPatchEvidenceManifest {
             }
         }
     }
+    $null = Backup-ResumeEvidenceFile -Path $manifestPath -Reason ('manifest-'+$EvidenceOrigin)
     Save-CanonicalJsonFile -InputObject $manifest -Path $manifestPath -Depth 16
     $roundTrip = Read-ReleaseJsonFile -Path $manifestPath
     if (-not $roundTrip -or -not $roundTrip.PSObject.Properties['Patches'] -or @($roundTrip.Patches).Count -ne $expectedCount) {
@@ -16198,6 +16200,10 @@ function Invoke-BuildPhase07_PatchInstallWim {
     Start-DebugTrace -Context 'Invoke-BuildPhase07_PatchInstallWim' -PhaseId 'P07'
     $p07Succeeded = $false
     $p07Backup = ''
+    $p07BackupManifest = $null
+    $p07PriorPreflightEvidenceBackup = ''
+    $p07PriorBeforeEvidenceBackup = ''
+    $p07PriorAfterEvidenceBackup = ''
     try {
         if (-not $Script:OsProfile.EnableInstallWimUpdate) {
             Write-Skip 'EnableInstallWimUpdate is false in profile; skipping P07.'
@@ -16232,6 +16238,7 @@ function Invoke-BuildPhase07_PatchInstallWim {
                 -DateDecision $Script:InstallWimDisplayDateDecision `
                 -TemporaryPath (Join-Path $Script:TempDir 'rawxml_display_date_preflight')
             $preflightPath=Join-Path $Script:LogsDir 'P07_rawxml_display_date_native_preflight.json'
+            $p07PriorPreflightEvidenceBackup=Backup-ResumeEvidenceFile -Path $preflightPath -Reason 'p07-preflight-replacement'
             Save-CanonicalJsonFile -InputObject $preflight -Path $preflightPath -Depth 24
             Write-Ok ('Raw XML/integrity display-date native preflight passed before install.wim servicing. Evidence: {0}' -f $preflightPath)
         }
@@ -16241,14 +16248,12 @@ function Invoke-BuildPhase07_PatchInstallWim {
             Write-Caution 'Running in Sandbox mode (no -Execute). Will list intended actions only.'
         } elseif ($Script:Execute -and -not $Script:SyntheticTestMode) {
             $backupDir = Join-Path $Script:StateDir 'p07-backup'
-            New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
-            $p07Backup = Join-Path $backupDir 'install.wim.pre-p07'
-            $p07BackupPart = $p07Backup + '.part'
-            Write-Step ('Creating P07 transaction backup: {0}' -f $p07Backup)
-            Remove-Item -LiteralPath $p07BackupPart -Force -ErrorAction SilentlyContinue
-            Copy-Item -LiteralPath $installWim -Destination $p07BackupPart -Force
-            Move-Item -LiteralPath $p07BackupPart -Destination $p07Backup -Force
-            Set-Content -LiteralPath ($p07Backup + '.sha256') -Value ((Get-FileHash -LiteralPath $p07Backup -Algorithm SHA256).Hash.ToLower()) -Encoding ASCII
+            Write-Step ('Creating verified P07 install.wim transaction backup: {0}' -f $backupDir)
+            $p07BackupManifest = New-VerifiedTransactionBackup -PhaseId P07 -BackupDir $backupDir `
+                -RoleToSourcePath @{ InstallWim=$installWim }
+            $p07Record=@($p07BackupManifest.Files|Where-Object{[string]$_.Role -eq 'InstallWim'})[0]
+            $p07Backup=[string]$p07Record.BackupPath
+            Write-Ok ('Verified P07 transaction backup ready: {0} sha256={1}' -f $p07Backup,$p07Record.Sha256)
         }
 
         $patches = Get-PatchListForInstallWim
@@ -16424,6 +16429,7 @@ function Invoke-BuildPhase07_PatchInstallWim {
                 Snapshot=$beforeMetadata
             }
             $beforeMetadataPath=Join-Path $Script:LogsDir 'P07_installwim_display_metadata_before.json'
+            $p07PriorBeforeEvidenceBackup=Backup-ResumeEvidenceFile -Path $beforeMetadataPath -Reason 'p07-before-replacement'
             Save-CanonicalJsonFile -InputObject $beforeEvidence -Path $beforeMetadataPath -Depth 20
 
             $metadataWriteResult=Set-InstallWimDisplayDateMetadata -WimPath $installWim `
@@ -16466,6 +16472,7 @@ function Invoke-BuildPhase07_PatchInstallWim {
                 Snapshot=$afterMetadata
             }
             $afterMetadataPath=Join-Path $Script:LogsDir 'P07_installwim_display_metadata_after.json'
+            $p07PriorAfterEvidenceBackup=Backup-ResumeEvidenceFile -Path $afterMetadataPath -Reason 'p07-after-replacement'
             Save-CanonicalJsonFile -InputObject $afterEvidence -Path $afterMetadataPath -Depth 28
             Write-Ok ('install.wim CREATIONTIME updated with {0} on index(es): {1}. Evidence: {2}' -f `
                 $Script:InstallWimDisplayDateDecision.Mode,($metadataIndexes -join ', '),$afterMetadataPath)
@@ -16480,16 +16487,28 @@ function Invoke-BuildPhase07_PatchInstallWim {
         New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P07.ok') -Force | Out-Null
         $p07Succeeded = $true
     } finally {
-        if ($p07Backup -and -not $p07Succeeded -and (Test-Path -LiteralPath $p07Backup)) {
-            Write-Caution 'P07 failed; restoring install.wim from the transaction backup.'
+        if (-not $p07Succeeded -and $p07BackupManifest) {
+            Write-Caution 'P07 failed; validating and restoring install.wim from the transaction backup.'
             try {
-                Copy-Item -LiteralPath $p07Backup -Destination (Join-Path $Script:ExtractedDir 'sources\install.wim') -Force
-                Write-DismRollbackEvidence -Phase 'P07' -Result 'Restored' -Context 'install.wim transaction backup'
+                $verified=Get-VerifiedTransactionBackup -PhaseId P07 -BackupDir (Join-Path $Script:StateDir 'p07-backup') -RequiredRoles @('InstallWim')
+                $record=@($verified.Files|Where-Object{[string]$_.Role -eq 'InstallWim'})[0]
+                Restore-VerifiedTransactionBackupFile -BackupRecord $record -DestinationPath (Join-Path $Script:ExtractedDir 'sources\install.wim')
+                Write-DismRollbackEvidence -Phase 'P07' -Result 'RestoredAndVerified' -Context 'install.wim transaction backup manifest/2.0'
             } catch {
-                Write-DismRollbackEvidence -Phase 'P07' -Result 'Failed' -Context 'install.wim transaction backup' -Error $_.Exception.Message
+                Write-DismRollbackEvidence -Phase 'P07' -Result 'Failed' -Context 'install.wim transaction backup manifest/2.0' -Error $_.Exception.Message
                 throw
             }
             Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P07.ok') -Force -ErrorAction SilentlyContinue
+            foreach($spec in @(
+                [pscustomobject]@{Current=(Join-Path $Script:LogsDir 'P07_rawxml_display_date_native_preflight.json');Previous=$p07PriorPreflightEvidenceBackup},
+                [pscustomobject]@{Current=(Join-Path $Script:LogsDir 'P07_installwim_display_metadata_before.json');Previous=$p07PriorBeforeEvidenceBackup},
+                [pscustomobject]@{Current=(Join-Path $Script:LogsDir 'P07_installwim_display_metadata_after.json');Previous=$p07PriorAfterEvidenceBackup}
+            )){
+                Remove-Item -LiteralPath $spec.Current -Force -ErrorAction SilentlyContinue
+                if(-not [string]::IsNullOrWhiteSpace([string]$spec.Previous) -and (Test-Path -LiteralPath ([string]$spec.Previous) -PathType Leaf)){
+                    $null=Copy-ResumeFileVerified -SourcePath ([string]$spec.Previous) -DestinationPath ([string]$spec.Current) -RelativePath ([IO.Path]::GetFileName([string]$spec.Current))
+                }
+            }
         }
         Stop-DebugTrace
     }
@@ -16539,6 +16558,8 @@ function Invoke-BuildPhase08_PatchBootWim {
     $p08Succeeded = $false
     $p08BootBackup = ''
     $p08InstallBackup = ''
+    $p08BackupManifest = $null
+    $p08PriorFinalEvidenceBackup = ''
     try {
         $bootPolicy = Resolve-BootWimLcuPolicyValue -RawValue $Script:OsProfile.BootWimLcuPolicy
         $bootFailurePolicy = Resolve-BootWimFailurePolicyValue -RawValue $Script:OsProfile.BootWimFailurePolicy
@@ -16563,23 +16584,15 @@ function Invoke-BuildPhase08_PatchBootWim {
 
         if ($Script:Execute -and -not $Script:SyntheticTestMode) {
             $backupDir = Join-Path $Script:StateDir 'p08-backup'
-            New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
-            $p08BootBackup = Join-Path $backupDir 'boot.wim.pre-p08'
-            $p08InstallBackup = Join-Path $backupDir 'install.wim.pre-p08'
             $installForBackup = Join-Path $Script:ExtractedDir 'sources\install.wim'
-            Write-Step 'Creating P08 transaction backups for boot.wim and install.wim.'
-            $bootPart = $p08BootBackup + '.part'
-            $installPart = $p08InstallBackup + '.part'
-            Remove-Item -LiteralPath $bootPart,$installPart -Force -ErrorAction SilentlyContinue
-            Copy-Item -LiteralPath $bootWim -Destination $bootPart -Force
-            Copy-Item -LiteralPath $installForBackup -Destination $installPart -Force
-            Move-Item -LiteralPath $bootPart -Destination $p08BootBackup -Force
-            Move-Item -LiteralPath $installPart -Destination $p08InstallBackup -Force
-            Save-CanonicalJsonFile -InputObject ([pscustomobject]@{
-                Timestamp=(Get-Date).ToString('o')
-                BootWimSha256=(Get-FileHash -LiteralPath $p08BootBackup -Algorithm SHA256).Hash.ToLower()
-                InstallWimSha256=(Get-FileHash -LiteralPath $p08InstallBackup -Algorithm SHA256).Hash.ToLower()
-            }) -Path (Join-Path $backupDir 'backup-manifest.json') -Depth 4
+            Write-Step 'Creating verified P08 transaction backups for boot.wim and install.wim.'
+            $p08BackupManifest=New-VerifiedTransactionBackup -PhaseId P08 -BackupDir $backupDir `
+                -RoleToSourcePath @{ BootWim=$bootWim; InstallWim=$installForBackup }
+            $p08BootRecord=@($p08BackupManifest.Files|Where-Object{[string]$_.Role -eq 'BootWim'})[0]
+            $p08InstallRecord=@($p08BackupManifest.Files|Where-Object{[string]$_.Role -eq 'InstallWim'})[0]
+            $p08BootBackup=[string]$p08BootRecord.BackupPath
+            $p08InstallBackup=[string]$p08InstallRecord.BackupPath
+            Write-Ok ('Verified P08 backups ready: boot={0}; install={1}' -f $p08BootRecord.Sha256,$p08InstallRecord.Sha256)
         }
 
         # The patch plan is shared state for BOTH the boot.wim loop
@@ -16676,7 +16689,9 @@ function Invoke-BuildPhase08_PatchBootWim {
                 throw 'boot.wim policy exception was authorized, but the P08 source boot.wim backup is unavailable.'
             }
             $sourceBootWimSha256=(Get-FileHash -LiteralPath $p08BootBackup -Algorithm SHA256).Hash.ToLowerInvariant()
-            Copy-Item -LiteralPath $p08BootBackup -Destination $bootWim -Force
+            $verifiedPolicyBackup=Get-VerifiedTransactionBackup -PhaseId P08 -BackupDir (Join-Path $Script:StateDir 'p08-backup') -RequiredRoles @('BootWim','InstallWim')
+            $policyBootRecord=@($verifiedPolicyBackup.Files|Where-Object{[string]$_.Role -eq 'BootWim'})[0]
+            Restore-VerifiedTransactionBackupFile -BackupRecord $policyBootRecord -DestinationPath $bootWim
             $restoredBootWimSha256=(Get-FileHash -LiteralPath $bootWim -Algorithm SHA256).Hash.ToLowerInvariant()
             if($sourceBootWimSha256 -ne $restoredBootWimSha256){
                 throw ('boot.wim policy-exception restore hash mismatch: source={0}; restored={1}' -f $sourceBootWimSha256,$restoredBootWimSha256)
@@ -16760,6 +16775,7 @@ function Invoke-BuildPhase08_PatchBootWim {
                 -TemporaryPath (Join-Path $Script:TempDir 'p08_final_installwim_metadata') `
                 -EvidenceOrigin 'P08PostWinRe'
             $p08FinalEvidencePath = Join-Path $Script:LogsDir 'P08_installwim_final_metadata.json'
+            $p08PriorFinalEvidenceBackup=Backup-ResumeEvidenceFile -Path $p08FinalEvidencePath -Reason 'p08-final-replacement'
             Save-CanonicalJsonFile -InputObject $p08FinalEvidence -Path $p08FinalEvidencePath -Depth 28
             Write-Ok ('Final post-P08 install.wim metadata/integrity evidence passed: {0}' -f $p08FinalEvidencePath)
         }
@@ -16767,21 +16783,27 @@ function Invoke-BuildPhase08_PatchBootWim {
         New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P08.ok') -Force | Out-Null
         $p08Succeeded = $true
     } finally {
-        if (-not $p08Succeeded -and $p08BootBackup -and (Test-Path -LiteralPath $p08BootBackup)) {
-            Write-Caution 'P08 failed; restoring boot.wim and install.wim from transaction backups.'
+        if (-not $p08Succeeded -and $p08BackupManifest) {
+            Write-Caution 'P08 failed; validating and restoring boot.wim and install.wim from transaction backups.'
             try {
-                Copy-Item -LiteralPath $p08BootBackup -Destination (Join-Path $Script:ExtractedDir 'sources\boot.wim') -Force
-                if ($p08InstallBackup -and (Test-Path -LiteralPath $p08InstallBackup)) {
-                    Copy-Item -LiteralPath $p08InstallBackup -Destination (Join-Path $Script:ExtractedDir 'sources\install.wim') -Force
-                }
-                Write-DismRollbackEvidence -Phase 'P08' -Result 'Restored' -Context 'boot.wim/install.wim transaction backups'
+                $verified=Get-VerifiedTransactionBackup -PhaseId P08 -BackupDir (Join-Path $Script:StateDir 'p08-backup') -RequiredRoles @('BootWim','InstallWim')
+                $bootRecord=@($verified.Files|Where-Object{[string]$_.Role -eq 'BootWim'})[0]
+                $installRecord=@($verified.Files|Where-Object{[string]$_.Role -eq 'InstallWim'})[0]
+                Restore-VerifiedTransactionBackupFile -BackupRecord $bootRecord -DestinationPath (Join-Path $Script:ExtractedDir 'sources\boot.wim')
+                Restore-VerifiedTransactionBackupFile -BackupRecord $installRecord -DestinationPath (Join-Path $Script:ExtractedDir 'sources\install.wim')
+                Write-DismRollbackEvidence -Phase 'P08' -Result 'RestoredAndVerified' -Context 'boot.wim/install.wim transaction backup manifest/2.0'
             } catch {
-                Write-DismRollbackEvidence -Phase 'P08' -Result 'Failed' -Context 'boot.wim/install.wim transaction backups' -Error $_.Exception.Message
+                Write-DismRollbackEvidence -Phase 'P08' -Result 'Failed' -Context 'boot.wim/install.wim transaction backup manifest/2.0' -Error $_.Exception.Message
                 throw
             }
             Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P08.ok') -Force -ErrorAction SilentlyContinue
             Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P08S.ok') -Force -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath (Join-Path $Script:LogsDir 'P08_installwim_final_metadata.json') -Force -ErrorAction SilentlyContinue
+            $p08EvidencePath=Join-Path $Script:LogsDir 'P08_installwim_final_metadata.json'
+            $null=Backup-ResumeEvidenceFile -Path $p08EvidencePath -Reason 'p08-failure-invalidated'
+            Remove-Item -LiteralPath $p08EvidencePath -Force -ErrorAction SilentlyContinue
+            if(-not [string]::IsNullOrWhiteSpace($p08PriorFinalEvidenceBackup) -and (Test-Path -LiteralPath $p08PriorFinalEvidenceBackup -PathType Leaf)){
+                $null=Copy-ResumeFileVerified -SourcePath $p08PriorFinalEvidenceBackup -DestinationPath $p08EvidencePath -RelativePath 'P08_installwim_final_metadata.json'
+            }
         }
         Stop-DebugTrace
     }
@@ -19670,6 +19692,665 @@ function Restore-BootWimFromSourceIso {
 }
 
 
+# ============================================================
+# Resume transaction / evidence hardening (r12.35)
+# ============================================================
+
+function Resolve-ResumeRelativePath {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$BasePath,
+        [Parameter(Mandatory)][string]$RelativePath
+    )
+    $current=[System.IO.Path]::GetFullPath($BasePath)
+    foreach($part in @($RelativePath -split '[\\/]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+        if($part -eq '.' -or $part -eq '..'){throw ('Unsafe resume relative path component: {0}' -f $RelativePath)}
+        $current=Join-Path $current $part
+    }
+    return $current
+}
+
+function Get-ResumeCriticalEvidenceRelativePaths {
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param()
+    return [string[]]@(
+        'logs\P02_inputs_resolved.csv',
+        'logs\P04_catalog_crosscheck.json',
+        'logs\P04_monthly_auxiliary_selection.json',
+        'logs\P04_wim_inventory.csv',
+        'logs\P05_patch_inventory.csv',
+        'logs\P07_rawxml_display_date_native_preflight.json',
+        'logs\P07_installwim_display_metadata_before.json',
+        'logs\P07_installwim_display_metadata_after.json',
+        'logs\P08_installwim_final_metadata.json',
+        'logs\P08S_setup_binaries_sync.csv',
+        'logs\setup_binaries_sync.json',
+        'logs\resolved_patch_manifest.json',
+        'logs\setupdu_overlay_manifest.json',
+        'logs\P11_verification.csv',
+        'logs\P11_static_verification.json',
+        'logs\inspection_post.json',
+        'logs\inspection_diff.json',
+        'logs\winre_post_verification.json',
+        'logs\P12_release_assessment.json',
+        'logs\release_eligibility.json',
+        'logs\release_evidence_index.json',
+        'state\p07-backup\backup-manifest.json',
+        'state\p08-backup\backup-manifest.json'
+    )
+}
+
+function Get-ResumeFileEvidence {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$RelativePath=''
+    )
+    $full=[System.IO.Path]::GetFullPath($Path)
+    if (-not (Test-Path -LiteralPath $full -PathType Leaf)) {
+        return [pscustomobject][ordered]@{
+            RelativePath=$RelativePath;Path=$full;Exists=$false;LengthBytes=0
+            Sha256='';LastWriteTimeUtc='';Attributes=''
+        }
+    }
+    $item=Get-Item -LiteralPath $full -Force
+    return [pscustomobject][ordered]@{
+        RelativePath=$RelativePath;Path=$full;Exists=$true;LengthBytes=[long]$item.Length
+        Sha256=(Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash.ToLowerInvariant()
+        LastWriteTimeUtc=$item.LastWriteTimeUtc.ToString('o');Attributes=[string]$item.Attributes
+    }
+}
+
+function Copy-ResumeFileVerified {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$DestinationPath,
+        [string]$RelativePath=''
+    )
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
+        throw ('Verified copy source is missing: {0}' -f $SourcePath)
+    }
+    $source=Get-ResumeFileEvidence -Path $SourcePath -RelativePath $RelativePath
+    $parent=[System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($DestinationPath))
+    if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+    $part=$DestinationPath+'.part'
+    Remove-Item -LiteralPath $part -Force -ErrorAction SilentlyContinue
+    Copy-Item -LiteralPath $SourcePath -Destination $part -Force
+    $partEvidence=Get-ResumeFileEvidence -Path $part -RelativePath $RelativePath
+    if ($source.LengthBytes -ne $partEvidence.LengthBytes -or $source.Sha256 -ne $partEvidence.Sha256) {
+        Remove-Item -LiteralPath $part -Force -ErrorAction SilentlyContinue
+        throw ('Verified copy mismatch for {0}: source length/hash={1}/{2}; copy length/hash={3}/{4}.' -f `
+            $SourcePath,$source.LengthBytes,$source.Sha256,$partEvidence.LengthBytes,$partEvidence.Sha256)
+    }
+    Move-Item -LiteralPath $part -Destination $DestinationPath -Force
+    $destination=Get-ResumeFileEvidence -Path $DestinationPath -RelativePath $RelativePath
+    if ($source.LengthBytes -ne $destination.LengthBytes -or $source.Sha256 -ne $destination.Sha256) {
+        throw ('Verified copy read-back mismatch for {0}.' -f $DestinationPath)
+    }
+    return [pscustomobject][ordered]@{
+        RelativePath=$RelativePath;Source=$source;Destination=$destination;Verified=$true
+    }
+}
+
+function Backup-ResumeEvidenceFile {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [string]$Reason='replacement'
+    )
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
+    $evidence=Get-ResumeFileEvidence -Path $Path
+    $stamp=[datetime]::UtcNow.ToString('yyyyMMdd-HHmmssfff')
+    $leaf=[System.IO.Path]::GetFileName($Path)
+    $stem=[System.IO.Path]::GetFileNameWithoutExtension($leaf)
+    $ext=[System.IO.Path]::GetExtension($leaf)
+    $historyRoot=''
+    if ($Script:ResumeSession -and $Script:ResumeSession.PSObject.Properties['SessionRoot']) {
+        $historyRoot=Join-Path ([string]$Script:ResumeSession.SessionRoot) 'evidence-history'
+    } else {
+        $historyRoot=Join-Path $Script:LogsDir 'evidence-history'
+    }
+    $destDir=Join-Path $historyRoot $stem
+    New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+    $safeReason=($Reason -replace '[^A-Za-z0-9_.-]','_')
+    $dest=Join-Path $destDir ('{0}-{1}-{2}{3}' -f $stamp,$safeReason,$evidence.Sha256.Substring(0,12),$ext)
+    $null=Copy-ResumeFileVerified -SourcePath $Path -DestinationPath $dest -RelativePath $leaf
+    return $dest
+}
+
+function Get-ResumeTreeManifest {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)][string]$RootPath)
+    $root=[System.IO.Path]::GetFullPath($RootPath)
+    if (-not (Test-Path -LiteralPath $root -PathType Container)) {
+        throw ('Tree manifest root is missing: {0}' -f $root)
+    }
+    $trimChars=[char[]]@([System.IO.Path]::DirectorySeparatorChar,[System.IO.Path]::AltDirectorySeparatorChar)
+    $prefix=$root.TrimEnd($trimChars)+[System.IO.Path]::DirectorySeparatorChar
+    $rows=[System.Collections.Generic.List[object]]::new()
+    $total=[long]0
+    foreach($item in @(Get-ChildItem -LiteralPath $root -Recurse -File -Force -ErrorAction Stop | Sort-Object FullName)) {
+        $full=[System.IO.Path]::GetFullPath($item.FullName)
+        if (-not $full.StartsWith($prefix,[System.StringComparison]::OrdinalIgnoreCase)) {
+            throw ('Tree manifest path escaped root: {0}' -f $full)
+        }
+        $rel=$full.Substring($prefix.Length).Replace([System.IO.Path]::DirectorySeparatorChar,'/').Replace([System.IO.Path]::AltDirectorySeparatorChar,'/')
+        $sha=(Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash.ToLowerInvariant()
+        $total += [long]$item.Length
+        $rows.Add([pscustomobject][ordered]@{RelativePath=$rel;LengthBytes=[long]$item.Length;Sha256=$sha}) | Out-Null
+    }
+    return [pscustomobject][ordered]@{
+        RootPath=$root;FileCount=$rows.Count;TotalBytes=$total;Files=$rows.ToArray()
+    }
+}
+
+function Test-ResumeTreeManifestMatch {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)]$Expected,
+        [Parameter(Mandatory)]$Actual
+    )
+    $issues=[System.Collections.Generic.List[string]]::new()
+    $expectedMap=@{};$actualMap=@{}
+    foreach($row in @($Expected.Files)){$expectedMap[[string]$row.RelativePath]=$row}
+    foreach($row in @($Actual.Files)){$actualMap[[string]$row.RelativePath]=$row}
+    if ([int]$Expected.FileCount -ne [int]$Actual.FileCount) {
+        $issues.Add(('file count expected={0} actual={1}' -f $Expected.FileCount,$Actual.FileCount)) | Out-Null
+    }
+    if ([long]$Expected.TotalBytes -ne [long]$Actual.TotalBytes) {
+        $issues.Add(('total bytes expected={0} actual={1}' -f $Expected.TotalBytes,$Actual.TotalBytes)) | Out-Null
+    }
+    foreach($key in @($expectedMap.Keys | Sort-Object)) {
+        if (-not $actualMap.ContainsKey($key)) {$issues.Add(('missing destination file: {0}' -f $key))|Out-Null;continue}
+        $e=$expectedMap[$key];$a=$actualMap[$key]
+        if ([long]$e.LengthBytes -ne [long]$a.LengthBytes -or [string]$e.Sha256 -ne [string]$a.Sha256) {
+            $issues.Add(('file mismatch: {0}' -f $key)) | Out-Null
+        }
+    }
+    foreach($key in @($actualMap.Keys | Sort-Object)) {
+        if (-not $expectedMap.ContainsKey($key)) {$issues.Add(('unexpected destination file: {0}' -f $key))|Out-Null}
+    }
+    return [pscustomobject][ordered]@{Passed=($issues.Count -eq 0);Issues=$issues.ToArray()}
+}
+
+function Copy-ResumeDirectoryTreeVerified {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$DestinationPath,
+        [Parameter(Mandatory)][string]$ManifestPath
+    )
+    if (-not (Test-Path -LiteralPath $SourcePath -PathType Container)) {
+        throw ('Resume checkpoint source directory is missing: {0}' -f $SourcePath)
+    }
+    # Measure and hash the source before copying. This both provides the rollback
+    # contract and allows a deterministic free-space gate before a multi-GB copy.
+    $sourceManifest=Get-ResumeTreeManifest -RootPath $SourcePath
+    $destinationFull=[System.IO.Path]::GetFullPath($DestinationPath)
+    $destinationRoot=[System.IO.Path]::GetPathRoot($destinationFull)
+    try{
+        $drive=[System.IO.DriveInfo]::new($destinationRoot)
+        $reserve=[long](1GB)
+        $required=[long]$sourceManifest.TotalBytes+$reserve
+        if($drive.AvailableFreeSpace -lt $required){
+            throw ('Insufficient free space for verified resume checkpoint: available={0}; required={1} (source={2}; reserve={3}).' -f $drive.AvailableFreeSpace,$required,$sourceManifest.TotalBytes,$reserve)
+        }
+    }catch{
+        if($_.Exception.Message -like 'Insufficient free space*'){throw}
+        Write-Caution ('Resume checkpoint free-space probe was unavailable for root {0}; copy verification remains mandatory: {1}' -f $destinationRoot,$_.Exception.Message)
+    }
+    if (Test-Path -LiteralPath $DestinationPath) {
+        Remove-Item -LiteralPath $DestinationPath -Recurse -Force -ErrorAction Stop
+    }
+    New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+    $robocopy=Get-Command -Name 'robocopy.exe' -ErrorAction SilentlyContinue
+    if ($robocopy -and $env:OS -eq 'Windows_NT') {
+        & $robocopy.Source $SourcePath $DestinationPath /E /COPY:DAT /DCOPY:DAT /R:2 /W:2 /XJ /NFL /NDL /NJH /NJS /NP | Out-Null
+        $rc=$LASTEXITCODE
+        if ($rc -gt 7) {throw ('robocopy failed while creating resume checkpoint (exit {0}).' -f $rc)}
+    } else {
+        foreach($item in @(Get-ChildItem -LiteralPath $SourcePath -Force -ErrorAction Stop)) {
+            Copy-Item -LiteralPath $item.FullName -Destination $DestinationPath -Recurse -Force
+        }
+    }
+    $destinationManifest=Get-ResumeTreeManifest -RootPath $DestinationPath
+    $comparison=Test-ResumeTreeManifestMatch -Expected $sourceManifest -Actual $destinationManifest
+    if (-not $comparison.Passed) {
+        throw ('Resume media checkpoint verification failed: {0}' -f ($comparison.Issues -join '; '))
+    }
+    $manifest=[pscustomobject][ordered]@{
+        SchemaVersion='resume-media-checkpoint/1.0';CreatedAtUtc=[datetime]::UtcNow.ToString('o')
+        SourceRoot=$sourceManifest.RootPath;CheckpointRoot=$destinationManifest.RootPath
+        FileCount=$sourceManifest.FileCount;TotalBytes=$sourceManifest.TotalBytes
+        SourceManifest=$sourceManifest;CheckpointVerified=$true
+    }
+    Save-CanonicalJsonFile -InputObject $manifest -Path $ManifestPath -Depth 12
+    return $manifest
+}
+
+function Save-ResumeSessionRecord {
+    [CmdletBinding()]
+    param()
+    if (-not $Script:ResumeSession -or -not $Script:ResumeSession.PSObject.Properties['SessionRoot']) {return}
+    $path=Join-Path ([string]$Script:ResumeSession.SessionRoot) 'session.json'
+    Save-CanonicalJsonFile -InputObject $Script:ResumeSession -Path $path -Depth 20
+}
+
+function Start-ResumeEvidenceSession {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)][ValidateSet('P08','P09')][string]$PhaseId)
+    if ($Script:ResumeSession) {return $Script:ResumeSession}
+    $stamp=[datetime]::UtcNow.ToString('yyyyMMdd-HHmmssfff')
+    $shortRun=([string]$Script:RunId).Replace('-','')
+    if ($shortRun.Length -gt 8) {$shortRun=$shortRun.Substring(0,8)}
+    $sessionId=('{0}-{1}-{2}' -f $stamp,$PhaseId.ToLowerInvariant(),$shortRun)
+    $root=Join-Path $Script:StateDir ('resume-sessions\'+$sessionId)
+    $evidenceRoot=Join-Path $root 'evidence-before'
+    New-Item -ItemType Directory -Path $evidenceRoot -Force | Out-Null
+    $records=[System.Collections.Generic.List[object]]::new()
+    $missing=[System.Collections.Generic.List[string]]::new()
+    $paths=[System.Collections.Generic.List[string]]::new()
+    foreach($rel in @(Get-ResumeCriticalEvidenceRelativePaths)){$paths.Add($rel)|Out-Null}
+    if (Test-Path -LiteralPath $Script:LogsDir -PathType Container) {
+        foreach($item in @(Get-ChildItem -LiteralPath $Script:LogsDir -File -Force -Filter 'resume-*.json' -ErrorAction SilentlyContinue)) {
+            $paths.Add(('logs\'+$item.Name))|Out-Null
+        }
+    }
+    if (Test-Path -LiteralPath $Script:MarkersDir -PathType Container) {
+        foreach($item in @(Get-ChildItem -LiteralPath $Script:MarkersDir -File -Force -ErrorAction SilentlyContinue)) {
+            $paths.Add(('.markers\'+$item.Name))|Out-Null
+        }
+    }
+    foreach($rel in @($paths | Sort-Object -Unique)) {
+        $source=Resolve-ResumeRelativePath -BasePath $Script:WorkRoot -RelativePath $rel
+        if (Test-Path -LiteralPath $source -PathType Leaf) {
+            $dest=Resolve-ResumeRelativePath -BasePath $evidenceRoot -RelativePath $rel
+            $records.Add((Copy-ResumeFileVerified -SourcePath $source -DestinationPath $dest -RelativePath $rel))|Out-Null
+        } else {$missing.Add($rel)|Out-Null}
+    }
+    $snapshot=[pscustomobject][ordered]@{
+        SchemaVersion='resume-evidence-snapshot/1.0';CreatedAtUtc=[datetime]::UtcNow.ToString('o')
+        SessionId=$sessionId;ResumeFromPhase=$PhaseId;Files=$records.ToArray();Missing=$missing.ToArray()
+    }
+    $snapshotPath=Join-Path $root 'evidence-before-manifest.json'
+    Save-CanonicalJsonFile -InputObject $snapshot -Path $snapshotPath -Depth 12
+    $Script:ResumeSession=[pscustomobject][ordered]@{
+        SchemaVersion='resume-session/1.0';SessionId=$sessionId;Status='EvidenceSnapshotted'
+        CreatedAtUtc=[datetime]::UtcNow.ToString('o');CompletedAtUtc='';ResumeFromPhase=$PhaseId
+        RunId=[string]$Script:RunId;ScriptVersion=[string]$Script:ScriptVersion;ScriptHash=[string]$Script:ScriptHash
+        OsKey=[string]$Script:OsVersion;OsLanguage=[string]$Script:OsLanguage;WorkRoot=[string]$Script:WorkRoot
+        SessionRoot=$root;EvidenceBeforeManifestPath=$snapshotPath;MediaCheckpointManifestPath=''
+        MediaCheckpointRoot='';OutputBackupPath='';OutputWasPresent=$false;RemovedMarkers=@();Actions=@()
+        Rollback=$null;Cleanup=$null
+    }
+    Save-ResumeSessionRecord
+    Write-Ok ('Resume evidence snapshot created before P01/P02 mutation: {0}' -f $root)
+    return $Script:ResumeSession
+}
+
+function Add-ResumeSessionAction {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Action,[string]$Detail='')
+    if (-not $Script:ResumeSession){return}
+    $actions=[System.Collections.Generic.List[object]]::new()
+    foreach($existing in @($Script:ResumeSession.Actions)){$actions.Add($existing)|Out-Null}
+    $actions.Add([pscustomobject][ordered]@{TimestampUtc=[datetime]::UtcNow.ToString('o');Action=$Action;Detail=$Detail})|Out-Null
+    $Script:ResumeSession.Actions=$actions.ToArray()
+    Save-ResumeSessionRecord
+}
+
+function Get-ExpectedOutputIsoPathForCurrentRun {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+    if ($Script:OutputIsoPath) {return [string]$Script:OutputIsoPath}
+    $monthTag=(Get-Date -Format 'yyyy-MM')
+    $outName=('{0}_{1}_Updated_{2}.iso' -f $Script:OsProfile.OsShortName,$Script:OsLanguage,$monthTag)
+    return (Join-Path $Script:OutputDir $outName)
+}
+
+function New-ResumeMediaCheckpoint {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)][ValidateSet('P08','P09')][string]$PhaseId)
+    if (-not $Script:ResumeSession) {throw 'Resume session was not initialized before media checkpoint creation.'}
+    $root=[string]$Script:ResumeSession.SessionRoot
+    $checkpointRoot=Join-Path $root 'media-before\extracted'
+    $manifestPath=Join-Path $root 'media-before-manifest.json'
+    Write-Step ('Creating verified full-media resume checkpoint before {0}: {1}' -f $PhaseId,$checkpointRoot)
+    $manifest=Copy-ResumeDirectoryTreeVerified -SourcePath $Script:ExtractedDir -DestinationPath $checkpointRoot -ManifestPath $manifestPath
+    $expectedOutput=Get-ExpectedOutputIsoPathForCurrentRun
+    $outputBackup=''
+    $outputWasPresent=$false
+    if (Test-Path -LiteralPath $expectedOutput -PathType Leaf) {
+        $outputWasPresent=$true
+        $outDir=Join-Path $root 'output-before'
+        New-Item -ItemType Directory -Path $outDir -Force|Out-Null
+        $outputBackup=Join-Path $outDir ([System.IO.Path]::GetFileName($expectedOutput))
+        $null=Copy-ResumeFileVerified -SourcePath $expectedOutput -DestinationPath $outputBackup -RelativePath ('output\'+[System.IO.Path]::GetFileName($expectedOutput))
+    }
+    $Script:ResumeSession.MediaCheckpointManifestPath=$manifestPath
+    $Script:ResumeSession.MediaCheckpointRoot=$checkpointRoot
+    $Script:ResumeSession.OutputBackupPath=$outputBackup
+    $Script:ResumeSession.OutputWasPresent=$outputWasPresent
+    $Script:ResumeSession.Status='CheckpointReady'
+    Add-ResumeSessionAction -Action 'MediaCheckpointCreated' -Detail ('files={0}; bytes={1}' -f $manifest.FileCount,$manifest.TotalBytes)
+    Save-ResumeSessionRecord
+    Write-Ok ('Verified resume checkpoint ready: {0} file(s), {1} byte(s).' -f $manifest.FileCount,$manifest.TotalBytes)
+    return $manifest
+}
+
+function Reset-ResumeDownstreamState {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][ValidateSet('P08','P09')][string]$PhaseId)
+    $prefixes=if($PhaseId -eq 'P08'){@('P08','P08S','P09','P10','P11','P12','P13','P14')}else{@('P09','P10','P11','P12','P13','P14')}
+    $removed=[System.Collections.Generic.List[string]]::new()
+    if (Test-Path -LiteralPath $Script:MarkersDir -PathType Container) {
+        foreach($item in @(Get-ChildItem -LiteralPath $Script:MarkersDir -File -Force -ErrorAction SilentlyContinue)) {
+            $remove=$false
+            foreach($prefix in $prefixes){if($item.Name -like ($prefix+'.*')){$remove=$true;break}}
+            if($remove){Remove-Item -LiteralPath $item.FullName -Force; $removed.Add($item.Name)|Out-Null}
+        }
+    }
+    if($Script:ResumeSession){$Script:ResumeSession.RemovedMarkers=$removed.ToArray();Add-ResumeSessionAction -Action 'DownstreamMarkersReset' -Detail ($removed -join ',')}
+}
+
+function Restore-ResumeSessionCheckpoint {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)][string]$FailureMessage)
+    if (-not $Script:ResumeSession) {
+        return [pscustomobject]@{Attempted=$false;Passed=$false;Reason='No resume session was started.'}
+    }
+    $sessionRoot=[string]$Script:ResumeSession.SessionRoot
+    $issues=[System.Collections.Generic.List[string]]::new()
+    $mediaRestored=$false;$evidenceRestored=$false;$outputRestored=$false
+    try {
+        $afterRoot=Join-Path $sessionRoot 'after-failure'
+        New-Item -ItemType Directory -Path $afterRoot -Force|Out-Null
+
+        # Restore media when a checkpoint exists. Preserve the failed tree first.
+        $checkpoint=[string]$Script:ResumeSession.MediaCheckpointRoot
+        if(-not [string]::IsNullOrWhiteSpace($checkpoint) -and (Test-Path -LiteralPath $checkpoint -PathType Container)){
+            $failedTree=Join-Path $afterRoot 'extracted'
+            if(Test-Path -LiteralPath $failedTree){Remove-Item -LiteralPath $failedTree -Recurse -Force}
+            if(Test-Path -LiteralPath $Script:ExtractedDir -PathType Container){Move-Item -LiteralPath $Script:ExtractedDir -Destination $failedTree -Force}
+            Move-Item -LiteralPath $checkpoint -Destination $Script:ExtractedDir -Force
+            $checkpointManifest=Read-ReleaseJsonFile -Path ([string]$Script:ResumeSession.MediaCheckpointManifestPath)
+            $restoredManifest=Get-ResumeTreeManifest -RootPath $Script:ExtractedDir
+            $comparison=Test-ResumeTreeManifestMatch -Expected $checkpointManifest.SourceManifest -Actual $restoredManifest
+            if(-not $comparison.Passed){throw ('Restored media checkpoint verification failed: {0}' -f ($comparison.Issues -join '; '))}
+            $mediaRestored=$true
+        }
+
+        # Restore pre-resume output ISO state.
+        $expectedOutput=Get-ExpectedOutputIsoPathForCurrentRun
+        if(Test-Path -LiteralPath $expectedOutput -PathType Leaf){
+            $failedOutDir=Join-Path $afterRoot 'output';New-Item -ItemType Directory -Path $failedOutDir -Force|Out-Null
+            Move-Item -LiteralPath $expectedOutput -Destination (Join-Path $failedOutDir ([System.IO.Path]::GetFileName($expectedOutput))) -Force
+        }
+        if([bool]$Script:ResumeSession.OutputWasPresent){
+            if(-not(Test-Path -LiteralPath ([string]$Script:ResumeSession.OutputBackupPath) -PathType Leaf)){throw 'Pre-resume output ISO backup is missing during rollback.'}
+            $null=Copy-ResumeFileVerified -SourcePath ([string]$Script:ResumeSession.OutputBackupPath) -DestinationPath $expectedOutput -RelativePath ('output\'+[System.IO.Path]::GetFileName($expectedOutput))
+        }
+        $outputRestored=$true
+
+        # Preserve current critical evidence, restore all files that existed,
+        # and remove tracked files that were absent before the attempt.
+        $failureEvidence=Join-Path $afterRoot 'evidence';New-Item -ItemType Directory -Path $failureEvidence -Force|Out-Null
+        $snapshot=Read-ReleaseJsonFile -Path ([string]$Script:ResumeSession.EvidenceBeforeManifestPath)
+        foreach($record in @($snapshot.Files)){
+            $rel=[string]$record.RelativePath
+            $current=Resolve-ResumeRelativePath -BasePath $Script:WorkRoot -RelativePath $rel
+            if(Test-Path -LiteralPath $current -PathType Leaf){
+                $dest=Resolve-ResumeRelativePath -BasePath $failureEvidence -RelativePath $rel
+                $null=Copy-ResumeFileVerified -SourcePath $current -DestinationPath $dest -RelativePath $rel
+            }
+            $original=Resolve-ResumeRelativePath -BasePath (Join-Path $sessionRoot 'evidence-before') -RelativePath $rel
+            if(-not(Test-Path -LiteralPath $original -PathType Leaf)){throw ('Evidence snapshot payload is missing during rollback: {0}' -f $rel)}
+            $null=Copy-ResumeFileVerified -SourcePath $original -DestinationPath $current -RelativePath $rel
+        }
+        foreach($rel in @($snapshot.Missing)){
+            $current=Resolve-ResumeRelativePath -BasePath $Script:WorkRoot -RelativePath ([string]$rel)
+            if(Test-Path -LiteralPath $current -PathType Leaf){
+                $dest=Resolve-ResumeRelativePath -BasePath $failureEvidence -RelativePath ([string]$rel)
+                $null=Copy-ResumeFileVerified -SourcePath $current -DestinationPath $dest -RelativePath ([string]$rel)
+                Remove-Item -LiteralPath $current -Force
+            }
+        }
+        # Remove all downstream markers, then restore the exact pre-resume marker set.
+        Reset-ResumeDownstreamState -PhaseId ([string]$Script:ResumeSession.ResumeFromPhase)
+        foreach($record in @($snapshot.Files|Where-Object{[string]$_.RelativePath -match '^\.markers[\\/]'})){
+            $rel=[string]$record.RelativePath
+            $original=Resolve-ResumeRelativePath -BasePath (Join-Path $sessionRoot 'evidence-before') -RelativePath $rel
+            $current=Resolve-ResumeRelativePath -BasePath $Script:WorkRoot -RelativePath $rel
+            $null=Copy-ResumeFileVerified -SourcePath $original -DestinationPath $current -RelativePath $rel
+        }
+        $evidenceRestored=$true
+
+        $Script:ResumeSession.Status='RolledBack'
+        $Script:ResumeSession.CompletedAtUtc=[datetime]::UtcNow.ToString('o')
+        $Script:ResumeSession.Rollback=[pscustomobject][ordered]@{
+            Attempted=$true;Passed=$true;FailureMessage=$FailureMessage;MediaRestored=$mediaRestored
+            OutputRestored=$outputRestored;EvidenceRestored=$evidenceRestored;Issues=@()
+        }
+        Add-ResumeSessionAction -Action 'RollbackCompleted' -Detail $FailureMessage
+        Save-ResumeSessionRecord
+        Write-Caution ('Resume attempt failed; available media/output checkpoints and all snapshotted evidence were restored: {0}' -f $sessionRoot)
+        return $Script:ResumeSession.Rollback
+    } catch {
+        $issues.Add($_.Exception.Message)|Out-Null
+        $Script:ResumeSession.Status='RollbackFailed'
+        $Script:ResumeSession.CompletedAtUtc=[datetime]::UtcNow.ToString('o')
+        $Script:ResumeSession.Rollback=[pscustomobject][ordered]@{
+            Attempted=$true;Passed=$false;FailureMessage=$FailureMessage;MediaRestored=$mediaRestored
+            OutputRestored=$outputRestored;EvidenceRestored=$evidenceRestored;Issues=$issues.ToArray()
+        }
+        try{Save-ResumeSessionRecord}catch{$null=$_}
+        Write-Fail ('Resume rollback failed; preserve the WorkRoot and session checkpoint for manual recovery: {0}' -f $_.Exception.Message)
+        return $Script:ResumeSession.Rollback
+    }
+}
+
+function Complete-ResumeSession {
+    [CmdletBinding()]
+    param()
+    if(-not $Script:ResumeSession){return}
+    $root=[string]$Script:ResumeSession.SessionRoot
+    $successRoot=Join-Path $root 'evidence-after-success'
+    New-Item -ItemType Directory -Path $successRoot -Force|Out-Null
+    foreach($rel in @(Get-ResumeCriticalEvidenceRelativePaths)){
+        $source=Resolve-ResumeRelativePath -BasePath $Script:WorkRoot -RelativePath $rel
+        if(Test-Path -LiteralPath $source -PathType Leaf){
+            $dest=Resolve-ResumeRelativePath -BasePath $successRoot -RelativePath $rel
+            $null=Copy-ResumeFileVerified -SourcePath $source -DestinationPath $dest -RelativePath $rel
+        }
+    }
+    $cleanupIssues=[System.Collections.Generic.List[string]]::new()
+    foreach($path in @([string]$Script:ResumeSession.MediaCheckpointRoot,[string]$Script:ResumeSession.OutputBackupPath)){
+        if([string]::IsNullOrWhiteSpace($path)){continue}
+        try{
+            if(Test-Path -LiteralPath $path -PathType Container){Remove-Item -LiteralPath $path -Recurse -Force}
+            elseif(Test-Path -LiteralPath $path -PathType Leaf){Remove-Item -LiteralPath $path -Force}
+        }catch{$cleanupIssues.Add($_.Exception.Message)|Out-Null}
+    }
+    $Script:ResumeSession.Status='Succeeded'
+    $Script:ResumeSession.CompletedAtUtc=[datetime]::UtcNow.ToString('o')
+    $Script:ResumeSession.Cleanup=[pscustomobject][ordered]@{
+        Passed=($cleanupIssues.Count -eq 0);Issues=$cleanupIssues.ToArray();MediaPayloadRemoved=($cleanupIssues.Count -eq 0)
+    }
+    Add-ResumeSessionAction -Action 'ResumeCompleted' -Detail 'All requested phases completed.'
+    Save-ResumeSessionRecord
+    Write-Ok ('Resume transaction completed; rollback media payload was removed after success, while evidence history was retained: {0}' -f $root)
+}
+
+function New-VerifiedTransactionBackup {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][ValidateSet('P07','P08')][string]$PhaseId,
+        [Parameter(Mandatory)][string]$BackupDir,
+        [Parameter(Mandatory)][hashtable]$RoleToSourcePath
+    )
+    New-Item -ItemType Directory -Path $BackupDir -Force|Out-Null
+    $existingManifest=Join-Path $BackupDir 'backup-manifest.json'
+    if(Test-Path -LiteralPath $existingManifest -PathType Leaf){
+        $history=Join-Path $BackupDir ('history\'+[datetime]::UtcNow.ToString('yyyyMMdd-HHmmssfff'))
+        New-Item -ItemType Directory -Path $history -Force|Out-Null
+        foreach($item in @(Get-ChildItem -LiteralPath $BackupDir -File -Force -ErrorAction SilentlyContinue)){
+            if($item.Name -like '*.pre-*' -or $item.Name -like '*.sha256' -or $item.Name -eq 'backup-manifest.json'){
+                Move-Item -LiteralPath $item.FullName -Destination (Join-Path $history $item.Name) -Force
+            }
+        }
+    }
+    $files=[System.Collections.Generic.List[object]]::new()
+    foreach($role in @($RoleToSourcePath.Keys|Sort-Object)){
+        $source=[string]$RoleToSourcePath[$role]
+        if(-not(Test-Path -LiteralPath $source -PathType Leaf)){throw ('{0} backup source is missing for role {1}: {2}' -f $PhaseId,$role,$source)}
+        $leaf=if($role -eq 'InstallWim'){'install.wim.pre-'+$PhaseId.ToLowerInvariant()}else{'boot.wim.pre-'+$PhaseId.ToLowerInvariant()}
+        $backup=Join-Path $BackupDir $leaf
+        $copy=Copy-ResumeFileVerified -SourcePath $source -DestinationPath $backup -RelativePath $leaf
+        $files.Add([pscustomobject][ordered]@{Role=$role;SourcePath=$copy.Source.Path;BackupPath=$copy.Destination.Path;LengthBytes=$copy.Source.LengthBytes;Sha256=$copy.Source.Sha256;Verified=$true})|Out-Null
+    }
+    $manifest=[pscustomobject][ordered]@{
+        SchemaVersion='wim-transaction-backup/2.0';PhaseId=$PhaseId;CreatedAtUtc=[datetime]::UtcNow.ToString('o')
+        RunId=[string]$Script:RunId;ScriptVersion=[string]$Script:ScriptVersion;ScriptHash=[string]$Script:ScriptHash
+        OsKey=[string]$Script:OsVersion;OsLanguage=[string]$Script:OsLanguage
+        BaselineId=$(if($Script:OsProfile -and $Script:OsProfile.PatchBaseline){[string]$Script:OsProfile.PatchBaseline.BaselineId}else{''})
+        Files=$files.ToArray();Passed=$true
+    }
+    Save-CanonicalJsonFile -InputObject $manifest -Path $existingManifest -Depth 10
+    $readBack=Get-VerifiedTransactionBackup -PhaseId $PhaseId -BackupDir $BackupDir -RequiredRoles @($RoleToSourcePath.Keys)
+    return $readBack
+}
+
+function Get-VerifiedTransactionBackup {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][ValidateSet('P07','P08')][string]$PhaseId,
+        [Parameter(Mandatory)][string]$BackupDir,
+        [Parameter(Mandatory)][string[]]$RequiredRoles
+    )
+    $manifestPath=Join-Path $BackupDir 'backup-manifest.json'
+    $manifest=$null
+    if(Test-Path -LiteralPath $manifestPath -PathType Leaf){$manifest=Read-ReleaseJsonFile -Path $manifestPath}
+
+    $isCurrentManifest=($manifest -and $manifest.PSObject.Properties['SchemaVersion'] -and $manifest.PSObject.Properties['PhaseId'] -and
+        [string]$manifest.SchemaVersion -eq 'wim-transaction-backup/2.0' -and [string]$manifest.PhaseId -eq $PhaseId)
+    if($isCurrentManifest){
+        # Current manifest: validate below.
+    } elseif($PhaseId -eq 'P08' -and $manifest -and
+        $manifest.PSObject.Properties['BootWimSha256'] -and $manifest.PSObject.Properties['InstallWimSha256']){
+        # r12.34 and earlier compatibility. Normalize only after validating the
+        # known files and their measured hashes; do not silently upgrade on disk.
+        $legacyRows=[System.Collections.Generic.List[object]]::new()
+        foreach($spec in @(
+            [pscustomobject]@{Role='BootWim';Leaf='boot.wim.pre-p08';Sha=[string]$manifest.BootWimSha256},
+            [pscustomobject]@{Role='InstallWim';Leaf='install.wim.pre-p08';Sha=[string]$manifest.InstallWimSha256}
+        )){
+            $path=Join-Path $BackupDir $spec.Leaf
+            if($spec.Sha -notmatch '^[0-9a-fA-F]{64}$' -or -not(Test-Path -LiteralPath $path -PathType Leaf)){
+                throw ('P08 legacy transaction backup is incomplete for {0}: {1}' -f $spec.Role,$path)
+            }
+            $ev=Get-ResumeFileEvidence -Path $path
+            if($ev.Sha256 -ne $spec.Sha.ToLowerInvariant()){
+                throw ('P08 legacy backup integrity mismatch for {0}: expected={1}; actual={2}.' -f $spec.Role,$spec.Sha,$ev.Sha256)
+            }
+            $legacyRows.Add([pscustomobject][ordered]@{Role=$spec.Role;SourcePath='';BackupPath=$ev.Path;LengthBytes=$ev.LengthBytes;Sha256=$ev.Sha256;Verified=$true;LegacyNormalized=$true})|Out-Null
+        }
+        $manifest=[pscustomobject][ordered]@{
+            SchemaVersion='wim-transaction-backup/2.0';PhaseId='P08';CreatedAtUtc=$(if($manifest.PSObject.Properties['Timestamp']){[string]$manifest.Timestamp}else{''})
+            RunId='';ScriptVersion='legacy';ScriptHash='';OsKey=[string]$Script:OsVersion;OsLanguage=[string]$Script:OsLanguage
+            BaselineId='';Files=$legacyRows.ToArray();Passed=$true;EvidenceOrigin='LegacyManifestNormalizedInMemory'
+        }
+    } elseif($PhaseId -eq 'P07'){
+        # Older P07 backups used a sidecar hash rather than JSON.
+        $path=Join-Path $BackupDir 'install.wim.pre-p07'
+        $sidecar=$path+'.sha256'
+        if(-not(Test-Path -LiteralPath $path -PathType Leaf) -or -not(Test-Path -LiteralPath $sidecar -PathType Leaf)){
+            throw ('P07 transaction backup manifest/sidecar is missing: {0}' -f $BackupDir)
+        }
+        $expected=((Get-Content -LiteralPath $sidecar -Raw -Encoding ASCII).Trim()).ToLowerInvariant()
+        $ev=Get-ResumeFileEvidence -Path $path
+        if($expected -notmatch '^[0-9a-f]{64}$' -or $expected -ne $ev.Sha256){throw 'P07 legacy transaction backup integrity mismatch.'}
+        $manifest=[pscustomobject][ordered]@{
+            SchemaVersion='wim-transaction-backup/2.0';PhaseId='P07';CreatedAtUtc='';RunId='';ScriptVersion='legacy';ScriptHash=''
+            OsKey=[string]$Script:OsVersion;OsLanguage=[string]$Script:OsLanguage;BaselineId=''
+            Files=@([pscustomobject][ordered]@{Role='InstallWim';SourcePath='';BackupPath=$ev.Path;LengthBytes=$ev.LengthBytes;Sha256=$ev.Sha256;Verified=$true;LegacyNormalized=$true})
+            Passed=$true;EvidenceOrigin='LegacySidecarNormalizedInMemory'
+        }
+    } else {
+        throw ('{0} transaction backup manifest is missing, invalid, or unsupported: {1}' -f $PhaseId,$manifestPath)
+    }
+
+    foreach($role in $RequiredRoles){
+        $matches=@($manifest.Files|Where-Object{[string]$_.Role -eq $role})
+        if($matches.Count -ne 1){throw ('{0} transaction backup requires exactly one {1} record; found {2}.' -f $PhaseId,$role,$matches.Count)}
+        $row=$matches[0]
+        if(-not(Test-Path -LiteralPath ([string]$row.BackupPath) -PathType Leaf)){throw ('{0} backup file is missing for {1}: {2}' -f $PhaseId,$role,$row.BackupPath)}
+        $actual=Get-ResumeFileEvidence -Path ([string]$row.BackupPath)
+        if([long]$row.LengthBytes -ne $actual.LengthBytes -or [string]$row.Sha256 -ne $actual.Sha256){
+            throw ('{0} backup integrity mismatch for {1}: expected={2}/{3}; actual={4}/{5}.' -f $PhaseId,$role,$row.LengthBytes,$row.Sha256,$actual.LengthBytes,$actual.Sha256)
+        }
+    }
+    return $manifest
+}
+
+function Restore-VerifiedTransactionBackupFile {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$BackupRecord,
+        [Parameter(Mandatory)][string]$DestinationPath
+    )
+    $null=Copy-ResumeFileVerified -SourcePath ([string]$BackupRecord.BackupPath) -DestinationPath $DestinationPath -RelativePath ([string]$BackupRecord.Role)
+    $actual=Get-ResumeFileEvidence -Path $DestinationPath
+    if($actual.Sha256 -ne [string]$BackupRecord.Sha256 -or $actual.LengthBytes -ne [long]$BackupRecord.LengthBytes){throw ('Restored transaction backup verification failed: {0}' -f $DestinationPath)}
+}
+
+function Ensure-P08FinalInstallWimEvidenceForResume {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([switch]$ValidateOnly)
+    $path=Join-Path $Script:LogsDir 'P08_installwim_final_metadata.json'
+    $p07Path=Join-Path $Script:LogsDir 'P07_installwim_display_metadata_after.json'
+    $installWim=Join-Path $Script:ExtractedDir 'sources\install.wim'
+    if(-not(Test-Path -LiteralPath $p07Path -PathType Leaf)){throw ('Resume refused: P07 display metadata evidence is missing: {0}' -f $p07Path)}
+    if(-not(Test-Path -LiteralPath $installWim -PathType Leaf)){throw ('Resume refused: final install.wim is missing: {0}' -f $installWim)}
+    $currentWimSha=Get-FileSha256OrEmpty -Path $installWim
+    $currentP07Sha=Get-FileSha256OrEmpty -Path $p07Path
+    if(Test-Path -LiteralPath $path -PathType Leaf){
+        $ev=Read-ReleaseJsonFile -Path $path
+        if(-not $ev -or [string]$ev.SchemaVersion -ne 'P08-installwim-final-metadata/1.0' -or -not [bool]$ev.Passed){throw ('Resume refused: existing P08 final install.wim evidence is invalid: {0}' -f $path)}
+        if([string]$ev.RawEvidence.WimSha256 -ne $currentWimSha -or [string]$ev.Snapshot.WimSha256 -ne $currentWimSha){throw 'Resume refused: P08 final evidence does not match the current extracted install.wim.'}
+        if([string]$ev.SourceP07EvidenceSha256 -ne $currentP07Sha){throw 'Resume refused: P08 final evidence is not bound to the current P07 evidence.'}
+        return [pscustomobject][ordered]@{Path=$path;Origin=[string]$ev.EvidenceOrigin;Rehydrated=$false;Passed=$true;WimSha256=$currentWimSha}
+    }
+    $rehydrated=New-InstallWimFinalMetadataEvidence -WimPath $installWim -P07EvidencePath $p07Path `
+        -TemporaryPath (Join-Path $Script:TempDir 'resume_final_installwim_evidence_rehydrate') -EvidenceOrigin 'ResumeValidationRehydrated'
+    if(-not [bool]$rehydrated.Passed){throw 'Resume refused: missing P08 final install.wim evidence could not be safely reconstructed.'}
+    if($ValidateOnly){
+        return [pscustomobject][ordered]@{Path=$path;Origin='ResumeValidationRehydrated';Rehydrated=$true;PersistencePerformed=$false;Passed=$true;WimSha256=$currentWimSha;ProposedEvidence=$rehydrated}
+    }
+    $null=Backup-ResumeEvidenceFile -Path $path -Reason 'resume-rehydrate'
+    Save-CanonicalJsonFile -InputObject $rehydrated -Path $path -Depth 28
+    Add-ResumeSessionAction -Action 'P08FinalEvidenceRehydrated' -Detail $path
+    Write-Caution ('Legacy WorkRoot compatibility: P08 final install.wim evidence was reconstructed and bound before any P09 mutation: {0}' -f $path)
+    return [pscustomobject][ordered]@{Path=$path;Origin='ResumeValidationRehydrated';Rehydrated=$true;PersistencePerformed=$true;Passed=$true;WimSha256=$currentWimSha}
+}
+
 function Set-ResumePatchProperty {
     [CmdletBinding()]
     param(
@@ -19700,7 +20381,10 @@ function Repair-ResolvedPatchManifestForResume {
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
-    param([Parameter(Mandatory)][ValidateSet('P08','P09')][string]$PhaseId)
+    param(
+        [Parameter(Mandatory)][ValidateSet('P08','P09')][string]$PhaseId,
+        [switch]$ValidateOnly
+    )
 
     $catalogPath = Join-Path $Script:LogsDir 'P04_catalog_crosscheck.json'
     $manifestPath = Join-Path $Script:LogsDir 'resolved_patch_manifest.json'
@@ -19816,18 +20500,30 @@ function Repair-ResolvedPatchManifestForResume {
         throw ('Resume refused: repaired patch count {0} does not equal runtime patch count {1}.' -f $repaired.Count,@($Script:ResolvedPatches).Count)
     }
     $Script:PatchPlan = Build-PatchPlan -Patches $Script:ResolvedPatches
-    $manifest = Write-ResolvedPatchEvidenceManifest -EvidenceOrigin 'ResumeRepairedFromP04CatalogAndLocalDigest'
+    $manifest = if ($ValidateOnly) {
+        New-ResolvedPatchEvidenceManifest -EvidenceOrigin 'ResumeRepairedFromP04CatalogAndLocalDigest'
+    } else {
+        Write-ResolvedPatchEvidenceManifest -EvidenceOrigin 'ResumeRepairedFromP04CatalogAndLocalDigest'
+    }
     $repairEvidencePath = Join-Path $Script:LogsDir ('resume-{0}-patch-manifest-repair.json' -f $PhaseId.ToLowerInvariant())
     $repairEvidence = [pscustomobject][ordered]@{
-        SchemaVersion='resume-patch-manifest-repair/1.0'
+        SchemaVersion='resume-patch-manifest-repair/1.1'
         PhaseId=$PhaseId; RepairedAtUtc=[datetime]::UtcNow.ToString('o')
         OsKey=[string]$Script:OsVersion; OsLanguage=[string]$Script:OsLanguage
         CatalogEvidencePath=$catalogPath; CatalogEvidenceSha256=(Get-FileSha256OrEmpty -Path $catalogPath)
-        ManifestPath=$manifestPath; ManifestSha256=(Get-FileSha256OrEmpty -Path $manifestPath)
-        PatchCount=$repaired.Count; NetworkAccessPerformed=$false; Patches=$repaired.ToArray()
+        ManifestPath=$manifestPath
+        ManifestSha256=$(if ($ValidateOnly) { '' } else { Get-FileSha256OrEmpty -Path $manifestPath })
+        PatchCount=$repaired.Count; NetworkAccessPerformed=$false
+        PersistencePerformed=(-not [bool]$ValidateOnly);Patches=$repaired.ToArray()
     }
-    Save-CanonicalJsonFile -InputObject $repairEvidence -Path $repairEvidencePath -Depth 12
-    Write-Caution ('Legacy WorkRoot repair: reconstructed missing resolved patch manifest from measured P04 Catalog identity and retained payload digests: {0}' -f $repairEvidencePath)
+    if ($ValidateOnly) {
+        Write-Step ('Resume preflight: missing patch manifest can be reconstructed safely in memory from P04 evidence; no WorkRoot file was written.')
+    } else {
+        $null=Backup-ResumeEvidenceFile -Path $repairEvidencePath -Reason 'resume-manifest-repair'
+        Save-CanonicalJsonFile -InputObject $repairEvidence -Path $repairEvidencePath -Depth 12
+        Add-ResumeSessionAction -Action 'PatchManifestRepaired' -Detail $repairEvidencePath
+        Write-Caution ('Legacy WorkRoot compatibility: reconstructed missing resolved patch manifest from measured P04 Catalog identity and retained payload digests before downstream mutation: {0}' -f $repairEvidencePath)
+    }
     return $manifest
 }
 
@@ -19855,7 +20551,10 @@ function Restore-ResolvedPatchAssetsForResume {
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
-    param([Parameter(Mandatory)][ValidateSet('P08','P09')][string]$PhaseId)
+    param(
+        [Parameter(Mandatory)][ValidateSet('P08','P09')][string]$PhaseId,
+        [switch]$ValidateOnly
+    )
 
     $catalogPath = Join-Path $Script:LogsDir 'P04_catalog_crosscheck.json'
     $manifestPath = Join-Path $Script:LogsDir 'resolved_patch_manifest.json'
@@ -19865,15 +20564,16 @@ function Restore-ResolvedPatchAssetsForResume {
     if (-not (Test-Path -LiteralPath (Join-Path $Script:MarkersDir 'P04.ok') -PathType Leaf)) {
         throw 'Resume refused: P04.ok is missing; resolved patch assets cannot be trusted.'
     }
+    $repairedManifest = $null
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
-        $null = Repair-ResolvedPatchManifestForResume -PhaseId $PhaseId
+        $repairedManifest = Repair-ResolvedPatchManifestForResume -PhaseId $PhaseId -ValidateOnly:$ValidateOnly
     }
-    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf) -and -not $repairedManifest) {
         throw ('Resume refused: required measured patch evidence is still missing after repair: {0}' -f $manifestPath)
     }
 
     $catalogRows = @(Get-Content -LiteralPath $catalogPath -Raw -Encoding UTF8 | ConvertFrom-CanonicalJson)
-    $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-CanonicalJson
+    $manifest = if ($repairedManifest) { $repairedManifest } else { Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-CanonicalJson }
     if (-not $manifest -or -not $manifest.PSObject.Properties['Patches']) {
         throw ('Resume refused: resolved patch manifest is invalid: {0}' -f $manifestPath)
     }
@@ -19999,16 +20699,22 @@ function Restore-ResolvedPatchAssetsForResume {
     }
     $Script:PatchPlan = Build-PatchPlan -Patches $Script:ResolvedPatches
     $result = [pscustomobject][ordered]@{
-        SchemaVersion='resume-patch-state/1.0'; PhaseId=$PhaseId
+        SchemaVersion='resume-patch-state/1.1'; PhaseId=$PhaseId
         RestoredAtUtc=[datetime]::UtcNow.ToString('o')
         OsKey=[string]$Script:OsVersion; OsLanguage=[string]$Script:OsLanguage
         BaselineId=$currentBaselineId; CatalogEvidencePath=$catalogPath
         PriorManifestPath=$manifestPath; RestoredPatchCount=$restored.Count
-        Patches=$restored.ToArray()
+        PersistencePerformed=(-not [bool]$ValidateOnly);Patches=$restored.ToArray()
     }
     $resumePatchStatePath = Join-Path $Script:LogsDir ('resume-{0}-patch-state.json' -f $PhaseId.ToLowerInvariant())
-    Save-CanonicalJsonFile -InputObject $result -Path $resumePatchStatePath -Depth 10
-    Write-Ok ('Resume patch assets rehydrated and verified: {0} patch(es); evidence: {1}' -f $restored.Count,$resumePatchStatePath)
+    if ($ValidateOnly) {
+        Write-Ok ('Resume preflight patch state validated in memory: {0} patch(es); no WorkRoot evidence was written.' -f $restored.Count)
+    } else {
+        $null=Backup-ResumeEvidenceFile -Path $resumePatchStatePath -Reason 'resume-patch-state'
+        Save-CanonicalJsonFile -InputObject $result -Path $resumePatchStatePath -Depth 10
+        Add-ResumeSessionAction -Action 'PatchStateRehydrated' -Detail $resumePatchStatePath
+        Write-Ok ('Resume patch assets rehydrated and verified: {0} patch(es); evidence: {1}' -f $restored.Count,$resumePatchStatePath)
+    }
     return $result
 }
 
@@ -20027,38 +20733,24 @@ function Initialize-ResumeBuildState {
     foreach ($required in @($installWim,$bootWim)) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw ('Resume prerequisite missing: {0}' -f $required) }
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $Script:MarkersDir 'P07.ok'))) { throw 'Resume refused: P07.ok is missing.' }
+    if (-not (Test-Path -LiteralPath (Join-Path $Script:MarkersDir 'P07.ok') -PathType Leaf)) { throw 'Resume refused: P07.ok is missing.' }
 
-    # Validate and restore patch state before changing any WIM or marker so a
-    # failed resume attempt leaves the previous measured build untouched.
-    $resumePatchState = Restore-ResolvedPatchAssetsForResume -PhaseId $PhaseId
+    # P01/P02 rebuild runtime objects. Rehydrate only identities that are bound
+    # to P04 evidence and retained payload digests. ResumePreflightOnly performs
+    # the same validation in memory and never repairs or writes WorkRoot state.
+    $resumePatchState = Restore-ResolvedPatchAssetsForResume -PhaseId $PhaseId -ValidateOnly:$ValidateOnly
 
+    $p08BackupManifest=$null
+    $needsP08sCompatibilityMarker=$false
+    $p08FinalEvidence=$null
     if ($PhaseId -eq 'P08') {
-        $stateBackup = Join-Path $Script:StateDir 'p08-backup\boot.wim.pre-p08'
-        $canRestoreFromBackup = Test-Path -LiteralPath $stateBackup -PathType Leaf
-        if (-not $canRestoreFromBackup) {
-            # Validate that the source ISO needed by Restore-BootWimFromSourceIso
-            # still exists before a real resume is allowed to mutate boot.wim.
-            $sourceIsoCandidate = [string]$Script:IsoPathResolved
-            if ([string]::IsNullOrWhiteSpace($sourceIsoCandidate) -or -not (Test-Path -LiteralPath $sourceIsoCandidate -PathType Leaf)) {
-                throw ('Resume refused: neither the P08 boot.wim backup nor the source ISO is available. backup={0}; iso={1}' -f $stateBackup,$sourceIsoCandidate)
-            }
-        }
+        $backupDir=Join-Path $Script:StateDir 'p08-backup'
+        $p08BackupManifest=Get-VerifiedTransactionBackup -PhaseId P08 -BackupDir $backupDir -RequiredRoles @('BootWim','InstallWim')
         if ($ValidateOnly) {
-            Write-Step $(if ($canRestoreFromBackup) { 'Resume preflight: P08 boot.wim transaction backup is available; no restore was performed.' } else { 'Resume preflight: source ISO is available for P08 boot.wim restore; no restore was performed.' })
-        } else {
-            if ($canRestoreFromBackup) {
-                Write-Step 'Restoring boot.wim from the P08 transaction backup.'
-                Copy-Item -LiteralPath $stateBackup -Destination $bootWim -Force
-            } else {
-                Write-Step 'No P08 backup exists; restoring boot.wim from the source ISO.'
-                Restore-BootWimFromSourceIso -DestinationPath $bootWim
-            }
-            Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P08.ok') -Force -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P08S.ok') -Force -ErrorAction SilentlyContinue
+            Write-Step ('Resume preflight: verified P08 boot.wim/install.wim transaction backups are available; no restore was performed: {0}' -f $backupDir)
         }
     } else {
-        if (-not (Test-Path -LiteralPath (Join-Path $Script:MarkersDir 'P08.ok'))) {
+        if (-not (Test-Path -LiteralPath (Join-Path $Script:MarkersDir 'P08.ok') -PathType Leaf)) {
             throw 'Resume refused: P08.ok is missing.'
         }
         $syncEvidence = Join-Path $Script:LogsDir 'setup_binaries_sync.json'
@@ -20067,15 +20759,34 @@ function Initialize-ResumeBuildState {
         }
         $p08sMarker = Join-Path $Script:MarkersDir 'P08S.ok'
         if (-not (Test-Path -LiteralPath $p08sMarker -PathType Leaf)) {
-            # r12.04 wrote the authoritative JSON evidence but did not create
-            # a P08S marker. Preflight reports the normalization without
-            # changing the workspace; the real resume creates it once.
+            $needsP08sCompatibilityMarker=$true
             if ($ValidateOnly) {
-                Write-Caution 'Resume preflight: P08S.ok is absent, but setup_binaries_sync.json exists. A real resume will create the compatibility marker.'
-            } else {
-                Write-Caution 'P08S.ok is absent, but setup_binaries_sync.json exists; accepting r12.04 legacy evidence and creating the marker.'
-                New-Item -ItemType File -Path $p08sMarker -Force | Out-Null
+                Write-Caution 'Resume preflight: P08S.ok is absent, but setup_binaries_sync.json exists. A real resume will create the compatibility marker only after the rollback checkpoint is ready.'
             }
+        }
+        # Bind P09 resume to the exact final post-P08 install.wim before Setup DU
+        # or PCA2023 can mutate the extracted media. Legacy evidence is rebuilt
+        # here, not later inside P11.
+        $p08FinalEvidence=Ensure-P08FinalInstallWimEvidenceForResume -ValidateOnly:$ValidateOnly
+    }
+
+    if (-not $ValidateOnly) {
+        if (-not $Script:ResumeSession) {$null=Start-ResumeEvidenceSession -PhaseId $PhaseId}
+        $null=New-ResumeMediaCheckpoint -PhaseId $PhaseId
+        Reset-ResumeDownstreamState -PhaseId $PhaseId
+
+        if ($PhaseId -eq 'P08') {
+            $bootRecord=@($p08BackupManifest.Files|Where-Object{[string]$_.Role -eq 'BootWim'})[0]
+            $installRecord=@($p08BackupManifest.Files|Where-Object{[string]$_.Role -eq 'InstallWim'})[0]
+            Write-Step 'Restoring both boot.wim and install.wim from verified pre-P08 transaction backups.'
+            Restore-VerifiedTransactionBackupFile -BackupRecord $bootRecord -DestinationPath $bootWim
+            Restore-VerifiedTransactionBackupFile -BackupRecord $installRecord -DestinationPath $installWim
+            Add-ResumeSessionAction -Action 'P08TransactionBackupsRestored' -Detail $p08BackupManifest.SchemaVersion
+        } elseif ($needsP08sCompatibilityMarker) {
+            $p08sMarker = Join-Path $Script:MarkersDir 'P08S.ok'
+            Write-Caution 'P08S.ok is absent, but setup_binaries_sync.json exists; creating the legacy compatibility marker after the resume checkpoint was verified.'
+            New-Item -ItemType File -Path $p08sMarker -Force | Out-Null
+            Add-ResumeSessionAction -Action 'LegacyP08SMarkerCreated' -Detail $p08sMarker
         }
     }
 
@@ -20087,16 +20798,31 @@ function Initialize-ResumeBuildState {
             [pscustomobject]@{ Wim='boot.wim'; ImageIndex=$_.ImageIndex; ImageName=$_.ImageName; ImageSize=$_.ImageSize }
         }
     )
-    $evPath = Join-Path $Script:LogsDir ('resume-{0}.json' -f $PhaseId.ToLower())
-    Save-CanonicalJsonFile -InputObject ([pscustomobject]@{
-        Timestamp=(Get-Date).ToString('o'); ResumeFrom=$PhaseId; OsVersion=$Script:OsVersion
-        InstallWimSha256=(Get-FileHash -LiteralPath $installWim -Algorithm SHA256).Hash.ToLower()
-        BootWimSha256=(Get-FileHash -LiteralPath $bootWim -Algorithm SHA256).Hash.ToLower()
-        RestoredPatchStatePath=(Join-Path $Script:LogsDir ('resume-{0}-patch-state.json' -f $PhaseId.ToLowerInvariant()))
+    $resumeEvidence=[pscustomobject][ordered]@{
+        SchemaVersion='resume-state/2.0';Timestamp=(Get-Date).ToString('o');ResumeFrom=$PhaseId
+        ValidateOnly=[bool]$ValidateOnly;OsVersion=$Script:OsVersion;OsLanguage=$Script:OsLanguage
+        SessionId=$(if($Script:ResumeSession){[string]$Script:ResumeSession.SessionId}else{''})
+        SessionRoot=$(if($Script:ResumeSession){[string]$Script:ResumeSession.SessionRoot}else{''})
+        InstallWimSha256=(Get-FileHash -LiteralPath $installWim -Algorithm SHA256).Hash.ToLowerInvariant()
+        BootWimSha256=(Get-FileHash -LiteralPath $bootWim -Algorithm SHA256).Hash.ToLowerInvariant()
+        RestoredPatchStatePath=$(if($ValidateOnly){''}else{Join-Path $Script:LogsDir ('resume-{0}-patch-state.json' -f $PhaseId.ToLowerInvariant())})
         RestoredPatchCount=$resumePatchState.RestoredPatchCount
+        P08FinalInstallWimEvidence=$p08FinalEvidence
+        RollbackCheckpointManifestPath=$(if($Script:ResumeSession){[string]$Script:ResumeSession.MediaCheckpointManifestPath}else{''})
         Inventory=$Script:WimIndexInventory
-    }) -Path $evPath -Depth 8
-    Write-Ok ('Resume state validated: {0}' -f $evPath)
+    }
+    if ($ValidateOnly) {
+        Write-Ok ('Resume preflight passed for {0}; validation was read-only and no WorkRoot evidence, marker, WIM, or media file was changed.' -f $PhaseId)
+        return $resumeEvidence
+    }
+    $evPath = Join-Path $Script:LogsDir ('resume-{0}.json' -f $PhaseId.ToLowerInvariant())
+    $null=Backup-ResumeEvidenceFile -Path $evPath -Reason 'resume-state'
+    Save-CanonicalJsonFile -InputObject $resumeEvidence -Path $evPath -Depth 12
+    Add-ResumeSessionAction -Action 'ResumeStateValidated' -Detail $evPath
+    $Script:ResumeSession.Status='Validated'
+    Save-ResumeSessionRecord
+    Write-Ok ('Resume state validated with rollback checkpoint: {0}' -f $evPath)
+    return $resumeEvidence
 }
 
 # ============================================================
@@ -20936,13 +21662,17 @@ try {
 
     if ($phaseList.Count -gt 0) {
         if ($Script:RequestedResumeFromPhase) {
+            # Snapshot evidence before P01/P02 can overwrite any prior-run file.
+            # ResumePreflightOnly remains strictly read-only and creates no session.
+            if(-not $Script:ResumePreflightOnly){$null=Start-ResumeEvidenceSession -PhaseId $Script:RequestedResumeFromPhase}
             Invoke-PhaseRunner -PhaseIds @('P01','P02')
             Initialize-ResumeBuildState -PhaseId $Script:RequestedResumeFromPhase -ValidateOnly:$Script:ResumePreflightOnly
             if ($Script:ResumePreflightOnly) {
-                Write-Ok ('Resume preflight passed for {0}; no build phase was executed.' -f $Script:RequestedResumeFromPhase)
+                Write-Ok ('Resume preflight passed for {0}; no build phase was executed and no WorkRoot state was changed.' -f $Script:RequestedResumeFromPhase)
             } else {
                 $remaining = @($phaseList | Where-Object { $_ -notin @('P01','P02') })
                 if ($remaining.Count -gt 0) { Invoke-PhaseRunner -PhaseIds $remaining }
+                Complete-ResumeSession
             }
         } else {
             Invoke-PhaseRunner -PhaseIds $phaseList
@@ -20954,7 +21684,14 @@ try {
     }
 } catch {
     $Script:ExitCode = 1
-    Write-Fail ('Run failed: {0}' -f $_.Exception.Message)
+    $runFailureMessage=[string]$_.Exception.Message
+    Write-Fail ('Run failed: {0}' -f $runFailureMessage)
+    if($Script:RequestedResumeFromPhase -and -not $Script:ResumePreflightOnly -and $Script:ResumeSession){
+        try{
+            $rollback=Restore-ResumeSessionCheckpoint -FailureMessage $runFailureMessage
+            if(-not [bool]$rollback.Passed){Write-Fail 'Resume rollback did not complete successfully. Preserve WorkRoot and resume session evidence.'}
+        }catch{Write-Fail ('Unexpected resume rollback exception: {0}' -f $_.Exception.Message)}
+    }
     # Auto-export any active debug trace (best-effort).
     # Export-DebugTraceJson takes -Path (a file), not -OutputDir;
     # synthesise a timestamped filename under DiagDir.
