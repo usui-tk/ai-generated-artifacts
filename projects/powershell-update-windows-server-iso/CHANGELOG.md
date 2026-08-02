@@ -22,6 +22,29 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.20-r12.27] - 2026-08-02
+
+Tag: `wimgapi-image-root-localname-hotfix` (the tag advances). The
+r12.26 WIM image-XML root check is made adapter-safe.
+
+### Fixed
+
+- **WIM image XML root check uses `LocalName`**: PowerShell's XML
+  adapter is case-insensitive, so on WIM IMAGE XML a child `<NAME>`
+  element can shadow `XmlElement.Name`; the r12.26 root check
+  (`.Name -ne 'IMAGE'`) could therefore reject valid metadata. The
+  check now reads the unambiguous CLR `LocalName` property.
+  Script-only hotfix to the r12.26 layer.
+- **T40**: release pin advanced to `update-wsi-2026.07.20-r12.27`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **5E/54W/8I** on
+the committed tree — unchanged from r12.26; committed verbatim per
+the no-fix-forward rule.
+
 ## [update-wsi-2026.07.20-r12.26] - 2026-08-02
 
 Tag: `install-wim-display-date-metadata-and-p14-evidence` (the tag

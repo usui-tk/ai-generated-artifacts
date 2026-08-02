@@ -166,7 +166,7 @@
 
 .PARAMETER ImageDisplayDate
     Optional display date for serviced install.wim indexes, in yyyy-MM-dd
-    format. r12.26 updates the WIM image LASTMODIFICATIONTIME metadata
+    format. r12.27 retains the r12.26 WIM image LASTMODIFICATIONTIME metadata
     intended for the edition-selection "Modified" / "更新日" presentation;
     the actual Setup UI mapping remains an E2E acceptance item. When omitted,
     P07 captures the host-local date once at phase start. Only indexes that
@@ -697,8 +697,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.20-r12.26'
-$Script:ScriptTag     = 'install-wim-display-date-metadata-and-p14-evidence'
+$Script:ScriptVersion = 'update-wsi-2026.07.20-r12.27'
+$Script:ScriptTag     = 'wimgapi-image-root-localname-hotfix'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -7293,10 +7293,10 @@ function Get-DismExportArgumentList {
 }
 
 # ============================================================
-# install.wim display-date metadata (r12.26)
+# install.wim display-date metadata (r12.26; r12.27 XML-root hotfix)
 # ============================================================
 # The source-media dates observed in Windows Setup remained unchanged after
-# successful package servicing. r12.26 therefore targets the WIM image
+# successful package servicing. r12.26 introduced the WIM image
 # LASTMODIFICATIONTIME XML metadata and requires a real Setup UI E2E to confirm
 # the presentation mapping. The helpers below round-trip the complete IMAGE XML
 # through Windows WIMGAPI, changing only LASTMODIFICATIONTIME. CREATIONTIME and
@@ -7401,8 +7401,13 @@ function Set-WimImageLastModificationTimeXml {
     $doc=[System.Xml.XmlDocument]::new()
     $doc.PreserveWhitespace=$false
     $doc.LoadXml($ImageXml.TrimStart([char]0xFEFF))
-    if (-not $doc.DocumentElement -or $doc.DocumentElement.Name -ne 'IMAGE') {
-        throw 'WIMGAPI image metadata root is not IMAGE.'
+    # PowerShell's XML adapter is case-insensitive: on WIM IMAGE XML the
+    # child <NAME> element can shadow XmlElement.Name. LocalName is the
+    # unambiguous CLR XML-node property and must be used for the root check.
+    $root=$doc.DocumentElement
+    $actualRoot=if($root){[string]$root.LocalName}else{'<null>'}
+    if (-not $root -or $actualRoot -ne 'IMAGE') {
+        throw ('WIMGAPI image metadata root is not IMAGE (actual: {0}).' -f $actualRoot)
     }
     $beforeInvariant=Get-WimImageMetadataInvariantFingerprint -ImageXml $doc.OuterXml
     $beforeCreation=$doc.DocumentElement.SelectSingleNode('CREATIONTIME')
@@ -7543,7 +7548,12 @@ function Convert-WimImageXmlToEvidence {
     $doc.PreserveWhitespace=$false
     $doc.LoadXml($ImageXml.TrimStart([char]0xFEFF))
     $root=$doc.DocumentElement
-    if (-not $root -or $root.Name -ne 'IMAGE') { throw 'WIMGAPI image metadata root is not IMAGE.' }
+    # Do not use $root.Name here. PowerShell resolves XML members
+    # case-insensitively, so the child <NAME> element can mask XmlNode.Name.
+    $actualRoot=if($root){[string]$root.LocalName}else{'<null>'}
+    if (-not $root -or $actualRoot -ne 'IMAGE') {
+        throw ('WIMGAPI image metadata root is not IMAGE (actual: {0}).' -f $actualRoot)
+    }
     $last=$root.SelectSingleNode('LASTMODIFICATIONTIME')
     $creation=$root.SelectSingleNode('CREATIONTIME')
     $lastUtc=$null
