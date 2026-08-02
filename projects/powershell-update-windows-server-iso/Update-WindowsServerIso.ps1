@@ -703,9 +703,9 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.01-r12.51'
-# Validation marker: r12.49 portable static regression complete; Windows-native gates remain required.
-$Script:ScriptTag     = 'setupdu-language-allowlist'
+$Script:ScriptVersion = 'update-wsi-2026.08.01-r12.52'
+# Validation marker: r12.52 Catalog semantic-response retry and single-fetch fallback hardening.
+$Script:ScriptTag     = 'catalog-semantic-retry'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -4643,40 +4643,42 @@ function Get-UpdateIdFromCatalog {
         Search Microsoft Update Catalog for a KB ID and return an array
         of (UpdateId, Title) tuples.
     .DESCRIPTION
-        GETs the Search.aspx page for the given KB number and extracts
-        UpdateID GUIDs from goToDetails(...) calls. Returns all matches.
-        Caller is expected to narrow down by Title (architecture,
-        OS variant) before passing the UpdateId to Get-DownloadLinkFromCatalog.
-    .EXAMPLE
-        Get-UpdateIdFromCatalog -KbId KB5058524 |
-            Where-Object { $_.Title -match 'Server 2025' -and $_.Title -match 'x64' }
+        Uses the shared Catalog transport/cache path. When Html is supplied,
+        parses that already-fetched response and performs no second network
+        request. This prevents legacy fallback from repeating an exact-KB GET
+        with a separate fixed 60-second timeout.
     #>
     [OutputType([pscustomobject[]])]
     param(
         [Parameter(Mandatory)] [string]$KbId,
-        [int]$MaxRetries = 3
+        [int]$MaxRetries = 3,
+        [AllowNull()][string]$Html = $null
     )
-    $searchUri = 'https://www.catalog.update.microsoft.com/Search.aspx?q=' + [uri]::EscapeDataString($KbId)
-    $headers = Get-CatalogRequestHeaders
-    $resp = $null
-    $attempt = 0
-    while ($attempt -lt $MaxRetries -and -not $resp) {
-        $attempt++
-        try {
-            # -UseBasicParsing required on Win PS 5.1 (PSA3005 not applicable here)
-            $resp = Invoke-WebRequest -Uri $searchUri -UseBasicParsing -Headers $headers `
-                                      -TimeoutSec 60 -ErrorAction Stop
-        } catch {
-            if ($attempt -ge $MaxRetries) { throw }
-            Wait-WithJitter -BaseSeconds 2 -JitterRange 1
+    $content = $Html
+    if ($null -eq $content) {
+        $searchUri = 'https://www.catalog.update.microsoft.com/Search.aspx?q=' + [uri]::EscapeDataString($KbId)
+        $slug = [regex]::Replace($KbId, '[^A-Za-z0-9]+', '_')
+        if ($slug.Length -gt 60) { $slug = $slug.Substring(0, 60) }
+        $tag = "search.$slug.raw.r1219.html"
+        $validator = $null
+        $validationDescription = ''
+        if ($KbId -match '^KB\d{6,8}$') {
+            $expectedKb = [regex]::Escape($KbId)
+            $guidPattern = '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
+            $validator = {
+                param($catalogContent)
+                $hasKb = [regex]::IsMatch([string]$catalogContent, $expectedKb, 'IgnoreCase')
+                $hasRowIdentity = [regex]::IsMatch([string]$catalogContent, ('(?is)(?:goToDetails\s*\(\s*["'']' + $guidPattern + '["'']|id\s*=\s*["'']' + $guidPattern + '_link["''])'))
+                return ($hasKb -and $hasRowIdentity)
+            }.GetNewClosure()
+            $validationDescription = "a parseable exact-KB result row for $KbId"
         }
+        $content = Get-CatalogText -Url $searchUri -Tag $tag -ContentValidator $validator -ContentValidationDescription $validationDescription
     }
-    if ($resp.StatusCode -ne 200) {
-        throw ('Microsoft Update Catalog returned HTTP {0} for KB {1}.' -f $resp.StatusCode, $KbId)
-    }
-    $pattern = '(?is)<a[^>]*onclick\s*=\s*(["'']?)goToDetails\(\s*"([0-9A-Fa-f-]{36})"\s*\)\s*;?\s*\1[^>]*>\s*(.*?)\s*</a>'
+    if ([string]::IsNullOrWhiteSpace([string]$content)) { return @() }
+    $pattern = '(?is)<a[^>]*onclick\s*=\s*(["'']?)goToDetails\(\s*["'']([0-9A-Fa-f-]{36})["'']\s*\)\s*;?\s*\1[^>]*>\s*(.*?)\s*</a>'
     $items = [System.Collections.Generic.List[object]]::new()
-    $matchList = [regex]::Matches($resp.Content, $pattern)
+    $matchList = [regex]::Matches($content, $pattern)
     foreach ($m in $matchList) {
         $guid = $m.Groups[2].Value
         $raw  = $m.Groups[3].Value
@@ -4689,7 +4691,6 @@ function Get-UpdateIdFromCatalog {
             KbId     = $KbId
         }) | Out-Null
     }
-    # Deduplicate by UpdateId
     return @($items | Sort-Object UpdateId -Unique)
 }
 
@@ -4699,39 +4700,33 @@ function Get-DownloadLinkFromCatalog {
         For an UpdateId returned by Get-UpdateIdFromCatalog, POST to
         DownloadDialog.aspx and extract direct download URL(s).
     .DESCRIPTION
-        Returns an array of (Url, FileName) tuples. Most updates have
-        one file; .NET family updates and bundles may have several.
+        Uses the shared escalating Catalog transport retry policy instead of
+        a separate fixed 60-second retry loop. Html can be supplied by a caller
+        that already fetched the DownloadDialog response.
     #>
     [OutputType([pscustomobject[]])]
     param(
         [Parameter(Mandatory)] [string]$UpdateId,
-        [int]$MaxRetries = 3
+        [int]$MaxRetries = 3,
+        [AllowNull()][string]$Html = $null
     )
-    $uri = 'https://www.catalog.update.microsoft.com/DownloadDialog.aspx'
-    $postJson = @{ size = 0; UpdateID = $UpdateId; UpdateIDInfo = $UpdateId } | ConvertTo-Json -Compress
-    $body = @{ UpdateIDs = '[' + $postJson + ']' }
-    $headers = Get-CatalogRequestHeaders
-    $resp = $null
-    $attempt = 0
-    while ($attempt -lt $MaxRetries -and -not $resp) {
-        $attempt++
-        try {
-            $resp = Invoke-WebRequest -Uri $uri -Method Post -Body $body `
-                                      -ContentType 'application/x-www-form-urlencoded' `
-                                      -UseBasicParsing -Headers $headers `
-                                      -TimeoutSec 60 -ErrorAction Stop
-        } catch {
-            if ($attempt -ge $MaxRetries) { throw }
-            Wait-WithJitter -BaseSeconds 2 -JitterRange 1
+    $content = $Html
+    if ($null -eq $content) {
+        $uri = 'https://www.catalog.update.microsoft.com/DownloadDialog.aspx'
+        $postJson = @{ size = 0; UpdateID = $UpdateId; UpdateIDInfo = $UpdateId } | ConvertTo-Json -Compress
+        $body = @{ UpdateIDs = '[' + $postJson + ']' }
+        $tag = 'legacy.dl.' + $UpdateId.Substring(0,8) + '.raw.r1252.html'
+        $validator = {
+            param($catalogContent)
+            return [regex]::IsMatch([string]$catalogContent, '(?is)downloadInformation\[\d+\]\.files\[\d+\]\.url\s*=')
         }
+        $response = Invoke-CatalogWebRequest -Url $uri -Method POST -Tag $tag -Body $body `
+            -ContentValidator $validator -ContentValidationDescription ('download file rows for UpdateId ' + $UpdateId)
+        $content = [string]$response.Content
     }
-    if ($resp.StatusCode -ne 200) {
-        throw ('DownloadDialog returned HTTP {0} for UpdateId {1}.' -f $resp.StatusCode, $UpdateId)
-    }
-    # Pattern extracts: downloadInformation[N].files[N].url = '<url>';
     $pattern = "downloadInformation\[\d+\]\.files\[\d+\]\.url\s*=\s*'([^']+)'"
     $items = [System.Collections.Generic.List[object]]::new()
-    $matchList = [regex]::Matches($resp.Content, $pattern)
+    $matchList = [regex]::Matches($content, $pattern)
     foreach ($m in $matchList) {
         $url = $m.Groups[1].Value
         $fn  = [System.IO.Path]::GetFileName(([uri]$url).AbsolutePath)
@@ -4941,6 +4936,10 @@ function Test-CatalogTransientFailure {
         $ex = $ex.InnerException
     }
     $message = [string]$ErrorRecord
+    # Catalog can return HTTP 200 with a temporary landing/error/challenge page.
+    # Treat an explicitly detected semantic-response mismatch as transient so the
+    # same escalating timeout schedule applies before any invalid page is cached.
+    if ($message -match 'CATALOG_SEMANTIC_RESPONSE_INVALID') { return $true }
     return [bool]($message -match '(?i)timed?\s*out|timeout|configured HttpClient\.Timeout|request was canceled|temporarily unavailable|connection.*(?:closed|reset|aborted)|name resolution|no such host|remote name could not be resolved')
 }
 
@@ -4984,9 +4983,11 @@ function Invoke-CatalogWebRequest {
         [Parameter(Mandatory)][string]$Url,
         [Parameter(Mandatory)][ValidateSet('GET','POST')][string]$Method,
         [Parameter(Mandatory)][string]$Tag,
-        [AllowEmptyString()][string]$Body = '',
+        [AllowNull()]$Body = '',
         [AllowNull()][int[]]$TimeoutScheduleSec,
-        [AllowNull()][int[]]$RetryDelayScheduleSec
+        [AllowNull()][int[]]$RetryDelayScheduleSec,
+        [AllowNull()][scriptblock]$ContentValidator,
+        [AllowEmptyString()][string]$ContentValidationDescription = ''
     )
     if (-not $TimeoutScheduleSec -or $TimeoutScheduleSec.Count -eq 0) { $TimeoutScheduleSec = $script:CatTimeoutScheduleSec }
     if (-not $RetryDelayScheduleSec) { $RetryDelayScheduleSec = $script:CatRetryDelayScheduleSec }
@@ -5011,11 +5012,29 @@ function Invoke-CatalogWebRequest {
             if (-not $response -or [string]::IsNullOrWhiteSpace([string]$response.Content)) {
                 throw [System.IO.InvalidDataException]::new('Microsoft Update Catalog returned an empty response body.')
             }
+            if ($ContentValidator) {
+                $validContent = $false
+                try {
+                    $validContent = [bool](& $ContentValidator ([string]$response.Content))
+                } catch {
+                    throw [System.IO.InvalidDataException]::new(
+                        ('CATALOG_SEMANTIC_RESPONSE_INVALID: validator threw for {0}: {1}' -f $ContentValidationDescription,$_.Exception.Message),
+                        $_.Exception
+                    )
+                }
+                if (-not $validContent) {
+                    $description = $(if ([string]::IsNullOrWhiteSpace($ContentValidationDescription)) { 'required Catalog content markers' } else { $ContentValidationDescription })
+                    throw [System.IO.InvalidDataException]::new(
+                        ('CATALOG_SEMANTIC_RESPONSE_INVALID: HTTP 200 response did not contain {0}.' -f $description)
+                    )
+                }
+            }
             Write-CatalogTransportEvidence -Method $Method -Url $Url -Tag $Tag -Attempt $attempt -TimeoutSec $timeout -Outcome 'Success' -StatusCode 200
             return $response
         } catch {
             $lastError = $_
             $status = Get-CatalogHttpStatusCodeFromError -ErrorRecord $_
+            if ($status -eq 0 -and ([string]$_ -match 'CATALOG_SEMANTIC_RESPONSE_INVALID')) { $status = 200 }
             $transient = Test-CatalogTransientFailure -ErrorRecord $_
             Write-CatalogTransportEvidence -Method $Method -Url $Url -Tag $Tag -Attempt $attempt -TimeoutSec $timeout -Outcome 'Failure' -StatusCode $status -Transient $transient -Message $_.Exception.Message
             $isLast = ($attempt -ge $TimeoutScheduleSec.Count)
@@ -5046,11 +5065,27 @@ function Convert-HtmlToText {
 }
 
 function Get-CatalogText {
-    param([string]$Url, [string]$Tag)
+    param(
+        [string]$Url,
+        [string]$Tag,
+        [AllowNull()][scriptblock]$ContentValidator,
+        [AllowEmptyString()][string]$ContentValidationDescription = ''
+    )
     if (-not (Test-Path -LiteralPath $script:CatCache)) { New-Item -ItemType Directory -Path $script:CatCache -Force | Out-Null }
     $p = Join-Path $script:CatCache $Tag
-    if (Test-Path $p) { return (Get-Content -LiteralPath $p -Raw) }
-    $r = Invoke-CatalogWebRequest -Url $Url -Method GET -Tag $Tag
+    if (Test-Path $p) {
+        $cached = Get-Content -LiteralPath $p -Raw
+        $cacheValid = $true
+        if ($ContentValidator) {
+            try { $cacheValid = [bool](& $ContentValidator ([string]$cached)) } catch { $cacheValid = $false }
+        }
+        if ($cacheValid) { return $cached }
+        Write-Caution ('Discarding semantically invalid Catalog cache entry before retry: {0}' -f $p)
+        Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
+    }
+    $r = Invoke-CatalogWebRequest -Url $Url -Method GET -Tag $Tag `
+        -ContentValidator $ContentValidator -ContentValidationDescription $ContentValidationDescription
+    # Cache only a transport- and semantic-validated response.
     $r.Content | Set-Content -LiteralPath $p -Encoding UTF8 -NoNewline
     Start-Sleep -Milliseconds 600
     return $r.Content
@@ -5090,7 +5125,21 @@ function Search-Catalog {
     if ($RefreshCache) {
         Remove-Item -LiteralPath (Join-Path $script:CatCache $tag) -Force -ErrorAction SilentlyContinue
     }
-    $html = Get-CatalogText ($script:CatSearchUrl + '?q=' + [uri]::EscapeDataString($Query)) $tag
+    $searchValidator = $null
+    $searchValidationDescription = ''
+    if ($Query -match '^KB\d{6,8}$') {
+        $expectedKb = [regex]::Escape($Query)
+        $guidPattern = '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
+        $searchValidator = {
+            param($catalogContent)
+            $hasKb = [regex]::IsMatch([string]$catalogContent, $expectedKb, 'IgnoreCase')
+            $hasRowIdentity = [regex]::IsMatch([string]$catalogContent, ('(?is)(?:goToDetails\s*\(\s*["'']' + $guidPattern + '["'']|id\s*=\s*["'']' + $guidPattern + '_link["''])'))
+            return ($hasKb -and $hasRowIdentity)
+        }.GetNewClosure()
+        $searchValidationDescription = "a parseable exact-KB result row for $Query"
+    }
+    $html = Get-CatalogText -Url ($script:CatSearchUrl + '?q=' + [uri]::EscapeDataString($Query)) -Tag $tag `
+        -ContentValidator $searchValidator -ContentValidationDescription $searchValidationDescription
     $guid = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
     $byUid = @{}
 
@@ -5170,9 +5219,10 @@ function Search-Catalog {
         if ($smb.Success) { $row.sizeBytes = [long]$smb.Groups[1].Value }
     }
 
-    # Last-resort fallback to the older, separately tested parser.
+    # Last-resort parser operates on the SAME validated HTML. It must not
+    # repeat the network GET through a legacy fixed-timeout code path.
     if ($byUid.Count -eq 0) {
-        foreach ($item in @(Get-UpdateIdFromCatalog -KbId $Query)) {
+        foreach ($item in @(Get-UpdateIdFromCatalog -KbId $Query -Html $html)) {
             $byUid[[string]$item.UpdateId] = [pscustomobject]@{
                 uid = [string]$item.UpdateId
                 title = [string]$item.Title
@@ -5185,6 +5235,10 @@ function Search-Catalog {
                 parser = 'legacy-goToDetails'
             }
         }
+    }
+    if ($byUid.Count -eq 0 -and $Query -match '^KB\d{6,8}$') {
+        $cachePath = Join-Path $script:CatCache $tag
+        throw ('Catalog exact-KB response passed transport but produced no parseable rows for {0}; cache={1}; transportEvidence={2}' -f $Query,$cachePath,(Get-CatalogTransportEvidencePath))
     }
 
     return @($byUid.Values | Sort-Object title, uid)
@@ -5401,10 +5455,10 @@ function Resolve-CatalogDownload {
         }
     }
 
-    # Last-resort fallback uses the older DownloadDialog parser, which
-    # derives FileName from each URL. Hashes are calculated after download.
+    # Last-resort parser reuses the SAME DownloadDialog response. Do not
+    # repeat a POST through an independent timeout/retry path.
     if ($out.Count -eq 0) {
-        foreach ($legacy in @(Get-DownloadLinkFromCatalog -UpdateId $Uid)) {
+        foreach ($legacy in @(Get-DownloadLinkFromCatalog -UpdateId $Uid -Html $html)) {
             $out.Add([pscustomobject]@{
                 idx = $out.Count
                 fileName = [string]$legacy.FileName

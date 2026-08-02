@@ -22,6 +22,41 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.01-r12.52] - 2026-08-02
+
+Tag: `catalog-semantic-retry`.
+
+### Changed
+
+- **Catalog semantic-response retry**: the Catalog can answer
+  HTTP 200 with a temporary landing/error/challenge page instead of
+  the requested content. Such responses are now detected as
+  semantically invalid and treated as transient — retried under the
+  shared escalating transport schedule from r12.51 — and only a
+  transport- and semantic-validated response is cached; a
+  semantically invalid cache entry is discarded before the retry.
+- **Single-fetch fallback hardening**: the last-resort search
+  parser and the download-link fallback reuse the SAME validated
+  HTML / DownloadDialog response as the primary path instead of
+  repeating the request through independent fixed-timeout code
+  paths, so every parser sees one consistent, validated page.
+  Script-only change; `data/*` and `schema/*` are untouched at this
+  revision.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.01-r12.52`
+  with the measured tag `catalog-semantic-retry`. No terminal
+  D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/120/64/112 + T45 21. PSA committed 5E/113W/11I (raw sweep
+  5E/114W/11I: +1W is the PSA7002 LF artefact; declared series
+  debt). The snapshot script remains BOM-absent at r12.52 (O1 watch
+  continues).
+
 ## [update-wsi-2026.08.01-r12.51] - 2026-08-02
 
 Tag retained: `setupdu-language-allowlist`.
