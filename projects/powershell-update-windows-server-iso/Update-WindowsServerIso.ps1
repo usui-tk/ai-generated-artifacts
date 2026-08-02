@@ -702,7 +702,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.28-r12.40'
+$Script:ScriptVersion = 'update-wsi-2026.07.28-r12.41'
 # Validation marker: pwsh7-runtime-validated on PowerShell 7.6.4 Linux x64; Windows-native gates remain required.
 $Script:ScriptTag     = 'all-os-version-decision-hardening'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
@@ -6901,7 +6901,8 @@ function Invoke-WimMountSafe {
         [Parameter(Mandatory)] [string]$ImagePath,
         [Parameter(Mandatory)] [int]   $Index,
         [Parameter(Mandatory)] [string]$Path,
-        [string]$LogDir
+        [string]$LogDir,
+        [string]$LogPath
     )
     Set-DebugStep -Step ('wim-mount-prepare')
 
@@ -6950,9 +6951,12 @@ function Invoke-WimMountSafe {
     if (-not [string]::IsNullOrEmpty($Script:ScratchDir)) {
         $mountArgs['ScratchDirectory'] = $Script:ScratchDir
     }
-    if ($LogDir) {
-        $logPath = Join-Path $LogDir (('mount_idx{0}_{1:yyyyMMdd-HHmmss}.log' -f $Index, (Get-Date)))
-        $mountArgs['LogPath'] = $logPath
+    if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
+        $mountArgs['LogPath'] = $LogPath
+    }
+    elseif ($LogDir) {
+        $generatedLogPath = Join-Path $LogDir (('mount_idx{0}_{1:yyyyMMdd-HHmmss}.log' -f $Index, (Get-Date)))
+        $mountArgs['LogPath'] = $generatedLogPath
     }
     Invoke-DismCmdlet -CommandName 'Mount-WindowsImage' -Parameters $mountArgs | Out-Null
     return $Path
@@ -16885,7 +16889,7 @@ function Invoke-BootWimServicingSmokeTest {
     $required=([string]$Script:OsVersion -eq 'Server2019' -and [string]$Script:OsProfile.BootWimLcuPolicy -eq 'enabled')
     if(-not $required){
         $notRequired=[pscustomobject][ordered]@{
-            SchemaVersion='P06-bootwim-servicing-smoke-test/1.0'
+            SchemaVersion='P06-bootwim-servicing-smoke-test/1.1'
             CreatedAtUtc=[datetime]::UtcNow.ToString('o')
             RunId=$Script:RunId
             OsKey=$Script:OsVersion
@@ -16915,9 +16919,26 @@ function Invoke-BootWimServicingSmokeTest {
     $smokeRoot=Join-Path $Script:WorkRoot 'work\p06_bootwim_smoke_test'
     $smokeWim=Join-Path $smokeRoot 'boot.wim'
     $mount=Join-Path $smokeRoot 'mount'
+    $mountLogPath=Join-Path $Script:LogsDir ('P06_bootwim_smoke_mount_idx{0}.log' -f $index)
     if(Test-Path -LiteralPath $smokeRoot){Remove-Item -LiteralPath $smokeRoot -Recurse -Force -ErrorAction SilentlyContinue}
     Initialize-RuntimeDirectories -Directory @($smokeRoot,$mount)
+
+    $smokeStage='PrepareCopy'
+    $failureCategory=''
+    $sourceAttributes=''
+    $copyAttributesBeforeMount=''
+    $copyWasReadOnlyBeforeMount=$false
+    $copyAttributesAfterMountPreparation=''
+    $copyIsReadOnlyAfterMountPreparation=$null
+
     Copy-Item -LiteralPath $bootWim -Destination $smokeWim -Force
+    $sourceItem=Get-Item -LiteralPath $bootWim -Force -ErrorAction Stop
+    $copyItem=Get-Item -LiteralPath $smokeWim -Force -ErrorAction Stop
+    $sourceAttributes=[string]$sourceItem.Attributes
+    $copyAttributesBeforeMount=[string]$copyItem.Attributes
+    $copyWasReadOnlyBeforeMount=[bool]$copyItem.IsReadOnly
+    Write-Step ('P06 smoke-test WIM copy attributes before mount: {0}; ReadOnly={1}' -f $copyAttributesBeforeMount,$copyWasReadOnlyBeforeMount)
+
     $sourceHash=(Get-FileHash -LiteralPath $bootWim -Algorithm SHA256).Hash.ToLowerInvariant()
     $copyHash=(Get-FileHash -LiteralPath $smokeWim -Algorithm SHA256).Hash.ToLowerInvariant()
     if($sourceHash -ne $copyHash){throw ('P06 boot.wim smoke-test copy hash mismatch: source={0}; copy={1}' -f $sourceHash,$copyHash)}
@@ -16931,18 +16952,25 @@ function Invoke-BootWimServicingSmokeTest {
     $hresult=''
     try{
         Write-Step ('P06 boot.wim servicing smoke test: Server2019 index {0} on verified disposable copy.' -f $index)
-        Invoke-DismCmdlet -CommandName 'Mount-WindowsImage' -Parameters @{
-            ImagePath=$smokeWim;Index=$index;Path=$mount;ErrorAction='Stop'
-            ScratchDirectory=$Script:ScratchDir
-            LogPath=(Join-Path $Script:LogsDir ('P06_bootwim_smoke_mount_idx{0}.log' -f $index))
-        }|Out-Null
+        $smokeStage='Mount'
+        Invoke-WimMountSafe -ImagePath $smokeWim -Index $index -Path $mount -LogDir $Script:LogsDir -LogPath $mountLogPath|Out-Null
         $mounted=$true
+        $copyItemAfterMount=Get-Item -LiteralPath $smokeWim -Force -ErrorAction Stop
+        $copyAttributesAfterMountPreparation=[string]$copyItemAfterMount.Attributes
+        $copyIsReadOnlyAfterMountPreparation=[bool]$copyItemAfterMount.IsReadOnly
+        if($copyIsReadOnlyAfterMountPreparation){
+            throw ('P06 smoke-test WIM remained ReadOnly after writable-mount preparation: {0}' -f $smokeWim)
+        }
+
+        $smokeStage='Readiness'
         Test-PatchServicingReadinessOnMount -MountPath $mount -PatchesToApply $patches -ImageLabel ('P06-smoke:boot.wim:idx{0}' -f $index)|Out-Null
         foreach($sp in $sequence){
             if($sp.PSObject.Properties['IsCleanupMarker'] -and $sp.IsCleanupMarker){continue}
             $failedSubPhase=[string]$sp.Name
+            $smokeStage='ApplySubPhase'
             Invoke-PatchSubPhase -SubPhase $sp -MountPath $mount -ImageLabel ('P06-smoke:boot.wim:idx{0}' -f $index)|Out-Null
             if($sp.PSObject.Properties['RequiresRemount'] -and [bool]$sp.RequiresRemount){
+                $smokeStage='Remount'
                 Invoke-WimDismountSafe -Path $mount -LogDir $Script:LogsDir
                 $mounted=$false
                 Invoke-WimMountSafe -ImagePath $smokeWim -Index $index -Path $mount -LogDir $Script:LogsDir|Out-Null
@@ -16951,19 +16979,49 @@ function Invoke-BootWimServicingSmokeTest {
         }
         $passed=$true
         $failedSubPhase=''
+        $smokeStage='Completed'
     }catch{
         $errorMessage=[string]$_.Exception.Message
         $errorType=$_.Exception.GetType().FullName
         try{$hresult=('0x{0:X8}' -f ([System.BitConverter]::ToUInt32([System.BitConverter]::GetBytes([int32]$_.Exception.HResult),0)))}catch{$hresult=''}
+        switch($smokeStage){
+            'PrepareCopy' {$failureCategory='SmokeTestPreparationFailure'}
+            'Mount' {$failureCategory='SmokeTestInfrastructureFailure'}
+            'Remount' {$failureCategory='SmokeTestInfrastructureFailure'}
+            'Readiness' {$failureCategory='ServicingReadinessFailure'}
+            'ApplySubPhase' {$failureCategory='BootWimServicingCompatibilityFailure'}
+            default {$failureCategory='SmokeTestInfrastructureFailure'}
+        }
     }finally{
         if($mounted){
             Invoke-WimDismountSafe -Path $mount -Discard -LogDir $Script:LogsDir
         }
+        if(Test-Path -LiteralPath $smokeWim -PathType Leaf){
+            try{
+                $copyItemFinal=Get-Item -LiteralPath $smokeWim -Force -ErrorAction Stop
+                if([string]::IsNullOrWhiteSpace($copyAttributesAfterMountPreparation)){
+                    $copyAttributesAfterMountPreparation=[string]$copyItemFinal.Attributes
+                    $copyIsReadOnlyAfterMountPreparation=[bool]$copyItemFinal.IsReadOnly
+                }
+            }catch{$null=$_}
+        }
     }
 
+    if($passed){$failureCategory=''}
     $ended=[datetime]::UtcNow
+    $resultMeaning=''
+    if($passed){
+        $resultMeaning='The selected boot.wim index accepted the resolved servicing sequence on a writable disposable copy.'
+    }
+    elseif($failureCategory -eq 'BootWimServicingCompatibilityFailure' -or $failureCategory -eq 'ServicingReadinessFailure'){
+        $resultMeaning='The source-media boot.wim and resolved patch set did not pass offline-servicing compatibility evaluation. No production WIM was changed.'
+    }
+    else{
+        $resultMeaning='The smoke-test infrastructure failed before source-media and patch compatibility could be evaluated. No production WIM was changed.'
+    }
+
     $evidence=[pscustomobject][ordered]@{
-        SchemaVersion='P06-bootwim-servicing-smoke-test/1.0'
+        SchemaVersion='P06-bootwim-servicing-smoke-test/1.1'
         CreatedAtUtc=$ended.ToString('o')
         RunId=$Script:RunId
         OsKey=$Script:OsVersion
@@ -16972,7 +17030,14 @@ function Invoke-BootWimServicingSmokeTest {
         Status=$(if($passed){'Passed'}else{'Failed'})
         SourceBootWim=$bootWim
         SourceBootWimSha256=$sourceHash
+        SourceFileAttributes=$sourceAttributes
         DisposableCopySha256=$copyHash
+        DisposableCopyAttributesBeforeMount=$copyAttributesBeforeMount
+        DisposableCopyWasReadOnlyBeforeMount=$copyWasReadOnlyBeforeMount
+        MountPreparation='Invoke-WimMountSafe'
+        DisposableCopyAttributesAfterMountPreparation=$copyAttributesAfterMountPreparation
+        DisposableCopyIsReadOnlyAfterMountPreparation=$copyIsReadOnlyAfterMountPreparation
+        MountLogPath=$mountLogPath
         Index=$index
         PatchIds=@($patches|ForEach-Object{[string]$_.PackageId})
         KbIds=@($patches|ForEach-Object{[string]$_.KbId})
@@ -16981,13 +17046,15 @@ function Invoke-BootWimServicingSmokeTest {
         StartedAtUtc=$started.ToString('o')
         EndedAtUtc=$ended.ToString('o')
         ElapsedSeconds=[math]::Round(($ended-$started).TotalSeconds,3)
+        SmokeTestStage=$smokeStage
         FailedSubPhase=$failedSubPhase
+        FailureCategory=$failureCategory
         ErrorType=$errorType
         HResult=$hresult
         ErrorMessage=$errorMessage
         DisposableWorkspace=$smokeRoot
         DisposableWorkspaceRemoved=$false
-        ResultMeaning=$(if($passed){'The selected boot.wim index accepted the resolved servicing sequence on a disposable copy.'}else{'The source-media boot.wim and resolved patch set are not offline-servicing compatible under the configured strategy. No production WIM was changed.'})
+        ResultMeaning=$resultMeaning
     }
     Save-CanonicalJsonFile -InputObject $evidence -Path $evidencePath -Depth 16
     Remove-Item -LiteralPath $smokeRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -16995,7 +17062,10 @@ function Invoke-BootWimServicingSmokeTest {
     Save-CanonicalJsonFile -InputObject $evidence -Path $evidencePath -Depth 16
 
     if(-not $passed){
-        throw ('P06 boot.wim servicing smoke test failed before install.wim servicing. Source media and patch set are incompatible: sub-phase={0}; HRESULT={1}; error={2}. Evidence: {3}' -f $failedSubPhase,$hresult,$errorMessage,$evidencePath)
+        if($failureCategory -eq 'BootWimServicingCompatibilityFailure' -or $failureCategory -eq 'ServicingReadinessFailure'){
+            throw ('P06 boot.wim servicing smoke test failed before install.wim servicing. Source media and patch set did not pass compatibility evaluation: stage={0}; sub-phase={1}; HRESULT={2}; error={3}. Evidence: {4}' -f $smokeStage,$failedSubPhase,$hresult,$errorMessage,$evidencePath)
+        }
+        throw ('P06 boot.wim servicing smoke-test infrastructure failed before compatibility could be evaluated: stage={0}; HRESULT={1}; error={2}. Evidence: {3}' -f $smokeStage,$hresult,$errorMessage,$evidencePath)
     }
     Write-Ok ('P06 boot.wim servicing smoke test passed for index {0}.' -f $index)
     return $evidence
