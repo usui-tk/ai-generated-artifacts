@@ -702,7 +702,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.27-r12.37'
+$Script:ScriptVersion = 'update-wsi-2026.07.27-r12.38'
 # Validation marker: pwsh7-runtime-validated on PowerShell 7.6.4 Linux x64; Windows-native gates remain required.
 $Script:ScriptTag     = 'all-os-version-decision-hardening'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
@@ -12576,7 +12576,17 @@ function ConvertTo-ComparableVersion {
     if ([string]::IsNullOrWhiteSpace($text)) { return $null }
     $m = [regex]::Match($text, '(?<!\d)(\d+\.\d+(?:\.\d+){0,2})(?!\d)')
     if (-not $m.Success) { return $null }
-    try { return [version]$m.Groups[1].Value } catch { return $null }
+    $versionText=$m.Groups[1].Value
+    # Windows component/file versions are frequently expressed as
+    # 10.0.<build>.<revision>, while CBS package identities commonly use
+    # <build>.<revision>[.<branch>.<qfe>].  Compare both in the same build-first
+    # coordinate system so that 10.0.14393.2272 is not treated as older merely
+    # because its major field is 10.
+    $parts=@($versionText.Split('.')|ForEach-Object{[int]$_})
+    if($parts.Count -eq 4 -and $parts[0] -eq 10 -and $parts[1] -eq 0){
+        $versionText=('{0}.{1}' -f $parts[2],$parts[3])
+    }
+    try { return [version]$versionText } catch { return $null }
 }
 
 function Compare-ComparableVersion {
@@ -12684,6 +12694,47 @@ function Get-OfflineServicingInventory {
         StagedSafeOsVersion=(Get-HighestPackageVersion -Records $array -Family 'SafeOSDU' -AllowedStates @('Staged'))
         DotNetRollupVersion=(Get-HighestPackageVersion -Records $array -Family 'DotNetRollup' -AllowedStates @('Installed'))
         StagedDotNetRollupVersion=(Get-HighestPackageVersion -Records $array -Family 'DotNetRollup' -AllowedStates @('Staged'))
+    }
+}
+
+
+function Get-OfflineServicingStackFilesystemState {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)][string]$MountPath)
+
+    $records=[System.Collections.Generic.List[object]]::new()
+    $patterns=@(
+        (Join-Path $MountPath 'Windows\WinSxS\*microsoft-windows-servicingstack*'),
+        (Join-Path $MountPath 'Windows\Servicing\*microsoft-windows-servicingstack*')
+    )
+    foreach($pattern in $patterns){
+        foreach($item in @(Get-ChildItem -Path $pattern -Directory -ErrorAction SilentlyContinue)){
+            $version=''
+            $m=[regex]::Match([string]$item.Name,'(?i)_(\d+\.\d+\.\d+\.\d+)(?:_|$)')
+            if($m.Success){$version=$m.Groups[1].Value}
+            if(-not $version){
+                $cbscore=Join-Path $item.FullName 'cbscore.dll'
+                if(Test-Path -LiteralPath $cbscore -PathType Leaf){
+                    try{$version=[string](Get-Item -LiteralPath $cbscore -ErrorAction Stop).VersionInfo.FileVersion}catch{}
+                }
+            }
+            $comparable=ConvertTo-ComparableVersion -Value $version
+            if($comparable){
+                $records.Add([pscustomobject][ordered]@{
+                    Path=$item.FullName;DirectoryName=$item.Name;Version=[string]$comparable;Source='ServicingStackComponentDirectory'
+                })|Out-Null
+            }
+        }
+    }
+    $array=@($records.ToArray()|Sort-Object @{Expression={ConvertTo-ComparableVersion -Value $_.Version};Descending=$true},Path -Unique)
+    $selected=if($array.Count -gt 0){[string]$array[0].Version}else{''}
+    return [pscustomobject][ordered]@{
+        SchemaVersion='offline-servicing-stack-filesystem-state/1.0'
+        SelectedVersion=$selected
+        CandidateCount=$array.Count
+        Candidates=$array
+        Source=$(if($selected){'ServicingStackComponentDirectory'}else{'Unavailable'})
     }
 }
 
@@ -12887,8 +12938,12 @@ function Get-OfflineWindowsState {
     $packages=@()
     try{$packages=@(Invoke-DismCmdlet -CommandName 'Get-WindowsPackage' -Parameters @{Path=$MountPath;ErrorAction='Stop'})}catch{throw ('Unable to inventory packages for mounted image {0}: {1}' -f $MountPath,$_.Exception.Message)}
     $inventory=Get-OfflineServicingInventory -Packages $packages
+    $filesystemSsu=Get-OfflineServicingStackFilesystemState -MountPath $MountPath
+    $activeSsu=[string]$inventory.ServicingStackVersion
+    $activeSsuSource=$(if($activeSsu){'InstalledPackageIdentity'}elseif($filesystemSsu.SelectedVersion){'ServicingStackComponentDirectory'}else{'Unavailable'})
+    if(-not $activeSsu -and $filesystemSsu.SelectedVersion){$activeSsu=[string]$filesystemSsu.SelectedVersion}
     $softwareHive = Join-Path $MountPath 'Windows\System32\Config\SOFTWARE'
-    $base=[ordered]@{Build='';Ubr=0;Version='';DotNetRelease=0;DotNetVersion='Unknown';PackageInventory=$inventory;ServicingStackVersion=$inventory.ServicingStackVersion;StagedServicingStackVersion=$inventory.StagedServicingStackVersion;RollupFixVersion=$inventory.RollupFixVersion;StagedRollupFixVersion=$inventory.StagedRollupFixVersion;SafeOsVersion=$inventory.SafeOsVersion;StagedSafeOsVersion=$inventory.StagedSafeOsVersion;DotNetRollupVersion=$inventory.DotNetRollupVersion;StagedDotNetRollupVersion=$inventory.StagedDotNetRollupVersion;PendingPackages=$inventory.PendingPackages;PendingPackageCount=$inventory.PendingPackageCount;StagedPackages=$inventory.StagedPackages;StagedPackageCount=$inventory.StagedPackageCount}
+    $base=[ordered]@{Build='';Ubr=0;Version='';DotNetRelease=0;DotNetVersion='Unknown';PackageInventory=$inventory;ServicingStackVersion=$activeSsu;ServicingStackVersionSource=$activeSsuSource;ServicingStackFilesystemState=$filesystemSsu;StagedServicingStackVersion=$inventory.StagedServicingStackVersion;RollupFixVersion=$inventory.RollupFixVersion;StagedRollupFixVersion=$inventory.StagedRollupFixVersion;SafeOsVersion=$inventory.SafeOsVersion;StagedSafeOsVersion=$inventory.StagedSafeOsVersion;DotNetRollupVersion=$inventory.DotNetRollupVersion;StagedDotNetRollupVersion=$inventory.StagedDotNetRollupVersion;PendingPackages=$inventory.PendingPackages;PendingPackageCount=$inventory.PendingPackageCount;StagedPackages=$inventory.StagedPackages;StagedPackageCount=$inventory.StagedPackageCount}
     if (-not (Test-Path -LiteralPath $softwareHive)) { return [pscustomobject]$base }
     $mountName = ('WSI_{0}_{1}' -f $PID, ([Guid]::NewGuid().ToString('N')))
     $regRoot = ('Registry::HKEY_LOCAL_MACHINE\' + $mountName)
@@ -12988,7 +13043,7 @@ function New-PatchVersionDecision {
         SchemaVersion='patch-version-decision/1.0';Timestamp=[datetime]::UtcNow.ToString('o');RunId=$Script:RunId;OsKey=$Script:OsVersion;OsLanguage=$Script:OsLanguage
         ImageLabel=$ImageLabel;PackageId=$(if($Patch.PSObject.Properties['PackageId']){[string]$Patch.PackageId}else{''});KbId=[string]$Patch.KbId;PatchType=(Get-PatchEntryType -Patch $Patch)
         Decision=$Decision;ReasonCode=$ReasonCode;Reason=$Reason
-        CurrentImageVersion=$(if($OfflineState){[string]$OfflineState.Version}else{''});CurrentServicingStackVersion=$(if($OfflineState){[string]$OfflineState.ServicingStackVersion}else{''})
+        CurrentImageVersion=$(if($OfflineState){[string]$OfflineState.Version}else{''});CurrentServicingStackVersion=$(if($OfflineState){[string]$OfflineState.ServicingStackVersion}else{''});CurrentServicingStackVersionSource=$(if($OfflineState -and $OfflineState.PSObject.Properties['ServicingStackVersionSource']){[string]$OfflineState.ServicingStackVersionSource}else{''})
         CurrentRollupFixVersion=$(if($OfflineState){[string]$OfflineState.RollupFixVersion}else{''});CurrentSafeOsVersion=$(if($OfflineState){[string]$OfflineState.SafeOsVersion}else{''});CurrentDotNetRollupVersion=$(if($OfflineState){[string]$OfflineState.DotNetRollupVersion}else{''})
         PendingPackageCount=$(if($OfflineState){[int]$OfflineState.PendingPackageCount}else{0})
         CandidateTargetVersion=$(if($AssetMetadata){[string]$AssetMetadata.TargetVersion}else{''});CandidatePackageVersion=$(if($AssetMetadata){[string]$AssetMetadata.CandidatePackageVersion}else{''});CandidateServicingStackVersion=$(if($AssetMetadata){[string]$AssetMetadata.EmbeddedServicingStackVersion}else{''})
@@ -16887,7 +16942,7 @@ function Invoke-VersionDecisionPreflight {
     $json=Join-Path $Script:VersionDecisionDir 'P06_patch_version_decision_plan.json'
     $csv=Join-Path $Script:VersionDecisionDir 'P06_patch_version_decision_plan.csv'
     Save-CanonicalJsonFile -InputObject $summary -Path $json -Depth 24
-    $array|Select-Object ImageLabel,PackageId,KbId,PatchType,Decision,ReasonCode,Reason,CurrentImageVersion,CurrentServicingStackVersion,CurrentRollupFixVersion,CurrentSafeOsVersion,CurrentDotNetRollupVersion,CandidateTargetVersion,CandidatePackageVersion,CandidateServicingStackVersion,PendingPackageCount,AssetSha256,AssetMetadataStatus|Export-Csv -LiteralPath $csv -NoTypeInformation -Encoding UTF8
+    $array|Select-Object ImageLabel,PackageId,KbId,PatchType,Decision,ReasonCode,Reason,CurrentImageVersion,CurrentServicingStackVersion,CurrentServicingStackVersionSource,CurrentRollupFixVersion,CurrentSafeOsVersion,CurrentDotNetRollupVersion,CandidateTargetVersion,CandidatePackageVersion,CandidateServicingStackVersion,PendingPackageCount,AssetSha256,AssetMetadataStatus|Export-Csv -LiteralPath $csv -NoTypeInformation -Encoding UTF8
     if($blocking.Count -gt 0){throw ('P06 version-decision gate blocked servicing with {0} decision(s). See {1}.' -f $blocking.Count,$json)}
     return $summary
 }
