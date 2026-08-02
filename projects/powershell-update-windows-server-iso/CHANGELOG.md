@@ -22,6 +22,34 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.26-r12.36] - 2026-08-02
+
+Revision r12.36 carries two independent delivered works under one
+revision number (series ruling: two commits, one CHANGELOG heading).
+
+Part 1 — tag: `server2019-bootwim-hresult-policy-fix`.
+
+### Fixed
+
+- **Boot.wim failure policy decides on the HRESULT, not localized
+  text**: DISM exceptions for cases like `0x80070032` can carry only
+  a localized message while the machine-readable `HResult` remains on
+  the exception; a new `Get-ExceptionDiagnosticText` helper renders
+  the unsigned `HRESULT=0x…` alongside the message, the P08 boot.wim
+  failure decision consumes that diagnostic, and the policy exception
+  is recorded as a structured `bootwim-policy-exception` JSONL entry
+  (type, message, diagnostic, image, policy, strategy, error code,
+  install-validation flag). Script-only change.
+- **T40**: release pin advanced to `update-wsi-2026.07.26-r12.36`
+  with the measured tag.
+
+### Gate state (measured on the branch, after part 1)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **2E/94W/9I** on
+the committed tree — unchanged from r12.35; committed verbatim per
+the no-fix-forward rule.
+
 ## [update-wsi-2026.07.26-r12.35] - 2026-08-02
 
 Tag: `resume-checkpoint-evidence-hardening` (the tag advances; the

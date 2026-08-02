@@ -700,9 +700,9 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.26-r12.35'
+$Script:ScriptVersion = 'update-wsi-2026.07.26-r12.36'
 # Validation marker: pwsh7-runtime-validated on PowerShell 7.6.4 Linux x64; Windows-native gates remain required.
-$Script:ScriptTag     = 'resume-checkpoint-evidence-hardening'
+$Script:ScriptTag     = 'server2019-bootwim-hresult-policy-fix'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -7015,6 +7015,36 @@ function Invoke-WimDismountSafe {
     }
 }
 
+function Get-ExceptionDiagnosticText {
+    <#
+    .SYNOPSIS
+        Build a locale-independent diagnostic string from an exception chain.
+    .DESCRIPTION
+        DISM cmdlets localize Exception.Message. On ja-JP hosts a COMException
+        for 0x80070032 can therefore contain only a localized text message,
+        while the machine-readable HRESULT remains available on the exception.
+        Policy and retry decisions must inspect both sources so that known
+        error handling is stable across Windows display languages.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([AllowNull()][System.Exception]$Exception)
+
+    if ($null -eq $Exception) { return '' }
+    $parts = [System.Collections.Generic.List[string]]::new()
+    $seen = [System.Collections.Generic.HashSet[System.Exception]]::new()
+    $current = $Exception
+    while ($null -ne $current -and $seen.Add($current)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$current.Message)) {
+            $parts.Add(([string]$current.Message).Trim()) | Out-Null
+        }
+        $unsignedHResult = (([int64]$current.HResult) -band 0xFFFFFFFFL)
+        $parts.Add(('HRESULT=0x{0:X8}' -f $unsignedHResult)) | Out-Null
+        $current = $current.InnerException
+    }
+    return (($parts.ToArray() | Select-Object -Unique) -join ' | ')
+}
+
 function Add-WindowsPackageWithRetry {
     <#
     .SYNOPSIS
@@ -7053,7 +7083,7 @@ function Add-WindowsPackageWithRetry {
         Write-DismLogClassificationEvidence -LogPath $logPathUsed -OperationStatus 'Ok' -Context ([System.IO.Path]::GetFileName($PackagePath)) -Metadata $EvidenceMetadata | Out-Null
         return 'Ok'
     } catch {
-        $m = [string]$_.Exception.Message
+        $m = Get-ExceptionDiagnosticText -Exception $_.Exception
         $hresult = [int]$_.Exception.HResult
         # Microsoft's installation-media sample documents 0x8007007e as a
         # known result when a combined LCU is supplied to WinRE only to carry
@@ -16654,7 +16684,8 @@ function Invoke-BuildPhase08_PatchBootWim {
                     Assert-ExpandedBootLcuTarget -MountPath $mountDir -ImageLabel $imgLabel
                     $idxSucceeded = $true
                 } catch {
-                    $failureDecision=Get-BootWimFailurePolicyDecision -FailurePolicy $bootFailurePolicy -ErrorText ([string]$_.Exception.Message) -ImageLabel $imgLabel
+                    $failureDiagnostic=Get-ExceptionDiagnosticText -Exception $_.Exception
+                    $failureDecision=Get-BootWimFailurePolicyDecision -FailurePolicy $bootFailurePolicy -ErrorText $failureDiagnostic -ImageLabel $imgLabel
                     if($failureDecision.Allowed){
                         $idxFailed=$true
                         $bootPolicyException=[pscustomobject][ordered]@{
@@ -16663,11 +16694,12 @@ function Invoke-BuildPhase08_PatchBootWim {
                             ImageLabel=$imgLabel;BootWimLcuPolicy=$bootPolicy
                             BootWimFailurePolicy=$bootFailurePolicy;BootWimServicingStrategy=$bootServicingStrategy
                             ErrorCode=$failureDecision.ErrorCode;ErrorMessage=[string]$_.Exception.Message
+                            ErrorDiagnostic=$failureDiagnostic
                             PreserveSourceBootWim=$true;RequiresInstallValidation=$true
                             Reason=$failureDecision.Reason
                         }
                         Write-Caution ('{0}: {1} The mounted index will be discarded; the complete source boot.wim will be restored.' -f $imgLabel,$failureDecision.Reason)
-                        Add-ErrorJsonlEntry -Phase 'P08' -Kind 'bootwim-policy-exception' -Properties @{exType=$_.Exception.GetType().FullName;msg=$_.Exception.Message;image=$imgLabel;policy=$bootFailurePolicy;strategy=$bootServicingStrategy;errorCode=$failureDecision.ErrorCode;requiresInstallValidation=$true}
+                        Add-ErrorJsonlEntry -Phase 'P08' -Kind 'bootwim-policy-exception' -Properties @{exType=$_.Exception.GetType().FullName;msg=$_.Exception.Message;diagnostic=$failureDiagnostic;image=$imgLabel;policy=$bootFailurePolicy;strategy=$bootServicingStrategy;errorCode=$failureDecision.ErrorCode;requiresInstallValidation=$true}
                     } elseif ($bootPolicy -eq 'tolerate') {
                         $idxFailed = $true
                         Write-Caution ('{0}: boot.wim servicing failed under BootWimLcuPolicy=tolerate; DISCARDING this index and continuing. Error: {1}' -f $imgLabel, $_.Exception.Message)
