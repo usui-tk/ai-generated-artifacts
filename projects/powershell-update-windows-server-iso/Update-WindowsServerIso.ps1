@@ -700,9 +700,9 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.26-r12.36'
+$Script:ScriptVersion = 'update-wsi-2026.07.27-r12.36'
 # Validation marker: pwsh7-runtime-validated on PowerShell 7.6.4 Linux x64; Windows-native gates remain required.
-$Script:ScriptTag     = 'server2019-bootwim-hresult-policy-fix'
+$Script:ScriptTag     = 'offline-servicing-failure-forensics'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -7015,34 +7015,214 @@ function Invoke-WimDismountSafe {
     }
 }
 
-function Get-ExceptionDiagnosticText {
+function Copy-ServicingEvidenceFile {
+    <# Copy one evidence file without allowing collection failure to hide the original servicing error. #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$DestinationPath
+    )
+    try {
+        if (-not (Test-Path -LiteralPath $SourcePath -PathType Leaf)) {
+            return [pscustomobject]@{ SourcePath=$SourcePath; DestinationPath=$DestinationPath; Status='NotPresent'; LengthBytes=0; Sha256='' }
+        }
+        $parent=Split-Path -Parent $DestinationPath
+        if($parent){New-Item -ItemType Directory -Path $parent -Force|Out-Null}
+        Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force -ErrorAction Stop
+        $item=Get-Item -LiteralPath $DestinationPath -Force -ErrorAction Stop
+        return [pscustomobject]@{
+            SourcePath=$SourcePath;DestinationPath=$DestinationPath;Status='Copied'
+            LengthBytes=[long]$item.Length
+            Sha256=(Get-FileHash -LiteralPath $DestinationPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    } catch {
+        return [pscustomobject]@{ SourcePath=$SourcePath; DestinationPath=$DestinationPath; Status='CopyFailed'; LengthBytes=0; Sha256=''; Error=$_.Exception.Message }
+    }
+}
+
+function Copy-ServicingLogTailEvidence {
+    <# Capture a bounded tail from a live host servicing log that may be locked for append. #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$SourcePath,
+        [Parameter(Mandatory)][string]$DestinationPath,
+        [int]$TailLines=50000
+    )
+    try {
+        if(-not(Test-Path -LiteralPath $SourcePath -PathType Leaf)){
+            return [pscustomobject]@{SourcePath=$SourcePath;DestinationPath=$DestinationPath;Status='NotPresent';TailLines=$TailLines;LengthBytes=0;Sha256=''}
+        }
+        $parent=Split-Path -Parent $DestinationPath
+        if($parent){New-Item -ItemType Directory -Path $parent -Force|Out-Null}
+        Get-Content -LiteralPath $SourcePath -Tail $TailLines -ErrorAction Stop|Set-Content -LiteralPath $DestinationPath -Encoding UTF8
+        $item=Get-Item -LiteralPath $DestinationPath -Force
+        return [pscustomobject]@{
+            SourcePath=$SourcePath;DestinationPath=$DestinationPath;Status='TailCopied';TailLines=$TailLines
+            LengthBytes=[long]$item.Length;Sha256=(Get-FileHash -LiteralPath $DestinationPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    } catch {
+        return [pscustomobject]@{SourcePath=$SourcePath;DestinationPath=$DestinationPath;Status='CopyFailed';TailLines=$TailLines;LengthBytes=0;Sha256='';Error=$_.Exception.Message}
+    }
+}
+
+function Export-OfflineServicingFailureEvidence {
     <#
     .SYNOPSIS
-        Build a locale-independent diagnostic string from an exception chain.
+        Capture the mounted image's servicing transaction state before
+        the caller discards the failed mount.
     .DESCRIPTION
-        DISM cmdlets localize Exception.Message. On ja-JP hosts a COMException
-        for 0x80070032 can therefore contain only a localized text message,
-        while the machine-readable HRESULT remains available on the exception.
-        Policy and retry decisions must inspect both sources so that known
-        error handling is stable across Windows display languages.
+        The evidence is deliberately limited to logs, XML/text metadata,
+        inventories, hashes, and targeted COMPONENTS registry queries.
+        WIM/MSU/CAB/CAT and registry-hive payloads are never copied.
+        Collection is best-effort and never replaces the original DISM
+        exception.
     #>
     [CmdletBinding()]
-    [OutputType([string])]
-    param([AllowNull()][System.Exception]$Exception)
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$MountPath,
+        [Parameter(Mandatory)][string]$PackagePath,
+        [AllowEmptyString()][string]$DismLogPath='',
+        [hashtable]$Metadata=@{},
+        [AllowNull()][object]$Exception
+    )
+    $imageLabel=if($Metadata.ContainsKey('ImageLabel')){[string]$Metadata.ImageLabel}else{'offline-image'}
+    $kbId=if($Metadata.ContainsKey('KbId')){[string]$Metadata.KbId}else{''}
+    $safeLabel=(($imageLabel+'-'+$kbId)-replace '[^A-Za-z0-9._-]','_').Trim('_')
+    if([string]::IsNullOrWhiteSpace($safeLabel)){$safeLabel='offline-image'}
+    $stamp=[datetime]::UtcNow.ToString('yyyyMMdd-HHmmssfff')
+    $root=Join-Path $Script:LogsDir ('servicing-failure-evidence\{0}-{1}' -f $stamp,$safeLabel)
+    New-Item -ItemType Directory -Path $root -Force|Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $root 'pending') -Force|Out-Null
+    $issues=[System.Collections.Generic.List[string]]::new()
+    $copies=[System.Collections.Generic.List[object]]::new()
 
-    if ($null -eq $Exception) { return '' }
-    $parts = [System.Collections.Generic.List[string]]::new()
-    $seen = [System.Collections.Generic.HashSet[System.Exception]]::new()
-    $current = $Exception
-    while ($null -ne $current -and $seen.Add($current)) {
-        if (-not [string]::IsNullOrWhiteSpace([string]$current.Message)) {
-            $parts.Add(([string]$current.Message).Trim()) | Out-Null
+    try {
+        $sourceSpecs=@(
+            [pscustomobject]@{Source=(Join-Path $MountPath 'Windows\WinSxS\pending.xml');Relative='pending\Windows-WinSxS-pending.xml'},
+            [pscustomobject]@{Source=(Join-Path $MountPath 'Windows\WinSxS\pending.xml.bad');Relative='pending\Windows-WinSxS-pending.xml.bad'},
+            [pscustomobject]@{Source=(Join-Path $MountPath 'Windows\WinSxS\cleanup.xml');Relative='pending\Windows-WinSxS-cleanup.xml'},
+            [pscustomobject]@{Source=(Join-Path $MountPath 'Windows\WinSxS\reboot.xml');Relative='pending\Windows-WinSxS-reboot.xml'},
+            [pscustomobject]@{Source=(Join-Path $MountPath 'Windows\servicing\RebootPending.xml');Relative='pending\Windows-servicing-RebootPending.xml'}
+        )
+        if($DismLogPath){
+            $sourceSpecs+= [pscustomobject]@{Source=$DismLogPath;Relative='host-dism\operation.log'}
         }
-        $unsignedHResult = (([int64]$current.HResult) -band 0xFFFFFFFFL)
-        $parts.Add(('HRESULT=0x{0:X8}' -f $unsignedHResult)) | Out-Null
-        $current = $current.InnerException
+        foreach($spec in $sourceSpecs){
+            $copies.Add((Copy-ServicingEvidenceFile -SourcePath $spec.Source -DestinationPath (Join-Path $root $spec.Relative)))|Out-Null
+        }
+        if($env:windir){
+            $copies.Add((Copy-ServicingLogTailEvidence -SourcePath (Join-Path $env:windir 'Logs\CBS\CBS.log') -DestinationPath (Join-Path $root 'host-servicing-log-tail\CBS.log')))|Out-Null
+            $copies.Add((Copy-ServicingLogTailEvidence -SourcePath (Join-Path $env:windir 'Logs\DISM\dism.log') -DestinationPath (Join-Path $root 'host-servicing-log-tail\dism.log')))|Out-Null
+        }
+
+        foreach($logArea in @(
+            [pscustomobject]@{Source=(Join-Path $MountPath 'Windows\Logs\CBS');Relative='image-logs\CBS'},
+            [pscustomobject]@{Source=(Join-Path $MountPath 'Windows\Logs\DISM');Relative='image-logs\DISM'}
+        )){
+            if(Test-Path -LiteralPath $logArea.Source -PathType Container){
+                foreach($file in @(Get-ChildItem -LiteralPath $logArea.Source -File -Recurse -ErrorAction SilentlyContinue|Where-Object{$_.Extension -in @('.log','.txt','.xml')})){
+                    $rel=$file.FullName.Substring($logArea.Source.Length).TrimStart([char[]]@('\','/'))
+                    $copies.Add((Copy-ServicingEvidenceFile -SourcePath $file.FullName -DestinationPath (Join-Path (Join-Path $root $logArea.Relative) $rel)))|Out-Null
+                }
+            }
+        }
+
+        $sessionsRoot=Join-Path $MountPath 'Windows\servicing\Sessions'
+        if(Test-Path -LiteralPath $sessionsRoot -PathType Container){
+            foreach($file in @(Get-ChildItem -LiteralPath $sessionsRoot -File -Recurse -ErrorAction SilentlyContinue|Where-Object{$_.Extension -in @('.xml','.txt','.log')})){
+                $rel=$file.FullName.Substring($sessionsRoot.Length).TrimStart([char[]]@('\','/'))
+                $copies.Add((Copy-ServicingEvidenceFile -SourcePath $file.FullName -DestinationPath (Join-Path (Join-Path $root 'sessions') $rel)))|Out-Null
+            }
+        }
+
+        foreach($pendingDir in @('Windows\WinSxS\Temp\PendingDeletes','Windows\WinSxS\Temp\PendingRenames')){
+            $full=Join-Path $MountPath $pendingDir
+            $rows=@()
+            if(Test-Path -LiteralPath $full -PathType Container){
+                $rows=@(Get-ChildItem -LiteralPath $full -Force -Recurse -ErrorAction SilentlyContinue|ForEach-Object{
+                    [pscustomobject]@{RelativePath=$_.FullName.Substring($full.Length).TrimStart([char[]]@('\','/'));IsDirectory=$_.PSIsContainer;LengthBytes=$(if($_.PSIsContainer){0}else{[long]$_.Length});LastWriteTimeUtc=$_.LastWriteTimeUtc.ToString('o')}
+                })
+            }
+            Save-CanonicalJsonFile -InputObject $rows -Path (Join-Path $root (('pending\{0}-inventory.json' -f (($pendingDir -replace '[\\/]','-'))))) -Depth 8
+        }
+
+        try {
+            $packages=@(Invoke-DismCmdlet -CommandName 'Get-WindowsPackage' -Parameters @{Path=$MountPath;ErrorAction='Stop'}|ForEach-Object{
+                [pscustomobject]@{PackageName=[string]$_.PackageName;PackageIdentity=[string]$_.PackageIdentity;PackageState=[string]$_.PackageState;ReleaseType=[string]$_.ReleaseType;InstallTime=$(if($_.InstallTime){$_.InstallTime.ToString('o')}else{''})}
+            })
+            Save-CanonicalJsonFile -InputObject $packages -Path (Join-Path $root 'packages-after-failure.json') -Depth 8
+        } catch {$issues.Add(('Get-WindowsPackage: '+$_.Exception.Message))|Out-Null}
+
+        try {
+            $features=@(Invoke-DismCmdlet -CommandName 'Get-WindowsOptionalFeature' -Parameters @{Path=$MountPath;ErrorAction='Stop'}|ForEach-Object{
+                [pscustomobject]@{FeatureName=[string]$_.FeatureName;State=[string]$_.State}
+            })
+            Save-CanonicalJsonFile -InputObject $features -Path (Join-Path $root 'optional-features-after-failure.json') -Depth 6
+        } catch {$issues.Add(('Get-WindowsOptionalFeature: '+$_.Exception.Message))|Out-Null}
+
+        $componentNeedles=@('BootEnvironment-PXE.Resources','qps-ploc')
+        $componentRows=[System.Collections.Generic.List[object]]::new()
+        foreach($baseRel in @('Windows\WinSxS\Manifests','Windows\servicing\Packages')){
+            $base=Join-Path $MountPath $baseRel
+            if(-not(Test-Path -LiteralPath $base -PathType Container)){continue}
+            foreach($file in @(Get-ChildItem -LiteralPath $base -File -Recurse -ErrorAction SilentlyContinue|Where-Object{
+                $name=$_.Name;@($componentNeedles|Where-Object{$name -match [regex]::Escape($_)}).Count -gt 0
+            })){
+                $hash=''
+                try{$hash=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}catch{$issues.Add(('Hash '+$file.FullName+': '+$_.Exception.Message))|Out-Null}
+                $componentRows.Add([pscustomobject]@{RelativePath=$file.FullName.Substring($MountPath.Length).TrimStart([char[]]@('\','/'));LengthBytes=[long]$file.Length;Sha256=$hash})|Out-Null
+                if($file.Extension -in @('.manifest','.mum')){
+                    $dest=Join-Path $root ('component-text\'+$file.Name)
+                    $copies.Add((Copy-ServicingEvidenceFile -SourcePath $file.FullName -DestinationPath $dest))|Out-Null
+                }
+            }
+        }
+        Save-CanonicalJsonFile -InputObject $componentRows.ToArray() -Path (Join-Path $root 'pxe-qps-component-files.json') -Depth 8
+
+        $componentsHive=Join-Path $MountPath 'Windows\System32\Config\COMPONENTS'
+        $regRoot=('WSI_COMPONENTS_{0}_{1}' -f $PID,[Guid]::NewGuid().ToString('N'))
+        $loaded=$false
+        try {
+            if(Test-Path -LiteralPath $componentsHive -PathType Leaf){
+                $regLoadLog=Join-Path $root 'components-registry-load.txt'
+                & reg.exe load ('HKLM\'+$regRoot) $componentsHive 2>&1|Set-Content -LiteralPath $regLoadLog -Encoding UTF8
+                if($LASTEXITCODE -eq 0){
+                    $loaded=$true
+                    foreach($needle in $componentNeedles){
+                        $safeNeedle=$needle -replace '[^A-Za-z0-9._-]','_'
+                        & reg.exe query ('HKLM\'+$regRoot) /f $needle /s 2>&1|Set-Content -LiteralPath (Join-Path $root ('components-registry-'+$safeNeedle+'.txt')) -Encoding UTF8
+                    }
+                }else{$issues.Add(('COMPONENTS reg load exit code '+$LASTEXITCODE))|Out-Null}
+            }else{$issues.Add('COMPONENTS hive is not present.')|Out-Null}
+        } catch {$issues.Add(('COMPONENTS query: '+$_.Exception.Message))|Out-Null}
+        finally {
+            if($loaded){
+                [gc]::Collect();[gc]::WaitForPendingFinalizers()
+                $regUnloadLog=Join-Path $root 'components-registry-unload.txt'
+                & reg.exe unload ('HKLM\'+$regRoot) 2>&1|Set-Content -LiteralPath $regUnloadLog -Encoding UTF8
+            }
+        }
+    } catch {$issues.Add(('Collector: '+$_.Exception.Message))|Out-Null}
+
+    $packageItem=$null
+    try{$packageItem=Get-Item -LiteralPath $PackagePath -Force -ErrorAction Stop}catch{$issues.Add(('Package stat: '+$_.Exception.Message))|Out-Null}
+    $summary=[pscustomobject][ordered]@{
+        SchemaVersion='offline-servicing-failure-evidence/1.0';CreatedAtUtc=[datetime]::UtcNow.ToString('o')
+        ScriptVersion=$Script:ScriptVersion;RunId=[string]$Script:RunId;OsKey=[string]$Script:OsVersion
+        MountPath=$MountPath;ImageLabel=$imageLabel;KbId=$kbId
+        Package=[pscustomobject]@{Path=$PackagePath;FileName=[System.IO.Path]::GetFileName($PackagePath);LengthBytes=$(if($packageItem){[long]$packageItem.Length}else{0});Sha256=$(if($packageItem){(Get-FileHash -LiteralPath $PackagePath -Algorithm SHA256).Hash.ToLowerInvariant()}else{''})}
+        DismLogPath=$DismLogPath;ExceptionType=$(if($Exception){$Exception.GetType().FullName}else{''})
+        ExceptionMessage=$(if($Exception){[string]$Exception.Message}else{''})
+        HResult=$(if($Exception){'0x{0:X8}' -f (([int64]$Exception.HResult)-band 4294967295)}else{''})
+        Metadata=$Metadata;CopiedFiles=$copies.ToArray();CollectionIssues=$issues.ToArray()
+        EvidenceRoot=$root;Passed=($issues.Count -eq 0)
     }
-    return (($parts.ToArray() | Select-Object -Unique) -join ' | ')
+    Save-CanonicalJsonFile -InputObject $summary -Path (Join-Path $root 'summary.json') -Depth 12
+    Write-Caution ('Offline servicing failure evidence captured before discard: {0}' -f $root)
+    return $summary
 }
 
 function Add-WindowsPackageWithRetry {
@@ -7083,7 +7263,7 @@ function Add-WindowsPackageWithRetry {
         Write-DismLogClassificationEvidence -LogPath $logPathUsed -OperationStatus 'Ok' -Context ([System.IO.Path]::GetFileName($PackagePath)) -Metadata $EvidenceMetadata | Out-Null
         return 'Ok'
     } catch {
-        $m = Get-ExceptionDiagnosticText -Exception $_.Exception
+        $m = [string]$_.Exception.Message
         $hresult = [int]$_.Exception.HResult
         # Microsoft's installation-media sample documents 0x8007007e as a
         # known result when a combined LCU is supplied to WinRE only to carry
@@ -7112,12 +7292,14 @@ function Add-WindowsPackageWithRetry {
             } catch {
                 $logPathUsed = if ($extraArg.ContainsKey('LogPath')) { [string]$extraArg['LogPath'] } else { '' }
                 Write-DismLogClassificationEvidence -LogPath $logPathUsed -OperationStatus 'Fail' -Context ([System.IO.Path]::GetFileName($PackagePath)) -Metadata $EvidenceMetadata -Exception $_.Exception -DoNotThrow | Out-Null
+                try { Export-OfflineServicingFailureEvidence -MountPath $MountPath -PackagePath $PackagePath -DismLogPath $logPathUsed -Metadata $EvidenceMetadata -Exception $_.Exception | Out-Null } catch { Write-Caution ('Failure-evidence collection also failed: {0}' -f $_.Exception.Message) }
                 throw
             }
         }
         # All other errors propagate, but failure evidence is always persisted first.
         $logPathUsed = if ($extraArg.ContainsKey('LogPath')) { [string]$extraArg['LogPath'] } else { '' }
         Write-DismLogClassificationEvidence -LogPath $logPathUsed -OperationStatus 'Fail' -Context ([System.IO.Path]::GetFileName($PackagePath)) -Metadata $EvidenceMetadata -Exception $_.Exception -DoNotThrow | Out-Null
+        try { Export-OfflineServicingFailureEvidence -MountPath $MountPath -PackagePath $PackagePath -DismLogPath $logPathUsed -Metadata $EvidenceMetadata -Exception $_.Exception | Out-Null } catch { Write-Caution ('Failure-evidence collection also failed: {0}' -f $_.Exception.Message) }
         throw
     }
 }
@@ -12009,6 +12191,110 @@ function Get-BootWimServicingStrategy {
     return (Resolve-BootWimServicingStrategyValue -RawValue $raw -PackageMode $mode)
 }
 
+function Export-ExpandedMsuMetadataEvidence {
+    <#
+    .SYNOPSIS
+        Persist an evidence-only analysis of an expanded MSU and its package MUMs.
+    .DESCRIPTION
+        CAB/MSU/CAT payload bytes remain outside Logs. Evidence contains hashes,
+        package/parent identities, the outer XML/TXT metadata, and raw MUM text
+        only for PXE/qps-ploc-relevant components.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$MsuPath,
+        [Parameter(Mandatory)][string]$KbId,
+        [Parameter(Mandatory)][string]$PayloadRoot,
+        [Parameter(Mandatory)][object[]]$CabPlan,
+        [Parameter(Mandatory)][string]$WorkingRoot
+    )
+    $safeName=([System.IO.Path]::GetFileNameWithoutExtension($MsuPath)-replace '[^A-Za-z0-9._-]','_')
+    $root=Join-Path $Script:LogsDir ('package-metadata\'+$safeName)
+    $mumTextRoot=Join-Path $root 'relevant-mum'
+    New-Item -ItemType Directory -Path $mumTextRoot -Force|Out-Null
+    $issues=[System.Collections.Generic.List[string]]::new()
+    $cabRows=[System.Collections.Generic.List[object]]::new()
+    $mumRows=[System.Collections.Generic.List[object]]::new()
+
+    foreach($entry in @($CabPlan)){
+        $cabPath=[string]$entry.CabPath
+        $cabItem=$null
+        try{$cabItem=Get-Item -LiteralPath $cabPath -Force -ErrorAction Stop}catch{$issues.Add(('CAB stat: '+$_.Exception.Message))|Out-Null;continue}
+        $cabHash=''
+        try{$cabHash=(Get-FileHash -LiteralPath $cabPath -Algorithm SHA256).Hash.ToLowerInvariant()}catch{$issues.Add(('CAB hash: '+$_.Exception.Message))|Out-Null}
+        $cabRows.Add([pscustomobject]@{FileName=$cabItem.Name;Role=[string]$entry.Role;LengthBytes=[long]$cabItem.Length;Sha256=$cabHash;PayloadRetainedInEvidence=$false})|Out-Null
+        $mumRoot=Join-Path $WorkingRoot ('evidence-mum-'+[Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $mumRoot -Force|Out-Null
+        try {
+            & expand.exe -F:*.mum $cabPath $mumRoot | Out-Null
+            if($LASTEXITCODE -ne 0){$issues.Add(('MUM expansion failed for '+$cabItem.Name+' with exit code '+$LASTEXITCODE))|Out-Null;continue}
+            foreach($mum in @(Get-ChildItem -LiteralPath $mumRoot -File -Recurse -Filter '*.mum' -ErrorAction SilentlyContinue)){
+                $raw=''
+                try{$raw=Get-Content -LiteralPath $mum.FullName -Raw -ErrorAction Stop}catch{$issues.Add(('MUM read '+$mum.Name+': '+$_.Exception.Message))|Out-Null}
+                $identity=$null;$parents=@();$parseStatus='Parsed'
+                try {
+                    [xml]$doc=$raw
+                    $identityNode=$doc.SelectSingleNode("/*[local-name()='assembly']/*[local-name()='assemblyIdentity']")
+                    if(-not $identityNode){$identityNode=$doc.SelectSingleNode("//*[local-name()='package']/*[local-name()='assemblyIdentity']")}
+                    if($identityNode){
+                        $identity=[pscustomobject]@{Name=[string]$identityNode.name;Version=[string]$identityNode.version;ProcessorArchitecture=[string]$identityNode.processorArchitecture;Language=[string]$identityNode.language;PublicKeyToken=[string]$identityNode.publicKeyToken}
+                    }
+                    $parents=@($doc.SelectNodes("//*[local-name()='parent']//*[local-name()='assemblyIdentity']")|ForEach-Object{
+                        [pscustomobject]@{Name=[string]$_.name;Version=[string]$_.version;ProcessorArchitecture=[string]$_.processorArchitecture;Language=[string]$_.language;PublicKeyToken=[string]$_.publicKeyToken}
+                    })
+                } catch {$parseStatus='ParseFailed';$issues.Add(('MUM XML '+$mum.Name+': '+$_.Exception.Message))|Out-Null}
+                $relevant=($mum.Name -match '(?i)BootEnvironment-PXE|qps-ploc' -or $raw -match '(?i)BootEnvironment-PXE|qps-ploc')
+                $rawEvidencePath=''
+                if($relevant){
+                    $cabEvidenceRoot=Join-Path $mumTextRoot (($cabItem.BaseName)-replace '[^A-Za-z0-9._-]','_')
+                    New-Item -ItemType Directory -Path $cabEvidenceRoot -Force|Out-Null
+                    $dest=Join-Path $cabEvidenceRoot $mum.Name
+                    $copy=Copy-ServicingEvidenceFile -SourcePath $mum.FullName -DestinationPath $dest
+                    if($copy.Status -eq 'Copied'){$rawEvidencePath=$dest}else{$issues.Add(('Relevant MUM copy '+$mum.Name+': '+$copy.Status))|Out-Null}
+                }
+                $mumRows.Add([pscustomobject]@{
+                    CabFileName=$cabItem.Name;MumFileName=$mum.Name
+                    Sha256=$(try{(Get-FileHash -LiteralPath $mum.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}catch{''})
+                    ParseStatus=$parseStatus;Identity=$identity;Parents=$parents;RelevantToPxeQps=$relevant
+                    RawEvidencePath=$rawEvidencePath
+                })|Out-Null
+            }
+        } finally {Remove-Item -LiteralPath $mumRoot -Recurse -Force -ErrorAction SilentlyContinue}
+    }
+
+    $outerRows=[System.Collections.Generic.List[object]]::new()
+    foreach($file in @(Get-ChildItem -LiteralPath $PayloadRoot -File -Recurse -ErrorAction SilentlyContinue)){
+        $rel=$file.FullName.Substring($PayloadRoot.Length).TrimStart([char[]]@('\','/'))
+        $hash=''
+        try{$hash=(Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()}catch{$issues.Add(('Payload hash '+$file.Name+': '+$_.Exception.Message))|Out-Null}
+        $copiedPath=''
+        if($file.Extension -in @('.xml','.txt','.mum')){
+            $dest=Join-Path (Join-Path $root 'outer-metadata') $rel
+            $copy=Copy-ServicingEvidenceFile -SourcePath $file.FullName -DestinationPath $dest
+            if($copy.Status -eq 'Copied'){$copiedPath=$dest}
+        }
+        $outerRows.Add([pscustomobject]@{RelativePath=$rel;Extension=$file.Extension;LengthBytes=[long]$file.Length;Sha256=$hash;PayloadRetainedInEvidence=($copiedPath-ne'');EvidencePath=$copiedPath})|Out-Null
+    }
+
+    $sig=[pscustomobject]@{Capability='Get-AuthenticodeSignature';Status='CapabilityNotAvailable';SignerSubject='';StatusMessage=''}
+    try {
+        $auth=Get-AuthenticodeSignature -LiteralPath $MsuPath -ErrorAction Stop
+        $sig=[pscustomobject]@{Capability='Get-AuthenticodeSignature';Status=[string]$auth.Status;SignerSubject=$(if($auth.SignerCertificate){[string]$auth.SignerCertificate.Subject}else{''});StatusMessage=[string]$auth.StatusMessage}
+    } catch {$sig.StatusMessage=$_.Exception.Message}
+    $msuItem=Get-Item -LiteralPath $MsuPath -Force
+    $evidence=[pscustomobject][ordered]@{
+        SchemaVersion='expanded-msu-package-metadata/1.0';CreatedAtUtc=[datetime]::UtcNow.ToString('o')
+        ScriptVersion=$Script:ScriptVersion;OsKey=[string]$Script:OsVersion;KbId=$KbId
+        Msu=[pscustomobject]@{FileName=$msuItem.Name;LengthBytes=[long]$msuItem.Length;Sha256=(Get-FileHash -LiteralPath $MsuPath -Algorithm SHA256).Hash.ToLowerInvariant();Authenticode=$sig;PayloadRetainedInEvidence=$false}
+        CabPayloads=$cabRows.ToArray();OuterPayloadInventory=$outerRows.ToArray();MumPackages=$mumRows.ToArray()
+        RelevantMumCount=@($mumRows.ToArray()|Where-Object RelevantToPxeQps).Count
+        CollectionIssues=$issues.ToArray();EvidenceRoot=$root
+    }
+    Save-CanonicalJsonFile -InputObject $evidence -Path (Join-Path $root 'package-metadata.json') -Depth 16
+    return $evidence
+}
+
 function Get-ExpandedMsuCabPlan {
     <# Expand an MSU once and select only package-bearing CAB payloads. #>
     [CmdletBinding()]
@@ -12072,7 +12358,13 @@ function Get-ExpandedMsuCabPlan {
         $ordered = @($plan.ToArray() | Sort-Object Order,FileName)
         Save-CanonicalJsonFile -InputObject $ordered -Path $manifestPath -Depth 8
     }
-    return @((Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json))
+    $resolvedPlan=@((Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json))
+    $metadataEvidencePath=Join-Path $Script:LogsDir ('package-metadata\{0}\package-metadata.json' -f $safeName)
+    if(-not(Test-Path -LiteralPath $metadataEvidencePath -PathType Leaf)){
+        Write-Step ('    Capturing MSU/package MUM metadata evidence: {0}' -f [System.IO.Path]::GetFileName($MsuPath))
+        Export-ExpandedMsuMetadataEvidence -MsuPath $MsuPath -KbId $KbId -PayloadRoot $payloadRoot -CabPlan $resolvedPlan -WorkingRoot $expandRoot|Out-Null
+    }
+    return $resolvedPlan
 }
 
 function Add-WindowsPackageFromExpandedMsu {
@@ -16684,8 +16976,7 @@ function Invoke-BuildPhase08_PatchBootWim {
                     Assert-ExpandedBootLcuTarget -MountPath $mountDir -ImageLabel $imgLabel
                     $idxSucceeded = $true
                 } catch {
-                    $failureDiagnostic=Get-ExceptionDiagnosticText -Exception $_.Exception
-                    $failureDecision=Get-BootWimFailurePolicyDecision -FailurePolicy $bootFailurePolicy -ErrorText $failureDiagnostic -ImageLabel $imgLabel
+                    $failureDecision=Get-BootWimFailurePolicyDecision -FailurePolicy $bootFailurePolicy -ErrorText ([string]$_.Exception.Message) -ImageLabel $imgLabel
                     if($failureDecision.Allowed){
                         $idxFailed=$true
                         $bootPolicyException=[pscustomobject][ordered]@{
@@ -16694,12 +16985,11 @@ function Invoke-BuildPhase08_PatchBootWim {
                             ImageLabel=$imgLabel;BootWimLcuPolicy=$bootPolicy
                             BootWimFailurePolicy=$bootFailurePolicy;BootWimServicingStrategy=$bootServicingStrategy
                             ErrorCode=$failureDecision.ErrorCode;ErrorMessage=[string]$_.Exception.Message
-                            ErrorDiagnostic=$failureDiagnostic
                             PreserveSourceBootWim=$true;RequiresInstallValidation=$true
                             Reason=$failureDecision.Reason
                         }
                         Write-Caution ('{0}: {1} The mounted index will be discarded; the complete source boot.wim will be restored.' -f $imgLabel,$failureDecision.Reason)
-                        Add-ErrorJsonlEntry -Phase 'P08' -Kind 'bootwim-policy-exception' -Properties @{exType=$_.Exception.GetType().FullName;msg=$_.Exception.Message;diagnostic=$failureDiagnostic;image=$imgLabel;policy=$bootFailurePolicy;strategy=$bootServicingStrategy;errorCode=$failureDecision.ErrorCode;requiresInstallValidation=$true}
+                        Add-ErrorJsonlEntry -Phase 'P08' -Kind 'bootwim-policy-exception' -Properties @{exType=$_.Exception.GetType().FullName;msg=$_.Exception.Message;image=$imgLabel;policy=$bootFailurePolicy;strategy=$bootServicingStrategy;errorCode=$failureDecision.ErrorCode;requiresInstallValidation=$true}
                     } elseif ($bootPolicy -eq 'tolerate') {
                         $idxFailed = $true
                         Write-Caution ('{0}: boot.wim servicing failed under BootWimLcuPolicy=tolerate; DISCARDING this index and continuing. Error: {1}' -f $imgLabel, $_.Exception.Message)

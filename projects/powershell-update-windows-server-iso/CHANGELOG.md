@@ -28,6 +28,8 @@ Revision r12.36 carries two independent delivered works under one
 revision number (series ruling: two commits, one CHANGELOG heading).
 
 Part 1 — tag: `server2019-bootwim-hresult-policy-fix`.
+Part 2 — tag: `offline-servicing-failure-forensics` (the version date
+component moves 07.26 → 07.27 within the same revision number).
 
 ### Fixed
 
@@ -41,14 +43,28 @@ Part 1 — tag: `server2019-bootwim-hresult-policy-fix`.
   (type, message, diagnostic, image, policy, strategy, error code,
   install-validation flag). Script-only change.
 - **T40**: release pin advanced to `update-wsi-2026.07.26-r12.36`
-  with the measured tag.
+  with the measured tag (part 1), then to
+  `update-wsi-2026.07.27-r12.36` (part 2).
 
-### Gate state (measured on the branch, after part 1)
+### Added (part 2)
+
+- **Offline servicing failure forensics**: four new helpers
+  (`Copy-ServicingEvidenceFile`, `Copy-ServicingLogTailEvidence`,
+  `Export-OfflineServicingFailureEvidence`,
+  `Export-ExpandedMsuMetadataEvidence`) capture a forensics bundle on
+  offline-servicing failure — DISM/CBS log tails, expanded-MSU
+  metadata and related evidence files are copied with verification
+  into the evidence tree, so a failed servicing run leaves an
+  analyzable record instead of only an error line. Script-only
+  change.
+
+### Gate state (measured on the branch, after both parts)
 
 Offline suite 25/26 PASS with T30 the declared red; D-contract totals
-140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **2E/94W/9I** on
-the committed tree — unchanged from r12.35; committed verbatim per
-the no-fix-forward rule.
+140/30/120/64/112 with T45 NOT-YET (unchanged across both parts).
+PSA **2E/94W/9I** after part 1 and **2E/95W/9I** after part 2 — one
+warning joins the debt with the forensics layer; committed verbatim
+per the no-fix-forward rule.
 
 ## [update-wsi-2026.07.26-r12.35] - 2026-08-02
 

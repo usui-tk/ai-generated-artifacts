@@ -182,8 +182,8 @@ def main() -> int:
         "SetupBinarySync_" in code and "-Actual 'MISMATCH' -Status 'Fail'" in code,
         "P11 pin failed", passed, failed)
     passed, failed = check(
-        "version bumped to r12.36 server2019-bootwim-hresult-policy-fix",
-        "update-wsi-2026.07.26-r12.36" in code and "'server2019-bootwim-hresult-policy-fix'" in code,
+        "version bumped to r12.36 offline-servicing-failure-forensics (part 2 of the double-work revision)",
+        "update-wsi-2026.07.27-r12.36" in code and "'offline-servicing-failure-forensics'" in code,
         "bump pin failed", passed, failed)
 
     print(f"\n  Summary: {passed} passed, {failed} failed, {passed + failed} total")
