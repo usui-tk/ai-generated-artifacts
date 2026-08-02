@@ -182,8 +182,8 @@ def main() -> int:
         "SetupBinarySync_" in code and "-Actual 'MISMATCH' -Status 'Fail'" in code,
         "P11 pin failed", passed, failed)
     passed, failed = check(
-        "version bumped to r12.16 catalog-language-and-workspace-containment",
-        "update-wsi-2026.07.18-r12.16" in code and "'catalog-language-and-workspace-containment'" in code,
+        "version bumped to r12.17 generic-list-binder-hardening",
+        "update-wsi-2026.07.18-r12.17" in code and "'generic-list-binder-hardening'" in code,
         "bump pin failed", passed, failed)
 
     print(f"\n  Summary: {passed} passed, {failed} failed, {passed + failed} total")

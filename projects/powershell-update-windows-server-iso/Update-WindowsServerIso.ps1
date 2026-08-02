@@ -659,8 +659,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.18-r12.16'
-$Script:ScriptTag     = 'catalog-language-and-workspace-containment'
+$Script:ScriptVersion = 'update-wsi-2026.07.18-r12.17'
+$Script:ScriptTag     = 'generic-list-binder-hardening'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -682,7 +682,7 @@ $Script:ScriptShortTag = ('{0}/{1}' -f $Script:ScriptVersion, $Script:ScriptHash
 $Script:ScriptStartTime   = Get-Date
 $Script:CurrentPhaseStart = $null
 $Script:CurrentPhaseId    = $null
-$Script:PhaseTimings      = New-Object System.Collections.Generic.List[object]
+$Script:PhaseTimings      = [System.Collections.Generic.List[object]]::new()
 # Idempotency guard for Show-PhaseSummary. P13 FinalReport prints
 # the timing table as part of its body (per SPEC.md Part B.5 Step 1);
 # the script-tail `finally` block also calls Show-PhaseSummary as a
@@ -902,7 +902,7 @@ $Script:DebugTraceStack = New-Object 'System.Collections.Generic.Stack[object]'
 
 # Completed frames retained for JSON Export. Capped to prevent
 # unbounded growth in long runs.
-$Script:DebugTraceCompletedFrames = New-Object 'System.Collections.Generic.List[object]'
+$Script:DebugTraceCompletedFrames = [System.Collections.Generic.List[object]]::new()
 $Script:DebugTraceCompletedCap    = 1024  # cap on retained completed frames
 
 # Step history cap per frame, to prevent unbounded growth in tight
@@ -920,7 +920,7 @@ $Script:DebugTraceJsonDepth = 100
 # typically from the main try-block once WorkDir\logs exists.
 $Script:DebugTraceJsonlEnabled    = $false
 $Script:DebugTraceJsonlPath       = $null
-$Script:DebugTraceJsonlBuffer     = New-Object 'System.Collections.Generic.List[string]'  # pre-activation buffer
+$Script:DebugTraceJsonlBuffer     = [System.Collections.Generic.List[string]]::new()  # pre-activation buffer
 $Script:DebugTraceJsonlBufferCap  = 4096  # pre-flush buffer cap (entry count)
 $Script:DebugTraceJsonlWriteCount = 0
 $Script:DebugTraceJsonlErrorCount = 0
@@ -1083,7 +1083,7 @@ function Start-DebugTrace {
     $frame = [pscustomobject]@{
         Context   = $Context
         Step      = 'entry'
-        Steps     = (New-Object 'System.Collections.Generic.List[object]')
+        Steps     = ([System.Collections.Generic.List[object]]::new())
         StartTime = Get-Date
         Echo      = [bool]$Echo
         PhaseId   = $PhaseId
@@ -2821,7 +2821,7 @@ function Assert-WorkspacePreflight {
     Write-Step ('Data directory: {0}' -f $dataDir)
 
     $requiredConfigs = @('config-Server2016.json','config-Server2019.json','config-Server2022.json','config-Server2025.json')
-    $missingConfigs  = New-Object System.Collections.Generic.List[string]
+    $missingConfigs  = [System.Collections.Generic.List[string]]::new()
     foreach ($cfg in $requiredConfigs) {
         $cfgPath = Join-Path $dataDir $cfg
         if (Test-Path -LiteralPath $cfgPath -PathType Leaf) {
@@ -3745,8 +3745,8 @@ function ConvertFrom-ReleaseInfoMarkdown {
     param([Parameter(Mandatory)] [string]$Markdown)
 
     $lines = $Markdown -split "`n"
-    $monthlyReleases  = New-Object System.Collections.Generic.List[object]
-    $hotpatchEntries  = New-Object System.Collections.Generic.List[object]
+    $monthlyReleases  = [System.Collections.Generic.List[object]]::new()
+    $hotpatchEntries  = [System.Collections.Generic.List[object]]::new()
 
     $section      = ''
     $currentOsKey = ''
@@ -4151,7 +4151,7 @@ function ConvertFrom-DotNetCuIndexMarkdown {
     $body = Split-DotNetCuMarkdownFrontMatter -Markdown $Markdown
     $entryRegex = [regex]'^- ([A-Za-z]+ \d{1,2}, \d{4}) - \[([^\]]+)\]\(([^)]+)\)\s*(?:\*\*[^*]+\*\*)?\s*$'
 
-    $entryList = New-Object 'System.Collections.Generic.List[pscustomobject]'
+    $entryList = [System.Collections.Generic.List[object]]::new()
     $invariant = [System.Globalization.CultureInfo]::InvariantCulture
 
     foreach ($rawLine in ($body -split "`n")) {
@@ -4238,7 +4238,7 @@ function ConvertFrom-DotNetCuMarkdown {
     $kbDigitsRegex  = [regex]'(\d{4,7})'
 
     $inSection = $false
-    $blockList = New-Object 'System.Collections.Generic.List[pscustomobject]'
+    $blockList = [System.Collections.Generic.List[object]]::new()
     $currentOs = $null
 
     foreach ($rawLine in ($body -split "`n")) {
@@ -4288,7 +4288,7 @@ function ConvertFrom-DotNetCuMarkdown {
                 OsLabel       = $osLabel
                 OsNormalised  = (ConvertFrom-DotNetCuOsLabel -Label $osLabel)
                 OsOfferingKb  = $offeringKb
-                Rows          = New-Object 'System.Collections.Generic.List[pscustomobject]'
+                Rows          = [System.Collections.Generic.List[object]]::new()
             }
             continue
         }
@@ -4402,7 +4402,7 @@ function Invoke-DotNetCuFetch {
 
     Write-Step ('  Index entries: {0}' -f $indexParsed.EntryCount)
 
-    $monthList = New-Object 'System.Collections.Generic.List[pscustomobject]'
+    $monthList = [System.Collections.Generic.List[object]]::new()
     foreach ($entry in $indexParsed.Entries) {
         $monthUrl = $entry.AbsoluteUrl + '?accept=text/markdown'
         $monthBody    = ''
@@ -4493,7 +4493,7 @@ function Update-DotNetCuCache {
 
     $indexParsed = ConvertFrom-DotNetCuIndexMarkdown -Markdown $rawAggr.IndexBody
 
-    $monthParsedList = New-Object 'System.Collections.Generic.List[pscustomobject]'
+    $monthParsedList = [System.Collections.Generic.List[object]]::new()
     foreach ($monthRaw in $rawAggr.Months) {
         $monthEntries = @()
         $monthSummary = $null
@@ -4622,7 +4622,7 @@ function Get-UpdateIdFromCatalog {
         throw ('Microsoft Update Catalog returned HTTP {0} for KB {1}.' -f $resp.StatusCode, $KbId)
     }
     $pattern = '(?is)<a[^>]*onclick\s*=\s*(["'']?)goToDetails\(\s*"([0-9A-Fa-f-]{36})"\s*\)\s*;?\s*\1[^>]*>\s*(.*?)\s*</a>'
-    $items = New-Object System.Collections.Generic.List[object]
+    $items = [System.Collections.Generic.List[object]]::new()
     $matchList = [regex]::Matches($resp.Content, $pattern)
     foreach ($m in $matchList) {
         $guid = $m.Groups[2].Value
@@ -4677,7 +4677,7 @@ function Get-DownloadLinkFromCatalog {
     }
     # Pattern extracts: downloadInformation[N].files[N].url = '<url>';
     $pattern = "downloadInformation\[\d+\]\.files\[\d+\]\.url\s*=\s*'([^']+)'"
-    $items = New-Object System.Collections.Generic.List[object]
+    $items = [System.Collections.Generic.List[object]]::new()
     $matchList = [regex]::Matches($resp.Content, $pattern)
     foreach ($m in $matchList) {
         $url = $m.Groups[1].Value
@@ -4734,7 +4734,7 @@ function Select-CanonicalPatchFile {
     )
     if (-not $Links -or $Links.Count -eq 0) { return $null }
 
-    $scored = New-Object System.Collections.Generic.List[object]
+    $scored = [System.Collections.Generic.List[object]]::new()
     foreach ($lnk in $Links) {
         if (-not $lnk -or -not $lnk.FileName) { continue }
         $fn = $lnk.FileName.ToLower()
@@ -5026,7 +5026,7 @@ function Resolve-CatalogDownload {
         $files[$i][$field] = $val
     }
 
-    $out = New-Object System.Collections.Generic.List[object]
+    $out = [System.Collections.Generic.List[object]]::new()
     foreach ($i in ($files.Keys | Sort-Object)) {
         $f = $files[$i]
         $url = $(if ($f.ContainsKey('url')) { [string]$f['url'] } else { '' })
@@ -5104,9 +5104,9 @@ function Get-CatalogIdentityRule {
         default      { '' }
     }
 
-    $titleTokens = New-Object System.Collections.Generic.List[string]
-    $productTokens = New-Object System.Collections.Generic.List[string]
-    $productReject = New-Object System.Collections.Generic.List[string]
+    $titleTokens = [System.Collections.Generic.List[string]]::new()
+    $productTokens = [System.Collections.Generic.List[string]]::new()
+    $productReject = [System.Collections.Generic.List[string]]::new()
     $classification = ''
 
     switch ($type) {
@@ -6250,7 +6250,7 @@ function Get-LanguagePackQueryTemplate {
     }
     $osTokensList = if ($osTitleTokens.ContainsKey($OsVersion)) { $osTitleTokens[$OsVersion] } else { @() }
 
-    $queries = New-Object System.Collections.Generic.List[object]
+    $queries = [System.Collections.Generic.List[object]]::new()
     # LP and LXP are mostly published only for newer OS versions; we
     # issue the queries regardless and let the empty-result path mark
     # "no patch found" for the older LTSC SKUs.
@@ -6299,7 +6299,7 @@ function Resolve-LanguageSpecificPatchesFromCatalog {
     Write-Step ('Language-specific patches: OS={0} Lang={1} Month={2}' -f $OsVersion, $OsLanguage, $PatchMonth)
     $tmpl = Get-LanguagePackQueryTemplate -OsVersion $OsVersion -OsLanguage $OsLanguage -PatchMonth $PatchMonth
 
-    $resolved = New-Object System.Collections.Generic.List[object]
+    $resolved = [System.Collections.Generic.List[object]]::new()
     foreach ($q in $tmpl.Queries) {
         Write-Step ('  query: type={0} template="{1}"' -f $q.Type, $q.QueryTemplate)
         $hits = $null
@@ -7159,7 +7159,7 @@ function Get-WimIndexInventory {
         throw ('WIM not found: {0}' -f $WimPath)
     }
     $entries = Invoke-DismCmdlet -CommandName 'Get-WindowsImage' -Parameters @{ ImagePath = $WimPath }
-    $list = New-Object System.Collections.Generic.List[object]
+    $list = [System.Collections.Generic.List[object]]::new()
     foreach ($e in $entries) {
         $list.Add([pscustomobject]@{
             ImageIndex       = [int]$e.ImageIndex
@@ -8611,13 +8611,13 @@ function Build-PatchPlan {
 
     if (-not $Patches) { $Patches = @() }
     $plan = @{
-        Install       = New-Object System.Collections.Generic.List[object]
-        Boot          = New-Object System.Collections.Generic.List[object]
-        WinRE         = New-Object System.Collections.Generic.List[object]
-        Setup         = New-Object System.Collections.Generic.List[object]
+        Install       = [System.Collections.Generic.List[object]]::new()
+        Boot          = [System.Collections.Generic.List[object]]::new()
+        WinRE         = [System.Collections.Generic.List[object]]::new()
+        Setup         = [System.Collections.Generic.List[object]]::new()
         _GeneratedAt  = (Get-Date).ToString('o')
         _PatchCount   = 0
-        _UnknownTypes = New-Object System.Collections.Generic.List[string]
+        _UnknownTypes = [System.Collections.Generic.List[string]]::new()
         _RoleCounts   = @{}
     }
 
@@ -8726,7 +8726,7 @@ function Get-PatchTargetsForEntry {
     [CmdletBinding()]
     [OutputType([string[]])]
     param([Parameter(Mandatory)]$Patch)
-    $targets = New-Object System.Collections.Generic.List[string]
+    $targets = [System.Collections.Generic.List[string]]::new()
     foreach ($role in (Get-PatchRoles -Patch $Patch)) {
         foreach ($target in (Get-PatchTargetsForRole -Patch $Patch -Role $role)) {
             if ($targets -notcontains $target) { $targets.Add($target) | Out-Null }
@@ -8806,7 +8806,7 @@ function New-ResolvedPatchEvidenceManifest {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param()
-    $items = New-Object System.Collections.Generic.List[object]
+    $items = [System.Collections.Generic.List[object]]::new()
     foreach ($p in @($Script:ResolvedPatches | Sort-Object -Property @('Kind','KbId','PackageId'))) {
         $localPath = if ($p.PSObject.Properties['LocalPath']) { [string]$p.LocalPath } else { '' }
         $integritySha = ''
@@ -8870,7 +8870,7 @@ function Test-ReleaseEvidenceIdentity {
         [Parameter(Mandatory)]$Expected,
         [Parameter(Mandatory)]$Actual
     )
-    $mismatches = New-Object System.Collections.Generic.List[string]
+    $mismatches = [System.Collections.Generic.List[string]]::new()
     foreach ($field in @('RunId','OsKey','OsLanguage','BaselineId','OutputIsoSha256','ScriptSha256','ConfigSha256','ResolvedPatchManifestSha256')) {
         $e = if ($Expected.PSObject.Properties[$field]) { [string]$Expected.$field } else { '' }
         $a = if ($Actual.PSObject.Properties[$field]) { [string]$Actual.$field } else { '' }
@@ -8931,7 +8931,7 @@ function Get-AuxiliaryFreshnessAssessment {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param()
-    $issues = New-Object System.Collections.Generic.List[object]
+    $issues = [System.Collections.Generic.List[object]]::new()
     $baselineMonth = ''
     if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline -and $Script:OsProfile.PatchBaseline.PSObject.Properties['BaselineId']) {
         $rawBaseline = [string]$Script:OsProfile.PatchBaseline.BaselineId
@@ -8970,7 +8970,7 @@ function Test-BootEvidenceArtifacts {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param([Parameter(Mandatory)]$Evidence)
-    $issues = New-Object System.Collections.Generic.List[string]
+    $issues = [System.Collections.Generic.List[string]]::new()
     $mode = if ($Evidence.PSObject.Properties['Mode']) { [string]$Evidence.Mode } else { '' }
     if (-not ($Evidence.PSObject.Properties['Success']) -or -not [bool]$Evidence.Success) {
         $issues.Add('P14 evidence does not report Success=true.') | Out-Null
@@ -9093,7 +9093,7 @@ function Test-BootEvidenceApproval {
     )
     $approval = Read-ReleaseJsonFile -Path $ApprovalPath
     if (-not $approval) { return [pscustomobject]@{Valid=$false;Reason='Approval file is missing or invalid JSON.';Approval=$null} }
-    $issues = New-Object System.Collections.Generic.List[string]
+    $issues = [System.Collections.Generic.List[string]]::new()
     if ([string]$approval.SchemaVersion -ne 'P14-boot-approval-request/1.0') { $issues.Add('SchemaVersion must be P14-boot-approval-request/1.0.') | Out-Null }
     if ([string]$approval.Decision -ne 'Approve') { $issues.Add('Decision must be Approve.') | Out-Null }
     if ([string]$approval.RunId -ne [string]$Identity.RunId) { $issues.Add('RunId does not match.') | Out-Null }
@@ -9137,7 +9137,7 @@ function Test-Pca2023PolicyCompliance {
         [Parameter(Mandatory)]$OutputCheck,
         [Parameter(Mandatory)][ValidateSet('RequirePca2023','AllowLegacyPca2011','AuditOnly')][string]$Policy
     )
-    $reasons = New-Object System.Collections.Generic.List[string]
+    $reasons = [System.Collections.Generic.List[string]]::new()
     $eligible = $true
     if (-not $OutputCheck -or -not $OutputCheck.Available) {
         $eligible = $false
@@ -9192,7 +9192,7 @@ function Get-DismLogClassification {
     # even when the top-level Add-WindowsPackage operation succeeds.
     $tail = $text
     if ($tail.Length -gt 131072) { $tail = $tail.Substring($tail.Length - 131072) }
-    $classes = New-Object System.Collections.Generic.List[string]
+    $classes = [System.Collections.Generic.List[string]]::new()
     $successStatus = $OperationStatus -in @('Ok','OkAfterRetry','WinReServicingStackKnownIssue')
     $notApplicableStatus = $OperationStatus -eq 'NotApplicable'
     $terminalStatus = $OperationStatus -eq 'Fail'
@@ -9273,7 +9273,7 @@ function Get-SetupDuFileManifest {
     )
     $normalizedRoot = [System.IO.Path]::GetFullPath($Root).TrimEnd($trimChars)
     $rootPrefix = $normalizedRoot + [System.IO.Path]::DirectorySeparatorChar
-    $rows = New-Object System.Collections.Generic.List[object]
+    $rows = [System.Collections.Generic.List[object]]::new()
 
     foreach ($file in @(Get-ChildItem -LiteralPath $normalizedRoot -File -Recurse -ErrorAction Stop)) {
         $fullPath = [System.IO.Path]::GetFullPath($file.FullName)
@@ -9340,7 +9340,7 @@ function Get-ExpandedMsuCabPlan {
         & expand.exe -F:* $MsuPath $payloadRoot | Out-Null
         if ($LASTEXITCODE -ne 0) { throw ('expand.exe failed for {0} with exit code {1}.' -f $MsuPath,$LASTEXITCODE) }
 
-        $plan = New-Object System.Collections.Generic.List[object]
+        $plan = [System.Collections.Generic.List[object]]::new()
         foreach ($cab in @(Get-ChildItem -LiteralPath $payloadRoot -File -Recurse -Filter '*.cab' -ErrorAction Stop)) {
             if ($cab.Name -match '(?i)wsusscan|express|delta|metadata') { continue }
             $mumRoot = Join-Path $expandRoot ('mum-' + [Guid]::NewGuid().Guid)
@@ -9393,7 +9393,7 @@ function Add-WindowsPackageFromExpandedMsu {
     )
     $plan = @(Get-ExpandedMsuCabPlan -MsuPath $MsuPath -KbId $KbId | Where-Object { $CabRoles -contains [string]$_.Role })
     if($plan.Count -eq 0){throw ('Expanded MSU has no CAB matching roles [{0}] for {1}.' -f ($CabRoles -join ','),$KbId)}
-    $statuses = New-Object System.Collections.Generic.List[string]
+    $statuses = [System.Collections.Generic.List[string]]::new()
     foreach ($entry in $plan) {
         Write-Step ('      Expanded MSU CAB [{0}]: {1}' -f $entry.Role, $entry.FileName)
         $meta=@{}; foreach($k in $EvidenceMetadata.Keys){$meta[$k]=$EvidenceMetadata[$k]};$meta['ExpandedCabRole']=[string]$entry.Role;$meta['ExpandedFromMsu']=[System.IO.Path]::GetFileName($MsuPath)
@@ -9456,7 +9456,7 @@ function Build-InstallApplySequence {
     $dyn    = Get-PatchesForRole -Patches $InstallPatches -Roles @('DynamicUpdateComponent')
     $dotnet = Get-PatchesForRole -Patches $InstallPatches -Roles @('DotNetLeaf')
 
-    $seq = New-Object System.Collections.Generic.List[object]
+    $seq = [System.Collections.Generic.List[object]]::new()
     $seq.Add([pscustomobject]@{ Name='I0.SourcePrerequisite'; Description='Source-media prerequisite, conditionally injected'; Patches=$prereq; RequiresRemount=$false }) | Out-Null
     $seq.Add([pscustomobject]@{ Name='I1.ServicingStack'; Description='Standalone SSU or combined-LCU servicing-stack carrier'; Patches=$stack; RequiresRemount=$false }) | Out-Null
     $seq.Add([pscustomobject]@{ Name='I2.LanguageFodOptional'; Description='Language/FOD/optional-component payloads'; Patches=$lp; RequiresRemount=$false }) | Out-Null
@@ -9481,7 +9481,7 @@ function Build-BootApplySequence {
     $lp     = Get-PatchesForRole -Patches $BootPatches -Roles @('WinPeLanguagePack','LanguagePack')
     $lcu    = Get-PatchesForRole -Patches $BootPatches -Roles @('FinalLCU')
 
-    $seq = New-Object System.Collections.Generic.List[object]
+    $seq = [System.Collections.Generic.List[object]]::new()
     $seq.Add([pscustomobject]@{ Name='B0.SourcePrerequisite'; Description='Source-media prerequisite, conditionally injected'; Patches=$prereq; RequiresRemount=$false }) | Out-Null
     $packageMode = Get-BootWimPackageMode
     $sameCombinedAsset = (Test-PatchSetsShareAsset -First $stack -Second $lcu)
@@ -9514,7 +9514,7 @@ function Build-WinReApplySequence {
     $lp     = Get-PatchesForRole -Patches $WinRePatches -Roles @('WinReLanguagePack','LanguagePack')
     $safeOs = Get-PatchesForRole -Patches $WinRePatches -Roles @('SafeOSDU')
 
-    $seq = New-Object System.Collections.Generic.List[object]
+    $seq = [System.Collections.Generic.List[object]]::new()
     $seq.Add([pscustomobject]@{ Name='W0.SourcePrerequisite'; Description='Source-media prerequisite, conditionally injected'; Patches=$prereq; RequiresRemount=$false }) | Out-Null
     $seq.Add([pscustomobject]@{ Name='W1.ServicingStack'; Description='Standalone SSU or combined-LCU servicing-stack carrier'; Patches=$stack; RequiresRemount=$false }) | Out-Null
     $seq.Add([pscustomobject]@{ Name='W2.LanguagePack'; Description='Recovery UI language pack'; Patches=$lp; RequiresRemount=$false }) | Out-Null
@@ -9643,7 +9643,7 @@ function Test-PatchServicingReadinessOnMount {
     }
     $installedIds = @($installedPackages | ForEach-Object { [string]$_.PackageIdentity })
 
-    $missing = New-Object System.Collections.Generic.List[string]
+    $missing = [System.Collections.Generic.List[string]]::new()
     foreach ($reqKb in $prereqMap.Keys) {
         $found = $false
         foreach ($packageId in $installedIds) {
@@ -9822,7 +9822,7 @@ function Invoke-PatchSubPhase {
         [Parameter(Mandatory)] [string]$MountPath,
         [Parameter(Mandatory)] [string]$ImageLabel
     )
-    $rows = New-Object System.Collections.Generic.List[object]
+    $rows = [System.Collections.Generic.List[object]]::new()
     $isCleanupMarker = $SubPhase.PSObject.Properties['IsCleanupMarker'] -and $SubPhase.IsCleanupMarker
 
     if ($isCleanupMarker) {
@@ -10612,7 +10612,7 @@ function Get-InspectionCrossChecks { # psa-disable-line PSA6003 -- "CrossChecks"
         [AllowNull()] [object]$PreBootBuild,
         [AllowNull()] [object]$PostBootBuild
     )
-    $findings = New-Object System.Collections.Generic.List[object]
+    $findings = [System.Collections.Generic.List[object]]::new()
     $add = {
         param($Level, $Kind, $Message)
         $findings.Add([pscustomobject]@{ Level = $Level; Kind = $Kind; Message = $Message }) | Out-Null
@@ -10934,7 +10934,7 @@ function Test-Pca2023AuthenticodeChain {
     $result.SignerName = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { $null }
 
     # Walk the chain via X509Chain so we see every CA, not just the leaf
-    $tokens = New-Object System.Collections.Generic.List[string]
+    $tokens = [System.Collections.Generic.List[string]]::new()
     try {
         $chain = New-Object System.Security.Cryptography.X509Certificates.X509Chain
         $chain.ChainPolicy.RevocationMode = 'NoCheck'  # offline analysis
@@ -11363,8 +11363,8 @@ function Test-OutputIsoPca2023Readiness {
     $fontsDir       = Join-Path $ExtractedMediaPath 'efi\microsoft\boot\fonts'
     $bootStlPath    = Join-Path $ExtractedMediaPath 'EFI\Microsoft\Boot\boot.stl'
 
-    $checks  = New-Object System.Collections.Generic.List[object]
-    $reasons = New-Object System.Collections.Generic.List[string]
+    $checks  = [System.Collections.Generic.List[object]]::new()
+    $reasons = [System.Collections.Generic.List[string]]::new()
 
     # ---- Target #1: UEFI critical path (bootx64.efi / bootaa64.efi) ----
     if (Test-Path -LiteralPath $criticalPath) {
@@ -11597,7 +11597,7 @@ function Get-Pca2023ReadinessSnapshot {
     $emb = Get-IsoBootCertReadiness -ExtractedMediaPath $ExtractedMediaPath -WorkRoot $WorkRoot
 
     $health = 'Unknown'
-    $reasons = New-Object System.Collections.Generic.List[string]
+    $reasons = [System.Collections.Generic.List[string]]::new()
 
     if (-not $emb.Available) {
         $reasons.Add(('ISO inventory unavailable: {0}' -f $emb.ErrorMessage)) | Out-Null
@@ -11971,7 +11971,7 @@ function Convert-WimBootToPca2023Signed {
     # unserviceable boot.wim (Server 2019, 0x80070032) never
     # receives the payloads while its install.wim does.
     $installWimPath = Join-Path $ExtractedMediaPath 'sources\install.wim'
-    $candidates = New-Object System.Collections.Generic.List[object]
+    $candidates = [System.Collections.Generic.List[object]]::new()
     $candidates.Add([pscustomobject]@{ Label = 'boot.wim'; Path = $bootWimPath; Index = 1 }) | Out-Null
     if (Test-Path -LiteralPath $installWimPath) {
         $fbIdx = 1
@@ -11982,7 +11982,7 @@ function Convert-WimBootToPca2023Signed {
         $candidates.Add([pscustomobject]@{ Label = 'install.wim'; Path = $installWimPath; Index = $fbIdx }) | Out-Null
     }
 
-    $updated = New-Object System.Collections.Generic.List[string]
+    $updated = [System.Collections.Generic.List[string]]::new()
     $mounted = $false
     try {
         $exBins = $null; $exFonts = $null; $exDvd = $null
@@ -12319,7 +12319,7 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
         # Step 3: Resolve patch list
         Set-DebugStep -Step 'resolve-patch-list'
         Write-SubSection 'Step 3: Resolve patch list'
-        $resolved = New-Object System.Collections.Generic.List[object]
+        $resolved = [System.Collections.Generic.List[object]]::new()
         if ($Script:EffectivePatchRefreshMode -in @('Auto','PinAll','PinOs') -or `
                   ($Script:OsProfile.PatchBaseline -and `
                    $Script:OsProfile.PatchBaseline.Lines -and `
@@ -12386,7 +12386,7 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
         # Emit CSV
         Set-DebugStep -Step 'emit-inputs-csv'
         $csvPath = Join-Path $Script:LogsDir 'P02_inputs_resolved.csv'
-        $rows = New-Object System.Collections.Generic.List[object]
+        $rows = [System.Collections.Generic.List[object]]::new()
         $rows.Add([pscustomobject]@{
             Kind = 'Iso'; Source = $isoSourceDesc
             LocalPath = $Script:IsoLocalPath; Sha256 = ''; SizeBytes = 0; Status = 'Pending'
@@ -12593,7 +12593,7 @@ function Invoke-SetupPhase03_RefreshPatchBaseline {
 
         # ---- Re-derive $Script:ResolvedPatches from new baseline ----
         Set-DebugStep -Step 'derive-resolved-patches'
-        $derived = New-Object System.Collections.Generic.List[object]
+        $derived = [System.Collections.Generic.List[object]]::new()
         foreach ($p in $newPatches) {
             $derived.Add((ConvertTo-ResolvedPatchFromBaselineLine -Line $p)) | Out-Null
         }
@@ -12745,7 +12745,7 @@ function Resolve-DotNetMonthlySelectorLines {
         'Server2025' { @('4.8.1') }
         default { @() }
     }
-    $lines = New-Object System.Collections.Generic.List[object]
+    $lines = [System.Collections.Generic.List[object]]::new()
     foreach ($row in @($selectedEntry.Rows)) {
         if (-not $row.KbId) { continue }
         $matched = $false
@@ -12777,7 +12777,7 @@ function ConvertTo-StableObjectArray {
 
     $source = $InputObject
     if ($SimulateGenericList) {
-        $generic = New-Object 'System.Collections.Generic.List[object]'
+        $generic = [System.Collections.Generic.List[object]]::new()
         if ($null -ne $InputObject) {
             foreach ($item in $InputObject) { $generic.Add($item) | Out-Null }
         }
@@ -13212,7 +13212,7 @@ function Invoke-PlanPhase05_ExpandIso {
         $installWim = Join-Path $Script:ExtractedDir 'sources\install.wim'
         $bootWim    = Join-Path $Script:ExtractedDir 'sources\boot.wim'
 
-        $rows = New-Object System.Collections.Generic.List[object]
+        $rows = [System.Collections.Generic.List[object]]::new()
         if (Test-Path -LiteralPath $installWim) {
             Write-Step ('install.wim found: {0}' -f $installWim)
             $invInstall = Get-WimIndexInventory -WimPath $installWim
@@ -13441,7 +13441,7 @@ function Invoke-BuildPhase07_PatchInstallWim {
         $targets = Resolve-InstallWimTargetIndexes -Inventory $Script:WimIndexInventory
         Write-Step ('install.wim indexes to update: {0}' -f ($targets | Measure-Object).Count)
 
-        $rows = New-Object System.Collections.Generic.List[object]
+        $rows = [System.Collections.Generic.List[object]]::new()
         foreach ($img in $targets) {
             Write-SubSection ('install.wim index {0}: {1}' -f $img.ImageIndex, $img.ImageName)
             Set-DebugStep -Step ('install-idx-' + $img.ImageIndex)
@@ -13474,7 +13474,7 @@ function Invoke-BuildPhase07_PatchInstallWim {
             # default sequence does not rely on a hard-coded I7 second pass.
 
             $remountAndContinue = $false
-            $secondPassSubPhases = New-Object System.Collections.Generic.List[object]
+            $secondPassSubPhases = [System.Collections.Generic.List[object]]::new()
             Set-DebugStep -Step ('mount-install-pass1-idx-' + $img.ImageIndex)
             Invoke-WimMountSafe -ImagePath $installWim -Index $img.ImageIndex `
                 -Path $Script:MountInstallDir -LogDir $Script:LogsDir | Out-Null
@@ -13977,7 +13977,7 @@ function Invoke-BuildPhase08S_SyncSetupBinaries { # psa-disable-line PSA6003 -- 
         }
         New-Item -ItemType Directory -Path $mountDir -Force | Out-Null
 
-        $records = New-Object System.Collections.Generic.List[object]
+        $records = [System.Collections.Generic.List[object]]::new()
         $mounted = $false
         Set-DebugStep -Step 'mount-boot-idx2'
         try {
@@ -14127,7 +14127,7 @@ function Invoke-BuildPhase09_AssembleIso {
                     # with 'Cannot find path'.
                     Copy-Item -Path (Join-Path $tmpExtract '*') `
                         -Destination $setupDestRoot -Recurse -Force
-                    $overlayRecords = New-Object System.Collections.Generic.List[object]
+                    $overlayRecords = [System.Collections.Generic.List[object]]::new()
                     foreach ($mr in $sourceManifest) {
                         $destPresent = Test-Path -LiteralPath $mr.DestinationPath
                         $destHash = if ($destPresent) { (Get-FileHash -LiteralPath $mr.DestinationPath -Algorithm SHA256).Hash.ToLower() } else { $null }
@@ -14589,7 +14589,7 @@ function Get-WinRePostServicingEvidence {
         [Parameter(Mandatory)][string]$WorkRoot,
         [Parameter(Mandatory)][string]$LogDir
     )
-    $records = New-Object System.Collections.Generic.List[object]
+    $records = [System.Collections.Generic.List[object]]::new()
     $extractMount = Join-Path $WorkRoot 'work\verify_winre_parent'
     $winreMount   = Join-Path $WorkRoot 'work\verify_winre_mount'
     $tempWinre    = Join-Path $WorkRoot 'work\verify_winre.wim'
@@ -14728,7 +14728,7 @@ function Invoke-VerifyPhase11_StaticVerify {
             $Script:OutputIsoPath = Join-Path $Script:OutputDir $outName
         }
 
-        $rows = New-Object System.Collections.Generic.List[object]
+        $rows = [System.Collections.Generic.List[object]]::new()
         function Add-VRow {
             param([string]$Check, [string]$Expected, [string]$Actual, [string]$Status, [string]$Notes)
             $rows.Add([pscustomobject]@{
@@ -15077,6 +15077,9 @@ function Invoke-VerifyPhase11_StaticVerify {
         Save-CanonicalJsonFile -InputObject (New-ResolvedPatchEvidenceManifest) -Path $patchManifestPath -Depth 16
         $identity = Get-ReleaseEvidenceIdentity
         $p11EvidencePath = Join-Path $Script:LogsDir 'P11_static_verification.json'
+        # Do not wrap Generic.List[object] in @(...). PowerShell issue #27558
+        # throws 'Argument types do not match' for New-Object-created lists.
+        # r12.17 uses constructor-created lists globally and reads Count directly.
         $p11Evidence = [pscustomobject][ordered]@{
             SchemaVersion='P11-static-verification/1.0'
             Status='Pass'
@@ -15086,7 +15089,7 @@ function Invoke-VerifyPhase11_StaticVerify {
             VerificationCsvSha256=(Get-FileSha256OrEmpty -Path $csvPath)
             PostInspectionPath=(Join-Path $Script:LogsDir 'inspection_post.json')
             PostInspectionSha256=(Get-FileSha256OrEmpty -Path (Join-Path $Script:LogsDir 'inspection_post.json'))
-            RowCount=@($rows).Count
+            RowCount=$rows.Count
             FailureCount=0
         }
         Save-CanonicalJsonFile -InputObject $p11Evidence -Path $p11EvidencePath -Depth 16
@@ -15181,7 +15184,7 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
         # ---- Emit Markdown ----
         Set-DebugStep -Step 'emit-md'
         $mdPath = Join-Path $pcaDir 'pca2023_readiness.md'
-        $mdLines = New-Object System.Collections.Generic.List[string]
+        $mdLines = [System.Collections.Generic.List[string]]::new()
         $mdLines.Add('# PCA2023 Boot Manager Readiness Report') | Out-Null
         $mdLines.Add('') | Out-Null
         $mdLines.Add(('- Captured: {0}' -f $snapshot.Generated.ToString('yyyy-MM-dd HH:mm:ss'))) | Out-Null
@@ -15241,7 +15244,7 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
         $staticVerification = Get-StaticVerificationAssessment
         $bootValidation = Get-BootValidationAssessment
         $staticEligible = $staticVerification.Eligible -and $compliance.ReleaseEligible -and $freshness.IsFresh
-        $reasons = New-Object System.Collections.Generic.List[string]
+        $reasons = [System.Collections.Generic.List[string]]::new()
         if (-not $staticVerification.Eligible -and $staticVerification.Reason) { $reasons.Add([string]$staticVerification.Reason) | Out-Null }
         foreach ($reason in @($compliance.Reasons)) { if ($reason) { $reasons.Add([string]$reason) | Out-Null } }
         foreach ($item in @($freshness.Issues)) {
@@ -16054,7 +16057,7 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
             Write-Caution 'DryRun is ON: changes will NOT be written back to disk.'
         }
 
-        $reportRows = New-Object System.Collections.Generic.List[object]
+        $reportRows = [System.Collections.Generic.List[object]]::new()
         # Per-OS summary collector for the rich end-of-run summary.
         # Key   : OsKey (string)
         # Value : pscustomobject containing:
@@ -16110,7 +16113,7 @@ function Invoke-AdminPhaseA01_RefreshAllBaselines {
                 AfterPatches     = $beforePatches    # updated below if Refresher changes anything
                 Changed          = $false
                 ErrorCount       = 0
-                ManualGroups     = New-Object System.Collections.Generic.List[string]
+                ManualGroups     = [System.Collections.Generic.List[string]]::new()
                 Pca2023          = $pca2023Ref
                 PreviousVerified = $previousVerified
             }
@@ -16461,7 +16464,7 @@ function Invoke-AdminPhaseA03_RefreshSnapshots {
         # CSV report (parity with A01_RefreshAllBaselines_report.csv)
         try {
             $reportPath = Join-Path $Script:LogsDir 'A03_RefreshSnapshots_report.csv'
-            $reportRows = New-Object System.Collections.Generic.List[object]
+            $reportRows = [System.Collections.Generic.List[object]]::new()
             $reportRows.Add([pscustomobject]@{
                 Section='release-info'; OsVersion=''; DuType=''
                 Status=$releaseInfoResult.Status; Detail=('monthly={0};hotpatch={1};bytes={2}' -f $releaseInfoResult.Monthly,$releaseInfoResult.Hotpatch,$releaseInfoResult.Bytes)
@@ -16966,8 +16969,8 @@ function Invoke-HyperVBootTest {
     $answerIso = $null
     $answerDir = $null
     $guestPassword = New-RandomValidationPassword
-    $shots = New-Object System.Collections.Generic.List[string]
-    $reasons = New-Object System.Collections.Generic.List[string]
+    $shots = [System.Collections.Generic.List[string]]::new()
+    $reasons = [System.Collections.Generic.List[string]]::new()
     $guestEvidence = $null
     $state = 'Unknown'
     $created = $false

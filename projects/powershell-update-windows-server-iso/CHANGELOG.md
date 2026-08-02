@@ -22,6 +22,36 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.18-r12.17] - 2026-08-02
+
+Tag: `generic-list-binder-hardening` (the tag advances). Generic-list
+construction stops going through the `New-Object` type binder.
+
+### Fixed
+
+- **Generic-list construction hardened**: every
+  `New-Object System.Collections.Generic.List[...]` site (script
+  state, debug-trace buffers, plan/step accumulators and helpers) is
+  replaced by the direct `[System.Collections.Generic.List[...]]::new()`
+  constructor — 76 sites, zero `New-Object` generic-list calls remain
+  (measured). The `New-Object` generic-type binder is the
+  edition-fragile path; the static constructor syntax binds
+  identically on Windows PowerShell 5.1 and PowerShell 7. Script-only
+  change: `data/*` and `schema/*` are byte-identical to r12.15
+  (measured).
+
+### Changed
+
+- **T40**: release pin advanced to `update-wsi-2026.07.18-r12.17`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/39W/7I**
+on the committed tree — one finding joins the debt (1× PSAP0005
+revision-anchored comment); committed verbatim per the no-fix-forward
+rule, draining post-series.
+
 ## [update-wsi-2026.07.18-r12.16] - 2026-08-02
 
 Tag: `catalog-language-and-workspace-containment` (the tag advances).
