@@ -22,6 +22,43 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.01-r12.55] - 2026-08-02
+
+Tag: `setupdu-baseline-language-preservation`.
+
+### Changed
+
+- **Baseline language resources are preserved, not removed**: when
+  the SOURCE media itself ships locale directories outside the
+  r12.49 allowlist, those baseline-original resources are now
+  recorded (`PreserveExistingLanguageResource` decisions;
+  `BaselinePreservedDisallowedLocaleDirectories` and
+  `BaselinePreservedDisallowedFiles` with per-file SHA-256 in the
+  language-cleanup manifest) and kept on the media instead of being
+  cleaned up — the allowlist governs what the OVERLAY may add, not
+  what the vendor media already contained. Media without baseline
+  language evidence retains the former strict behavior.
+- **P11 verifies no-new-locale instead of allowlist-only**: the
+  language-scope verification row now asserts that every observed
+  disallowed locale directory is within the baseline-preserved set
+  (nothing new was introduced by the overlay) and that each
+  baseline-preserved file still exists with its recorded SHA-256.
+  Script-only change; `data/*` and `schema/*` are untouched at this
+  revision.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.01-r12.55`
+  with the measured tag `setupdu-baseline-language-preservation`.
+  No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 4E/120W/12I (raw sweep
+  4E/121W/12I: +1W is the PSA7002 LF artefact; declared series
+  debt). The snapshot form remains BOM + LF at r12.55.
+
 ## [update-wsi-2026.08.01-r12.54] - 2026-08-02
 
 Tag: `setupdu-pinned-authority-handoff`.

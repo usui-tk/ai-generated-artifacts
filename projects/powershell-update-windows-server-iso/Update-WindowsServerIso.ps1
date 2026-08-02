@@ -703,9 +703,9 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.01-r12.54'
-# Validation marker: r12.54 pinned Catalog identity evidence handoff and P09 resume compatibility.
-$Script:ScriptTag     = 'setupdu-pinned-authority-handoff'
+$Script:ScriptVersion = 'update-wsi-2026.08.01-r12.55'
+# Validation marker: r12.55 Setup DU baseline-language preservation and P11 no-new-locale verification.
+$Script:ScriptTag     = 'setupdu-baseline-language-preservation'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -12308,6 +12308,18 @@ function Remove-SetupDuPreviouslyAppliedExcludedLanguageResources {
         }
     }
 
+    $sourcesRoot = Join-Path $Script:ExtractedDir 'sources'
+    $observedLocaleDirectoriesBefore = @()
+    if (Test-Path -LiteralPath $sourcesRoot -PathType Container) {
+        $observedLocaleDirectoriesBefore = @(Get-ChildItem -LiteralPath $sourcesRoot -Directory -ErrorAction Stop |
+            Where-Object { Test-SetupDuLanguageDirectoryName -Name $_.Name } |
+            ForEach-Object { $_.Name.ToLowerInvariant() } | Sort-Object -Unique)
+    }
+    $observedDisallowedLocaleDirectoriesBefore = @($observedLocaleDirectoriesBefore | Where-Object { $allowed -notcontains $_ })
+    $priorCopiedLanguageDirectories = @($priorRecords | Where-Object { [bool]$_.Copied } | ForEach-Object {
+        Get-SetupDuRelativeLanguageDirectory -RelativePath ([string]$_.RelativePath)
+    } | Where-Object { $_ -and ($allowed -notcontains $_) } | Sort-Object -Unique)
+
     $records = [System.Collections.Generic.List[object]]::new()
     $excludedRows = @($SourceManifest | Where-Object {
         $lang = Get-SetupDuRelativeLanguageDirectory -RelativePath ([string]$_.RelativePath)
@@ -12320,26 +12332,47 @@ function Remove-SetupDuPreviouslyAppliedExcludedLanguageResources {
         $presentBefore = Test-Path -LiteralPath $dest -PathType Leaf
         $hashBefore = if ($presentBefore) { (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' }
         $removed = $false
+        $preserved = $false
         $basis = 'NotPresent'
         if ($presentBefore) {
             $priorCandidates = @($priorRecords | Where-Object { [string]$_.RelativePath -ieq $rel -and [bool]$_.Copied })
+            if ($priorCandidates.Count -gt 1) {
+                throw ('Prior Setup DU overlay evidence is ambiguous for excluded language resource: {0}; matches={1}; priorEvidence={2}' -f $dest,$priorCandidates.Count,$priorPath)
+            }
             $priorMatch = if ($priorCandidates.Count -eq 1) { $priorCandidates[0] } else { $null }
-            $priorExpected = ''
             if ($priorMatch) {
+                $priorDestinationPresentBefore = $false
+                if ($priorMatch.PSObject.Properties['DestinationPresentBefore']) {
+                    $priorDestinationPresentBefore = [bool]$priorMatch.DestinationPresentBefore
+                } elseif ($priorMatch.PSObject.Properties['DestinationSha256Before'] -and -not [string]::IsNullOrWhiteSpace([string]$priorMatch.DestinationSha256Before)) {
+                    $priorDestinationPresentBefore = $true
+                }
+                if ($priorDestinationPresentBefore) {
+                    throw ('Prior Setup DU overlay replaced an existing excluded-language media file, but no source-media backup is available for safe restoration: {0}; priorEvidence={1}' -f $dest,$priorPath)
+                }
+                $priorExpected = ''
                 if (-not [string]::IsNullOrWhiteSpace([string]$priorMatch.ExpectedSha256After)) {
                     $priorExpected = ([string]$priorMatch.ExpectedSha256After).ToLowerInvariant()
                 } elseif (-not [string]::IsNullOrWhiteSpace([string]$priorMatch.DestinationSha256After)) {
                     $priorExpected = ([string]$priorMatch.DestinationSha256After).ToLowerInvariant()
                 }
+                if ([string]::IsNullOrWhiteSpace($priorExpected) -or $hashBefore -ne $priorExpected) {
+                    throw ('Disallowed Setup DU language resource matches prior overlay path but not its verified SHA-256: {0}; language={1}; currentSha256={2}; priorExpectedSha256={3}; priorEvidence={4}' -f $dest,$lang,$hashBefore,$priorExpected,$priorPath)
+                }
+                $item = Get-Item -LiteralPath $dest -ErrorAction Stop
+                if ($item.IsReadOnly) { $item.IsReadOnly = $false }
+                Remove-Item -LiteralPath $dest -Force -ErrorAction Stop
+                $removed = $true
+                $basis = 'PriorVerifiedSetupDuOverlay'
+            } else {
+                # A language resource already present before the first Setup DU
+                # overlay is part of the extracted Microsoft source media.  It
+                # must not be replaced by a non-target Setup DU payload, but it
+                # must also not be deleted merely because the Setup DU CAB
+                # contains a matching relative path.
+                $preserved = $true
+                $basis = 'ExistingExtractedMediaResourcePreserved'
             }
-            if (-not $priorMatch -or [string]::IsNullOrWhiteSpace($priorExpected) -or $hashBefore -ne $priorExpected) {
-                throw ('Disallowed Setup DU language resource already exists but cannot be safely attributed to the prior verified overlay: {0}; language={1}; currentSha256={2}; priorEvidence={3}' -f $dest,$lang,$hashBefore,$priorPath)
-            }
-            $item = Get-Item -LiteralPath $dest -ErrorAction Stop
-            if ($item.IsReadOnly) { $item.IsReadOnly = $false }
-            Remove-Item -LiteralPath $dest -Force -ErrorAction Stop
-            $removed = $true
-            $basis = 'PriorVerifiedSetupDuOverlay'
         }
         $records.Add([pscustomobject][ordered]@{
             RelativePath=$rel
@@ -12348,48 +12381,89 @@ function Remove-SetupDuPreviouslyAppliedExcludedLanguageResources {
             PresentBefore=$presentBefore
             Sha256Before=$hashBefore
             Removed=$removed
+            Preserved=$preserved
             RemovalBasis=$basis
             PresentAfter=(Test-Path -LiteralPath $dest -PathType Leaf)
+            Sha256After=$(if (Test-Path -LiteralPath $dest -PathType Leaf) { (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' })
         }) | Out-Null
     }
 
-    # Remove only empty locale roots. Any remaining file under a prohibited
-    # locale is a hard failure; the script never recursively deletes unknown
-    # source-media content.
-    $sourcesRoot = Join-Path $Script:ExtractedDir 'sources'
+    # Remove empty locale roots created solely by a prior verified overlay.
+    # Non-empty locale roots that were already present in the extracted source
+    # media are preserved; P09 records their hashes and P11 proves that Setup DU
+    # neither added nor modified their excluded-language files.
     $excludedLanguages = @($excludedRows | ForEach-Object {
         Get-SetupDuRelativeLanguageDirectory -RelativePath ([string]$_.RelativePath)
     } | Where-Object { $_ } | Sort-Object -Unique)
+    $baselinePreservedLanguages = @($records.ToArray() | Where-Object { $_.Preserved } |
+        ForEach-Object { [string]$_.LanguageDirectory } | Sort-Object -Unique)
+    $baselinePreservedDisallowedLocaleDirectories = @($observedDisallowedLocaleDirectoriesBefore | Where-Object {
+        ($priorCopiedLanguageDirectories -notcontains $_) -or ($baselinePreservedLanguages -contains $_)
+    } | Sort-Object -Unique)
     foreach ($lang in $excludedLanguages) {
         $dir = Join-Path $sourcesRoot $lang
         if (Test-Path -LiteralPath $dir -PathType Container) {
             $remaining = @(Get-ChildItem -LiteralPath $dir -Force -ErrorAction Stop)
             if ($remaining.Count -eq 0) {
                 Remove-Item -LiteralPath $dir -Force -ErrorAction Stop
-            } else {
-                throw ('Disallowed Setup DU language directory still contains unverified content after targeted cleanup: {0}; remaining={1}' -f $dir,$remaining.Count)
+            } elseif ($baselinePreservedDisallowedLocaleDirectories -notcontains $lang) {
+                throw ('Disallowed Setup DU language directory still contains content that cannot be attributed to preserved source media: {0}; remaining={1}; priorEvidence={2}' -f $dir,$remaining.Count,$priorPath)
             }
         }
     }
 
+    $baselinePreservedDisallowedFiles = [System.Collections.Generic.List[object]]::new()
+    $trimChars = [char[]]@([System.IO.Path]::DirectorySeparatorChar,[System.IO.Path]::AltDirectorySeparatorChar)
+    $normalizedSourcesRoot = [System.IO.Path]::GetFullPath($sourcesRoot).TrimEnd($trimChars)
+    foreach ($lang in $baselinePreservedDisallowedLocaleDirectories) {
+        $dir = Join-Path $normalizedSourcesRoot $lang
+        if (-not (Test-Path -LiteralPath $dir -PathType Container)) { continue }
+        foreach ($file in @(Get-ChildItem -LiteralPath $dir -File -Recurse -Force -ErrorAction Stop)) {
+            $fullPath = [System.IO.Path]::GetFullPath($file.FullName)
+            $rel = $fullPath.Substring($normalizedSourcesRoot.Length).TrimStart($trimChars)
+            $baselinePreservedDisallowedFiles.Add([pscustomobject][ordered]@{
+                RelativePath=$rel
+                LanguageDirectory=$lang
+                SizeBytes=[long]$file.Length
+                Sha256=(Get-FileHash -LiteralPath $fullPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            }) | Out-Null
+        }
+    }
+
+    $observedLocaleDirectoriesAfter = @()
+    if (Test-Path -LiteralPath $sourcesRoot -PathType Container) {
+        $observedLocaleDirectoriesAfter = @(Get-ChildItem -LiteralPath $sourcesRoot -Directory -ErrorAction Stop |
+            Where-Object { Test-SetupDuLanguageDirectoryName -Name $_.Name } |
+            ForEach-Object { $_.Name.ToLowerInvariant() } | Sort-Object -Unique)
+    }
+
     $evidencePath = if ($Script:LogsDir) { Join-Path $Script:LogsDir 'P09_setupdu_language_cleanup.json' } else { '' }
     $result = [pscustomobject][ordered]@{
-        SchemaVersion='setupdu-language-cleanup/1.0'
+        SchemaVersion='setupdu-language-cleanup/1.2'
         CreatedAtUtc=[datetime]::UtcNow.ToString('o')
         OsKey=[string]$Script:OsVersion
         OsLanguage=[string]$Script:OsLanguage
         KbId=$KbId
+        PolicySemantics='SetupDuMayApplyNeutralAndAllowedLanguageResourcesOnly;ExistingExtractedMediaLocaleResourcesRemainByteIdentical'
         AllowedLanguageDirectories=@($allowed)
         ExcludedLanguageDirectories=@($excludedLanguages)
+        ObservedLocaleDirectoriesBefore=@($observedLocaleDirectoriesBefore)
+        ObservedDisallowedLocaleDirectoriesBefore=@($observedDisallowedLocaleDirectoriesBefore)
+        PriorOverlayCopiedLanguageDirectories=@($priorCopiedLanguageDirectories)
+        BaselinePreservedLanguageDirectories=@($baselinePreservedLanguages)
+        BaselinePreservedDisallowedLocaleDirectories=@($baselinePreservedDisallowedLocaleDirectories)
+        BaselinePreservedDisallowedFileCount=$baselinePreservedDisallowedFiles.Count
+        BaselinePreservedDisallowedFiles=$baselinePreservedDisallowedFiles.ToArray()
+        ObservedLocaleDirectoriesAfterCleanup=@($observedLocaleDirectoriesAfter)
         PriorOverlayEvidencePath=$priorPath
         RecordCount=$records.Count
         RemovedCount=@($records.ToArray() | Where-Object { $_.Removed }).Count
+        PreservedCount=@($records.ToArray() | Where-Object { $_.Preserved }).Count
         Records=$records.ToArray()
     }
     if ($evidencePath) { Save-CanonicalJsonFile -InputObject $result -Path $evidencePath -Depth 12 }
     return $result
 }
-
 
 function Get-SetupDuOverlayPolicy {
     [CmdletBinding()]
@@ -12806,9 +12880,9 @@ function Get-SetupDuFileVersionDecision {
     $reason='Destination file is absent.'
     if(-not $languageAllowed){
         if($destinationPresent){
-            $decision='ManualReviewRequired'
-            $reasonCode='DisallowedSetupDuLanguageResourceStillPresent'
-            $reason=('Setup DU language resource {0} is outside the allowed media languages [{1}] and remains present after cleanup.' -f $languageDirectory,($normalizedAllowedLanguages -join ','))
+            $decision='PreserveExistingLanguageResource'
+            $reasonCode='SetupDuLanguageResourceExcludedExistingMediaPreserved'
+            $reason=('Setup DU language resource {0} is outside the allowed media languages [{1}]. The existing extracted-media file is preserved byte-for-byte and the Setup DU payload is not applied.' -f $languageDirectory,($normalizedAllowedLanguages -join ','))
         }else{
             $decision='SkipLanguageResource'
             $reasonCode='SetupDuLanguageResourceExcluded'
@@ -12855,7 +12929,7 @@ function Get-SetupDuFileVersionDecision {
         }
     }
     return [pscustomobject][ordered]@{
-        SchemaVersion='setupdu-file-decision/1.2'
+        SchemaVersion='setupdu-file-decision/1.3'
         TimestampUtc=[datetime]::UtcNow.ToString('o')
         OsKey=[string]$Script:OsVersion
         KbId=$KbId
@@ -12926,6 +13000,9 @@ function Invoke-SetupDuVersionAwareOverlay {
     if([int]$languageCleanup.RemovedCount -gt 0){
         Write-Ok ('Removed {0} previously overlaid non-target Setup DU language file(s) before rebuilding P09.' -f [int]$languageCleanup.RemovedCount)
     }
+    if([int]$languageCleanup.PreservedCount -gt 0){
+        Write-Step ('Preserving {0} non-target language file(s) already present in the extracted source media; Setup DU will not replace them.' -f [int]$languageCleanup.PreservedCount)
+    }
     $decisions=@()
     foreach($row in @($SourceManifest)){
         $decisions+=,(Get-SetupDuFileVersionDecision -ManifestRow $row -KbId $KbId -BootWimSetupBinaryStash $stashDir -PackageAuthority $packageAuthority -SameVersionDifferentContentPolicy ([string]$policy.SameVersionDifferentContentPolicy) -AllowedLanguageDirectories @($policy.AllowedLanguageDirectories) -LanguageResourcePolicy ([string]$policy.LanguageResourcePolicy))
@@ -12964,6 +13041,7 @@ function Invoke-SetupDuVersionAwareOverlay {
         $records.Add([pscustomobject][ordered]@{
             KbId=$KbId;RelativePath=$d.RelativePath;LanguageDirectory=$d.LanguageDirectory;LanguageAllowed=$d.LanguageAllowed
             Decision=$d.Decision;ReasonCode=$d.ReasonCode
+            DestinationPresentBefore=$d.DestinationPresent;DestinationSha256Before=$d.DestinationSha256Before
             Copied=$copied;ExpectedPresentAfter=$expectedPresent;DestinationPresentAfter=$afterPresent;DestinationSha256After=$afterHash
             ExpectedSha256After=$expectedHash;MatchAfter=$matchAfter
             SourceFileVersion=$d.SourceFileVersion;DestinationFileVersionBefore=$d.DestinationFileVersionBefore
@@ -12973,7 +13051,7 @@ function Invoke-SetupDuVersionAwareOverlay {
     $failed=@($records|Where-Object{-not $_.MatchAfter})
     $overlayPath=Join-Path $Script:LogsDir 'setupdu_overlay_manifest.json'
     Save-CanonicalJsonFile -InputObject ([pscustomobject][ordered]@{
-        SchemaVersion='setupdu-overlay/2.2';CreatedAtUtc=[datetime]::UtcNow.ToString('o');OsKey=[string]$Script:OsVersion;KbId=$KbId
+        SchemaVersion='setupdu-overlay/2.3';CreatedAtUtc=[datetime]::UtcNow.ToString('o');OsKey=[string]$Script:OsVersion;KbId=$KbId
         Policy=$policy;PackageAuthority=$packageAuthority;LanguageCleanup=$languageCleanup;DecisionEvidence=$evidence;Records=$records.ToArray()
     }) -Path $overlayPath -Depth 12
     if($failed.Count -gt 0){throw ('Setup DU overlay verification failed for {0} file(s); evidence={1}' -f $failed.Count,$overlayPath)}
@@ -20411,15 +20489,21 @@ function Invoke-VerifyPhase11_StaticVerify {
                 $setupFailures=0; $setupChecked=0; $setupExcludedChecked=0
                 foreach ($mrec in @($setupManifest.Records)) {
                     $isoDest=Join-Path $mountedDrive ('sources\' + ([string]$mrec.RelativePath))
-                    if ([string]$mrec.Decision -eq 'SkipLanguageResource') {
-                        $setupExcludedChecked++
-                        if (Test-Path -LiteralPath $isoDest -PathType Leaf) { $setupFailures++ }
+                    if ($mrec.OverriddenByBootWim) { continue }
+                    $isExcludedLanguageDecision=([string]$mrec.Decision -in @('SkipLanguageResource','PreserveExistingLanguageResource'))
+                    if($isExcludedLanguageDecision){$setupExcludedChecked++}else{$setupChecked++}
+                    $expectedPresent = if ($mrec.PSObject.Properties['ExpectedPresentAfter']) {
+                        [bool]$mrec.ExpectedPresentAfter
+                    } else {
+                        ([string]$mrec.Decision -ne 'SkipLanguageResource')
+                    }
+                    $actualPresent=Test-Path -LiteralPath $isoDest -PathType Leaf
+                    if(-not $expectedPresent){
+                        if($actualPresent){$setupFailures++}
                         continue
                     }
-                    if ($mrec.OverriddenByBootWim) { continue }
-                    $setupChecked++
-                    if (-not (Test-Path -LiteralPath $isoDest -PathType Leaf)) { $setupFailures++; continue }
-                    $isoHash=(Get-FileHash -LiteralPath $isoDest -Algorithm SHA256).Hash.ToLower()
+                    if(-not $actualPresent){$setupFailures++;continue}
+                    $isoHash=(Get-FileHash -LiteralPath $isoDest -Algorithm SHA256).Hash.ToLowerInvariant()
                     $expectedHash = if (-not [string]::IsNullOrWhiteSpace([string]$mrec.ExpectedSha256After)) {
                         ([string]$mrec.ExpectedSha256After).ToLowerInvariant()
                     } elseif (-not [string]::IsNullOrWhiteSpace([string]$mrec.SourceSha256)) {
@@ -20430,7 +20514,7 @@ function Invoke-VerifyPhase11_StaticVerify {
                     }
                     if ([string]::IsNullOrWhiteSpace($expectedHash) -or $isoHash -ne $expectedHash) { $setupFailures++ }
                 }
-                Add-VRow -Check 'SetupDuFinalManifest' -Expected ('all ' + $setupChecked + ' included files matching and ' + $setupExcludedChecked + ' excluded language files absent') -Actual $(if ($setupFailures -eq 0) { 'match' } else { ($setupFailures.ToString() + ' mismatch/missing/unexpected') }) -Status $(if ($setupFailures -eq 0) { 'Pass' } else { 'Fail' }) -Notes $setupManifestPath
+                Add-VRow -Check 'SetupDuFinalManifest' -Expected ('all ' + $setupChecked + ' included files matching and ' + $setupExcludedChecked + ' excluded-language files absent or preserved byte-identical') -Actual $(if ($setupFailures -eq 0) { 'match' } else { ($setupFailures.ToString() + ' mismatch/missing/unexpected') }) -Status $(if ($setupFailures -eq 0) { 'Pass' } else { 'Fail' }) -Notes $setupManifestPath
 
                 $allowedSetupLanguages=@()
                 if($setupManifest.Policy -and $setupManifest.Policy.PSObject.Properties['AllowedLanguageDirectories']){
@@ -20438,10 +20522,49 @@ function Invoke-VerifyPhase11_StaticVerify {
                 }else{
                     $allowedSetupLanguages=@(Get-SetupDuAllowedLanguageDirectories -Policy 'EnUsAndTargetOnly' -OsLanguage ([string]$Script:OsLanguage))
                 }
+                $baselineDisallowedLocaleDirs=@()
+                $baselineDisallowedFiles=@()
+                $hasBaselineLanguageEvidence=$false
+                if($setupManifest.LanguageCleanup -and $setupManifest.LanguageCleanup.PSObject.Properties['BaselinePreservedDisallowedLocaleDirectories']){
+                    $hasBaselineLanguageEvidence=$true
+                    $baselineDisallowedLocaleDirs=@($setupManifest.LanguageCleanup.BaselinePreservedDisallowedLocaleDirectories | ForEach-Object { ([string]$_).ToLowerInvariant() } | Sort-Object -Unique)
+                    if($setupManifest.LanguageCleanup.PSObject.Properties['BaselinePreservedDisallowedFiles']){
+                        $baselineDisallowedFiles=@($setupManifest.LanguageCleanup.BaselinePreservedDisallowedFiles)
+                    }
+                }
                 $isoSourcesRoot=Join-Path $mountedDrive 'sources'
                 $observedLocaleDirs=@(Get-ChildItem -LiteralPath $isoSourcesRoot -Directory -ErrorAction Stop | Where-Object { Test-SetupDuLanguageDirectoryName -Name $_.Name } | ForEach-Object { $_.Name.ToLowerInvariant() } | Sort-Object -Unique)
-                $disallowedLocaleDirs=@($observedLocaleDirs | Where-Object { $allowedSetupLanguages -notcontains $_ })
-                Add-VRow -Check 'SetupDuLanguageResourceAllowlist' -Expected ('only ' + ($allowedSetupLanguages -join ',')) -Actual $(if($disallowedLocaleDirs.Count -eq 0){'only allowed locale directories present'}else{'disallowed=' + ($disallowedLocaleDirs -join ',')}) -Status $(if($disallowedLocaleDirs.Count -eq 0){'Pass'}else{'Fail'}) -Notes ('observed=' + ($observedLocaleDirs -join ','))
+                $observedDisallowedLocaleDirs=@($observedLocaleDirs | Where-Object { $allowedSetupLanguages -notcontains $_ })
+                $newDisallowedLocaleDirs=if($hasBaselineLanguageEvidence){
+                    @($observedDisallowedLocaleDirs | Where-Object { $baselineDisallowedLocaleDirs -notcontains $_ })
+                }else{
+                    # Legacy manifests did not record the pre-overlay media
+                    # baseline, so retain the former strict behavior.
+                    @($observedDisallowedLocaleDirs)
+                }
+                $baselineFileFailures=0
+                $newDisallowedFiles=[System.Collections.Generic.List[string]]::new()
+                if($hasBaselineLanguageEvidence){
+                    $baselineRelativePaths=@($baselineDisallowedFiles | ForEach-Object { ([string]$_.RelativePath).ToLowerInvariant() })
+                    foreach($brec in $baselineDisallowedFiles){
+                        $rel=[string]$brec.RelativePath
+                        $dest=Join-Path $isoSourcesRoot $rel
+                        if(-not(Test-Path -LiteralPath $dest -PathType Leaf)){$baselineFileFailures++;continue}
+                        $actualHash=(Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLowerInvariant()
+                        if($actualHash -ne ([string]$brec.Sha256).ToLowerInvariant()){$baselineFileFailures++}
+                    }
+                    foreach($lang in $observedDisallowedLocaleDirs){
+                        $dir=Join-Path $isoSourcesRoot $lang
+                        foreach($file in @(Get-ChildItem -LiteralPath $dir -File -Recurse -Force -ErrorAction Stop)){
+                            $full=[System.IO.Path]::GetFullPath($file.FullName)
+                            $rootFull=[System.IO.Path]::GetFullPath($isoSourcesRoot).TrimEnd([char[]]@([System.IO.Path]::DirectorySeparatorChar,[System.IO.Path]::AltDirectorySeparatorChar))
+                            $rel=$full.Substring($rootFull.Length).TrimStart([char[]]@([System.IO.Path]::DirectorySeparatorChar,[System.IO.Path]::AltDirectorySeparatorChar))
+                            if($baselineRelativePaths -notcontains $rel.ToLowerInvariant()){$newDisallowedFiles.Add($rel)|Out-Null}
+                        }
+                    }
+                }
+                $languageGatePassed=($newDisallowedLocaleDirs.Count -eq 0 -and $baselineFileFailures -eq 0 -and $newDisallowedFiles.Count -eq 0)
+                Add-VRow -Check 'SetupDuLanguageResourceAllowlist' -Expected ('Setup DU adds no locale or file outside ' + ($allowedSetupLanguages -join ',') + '; pre-existing source-media locale files remain byte-identical') -Actual $(if($languageGatePassed){'no new disallowed locale content; baseline hashes match'}else{'newDirs=' + ($newDisallowedLocaleDirs -join ',') + '; baselineFileFailures=' + $baselineFileFailures + '; newFiles=' + (@($newDisallowedFiles.ToArray()) -join ',')}) -Status $(if($languageGatePassed){'Pass'}else{'Fail'}) -Notes ('baselinePreservedDirs=' + ($baselineDisallowedLocaleDirs -join ',') + '; baselineFiles=' + $baselineDisallowedFiles.Count + '; observed=' + ($observedLocaleDirs -join ','))
             } elseif (@($Script:ResolvedPatches | Where-Object { $_.PatchType -eq 'SetupDU' }).Count -gt 0) {
                 Add-VRow -Check 'SetupDuFinalManifest' -Expected 'evidence present' -Actual 'missing' -Status 'Fail' -Notes $setupManifestPath
             }
