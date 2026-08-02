@@ -1,0 +1,23 @@
+{
+  "SchemaVersion": "servicing-contract-baselines/1.0",
+  "EstablishedBy": "r12.44",
+  "Purpose": "Fail closed when any OS servicing contract changes without an explicit baseline update.",
+  "Contracts": {
+    "Server2016": {
+      "ContractRevision": "Server2016-r1",
+      "Sha256": "a92b7e37d8d0e835f706037e2591e222c35098f8e546c67a2de928fbcae3da46"
+    },
+    "Server2019": {
+      "ContractRevision": "Server2019-r1",
+      "Sha256": "d72bd096168cc74836d0b441d9bd03bb74e1f6e1d4eb5d2a3adc80b917830c0d"
+    },
+    "Server2022": {
+      "ContractRevision": "Server2022-r1",
+      "Sha256": "35e5617087fe98403895b6d3e4de0120635175dd7458e0cb5253ed87e9287e67"
+    },
+    "Server2025": {
+      "ContractRevision": "Server2025-r1",
+      "Sha256": "f292004114beda533920ed4b5f980e7b9a11e2dddea52f50726fc918f85b9122"
+    }
+  }
+}

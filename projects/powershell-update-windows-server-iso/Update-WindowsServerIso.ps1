@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Build an updated Windows Server ISO by integrating SSU/LCU/Dynamic Updates
     into the install.wim, boot.wim, and winre.wim, then repackaging the media.
@@ -663,6 +663,7 @@ $Script:MarkersDir        = Join-Path $Script:WorkRoot '.markers'
 $Script:StateDir          = Join-Path $Script:WorkRoot 'state'
 $Script:VersionDecisionDir = Join-Path $Script:LogsDir 'version-decision'
 $Script:PatchAssetMetadataCache = @{}
+$Script:ServicingContract = $null
 
 # >>> CANONICAL unit_id=pwsh.helper.initialize-runtimedirectories version=1.0.0 hash=30bff32f7d40fca8 policy=canonical binding=follow-latest >>>
 function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical unit_id retained; noun stays plural by design
@@ -702,9 +703,9 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.29-r12.43'
+$Script:ScriptVersion = 'update-wsi-2026.07.29-r12.44'
 # Validation marker: pwsh7-runtime-validated on PowerShell 7.6.4 Linux x64; Windows-native gates remain required.
-$Script:ScriptTag     = 'all-os-version-decision-hardening'
+$Script:ScriptTag     = 'safeos-p11-metadata-contract-isolation-stage1'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -11151,10 +11152,7 @@ function Get-PatchTargetsForRole {
         'CheckpointDependency'   { return [string[]]@() }
         'DotNetLeaf'             { return [string[]]@('Install') }
         'SafeOSDU'               {
-            if ([string]$Script:OsVersion -eq 'Server2019' -and
-                $Script:OsProfile -and
-                $Script:OsProfile.Common -and
-                [string]$Script:OsProfile.Common.BootWimUpdateModel -eq 'SafeOSDU') {
+            if ((Get-ConfiguredBootWimUpdateModel) -eq 'SafeOSDU') {
                 return [string[]]@('Boot','WinRE')
             }
             return [string[]]@('WinRE')
@@ -11772,7 +11770,9 @@ function Initialize-BootTestState {
     $Script:RunId = [string]$index.Identity.RunId
     $Script:OsVersion = [string]$index.Identity.OsKey
     $Script:OsLanguage = [string]$index.Identity.OsLanguage
+    $Script:ServicingContract = Get-ServicingContract -OsKey $Script:OsVersion
     $Script:OsProfile = Get-ConfigProfile -OsKey $Script:OsVersion -OsLang $Script:OsLanguage
+    Initialize-ServicingContract
     $candidate = if ($Script:BootTestIsoPath) { Resolve-RelativeToScript $Script:BootTestIsoPath } else { [string]$index.Identity.OutputIsoPath }
     if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { throw ('BootTest ISO not found: {0}' -f $candidate) }
     $Script:OutputIsoPath = $candidate
@@ -12403,11 +12403,7 @@ function Build-BootApplySequence {
         throw ('boot.wim update plan is ambiguous: SafeOSDU={0}, ServicingStackCarrier={1}, FinalLCU={2}. Select one cumulative-update model.' -f $safeOs.Count,$stack.Count,$lcu.Count)
     }
     $actualBootUpdateModel = if ($safeOs.Count -gt 0) { 'SafeOSDU' } else { 'FullLCU' }
-    $configuredBootUpdateModel = ''
-    if ($Script:OsProfile -and $Script:OsProfile.Common -and
-        $Script:OsProfile.Common.PSObject.Properties['BootWimUpdateModel']) {
-        $configuredBootUpdateModel = [string]$Script:OsProfile.Common.BootWimUpdateModel
-    }
+    $configuredBootUpdateModel = Get-ConfiguredBootWimUpdateModel
     if (-not [string]::IsNullOrWhiteSpace($configuredBootUpdateModel) -and
         $configuredBootUpdateModel -ne $actualBootUpdateModel) {
         throw ('boot.wim update model mismatch: configured={0}; resolved-plan={1}. Refusing to service with a Catalog-refresh target regression.' -f $configuredBootUpdateModel,$actualBootUpdateModel)
@@ -15860,6 +15856,185 @@ function Write-PatchFreshnessSummary {
     }
 }
 
+
+# ============================================================
+# OS servicing contracts (single-file logical isolation)
+# ============================================================
+# The production implementation remains one .ps1 file. These pure contract
+# functions isolate OS-specific servicing semantics from the shared DISM/WIM
+# execution primitives. Deep phase functions consume the selected contract
+# rather than adding new OsVersion conditionals.
+
+function New-Server2016ServicingContract {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param()
+    return [pscustomobject][ordered]@{
+        SchemaVersion='servicing-contract/1.0'
+        ContractRevision='Server2016-r1'
+        OsKey='Server2016'
+        PatchModel='separate-ssu'
+        VersionDecisionPolicy='StrictFailClosed'
+        Install=[pscustomobject][ordered]@{UpdateModel='SeparateSSUThenFullLCU';VerificationMode='LcuBuildAndStandaloneSsu';PendingPolicy='Reject'}
+        Boot=[pscustomobject][ordered]@{UpdateModel='FullLCU';VerificationMode='FullLcuTarget';FailurePolicy='FailBuild';SmokeTestRequired=$false}
+        WinRE=[pscustomobject][ordered]@{UpdateModel='SeparateSSUThenFullLCUPlusSafeOSDU';VerificationMode='RollupSafeOsAndSsuEvidence';DistributionPolicy='ServiceOnceCopyToAllInstallIndexes'}
+        Ssu=[pscustomobject][ordered]@{StateResolver='InstalledPackageThenComponentDirectory';Monotonic=$true}
+        Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After'}
+    }
+}
+
+function New-Server2019ServicingContract {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param()
+    return [pscustomobject][ordered]@{
+        SchemaVersion='servicing-contract/1.0'
+        ContractRevision='Server2019-r1'
+        OsKey='Server2019'
+        PatchModel='embedded-ssu'
+        VersionDecisionPolicy='StrictFailClosed'
+        Install=[pscustomobject][ordered]@{UpdateModel='EmbeddedSSUFullLCU';VerificationMode='LcuBuildAndEmbeddedSsu';PendingPolicy='Reject'}
+        Boot=[pscustomobject][ordered]@{UpdateModel='SafeOSDU';VerificationMode='SafeOsPackageKernelOperation';FailurePolicy='FailBuild';SmokeTestRequired=$true}
+        WinRE=[pscustomobject][ordered]@{UpdateModel='EmbeddedSSUFullLCUThenSafeOSDU';VerificationMode='RollupSafeOsAndSsuEvidence';DistributionPolicy='ServiceOnceCopyToAllInstallIndexes'}
+        Ssu=[pscustomobject][ordered]@{StateResolver='InstalledPackageIdentity';Monotonic=$true;LegacyPrerequisitePolicy='SkipWhenActiveSsuIsNewer'}
+        Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After'}
+    }
+}
+
+function New-Server2022ServicingContract {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param()
+    return [pscustomobject][ordered]@{
+        SchemaVersion='servicing-contract/1.0'
+        ContractRevision='Server2022-r1'
+        OsKey='Server2022'
+        PatchModel='embedded-ssu-du'
+        VersionDecisionPolicy='StrictFailClosed'
+        Install=[pscustomobject][ordered]@{UpdateModel='BridgeWhenRequiredThenEmbeddedSSUFullLCU';VerificationMode='LcuBuildAndEmbeddedSsu';PendingPolicy='Reject'}
+        Boot=[pscustomobject][ordered]@{UpdateModel='FullLCU';VerificationMode='FullLcuTarget';FailurePolicy='FailBuild';SmokeTestRequired=$false}
+        WinRE=[pscustomobject][ordered]@{UpdateModel='EmbeddedSSUFullLCUThenSafeOSDU';VerificationMode='RollupSafeOsAndSsuEvidence';DistributionPolicy='ServiceOnceCopyToAllInstallIndexes'}
+        Ssu=[pscustomobject][ordered]@{StateResolver='InstalledPackageIdentity';Monotonic=$true;BridgePolicy='CompareImageAndSsuFloors'}
+        Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After'}
+    }
+}
+
+function New-Server2025ServicingContract {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param()
+    return [pscustomobject][ordered]@{
+        SchemaVersion='servicing-contract/1.0'
+        ContractRevision='Server2025-r1'
+        OsKey='Server2025'
+        PatchModel='uup-checkpoint'
+        VersionDecisionPolicy='StrictFailClosed'
+        Install=[pscustomobject][ordered]@{UpdateModel='CheckpointChainThenEmbeddedSSUFullLCU';VerificationMode='CheckpointChainAndLcuBuild';PendingPolicy='Reject'}
+        Boot=[pscustomobject][ordered]@{UpdateModel='FullLCU';VerificationMode='FullLcuTarget';FailurePolicy='FailBuild';SmokeTestRequired=$false}
+        WinRE=[pscustomobject][ordered]@{UpdateModel='CheckpointAwareLCUThenSafeOSDU';VerificationMode='RollupSafeOsAndSsuEvidence';DistributionPolicy='ServiceOnceCopyToAllInstallIndexes'}
+        Ssu=[pscustomobject][ordered]@{StateResolver='InstalledPackageIdentity';Monotonic=$true;CheckpointPolicy='ValidateOrderedCoLocatedChain'}
+        Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After'}
+    }
+}
+
+function Get-ServicingContract {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)][ValidateSet('Server2016','Server2019','Server2022','Server2025')][string]$OsKey)
+    switch($OsKey){
+        'Server2016' { return New-Server2016ServicingContract }
+        'Server2019' { return New-Server2019ServicingContract }
+        'Server2022' { return New-Server2022ServicingContract }
+        'Server2025' { return New-Server2025ServicingContract }
+    }
+    throw ('No servicing contract is defined for {0}.' -f $OsKey)
+}
+
+function Get-ServicingContractHash {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)]$Contract)
+    $json=ConvertTo-CanonicalJson -InputObject $Contract -Depth 12
+    $utf8=[System.Text.UTF8Encoding]::new($false)
+    $sha=[System.Security.Cryptography.SHA256]::Create()
+    try{$bytes=$sha.ComputeHash($utf8.GetBytes($json))}finally{$sha.Dispose()}
+    return ([System.BitConverter]::ToString($bytes).Replace('-','').ToLowerInvariant())
+}
+
+function Get-ConfiguredBootWimUpdateModel {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+    if($Script:ServicingContract -and $Script:ServicingContract.Boot -and $Script:ServicingContract.Boot.PSObject.Properties['UpdateModel']){
+        return [string]$Script:ServicingContract.Boot.UpdateModel
+    }
+    if($Script:OsProfile -and $Script:OsProfile.Common -and $Script:OsProfile.Common.PSObject.Properties['BootWimUpdateModel']){
+        return [string]$Script:OsProfile.Common.BootWimUpdateModel
+    }
+    return 'FullLCU'
+}
+
+function Assert-ServicingContractProfileCompatibility {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Contract,[Parameter(Mandatory)]$Profile)
+    $issues=[System.Collections.Generic.List[string]]::new()
+    if([string]$Contract.OsKey -ne [string]$Profile.OsKey){$issues.Add(('OsKey contract={0}, profile={1}' -f $Contract.OsKey,$Profile.OsKey))|Out-Null}
+    if([string]$Contract.PatchModel -ne [string]$Profile.PatchModel){$issues.Add(('PatchModel contract={0}, profile={1}' -f $Contract.PatchModel,$Profile.PatchModel))|Out-Null}
+    $profileBoot=if($Profile.Common -and $Profile.Common.PSObject.Properties['BootWimUpdateModel']){[string]$Profile.Common.BootWimUpdateModel}else{'FullLCU'}
+    if([string]$Contract.Boot.UpdateModel -ne $profileBoot){$issues.Add(('Boot.UpdateModel contract={0}, profile={1}' -f $Contract.Boot.UpdateModel,$profileBoot))|Out-Null}
+    $failurePolicy=if($Profile.Common -and $Profile.Common.PSObject.Properties['BootWimFailurePolicy']){[string]$Profile.Common.BootWimFailurePolicy}else{''}
+    if($failurePolicy -and [string]$Contract.Boot.FailurePolicy -ne $failurePolicy){$issues.Add(('Boot.FailurePolicy contract={0}, profile={1}' -f $Contract.Boot.FailurePolicy,$failurePolicy))|Out-Null}
+    $versionPolicy=if($Profile.Common -and $Profile.Common.PSObject.Properties['VersionDecisionPolicy']){[string]$Profile.Common.VersionDecisionPolicy}else{''}
+    if($versionPolicy -and [string]$Contract.VersionDecisionPolicy -ne $versionPolicy){$issues.Add(('VersionDecisionPolicy contract={0}, profile={1}' -f $Contract.VersionDecisionPolicy,$versionPolicy))|Out-Null}
+    if($issues.Count -gt 0){throw ('Servicing contract/profile mismatch: {0}' -f ($issues -join '; '))}
+}
+
+function Assert-AllServicingContractBaselines {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param()
+    $path=Join-Path $Script:ScriptRoot 'data\servicing-contract-baselines.json'
+    if(-not (Test-Path -LiteralPath $path -PathType Leaf)){throw ('Required servicing contract baseline is missing: {0}' -f $path)}
+    $baseline=Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-CanonicalJson
+    $results=[System.Collections.Generic.List[object]]::new()
+    foreach($os in @('Server2016','Server2019','Server2022','Server2025')){
+        $contract=Get-ServicingContract -OsKey $os
+        $actual=Get-ServicingContractHash -Contract $contract
+        $prop=$baseline.Contracts.PSObject.Properties[$os]
+        $expected=if($prop){[string]$prop.Value.Sha256}else{''}
+        $pass=(-not [string]::IsNullOrWhiteSpace($expected) -and $actual -eq $expected)
+        $results.Add([pscustomobject][ordered]@{OsKey=$os;ExpectedSha256=$expected;ActualSha256=$actual;Passed=$pass})|Out-Null
+    }
+    $failed=@($results|Where-Object{-not $_.Passed})
+    if($failed.Count -gt 0){throw ('UnexpectedCrossOsBehaviorChange: servicing contract baseline mismatch: {0}' -f (($failed|ForEach-Object{('{0}: expected={1}, actual={2}' -f $_.OsKey,$_.ExpectedSha256,$_.ActualSha256)}) -join '; '))}
+    return [pscustomobject][ordered]@{SchemaVersion='servicing-contract-baseline-check/1.0';BaselinePath=$path;Passed=$true;Results=@($results)}
+}
+
+function Initialize-ServicingContract {
+    [CmdletBinding()]
+    param()
+    $contract=Get-ServicingContract -OsKey $Script:OsVersion
+    Assert-ServicingContractProfileCompatibility -Contract $contract -Profile $Script:OsProfile
+    $baselineCheck=Assert-AllServicingContractBaselines
+    $Script:ServicingContract=$contract
+    if(Test-Path -LiteralPath $Script:LogsDir -PathType Container){
+        $dir=Join-Path $Script:LogsDir 'servicing-contract'
+        Initialize-RuntimeDirectories -Directory @($dir)
+        $selected=[pscustomobject][ordered]@{
+            SchemaVersion='selected-servicing-contract/1.0'
+            CreatedAtUtc=[datetime]::UtcNow.ToString('o')
+            RunId=$Script:RunId
+            OsKey=$Script:OsVersion
+            OsLanguage=$Script:OsLanguage
+            ContractSha256=Get-ServicingContractHash -Contract $contract
+            Contract=$contract
+            BaselineCheck=$baselineCheck
+        }
+        Save-CanonicalJsonFile -InputObject $selected -Path (Join-Path $dir 'selected-contract.json') -Depth 16
+        Save-CanonicalJsonFile -InputObject $baselineCheck -Path (Join-Path $dir 'all-os-contract-baseline-check.json') -Depth 12
+    }
+}
+
 # ============================================================
 # Phase P02: Resolve inputs (Setup group)
 # ============================================================
@@ -15879,7 +16054,9 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
         # Load profile
         Set-DebugStep -Step 'load-config-profile'
         Write-SubSection 'Step 1: Load OS profile'
+        $Script:ServicingContract = Get-ServicingContract -OsKey $Script:OsVersion
         $Script:OsProfile = Get-ConfigProfile -OsKey $Script:OsVersion -OsLang $Script:OsLanguage
+        Initialize-ServicingContract
         $Script:OsLangProfile = $Script:OsProfile.Language
         Write-Ok ('Profile loaded: {0} / {1} (build {2})' -f $Script:OsProfile.WimEdition, $Script:OsLanguage, $Script:OsProfile.Build)
         Write-Step ('Volume label prefix: {0}' -f $Script:OsLangProfile.VolumeLabelPrefix)
@@ -16930,7 +17107,7 @@ function Invoke-BootWimServicingSmokeTest {
     param()
 
     $evidencePath=Join-Path $Script:VersionDecisionDir 'P06_bootwim_servicing_smoke_test.json'
-    $required=([string]$Script:OsVersion -eq 'Server2019' -and [string]$Script:OsProfile.BootWimLcuPolicy -eq 'enabled')
+    $required=([bool]$Script:ServicingContract.Boot.SmokeTestRequired -and [string]$Script:OsProfile.BootWimLcuPolicy -eq 'enabled')
     if(-not $required){
         $notRequired=[pscustomobject][ordered]@{
             SchemaVersion='P06-bootwim-servicing-smoke-test/2.0'
@@ -16962,10 +17139,7 @@ function Invoke-BootWimServicingSmokeTest {
     if($safeOsPatches.Count -gt 0 -and $fullLcuPatches.Count -gt 0){
         throw 'P06 boot.wim smoke test found an ambiguous plan containing both SafeOSDU and full-LCU roles.'
     }
-    $configuredBootUpdateModel=''
-    if($Script:OsProfile.Common -and $Script:OsProfile.Common.PSObject.Properties['BootWimUpdateModel']){
-        $configuredBootUpdateModel=[string]$Script:OsProfile.Common.BootWimUpdateModel
-    }
+    $configuredBootUpdateModel=Get-ConfiguredBootWimUpdateModel
     if(-not [string]::IsNullOrWhiteSpace($configuredBootUpdateModel) -and $configuredBootUpdateModel -ne $bootUpdateModel){
         throw ('P06 boot.wim smoke test resolved the wrong update model: configured={0}; resolved={1}. Catalog refresh may have dropped a target assignment.' -f $configuredBootUpdateModel,$bootUpdateModel)
     }
@@ -17719,7 +17893,7 @@ function Invoke-BuildPhase08_PatchBootWim {
         # Pull the role-based boot.wim sequence. Server2019 may use the SafeOS CU alternative; other generations use the full-LCU model.
         $bootSequence = @($plan.BootSequence)
         $bootUpdateModel=if(@($bootSequence|Where-Object{$_.PSObject.Properties['BootUpdateModel'] -and [string]$_.BootUpdateModel -eq 'SafeOSDU'}).Count -gt 0){'SafeOSDU'}else{'FullLCU'}
-        $configuredBootUpdateModel=if($Script:OsProfile.Common -and $Script:OsProfile.Common.PSObject.Properties['BootWimUpdateModel']){[string]$Script:OsProfile.Common.BootWimUpdateModel}else{''}
+        $configuredBootUpdateModel=Get-ConfiguredBootWimUpdateModel
         if(-not [string]::IsNullOrWhiteSpace($configuredBootUpdateModel) -and $configuredBootUpdateModel -ne $bootUpdateModel){
             throw ('P08 boot.wim update model mismatch: configured={0}; sequence={1}.' -f $configuredBootUpdateModel,$bootUpdateModel)
         }
@@ -18821,12 +18995,44 @@ function Get-BootSafeOsDuVerificationDecision {
     foreach($patch in @($SafeOsPatches)){
         if(-not $patch){continue}
         $candidate=''
-        if($patch.PSObject.Properties['CandidatePackageVersion']){$candidate=[string]$patch.CandidatePackageVersion}
-        if([string]::IsNullOrWhiteSpace($candidate) -and $patch.PSObject.Properties['TargetVersion']){$candidate=[string]$patch.TargetVersion}
+        $metadataStatus=''
+        $metadataSource=''
+        $assetSha256=''
+        $assetMetadata=$null
+        try{
+            # ResolvedPatches intentionally contains selection/config data only.
+            # Candidate package versions are authoritative asset metadata and
+            # must be rehydrated through the common metadata parser at P11.
+            $assetMetadata=Get-PatchAssetMetadata -Patch $patch
+        }catch{
+            $assetMetadata=$null
+            $metadataStatus='Error: ' + $_.Exception.Message
+        }
+        if($assetMetadata){
+            if($assetMetadata.PSObject.Properties['MetadataStatus']){$metadataStatus=[string]$assetMetadata.MetadataStatus}
+            if($assetMetadata.PSObject.Properties['CandidatePackageVersion']){$candidate=[string]$assetMetadata.CandidatePackageVersion}
+            if([string]::IsNullOrWhiteSpace($candidate) -and $assetMetadata.PSObject.Properties['TargetVersion']){$candidate=[string]$assetMetadata.TargetVersion}
+            if($assetMetadata.PSObject.Properties['Sha256']){$assetSha256=[string]$assetMetadata.Sha256}
+            if(-not [string]::IsNullOrWhiteSpace($candidate)){$metadataSource='Get-PatchAssetMetadata'}
+        }
+        # Backward-compatible fallback for old resume manifests that persisted
+        # candidate fields directly on the patch object. A fresh run must use
+        # Get-PatchAssetMetadata; the source is recorded for diagnosis.
+        if([string]::IsNullOrWhiteSpace($candidate) -and $patch.PSObject.Properties['CandidatePackageVersion']){
+            $candidate=[string]$patch.CandidatePackageVersion
+            if(-not [string]::IsNullOrWhiteSpace($candidate)){$metadataSource='PatchObject.CandidatePackageVersion'}
+        }
+        if([string]::IsNullOrWhiteSpace($candidate) -and $patch.PSObject.Properties['TargetVersion']){
+            $candidate=[string]$patch.TargetVersion
+            if(-not [string]::IsNullOrWhiteSpace($candidate)){$metadataSource='PatchObject.TargetVersion'}
+        }
         $expectedRecords+=,[pscustomobject]@{
             KbId=[string]$patch.KbId
             PackageId=[string]$patch.PackageId
             CandidateVersion=$candidate
+            MetadataStatus=$metadataStatus
+            MetadataSource=$metadataSource
+            AssetSha256=$assetSha256
         }
     }
 
@@ -18892,7 +19098,7 @@ function Get-BootSafeOsDuVerificationDecision {
     $reasonCode=if(-not $metadataPass){'SafeOsCandidateMetadataMissing'}elseif(-not $packagePass){'SafeOsPackageVersionMissingOrOlder'}elseif(-not $kernelPass){'SafeOsKernelBuildBelowTarget'}elseif(-not $operationPass){'SafeOsP08OperationEvidenceMissingOrInvalid'}else{'SafeOsDuVerified'}
     $expectedText=('SafeOSDU>={0}; kernel>={1}; P08 ApplyStatus=Ok; pending=0' -f (($expectedRecords|ForEach-Object{$_.CandidateVersion}|Sort-Object -Unique)-join ','),$(if($expectedKernelBuild){[string]$expectedKernelBuild}else{'unknown'}))
     $actualText=('package={0}; kernel={1}; P08={2}' -f $(if($observedVersions.Count -gt 0){$observedVersions -join ','}else{'Absent'}),$(if($kernelBuild){[string]$kernelBuild}else{'Unknown'}),$(if($operationResults.Count -gt 0){(($operationResults|ForEach-Object{('{0}:{1}' -f $_.KbId,$_.Passed)}) -join ',')}else{'Absent'}))
-    $notes=('SafeOS DU intentionally leaves source RollupFix/registry build unchanged; validation uses installed SafeOSDU identity, offline kernel payload, and P08 operation evidence. ReasonCode={0}; evidence={1}' -f $reasonCode,(($operationResults|ForEach-Object{$_.EvidenceFile}|Where-Object{$_}) -join ';'))
+    $notes=('SafeOS DU intentionally leaves source RollupFix/registry build unchanged; validation uses parsed asset metadata, installed SafeOSDU identity, offline kernel payload, and P08 operation evidence. ReasonCode={0}; metadata={1}; evidence={2}' -f $reasonCode,(($expectedRecords|ForEach-Object{('{0}:{1}:{2}' -f $_.KbId,$_.MetadataSource,$_.MetadataStatus)}) -join ','),(($operationResults|ForEach-Object{$_.EvidenceFile}|Where-Object{$_}) -join ';'))
 
     return [pscustomobject]@{
         Passed=$passed
@@ -19212,7 +19418,7 @@ function Invoke-VerifyPhase11_StaticVerify {
                 }
                 $bootPolicyForVerify=Resolve-BootWimLcuPolicyValue -RawValue $Script:OsProfile.BootWimLcuPolicy
                 if ($bootPolicyForVerify -eq 'enabled') {
-                    $configuredBootUpdateModel=if($Script:OsProfile.Common -and $Script:OsProfile.Common.PSObject.Properties['BootWimUpdateModel']){[string]$Script:OsProfile.Common.BootWimUpdateModel}else{'FullLCU'}
+                    $configuredBootUpdateModel=Get-ConfiguredBootWimUpdateModel
                     $bootSafeLines=@($Script:ResolvedPatches | Where-Object { $_.PatchType -eq 'SafeOSDU' -and ((Get-PatchTargetsForEntry -Patch $_) -contains 'Boot') })
                     $bootFullLcuLines=@($Script:ResolvedPatches | Where-Object { $_.PatchType -eq 'LCU' -and ((Get-PatchTargetsForEntry -Patch $_) -contains 'Boot') })
                     $resolvedBootUpdateModel=if($bootSafeLines.Count -gt 0 -and $bootFullLcuLines.Count -eq 0){'SafeOSDU'}elseif($bootSafeLines.Count -eq 0 -and $bootFullLcuLines.Count -gt 0){'FullLCU'}else{'AmbiguousOrMissing'}
@@ -19229,7 +19435,7 @@ function Invoke-VerifyPhase11_StaticVerify {
                             $observedBootBuild=if($brec.Evidence -and $brec.Evidence.Build){[string]$brec.Evidence.Build}else{'unknown'}
                             Add-VRow -Check ('BootIndex' + $brec.Index + '_LcuTargetApplied') -Expected ('PolicyException: source build preserved; P14 Install required instead of target ' + $expectedBuildAll) -Actual $observedBootBuild -Status 'PolicyException' -Notes ([string]$bootPolicyException.Reason)
                         } else {
-                            if($resolvedBootUpdateModel -eq 'SafeOSDU'){
+                            if([string]$Script:ServicingContract.Boot.VerificationMode -eq 'SafeOsPackageKernelOperation'){
                                 $safeDecision=Get-BootSafeOsDuVerificationDecision -BootRecord $brec -SafeOsPatches $bootSafeLines -LogDir $Script:LogsDir
                                 Add-VRow -Check ('BootIndex' + $brec.Index + '_SafeOsTargetApplied') -Expected $safeDecision.Expected -Actual $safeDecision.Actual -Status $(if($safeDecision.Passed){'Pass'}else{'Fail'}) -Notes $safeDecision.Notes
                                 Add-VRow -Check ('BootIndex' + $brec.Index + '_SafeOsPackageEvidence') -Expected (($safeDecision.ExpectedRecords|ForEach-Object{$_.CandidateVersion}|Sort-Object -Unique) -join ',') -Actual $(if($safeDecision.ObservedPackageNames.Count -gt 0){$safeDecision.ObservedPackageNames -join ';'}else{'Absent'}) -Status $(if($safeDecision.PackagePass){'Pass'}else{'Fail'}) -Notes 'The SafeOSDU package version, not the source-media RollupFix identity, is authoritative for the selected boot update model.'
