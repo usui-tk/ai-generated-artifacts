@@ -730,7 +730,7 @@
     "NotesSource": [
       "https://techcommunity.microsoft.com/blog/windowsservernewsandbestpractices/windows-server-secure-boot-playbook-for-certificates-expiring-in-2026/4495789"
     ],
-    "Notes": "Server 2025 defaults to audit-only because the Server 2016/2019/2022 conversion workflow is not documented for this media generation. RequirePca2023 needs an explicitly verified source or -ForcePca2023OnServer2025.",
+    "Notes": "Server 2025 defaults to audit-only as a project safety policy until this project completes a measured Server 2025 conversion and Secure Boot E2E. Microsoft Make2023BootableMedia.ps1 is generic Windows-media tooling and does not state this project-specific exclusion. RequirePca2023 needs measured project evidence or -ForcePca2023OnServer2025.",
     "CompliancePolicy": "AuditOnly",
     "SourceMediaAssurance": "Unverified"
   },

@@ -22,6 +22,41 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.19-r12.21] - 2026-08-02
+
+Tag: `dotnet-applicability-secureboot-v165-alignment` (the tag
+advances; the version date component moves 07.18 → 07.19).
+
+### Changed
+
+- **.NET applicability grading**: the .NET freshness assessment gains
+  a `NotApplicable` grade — a configured standalone runtime absent
+  from every install index no longer counts against freshness, and an
+  all-`NotApplicable` .NET set aggregates to `Fresh` (there is no
+  stale payload to service). Refines the r12.20 `Kind='DotNet'`
+  filtering.
+- **Secure Boot tooling reference pinned at v1.6.5**: a new
+  `Get-SecureBootWorkflowReference` helper and script-scope constants
+  pin the delegated conversion tooling identity
+  (`SecureBootObjectsRelease v1.6.5-signed`, source tag `v1.6.5`,
+  commit `798cdc5`, `Make2023BootableMedia.ps1` v1.4 / 2026-03-13),
+  aligning every reference emitted in evidence and messages.
+- **Server 2025 audit-only rationale corrected**
+  (`data/config-Server2025.json` Notes): the audit-only default is a
+  project safety policy pending a measured Server 2025 conversion and
+  Secure Boot E2E — not a statement about Microsoft's tooling, which
+  is generic Windows-media tooling without this project-specific
+  exclusion.
+- **T40**: release pin advanced to `update-wsi-2026.07.19-r12.21`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/123/64/112 with T45 NOT-YET (unchanged). PSA **4E/48W/7I** on
+the committed tree — unchanged from r12.20; committed verbatim per
+the no-fix-forward rule.
+
 ## [update-wsi-2026.07.18-r12.20] - 2026-08-02
 
 Tag: `runtime-catalog-handoff-placeholder-fix` (the tag advances).

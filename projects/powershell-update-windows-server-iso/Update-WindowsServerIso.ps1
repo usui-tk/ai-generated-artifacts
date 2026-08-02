@@ -659,8 +659,13 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.18-r12.20'
-$Script:ScriptTag     = 'runtime-catalog-handoff-placeholder-fix'
+$Script:ScriptVersion = 'update-wsi-2026.07.19-r12.21'
+$Script:ScriptTag     = 'dotnet-applicability-secureboot-v165-alignment'
+$Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
+$Script:SecureBootObjectsSourceTag     = 'v1.6.5'
+$Script:SecureBootObjectsCommit        = '798cdc5'
+$Script:Make2023BootableMediaVersion   = '1.4'
+$Script:Make2023BootableMediaDate      = '2026-03-13'
 $Script:ScriptHash    = '(unknown)'
 try {
     $scriptPath = $PSCommandPath
@@ -7776,7 +7781,7 @@ function Resolve-OscdimgExe {
 
         The reference hash table is lifted verbatim from Microsoft's
         secureboot_objects repository
-        (scripts/windows/Make2023BootableMedia.ps1 v1.6.4-signed / commit bd7abe3,
+        (scripts/windows/Make2023BootableMedia.ps1 v1.6.5 / v1.6.5-signed / commit 798cdc5,
         $global:oscdimg_known_hashes). These hashes correspond to the
         oscdimg.exe binaries distributed via Microsoft's public symbol
         server (https://msdl.microsoft.com/download/symbols/).
@@ -7796,7 +7801,7 @@ function Resolve-OscdimgExe {
     param()
 
     # Microsoft official oscdimg.exe SHA-256 hashes (from secureboot_objects
-    # Make2023BootableMedia.ps1 v1.6.4-signed / commit bd7abe3). These are the
+    # Make2023BootableMedia.ps1 v1.6.5 / v1.6.5-signed / commit 798cdc5). These are the
     # hashes of binaries downloaded from the Microsoft public symbol server.
     $knownHashes = @{
         'AMD64' = 'ABCD07318EBD8CDBE274B46C9DE78820DCA9709D558CDBC1F5D1730924264D07'
@@ -9248,8 +9253,13 @@ function New-ResolvedPatchEvidenceManifest {
             elseif ($p.Integrity.Sha256.PSObject.Properties['Hex']) { $integritySha = [string]$p.Integrity.Sha256.Hex }
             elseif ($p.Integrity.Sha256.PSObject.Properties['Value']) { $integritySha = [string]$p.Integrity.Sha256.Value }
         }
+        $entryType = Get-PatchEntryType -Patch $p
         $items.Add([pscustomobject][ordered]@{
-            PackageId=[string]$p.PackageId; Kind=[string]$p.Kind; KbId=[string]$p.KbId
+            PackageId=[string]$p.PackageId
+            Kind=$entryType
+            PatchType=$entryType
+            ObjectKind=$(if ($p.PSObject.Properties['Kind']) { [string]$p.Kind } else { '' })
+            KbId=[string]$p.KbId
             ParentKbId=$(if ($p.PSObject.Properties['ParentKbId']) { [string]$p.ParentKbId } else { '' })
             UpdateId=$(if ($p.PSObject.Properties['UpdateId']) { [string]$p.UpdateId } else { '' })
             Revision=$(if ($p.PSObject.Properties['Revision']) { [string]$p.Revision } else { '' })
@@ -9261,7 +9271,7 @@ function New-ResolvedPatchEvidenceManifest {
         }) | Out-Null
     }
     return [pscustomobject][ordered]@{
-        SchemaVersion='release-patch-manifest/1.0'
+        SchemaVersion='release-patch-manifest/1.1'
         RunId=$Script:RunId
         OsKey=[string]$Script:OsVersion
         OsLanguage=[string]$Script:OsLanguage
@@ -9361,41 +9371,200 @@ function Get-StaticVerificationAssessment {
 }
 
 function Get-AuxiliaryFreshnessAssessment {
+    <#
+    .SYNOPSIS
+        Assess monthly .NET freshness using both resolved patch metadata and
+        the actual per-index servicing inventory emitted by P07.
+
+    .DESCRIPTION
+        A resolved patch object is a generic Kind='Patch' object whose
+        servicing role is held in PatchType. r12.20 filtered Kind='DotNet'
+        and therefore missed every runtime selector. This implementation uses
+        Get-PatchEntryType and distinguishes three execution outcomes:
+
+          Fresh         - every applicable .NET package is current.
+          NotApplicable - the selected standalone runtime is absent from all
+                          install.wim indexes; this is an acceptable item
+                          outcome and does not block static eligibility.
+          Unknown       - inventory, release date, or execution evidence is
+                          missing/inconsistent.
+
+        The aggregate Status remains Fresh/Stale/Unknown. An all-
+        NotApplicable .NET set aggregates to Fresh because there is no stale
+        applicable runtime on the media.
+    #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param()
+
     $issues = [System.Collections.Generic.List[object]]::new()
+    $items = [System.Collections.Generic.List[object]]::new()
+    $staleItems = [System.Collections.Generic.List[object]]::new()
     $baselineMonth = ''
+
     if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline -and $Script:OsProfile.PatchBaseline.PSObject.Properties['BaselineId']) {
         $rawBaseline = [string]$Script:OsProfile.PatchBaseline.BaselineId
-        if ($rawBaseline -match '^(\d{4}-\d{2})(?:-B)?$') { $baselineMonth = $Matches[1] }
-        else { $issues.Add([pscustomobject]@{Kind='Baseline';KbId='';ReleaseMonth='';BaselineMonth='';Issue='BaselineId is missing or malformed.'}) | Out-Null }
+        if ($rawBaseline -match '^(\d{4}-\d{2})(?:-B)?$') {
+            $baselineMonth = $Matches[1]
+        } else {
+            $issues.Add([pscustomobject]@{Kind='Baseline';KbId='';ReleaseMonth='';BaselineMonth='';Issue='BaselineId is missing or malformed.'}) | Out-Null
+        }
     } else {
         $issues.Add([pscustomobject]@{Kind='Baseline';KbId='';ReleaseMonth='';BaselineMonth='';Issue='PatchBaseline.BaselineId is unavailable.'}) | Out-Null
     }
-    $dotNet = @($Script:ResolvedPatches | Where-Object { $_.Kind -eq 'DotNet' })
+
+    $dotNet = @($Script:ResolvedPatches | Where-Object { (Get-PatchEntryType -Patch $_) -eq 'DotNet' })
     if ($dotNet.Count -eq 0) {
         $issues.Add([pscustomobject]@{Kind='DotNet';KbId='';ReleaseMonth='';BaselineMonth=$baselineMonth;Issue='No resolved .NET package was available for freshness assessment.'}) | Out-Null
     }
+
+    $inventoryPath = Join-Path $Script:LogsDir 'P05_patch_inventory.csv'
+    $inventory = @()
+    if (Test-Path -LiteralPath $inventoryPath -PathType Leaf) {
+        try {
+            $inventory = @(Import-Csv -LiteralPath $inventoryPath -Encoding UTF8 -ErrorAction Stop)
+        } catch {
+            $issues.Add([pscustomobject]@{Kind='DotNet';KbId='';ReleaseMonth='';BaselineMonth=$baselineMonth;Issue=('P07 patch inventory could not be read: {0}' -f $_.Exception.Message)}) | Out-Null
+        }
+    } elseif ($dotNet.Count -gt 0) {
+        $issues.Add([pscustomobject]@{Kind='DotNet';KbId='';ReleaseMonth='';BaselineMonth=$baselineMonth;Issue='P07 patch inventory is missing; .NET applicability cannot be proven.'}) | Out-Null
+    }
+
+    # Establish the exact install.wim index set that P07 was expected to
+    # service. Prefer the in-memory WIM inventory and apply the same operator /
+    # profile index filters used by P07. If P12 is reconstructed without that
+    # state, derive the expected set from all install.wim rows in the P07 CSV,
+    # not from the .NET rows alone (which would make incomplete evidence appear
+    # complete).
+    $expectedIndexIds = @()
+    if ($Script:WimIndexInventory) {
+        $expectedInventory = @($Script:WimIndexInventory)
+        if (-not [string]::IsNullOrWhiteSpace([string]$Script:OnlyInstallWimIndexes)) {
+            $wantedIndexes = @($Script:OnlyInstallWimIndexes -split ',' | ForEach-Object { [int]($_.Trim()) })
+            $expectedInventory = @($expectedInventory | Where-Object { $wantedIndexes -contains [int]$_.ImageIndex })
+        } elseif ($Script:OsProfile -and $Script:OsProfile.PSObject.Properties['InstallWimIndexes']) {
+            $configuredIndexes = $Script:OsProfile.InstallWimIndexes
+            $allIndexes = ([string]$configuredIndexes -eq 'all')
+            if (-not $allIndexes -and $null -ne $configuredIndexes) {
+                $wantedIndexes = @($configuredIndexes | ForEach-Object { [int]$_ })
+                $expectedInventory = @($expectedInventory | Where-Object { $wantedIndexes -contains [int]$_.ImageIndex })
+            }
+        }
+        $expectedIndexIds = @($expectedInventory | ForEach-Object { [string][int]$_.ImageIndex } | Sort-Object -Unique)
+    }
+    if ($expectedIndexIds.Count -eq 0 -and $inventory.Count -gt 0) {
+        $expectedIndexIds = @($inventory | ForEach-Object {
+            if ([string]$_.AppliesTo -match '^install\.wim:idx(\d+)$') { [string][int]$Matches[1] }
+        } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+    }
+    if ($dotNet.Count -gt 0 -and $expectedIndexIds.Count -eq 0) {
+        $issues.Add([pscustomobject]@{Kind='DotNet';KbId='';ReleaseMonth='';BaselineMonth=$baselineMonth;Issue='Expected install.wim index set could not be established; .NET applicability cannot be proven.'}) | Out-Null
+    }
+
+    $successStatuses = @('Ok','OkAfterRetry','WinReServicingStackKnownIssue')
     foreach ($p in $dotNet) {
         $releaseMonth = ''
         if ($p.PSObject.Properties['ReleaseDate'] -and $p.ReleaseDate) {
             $parsed = [datetime]::MinValue
-            if ([datetime]::TryParse([string]$p.ReleaseDate,[ref]$parsed)) { $releaseMonth = $parsed.ToString('yyyy-MM') }
+            if ([datetime]::TryParse([string]$p.ReleaseDate,[ref]$parsed)) {
+                $releaseMonth = $parsed.ToString('yyyy-MM')
+            }
         }
-        if ([string]::IsNullOrWhiteSpace($releaseMonth)) {
-            $issues.Add([pscustomobject]@{Kind='DotNet';KbId=[string]$p.KbId;ReleaseMonth='';BaselineMonth=$baselineMonth;Issue='ReleaseDate is missing or invalid.'}) | Out-Null
-        } elseif ($baselineMonth -and $releaseMonth -lt $baselineMonth) {
-            $issues.Add([pscustomobject]@{Kind='DotNet';KbId=[string]$p.KbId;ReleaseMonth=$releaseMonth;BaselineMonth=$baselineMonth;Issue='Release month is older than the OS baseline month.'}) | Out-Null
+
+        $kbId = [string]$p.KbId
+        $rows = @($inventory | Where-Object {
+            [string]$_.KbId -eq $kbId -and
+            [string]$_.PatchType -eq 'DotNet' -and
+            [string]$_.AppliesTo -like 'install.wim:*'
+        })
+        $statuses = @($rows | ForEach-Object { [string]$_.ApplyStatus } | Sort-Object -Unique)
+        $unexpected = @($statuses | Where-Object { $_ -notin ($successStatuses + @('NotApplicable')) })
+        $applicableRows = @($rows | Where-Object { [string]$_.ApplyStatus -in $successStatuses })
+        $notApplicableRows = @($rows | Where-Object { [string]$_.ApplyStatus -eq 'NotApplicable' })
+        $observedIndexIds = @($rows | ForEach-Object {
+            if ([string]$_.AppliesTo -match '^install\.wim:idx(\d+)$') { [string][int]$Matches[1] }
+        } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+        $duplicateIndexIds = @($rows | Group-Object AppliesTo | Where-Object { $_.Count -ne 1 } | ForEach-Object {
+            if ([string]$_.Name -match '^install\.wim:idx(\d+)$') { [string][int]$Matches[1] }
+        })
+        $missingIndexIds = @($expectedIndexIds | Where-Object { $_ -notin $observedIndexIds })
+        $unexpectedIndexIds = @($observedIndexIds | Where-Object { $_ -notin $expectedIndexIds })
+        $coverageComplete = (
+            $expectedIndexIds.Count -gt 0 -and
+            $missingIndexIds.Count -eq 0 -and
+            $unexpectedIndexIds.Count -eq 0 -and
+            $duplicateIndexIds.Count -eq 0 -and
+            $rows.Count -eq $expectedIndexIds.Count
+        )
+        $itemStatus = 'Unknown'
+        $itemIssue = ''
+
+        if ($rows.Count -eq 0) {
+            $itemIssue = 'No install.wim applicability rows were recorded for this .NET package.'
+        } elseif (-not $coverageComplete) {
+            $itemIssue = ('Incomplete or inconsistent install.wim applicability coverage. Expected=[{0}] Observed=[{1}] Missing=[{2}] Unexpected=[{3}] Duplicate=[{4}].' -f
+                ($expectedIndexIds -join ','), ($observedIndexIds -join ','), ($missingIndexIds -join ','), ($unexpectedIndexIds -join ','), ($duplicateIndexIds -join ','))
+        } elseif ($unexpected.Count -gt 0) {
+            $itemIssue = ('Unexpected P07 applicability status: {0}.' -f ($unexpected -join ', '))
+        } elseif ($applicableRows.Count -eq 0 -and $notApplicableRows.Count -eq $rows.Count) {
+            $itemStatus = 'NotApplicable'
+        } elseif ([string]::IsNullOrWhiteSpace($releaseMonth)) {
+            $itemIssue = 'ReleaseDate is missing or invalid for an applicable .NET package.'
+        } elseif ([string]::IsNullOrWhiteSpace($baselineMonth)) {
+            $itemIssue = 'OS baseline month is unavailable for an applicable .NET package.'
+        } elseif ($releaseMonth -lt $baselineMonth) {
+            $itemStatus = 'Stale'
+            $itemIssue = 'Release month is older than the OS baseline month.'
+        } else {
+            $itemStatus = 'Fresh'
+        }
+
+        $item = [pscustomobject][ordered]@{
+            Kind='DotNet'
+            KbId=$kbId
+            ReleaseMonth=$releaseMonth
+            BaselineMonth=$baselineMonth
+            Status=$itemStatus
+            ExpectedInstallIndexCount=$expectedIndexIds.Count
+            ExpectedInstallIndexIds=$expectedIndexIds
+            ObservedInstallIndexCount=$observedIndexIds.Count
+            ObservedInstallIndexIds=$observedIndexIds
+            MissingInstallIndexIds=$missingIndexIds
+            UnexpectedInstallIndexIds=$unexpectedIndexIds
+            DuplicateInstallIndexIds=$duplicateIndexIds
+            CoverageComplete=$coverageComplete
+            ApplicableIndexCount=$applicableRows.Count
+            NotApplicableIndexCount=$notApplicableRows.Count
+            InventoryRowCount=$rows.Count
+            ApplyStatuses=$statuses
+            Issue=$itemIssue
+        }
+        $items.Add($item) | Out-Null
+
+        if ($itemStatus -eq 'Stale') {
+            $staleItems.Add($item) | Out-Null
+            $issues.Add([pscustomobject]@{Kind='DotNet';KbId=$kbId;ReleaseMonth=$releaseMonth;BaselineMonth=$baselineMonth;Issue=$itemIssue}) | Out-Null
+        } elseif ($itemStatus -eq 'Unknown') {
+            $issues.Add([pscustomobject]@{Kind='DotNet';KbId=$kbId;ReleaseMonth=$releaseMonth;BaselineMonth=$baselineMonth;Issue=$itemIssue}) | Out-Null
         }
     }
-    $status = if ($issues.Count -eq 0) { 'Fresh' } elseif (@($issues | Where-Object { $_.ReleaseMonth -and $_.BaselineMonth -and $_.ReleaseMonth -lt $_.BaselineMonth }).Count -gt 0) { 'Stale' } else { 'Unknown' }
-    return [pscustomobject]@{
+
+    $status = if ($staleItems.Count -gt 0) { 'Stale' } elseif ($issues.Count -gt 0) { 'Unknown' } else { 'Fresh' }
+    $applicableCount = @($items.ToArray() | Where-Object { $_.Status -in @('Fresh','Stale') }).Count
+    $notApplicableCount = @($items.ToArray() | Where-Object { $_.Status -eq 'NotApplicable' }).Count
+
+    return [pscustomobject][ordered]@{
+        SchemaVersion='auxiliary-freshness/1.1'
         BaselineMonth=$baselineMonth
         Status=$status
         IsFresh=($status -eq 'Fresh')
+        ApplicabilityStatus=$(if ($dotNet.Count -eq 0) { 'Unknown' } elseif ($applicableCount -gt 0) { 'Applicable' } elseif ($notApplicableCount -eq $dotNet.Count) { 'NotApplicable' } else { 'Unknown' })
+        ApplicableItemCount=$applicableCount
+        NotApplicableItemCount=$notApplicableCount
+        Items=$items.ToArray()
         Issues=$issues.ToArray()
-        StaleItems=@($issues | Where-Object { $_.ReleaseMonth -and $_.BaselineMonth -and $_.ReleaseMonth -lt $_.BaselineMonth })
+        StaleItems=$staleItems.ToArray()
+        InventoryPath=$inventoryPath
     }
 }
 
@@ -11675,12 +11844,28 @@ function Get-P10SkipReason {
     } catch { return '' }
 }
 
+function Get-SecureBootWorkflowReference {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param()
+    return [pscustomobject][ordered]@{
+        Repository='microsoft/secureboot_objects'
+        Release=$Script:SecureBootObjectsRelease
+        SourceTag=$Script:SecureBootObjectsSourceTag
+        Commit=$Script:SecureBootObjectsCommit
+        Script='scripts/windows/Make2023BootableMedia.ps1'
+        ScriptVersion=$Script:Make2023BootableMediaVersion
+        ScriptDate=$Script:Make2023BootableMediaDate
+        RequiredServicingFloor='2024-4B or later'
+    }
+}
+
 function Test-OutputIsoPca2023Readiness {
     <#
     .SYNOPSIS
         Verify an extracted OUTPUT-ISO directory against the five
         conversion targets defined by Microsoft's
-        Make2023BootableMedia.ps1 v1.6.4-signed / commit bd7abe3 (Copy-2023BootBins).
+        Make2023BootableMedia.ps1 v1.6.5 / v1.6.5-signed / commit 798cdc5 (Copy-2023BootBins).
 
         This function performs no DISM mounts and no registry hive
         loads; it inspects a fixed set of paths under the extracted
@@ -11766,6 +11951,7 @@ function Test-OutputIsoPca2023Readiness {
         OverallStatus = 'Unknown'
         ConversionSkippedByPolicy = $skippedByPolicy
         ConversionSkipReason      = $ConversionSkipReason
+        OfficialWorkflow = (Get-SecureBootWorkflowReference)
         TargetChecks  = @()
         Reasons       = @()
     }
@@ -11862,7 +12048,7 @@ function Test-OutputIsoPca2023Readiness {
             IsPca2023         = $chain2.IsPca2023
             IsPca2011         = $chain2.IsPca2011
             Status            = 'PassWithNotes'
-            Notes             = 'Per Make2023BootableMedia.ps1 (v1.6.4-signed / commit bd7abe3, Copy-2023BootBins), bootmgr.efi at ISO root is by-design NOT signed with the 2023 cert. UEFI Secure Boot does not consult this file; BIOS/MBR boot paths do.'
+            Notes             = 'Per Make2023BootableMedia.ps1 (v1.6.5 / v1.6.5-signed / commit 798cdc5; script Version 1.4 dated 2026-03-13), bootmgr_EX.efi is copied to the ISO root when present even though Microsoft notes that this file is technically not signed with the Windows UEFI CA 2023 certificate. This is therefore PassWithNotes, while bootx64.efi remains the mandatory PCA2023 target.'
         }) | Out-Null
     } else {
         $checks.Add([pscustomobject]@{
@@ -12038,6 +12224,7 @@ function Get-Pca2023ReadinessSnapshot {
             Generated   = (Get-Date)
             Source      = 'IsoEmbedded'
             OsKey       = $OsKey
+            OfficialWorkflow = (Get-SecureBootWorkflowReference)
             IsoEmbedded = $emb
             Health      = $health
             Reasons     = @($reasons)
@@ -12092,13 +12279,14 @@ function Get-Pca2023ReadinessSnapshot {
 
     # Add Server2025-specific advisory
     if ($OsKey -eq 'Server2025') {
-        $reasons.Add('NOTE: Server 2025 is evaluated against Pca2023.CompliancePolicy, but automatic conversion is not attempted because Microsoft''s documented conversion workflow does not list Server 2025. Use the force switch only as an approved experiment.') | Out-Null
+        $reasons.Add('NOTE: Server 2025 is evaluated against Pca2023.CompliancePolicy, but automatic conversion is not attempted because this project''s Server 2025 conversion E2E has not yet completed. Use the force switch only as an approved experiment.') | Out-Null
     }
 
     [pscustomobject]@{
         Generated   = (Get-Date)
         Source      = 'IsoEmbedded'
         OsKey       = $OsKey
+        OfficialWorkflow = (Get-SecureBootWorkflowReference)
         IsoEmbedded = $emb
         Health      = $health
         Reasons     = @($reasons)
@@ -12340,7 +12528,7 @@ function Convert-WimBootToPca2023Signed {
     .SYNOPSIS
         PSA-clean re-implementation of Microsoft's Copy-2023BootBins
         logic (from Make2023BootableMedia.ps1, microsoft/secureboot_objects
-        repo, v1.6.4-signed / commit bd7abe3).
+        repo, v1.6.5 / v1.6.5-signed / commit 798cdc5).
 
         DIFFERENCES from upstream Make2023BootableMedia.ps1:
 
@@ -14664,11 +14852,11 @@ function Invoke-BuildPhase09_AssembleIso {
 # -SkipPca2023BootManager). The PCA2011 signing CA expired 2026-06,
 # so leaving the shipped PCA2011-signed boot manager is now the
 # exception (older firmware without the 2023 certs), not the norm.
-# Server 2025 is audit/gate-only by default because Microsoft's documented
-# Make2023BootableMedia workflow does not currently list Server 2025 as a
-# supported conversion target. Conversion therefore requires the explicit
-# -ForcePca2023OnServer2025 experimental override; RequirePca2023 still
-# blocks release eligibility when the resulting media is not compliant.
+# Server 2025 remains audit/gate-only by default as a PROJECT safety policy
+# until this project's Server 2025 conversion E2E is completed. Microsoft's
+# current Make2023BootableMedia.ps1 is generic Windows-media tooling and does
+# not express a Server 2025 exclusion. Conversion therefore still requires
+# -ForcePca2023OnServer2025 for now; this is not an upstream support claim.
 #
 # Group classification note: P10 lives inside the Build group as
 # a Build-group OPTIONAL phase (the only Build-group phase that
@@ -15677,7 +15865,7 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
         $mdLines.Add('## References') | Out-Null
         $mdLines.Add('') | Out-Null
         $mdLines.Add('- Microsoft: [Updating Windows bootable media to use the PCA2023-signed boot manager](https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f)') | Out-Null
-        $mdLines.Add('- GitHub: [microsoft/secureboot_objects Make2023BootableMedia.ps1](https://github.com/microsoft/secureboot_objects/blob/main/scripts/windows/Make2023BootableMedia.ps1)') | Out-Null
+        $mdLines.Add('- GitHub: [microsoft/secureboot_objects Make2023BootableMedia.ps1](https://github.com/microsoft/secureboot_objects/blob/v1.6.5/scripts/windows/Make2023BootableMedia.ps1)') | Out-Null
         $mdLines.Add('') | Out-Null
         Set-Content -LiteralPath $mdPath -Value ($mdLines -join "`n") -Encoding UTF8 -Force
         Write-Step ('Snapshot Markdown: {0}' -f $mdPath)
@@ -15698,13 +15886,16 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
         $releaseEligible = $staticEligible -and $bootValidation.Eligible
         $releaseStatus = if ($releaseEligible) { 'ReleaseReady' } elseif ($staticEligible -and $bootValidation.Status -eq 'ReviewRequired') { 'BootEvidenceReviewRequired' } elseif ($staticEligible) { 'Candidate-BootTestRequired' } else { 'NotEligible' }
         $Script:ReleaseEligibility = [pscustomobject][ordered]@{
-            SchemaVersion='release-eligibility/1.1'
+            SchemaVersion='release-eligibility/1.2'
             RunId=$Script:RunId
             BuildSucceeded=$true
             StaticVerificationStatus=$staticVerification.Status
             Pca2023Compliance=$(if ($compliance.ReleaseEligible) { 'Pass' } else { 'Fail' })
             Pca2023Policy=$policy
             AuxiliaryFreshness=$freshness.Status
+            AuxiliaryApplicability=$freshness.ApplicabilityStatus
+            AuxiliaryApplicableItemCount=$freshness.ApplicableItemCount
+            AuxiliaryNotApplicableItemCount=$freshness.NotApplicableItemCount
             StaticEligible=$staticEligible
             BootTestStatus=$bootValidation.Status
             BootTestEligible=$bootValidation.Eligible
@@ -15715,7 +15906,7 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
         $identity = Get-ReleaseEvidenceIdentity
         $assessmentPath = Join-Path $Script:LogsDir 'P12_release_assessment.json'
         $assessment = [pscustomobject][ordered]@{
-            SchemaVersion='P12-release-assessment/1.0'
+            SchemaVersion='P12-release-assessment/1.1'
             CreatedAtUtc=([datetime]::UtcNow.ToString('o'))
             Identity=$identity
             StaticVerification=$staticVerification
@@ -15801,6 +15992,7 @@ function Invoke-ReportPhase13_FinalReport {
             Write-Step ('StaticVerificationStatus: {0}' -f $Script:ReleaseEligibility.StaticVerificationStatus)
             Write-Step ('Pca2023Compliance       : {0} ({1})' -f $Script:ReleaseEligibility.Pca2023Compliance, $Script:ReleaseEligibility.Pca2023Policy)
             Write-Step ('AuxiliaryFreshness      : {0}' -f $Script:ReleaseEligibility.AuxiliaryFreshness)
+            if ($Script:ReleaseEligibility.PSObject.Properties['AuxiliaryApplicability']) { Write-Step ('AuxiliaryApplicability  : {0} (applicable={1}; notApplicable={2})' -f $Script:ReleaseEligibility.AuxiliaryApplicability,$Script:ReleaseEligibility.AuxiliaryApplicableItemCount,$Script:ReleaseEligibility.AuxiliaryNotApplicableItemCount) }
             Write-Step ('StaticEligible          : {0}' -f $Script:ReleaseEligibility.StaticEligible)
             Write-Step ('BootTestStatus          : {0}' -f $Script:ReleaseEligibility.BootTestStatus)
             Write-Step ('BootTestEligible        : {0}' -f $Script:ReleaseEligibility.BootTestEligible)
