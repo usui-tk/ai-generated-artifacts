@@ -22,6 +22,49 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.01-r12.53] - 2026-08-02
+
+Tag retained: `catalog-semantic-retry`.
+
+### Changed
+
+- **Pinned UpdateId resolution on the Server 2025 declaration**:
+  `data/config-Server2025.json` lines carry reviewed pinned
+  identities — `UpdateId`, exact file name, and SHA-1 (base64 and
+  hex) — so `PinOs`/`PinAll` refresh modes resolve Catalog assets
+  without depending on Search.aspx HTML discovery. This is a
+  declared-surface change: T43 tracks it as 120 → 128 asserts,
+  matching the convergence-matrix transition row for this revision
+  (terminal D-totals reached: 139/37/128/64/21/112 = 501).
+- **Parser-shape resilience and raw Catalog evidence capture**:
+  Catalog search, UpdateId and download-link parsing tolerate
+  page-shape variation, and the raw response is captured as
+  transport evidence alongside the parse result, extending the
+  r12.51/r12.52 transport hardening.
+
+### Fixed
+
+- **Canonical `.ps1` BOM restored** (O1 watch closure, first half):
+  the snapshot script regains the UTF-8 BOM at this revision — the
+  measured snapshot form is BOM + LF — so the committed checkout
+  form returns to BOM+CRLF under `.gitattributes` normalization and
+  the PSA7001 (missing BOM) debt carried since r12.10 clears. The
+  CRLF half of the oscillation returns at a later revision (the
+  snapshot form is BOM+CRLF by r12.56).
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.01-r12.53`
+  (the tag is retained). No terminal D-contract required an edit:
+  the T43 total moves with the declaration.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21 (T43 120 → 128, matrix match). PSA
+  committed 5E/120W/12I (raw sweep 5E/121W/12I: +1W is the PSA7002
+  LF artefact; PSA7001 no longer fires; declared series debt).
+
 ## [update-wsi-2026.08.01-r12.52] - 2026-08-02
 
 Tag: `catalog-semantic-retry`.

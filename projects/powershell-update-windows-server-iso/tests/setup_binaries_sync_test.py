@@ -182,8 +182,8 @@ def main() -> int:
         "SetupBinarySync_" in code and "-Actual 'MISMATCH' -Status 'Fail'" in code,
         "P11 pin failed", passed, failed)
     passed, failed = check(
-        "version bumped to r12.52 (tag: catalog-semantic-retry)",
-        "update-wsi-2026.08.01-r12.52" in code and "'catalog-semantic-retry'" in code,
+        "version bumped to r12.53 (tag retained: catalog-semantic-retry)",
+        "update-wsi-2026.08.01-r12.53" in code and "'catalog-semantic-retry'" in code,
         "bump pin failed", passed, failed)
 
     print(f"\n  Summary: {passed} passed, {failed} failed, {passed + failed} total")

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Build an updated Windows Server ISO by integrating SSU/LCU/Dynamic Updates
     into the install.wim, boot.wim, and winre.wim, then repackaging the media.
@@ -703,8 +703,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.01-r12.52'
-# Validation marker: r12.52 Catalog semantic-response retry and single-fetch fallback hardening.
+$Script:ScriptVersion = 'update-wsi-2026.08.01-r12.53'
+# Validation marker: r12.53 pinned UpdateId resolution, parser-shape resilience, and raw Catalog evidence capture.
 $Script:ScriptTag     = 'catalog-semantic-retry'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
@@ -4638,104 +4638,36 @@ function Get-DotNetCuCache {
 #     mode on Windows PowerShell 5.1; we set both unconditionally.
 
 function Get-UpdateIdFromCatalog {
-    <#
-    .SYNOPSIS
-        Search Microsoft Update Catalog for a KB ID and return an array
-        of (UpdateId, Title) tuples.
-    .DESCRIPTION
-        Uses the shared Catalog transport/cache path. When Html is supplied,
-        parses that already-fetched response and performs no second network
-        request. This prevents legacy fallback from repeating an exact-KB GET
-        with a separate fixed 60-second timeout.
-    #>
     [OutputType([pscustomobject[]])]
-    param(
-        [Parameter(Mandatory)] [string]$KbId,
-        [int]$MaxRetries = 3,
-        [AllowNull()][string]$Html = $null
-    )
-    $content = $Html
-    if ($null -eq $content) {
-        $searchUri = 'https://www.catalog.update.microsoft.com/Search.aspx?q=' + [uri]::EscapeDataString($KbId)
-        $slug = [regex]::Replace($KbId, '[^A-Za-z0-9]+', '_')
-        if ($slug.Length -gt 60) { $slug = $slug.Substring(0, 60) }
-        $tag = "search.$slug.raw.r1219.html"
-        $validator = $null
-        $validationDescription = ''
-        if ($KbId -match '^KB\d{6,8}$') {
-            $expectedKb = [regex]::Escape($KbId)
-            $guidPattern = '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
-            $validator = {
-                param($catalogContent)
-                $hasKb = [regex]::IsMatch([string]$catalogContent, $expectedKb, 'IgnoreCase')
-                $hasRowIdentity = [regex]::IsMatch([string]$catalogContent, ('(?is)(?:goToDetails\s*\(\s*["'']' + $guidPattern + '["'']|id\s*=\s*["'']' + $guidPattern + '_link["''])'))
-                return ($hasKb -and $hasRowIdentity)
-            }.GetNewClosure()
-            $validationDescription = "a parseable exact-KB result row for $KbId"
-        }
-        $content = Get-CatalogText -Url $searchUri -Tag $tag -ContentValidator $validator -ContentValidationDescription $validationDescription
+    param([Parameter(Mandatory)][string]$KbId,[int]$MaxRetries=3,[AllowNull()][string]$Html=$null)
+    $content=$Html
+    if($null -eq $content){
+        $uri='https://www.catalog.update.microsoft.com/Search.aspx?q='+[uri]::EscapeDataString($KbId)
+        $slug=[regex]::Replace($KbId,'[^A-Za-z0-9]+','_');if($slug.Length -gt 60){$slug=$slug.Substring(0,60)}
+        $expected=$KbId
+        $validator={param($c) return (@(Get-CatalogSearchCandidatesFromHtml -Html ([string]$c) -ExactKbId $expected).Count -gt 0)}.GetNewClosure()
+        $content=Get-CatalogText -Url $uri -Tag ("search.$slug.raw.r1253.html") -ContentValidator $validator -ContentValidationDescription ("a parseable exact-KB result row for $KbId")
     }
-    if ([string]::IsNullOrWhiteSpace([string]$content)) { return @() }
-    $pattern = '(?is)<a[^>]*onclick\s*=\s*(["'']?)goToDetails\(\s*["'']([0-9A-Fa-f-]{36})["'']\s*\)\s*;?\s*\1[^>]*>\s*(.*?)\s*</a>'
-    $items = [System.Collections.Generic.List[object]]::new()
-    $matchList = [regex]::Matches($content, $pattern)
-    foreach ($m in $matchList) {
-        $guid = $m.Groups[2].Value
-        $raw  = $m.Groups[3].Value
-        $txt  = ($raw -replace '<[^>]+>', '')
-        $txt  = [System.Net.WebUtility]::HtmlDecode($txt)
-        $title = ($txt -replace '\s+', ' ').Trim()
-        $items.Add([pscustomobject][ordered]@{
-            UpdateId = $guid
-            Title    = $title
-            KbId     = $KbId
-        }) | Out-Null
-    }
-    return @($items | Sort-Object UpdateId -Unique)
+    $out=[System.Collections.Generic.List[object]]::new()
+    foreach($item in @(Get-CatalogSearchCandidatesFromHtml -Html $content -ExactKbId $KbId)){$out.Add([pscustomobject]@{UpdateId=[string]$item.UpdateId;Title=[string]$item.Title;KbId=$KbId;Parser=[string]$item.Parser})|Out-Null}
+    return @($out.ToArray()|Sort-Object UpdateId -Unique)
 }
 
 function Get-DownloadLinkFromCatalog {
-    <#
-    .SYNOPSIS
-        For an UpdateId returned by Get-UpdateIdFromCatalog, POST to
-        DownloadDialog.aspx and extract direct download URL(s).
-    .DESCRIPTION
-        Uses the shared escalating Catalog transport retry policy instead of
-        a separate fixed 60-second retry loop. Html can be supplied by a caller
-        that already fetched the DownloadDialog response.
-    #>
     [OutputType([pscustomobject[]])]
-    param(
-        [Parameter(Mandatory)] [string]$UpdateId,
-        [int]$MaxRetries = 3,
-        [AllowNull()][string]$Html = $null
-    )
-    $content = $Html
-    if ($null -eq $content) {
-        $uri = 'https://www.catalog.update.microsoft.com/DownloadDialog.aspx'
-        $postJson = @{ size = 0; UpdateID = $UpdateId; UpdateIDInfo = $UpdateId } | ConvertTo-Json -Compress
-        $body = @{ UpdateIDs = '[' + $postJson + ']' }
-        $tag = 'legacy.dl.' + $UpdateId.Substring(0,8) + '.raw.r1252.html'
-        $validator = {
-            param($catalogContent)
-            return [regex]::IsMatch([string]$catalogContent, '(?is)downloadInformation\[\d+\]\.files\[\d+\]\.url\s*=')
-        }
-        $response = Invoke-CatalogWebRequest -Url $uri -Method POST -Tag $tag -Body $body `
-            -ContentValidator $validator -ContentValidationDescription ('download file rows for UpdateId ' + $UpdateId)
-        $content = [string]$response.Content
+    param([Parameter(Mandatory)][string]$UpdateId,[int]$MaxRetries=3,[AllowNull()][string]$Html=$null)
+    $content=$Html
+    if($null -eq $content){
+        $uri='https://www.catalog.update.microsoft.com/DownloadDialog.aspx'
+        $postJson=@{size=0;UpdateID=$UpdateId;UpdateIDInfo=$UpdateId}|ConvertTo-Json -Compress
+        $body=@{UpdateIDs='['+$postJson+']'}
+        $validator={param($c) return (@(Get-CatalogDownloadFilesFromHtml -Html ([string]$c)).Count -gt 0)}
+        $response=Invoke-CatalogWebRequest -Url $uri -Method POST -Tag ('legacy.dl.'+$UpdateId.Substring(0,8)+'.raw.r1253.html') -Body $body -ContentValidator $validator -ContentValidationDescription ('download file rows for UpdateId '+$UpdateId)
+        $content=[string]$response.Content
     }
-    $pattern = "downloadInformation\[\d+\]\.files\[\d+\]\.url\s*=\s*'([^']+)'"
-    $items = [System.Collections.Generic.List[object]]::new()
-    $matchList = [regex]::Matches($content, $pattern)
-    foreach ($m in $matchList) {
-        $url = $m.Groups[1].Value
-        $fn  = [System.IO.Path]::GetFileName(([uri]$url).AbsolutePath)
-        $items.Add([pscustomobject][ordered]@{
-            Url      = $url
-            FileName = $fn
-        }) | Out-Null
-    }
-    return @($items | Sort-Object Url -Unique)
+    $items=[System.Collections.Generic.List[object]]::new()
+    foreach($f in @(Get-CatalogDownloadFilesFromHtml -Html $content)){$items.Add([pscustomobject]@{Url=[string]$f.url;FileName=[string]$f.fileName;Parser=[string]$f.parser})|Out-Null}
+    return @($items.ToArray()|Sort-Object Url -Unique)
 }
 
 function Select-CanonicalPatchFile {
@@ -4895,6 +4827,231 @@ function Get-CatalogRequestHeaders {
 # timeout cannot terminate a multi-hour build before any asset is modified.
 $script:CatTimeoutScheduleSec = [int[]]@(60, 120, 180)
 $script:CatRetryDelayScheduleSec = [int[]]@(2, 5)
+$script:CatRawEvidenceSchema = 'catalog-raw-response/1.0'
+$script:CatRawDir = $null
+
+function Get-CatalogRawEvidenceDirectory {
+    [OutputType([string])]
+    param()
+    if ([string]::IsNullOrWhiteSpace([string]$script:CatRawDir)) {
+        $base = if ($Script:LogsDir) { [string]$Script:LogsDir } elseif ($script:CatCache) { [string]$script:CatCache } else { [System.IO.Path]::GetTempPath() }
+        $script:CatRawDir = Join-Path $base 'catalog-raw'
+    }
+    if (-not (Test-Path -LiteralPath $script:CatRawDir)) { New-Item -ItemType Directory -Path $script:CatRawDir -Force | Out-Null }
+    return [string]$script:CatRawDir
+}
+
+function Get-CatalogResponseShapeSummary {
+    [OutputType([pscustomobject])]
+    param([AllowNull()][string]$Content)
+    $value = [string]$Content
+    $normalizedValue = ($value -replace '\\u0026','&' -replace '\\/','/')
+    $guid = '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
+    return [pscustomobject][ordered]@{
+        Length = $value.Length
+        GoToDetails = [regex]::IsMatch($value, ('(?is)goToDetails\s*\(\s*["'']' + $guid + '["'']'))
+        GuidLink = [regex]::IsMatch($value, ('(?is)id\s*=\s*["'']' + $guid + '_link["'']'))
+        UpdateIdAttribute = [regex]::IsMatch($value, ('(?is)(?:data-updateid|updateid|uidInfo|updateID)\s*[=:]\s*["'']?' + $guid))
+        DownloadAssignment = [regex]::IsMatch($value, '(?is)(?:downloadInformation\[\d+\]\.)?files\[\d+\]\.url\s*=')
+        DirectPackageUrl = [regex]::IsMatch($normalizedValue, '(?is)https://(?:[A-Za-z0-9-]+\.)*(?:download\.windowsupdate\.com|dl\.delivery\.mp\.microsoft\.com)/[^"''<>\s]+\.(?:msu|cab)(?:\?[^"''<>\s]*)?')
+        ScopedUpdateId = [regex]::IsMatch($value, ('(?is)(?:Update\s*ID|labelUpdateID|updateID).*?' + $guid))
+        ScriptRequired = [regex]::IsMatch($value, '(?is)(?:scripting must be enabled|enable scripting|javascript is required)')
+        AccessOrChallenge = [regex]::IsMatch($value, '(?is)(?:access denied|request blocked|captcha|challenge-platform|cf-chl)')
+    }
+}
+
+function Get-CatalogTextSha256 {
+    [OutputType([string])]
+    param([AllowNull()][string]$Text)
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$Text)
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { return ([System.BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
+}
+
+function Write-CatalogRawEvidence {
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$Method,
+        [Parameter(Mandatory)][string]$Url,
+        [Parameter(Mandatory)][string]$Tag,
+        [Parameter(Mandatory)][int]$Attempt,
+        [Parameter(Mandatory)][int]$TimeoutSec,
+        [AllowNull()]$Response,
+        [AllowNull()]$RequestBody,
+        [AllowEmptyString()][string]$Outcome = '',
+        [AllowEmptyString()][string]$ErrorMessage = ''
+    )
+    try {
+        $dir = Get-CatalogRawEvidenceDirectory
+        $safeTag = [regex]::Replace($Tag, '[^A-Za-z0-9._-]+', '_')
+        if ($safeTag.Length -gt 100) { $safeTag = $safeTag.Substring(0,100) }
+        $stamp = [datetime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ')
+        $stem = '{0}.{1}.{2}.attempt{3}' -f $stamp,$Method.ToLowerInvariant(),$safeTag,$Attempt
+        $bodyPath = Join-Path $dir ($stem + '.body.txt')
+        $metaPath = Join-Path $dir ($stem + '.metadata.json')
+        $requestPath = ''
+        $content = ''
+        $statusCode = 0
+        $headers = [ordered]@{}
+        if ($Response) {
+            if ($Response.PSObject.Properties['Content']) { $content = [string]$Response.Content }
+            if ($Response.PSObject.Properties['StatusCode']) { try { $statusCode = [int]$Response.StatusCode } catch {} }
+            if ($Response.PSObject.Properties['Headers'] -and $Response.Headers) {
+                try {
+                    foreach ($key in @($Response.Headers.Keys)) { $headers[[string]$key] = [string]$Response.Headers[$key] }
+                } catch {}
+            }
+        }
+        [System.IO.File]::WriteAllText($bodyPath, $content, [System.Text.UTF8Encoding]::new($false))
+        if ($Method -eq 'POST') {
+            $requestPath = Join-Path $dir ($stem + '.request.txt')
+            $requestText = ''
+            if ($null -ne $RequestBody) {
+                if ($RequestBody -is [System.Collections.IDictionary]) {
+                    $pairs = @()
+                    foreach ($key in @($RequestBody.Keys)) { $pairs += ('{0}={1}' -f [string]$key,[string]$RequestBody[$key]) }
+                    $requestText = $pairs -join [Environment]::NewLine
+                } else { $requestText = [string]$RequestBody }
+            }
+            [System.IO.File]::WriteAllText($requestPath, $requestText, [System.Text.UTF8Encoding]::new($false))
+        }
+        $metadata = [pscustomobject][ordered]@{
+            SchemaVersion = $script:CatRawEvidenceSchema
+            TimestampUtc = [datetime]::UtcNow.ToString('o')
+            Method = $Method
+            Url = $Url
+            Tag = $Tag
+            Attempt = $Attempt
+            TimeoutSec = $TimeoutSec
+            Outcome = $Outcome
+            StatusCode = $statusCode
+            ResponseHeaders = [pscustomobject]$headers
+            ContentLength = $content.Length
+            ContentSha256 = Get-CatalogTextSha256 -Text $content
+            ShapeSummary = Get-CatalogResponseShapeSummary -Content $content
+            BodyPath = $bodyPath
+            RequestPath = $requestPath
+            ErrorMessage = $ErrorMessage
+        }
+        $metadata | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $metaPath -Encoding UTF8
+        return $metaPath
+    } catch {
+        return ''
+    }
+}
+
+function Update-CatalogRawEvidenceMetadata {
+    param(
+        [AllowEmptyString()][string]$MetadataPath,
+        [AllowEmptyString()][string]$FinalOutcome,
+        [AllowEmptyString()][string]$ErrorMessage
+    )
+    if ([string]::IsNullOrWhiteSpace($MetadataPath) -or -not (Test-Path -LiteralPath $MetadataPath -PathType Leaf)) { return }
+    try {
+        $metadata = Get-Content -LiteralPath $MetadataPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $metadata | Add-Member -NotePropertyName FinalOutcome -NotePropertyValue $FinalOutcome -Force
+        $metadata | Add-Member -NotePropertyName ErrorMessage -NotePropertyValue $ErrorMessage -Force
+        $metadata | Add-Member -NotePropertyName FinalizedUtc -NotePropertyValue ([datetime]::UtcNow.ToString('o')) -Force
+        $metadata | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $MetadataPath -Encoding UTF8
+    } catch {}
+}
+
+function Get-CatalogSearchCandidatesFromHtml {
+    [OutputType([object[]])]
+    param(
+        [AllowNull()][string]$Html,
+        [AllowEmptyString()][string]$ExactKbId = ''
+    )
+    $content = [string]$Html
+    if ([string]::IsNullOrWhiteSpace($content)) { return @() }
+    $guid = '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
+    $patterns = @(
+        [pscustomobject]@{ Name='goToDetails'; Regex=('(?is)<a[^>]*?goToDetails\s*\(\s*["''](' + $guid + ')["'']\s*\)[^>]*>(.*?)</a>'); Group=1; TitleGroup=2 },
+        [pscustomobject]@{ Name='guid-link'; Regex=('(?is)<a[^>]*id\s*=\s*["''](' + $guid + ')_link["''][^>]*>(.*?)</a>'); Group=1; TitleGroup=2 },
+        [pscustomobject]@{ Name='data-updateid'; Regex=('(?is)<(?:a|button|input|tr|div)[^>]*?(?:data-updateid|updateid|uidInfo|updateID)\s*=\s*["''](' + $guid + ')["''][^>]*>(.*?)</(?:a|button|tr|div)>'); Group=1; TitleGroup=2 },
+        [pscustomobject]@{ Name='value-updateid'; Regex=('(?is)<input[^>]*(?:id|name)\s*=\s*["''][^"'']*(?:update|uid)[^"'']*["''][^>]*value\s*=\s*["''](' + $guid + ')["''][^>]*>'); Group=1; TitleGroup=0 }
+    )
+    $items = [ordered]@{}
+    foreach ($shape in $patterns) {
+        foreach ($m in [regex]::Matches($content, [string]$shape.Regex)) {
+            $uid = $m.Groups[[int]$shape.Group].Value
+            $start = [Math]::Max(0, $m.Index - 1800)
+            $length = [Math]::Min($content.Length - $start, $m.Length + 3600)
+            $context = $content.Substring($start, $length)
+            if (-not [string]::IsNullOrWhiteSpace($ExactKbId) -and $context.IndexOf($ExactKbId,[System.StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+            $title = ''
+            if ([int]$shape.TitleGroup -gt 0) { $title = Convert-HtmlToText $m.Groups[[int]$shape.TitleGroup].Value }
+            if ([string]::IsNullOrWhiteSpace($title)) {
+                $titleMatch = [regex]::Match($context, '(?is)<a[^>]*>([^<]*(?:KB\d{6,8})[^<]*)</a>')
+                if ($titleMatch.Success) { $title = Convert-HtmlToText $titleMatch.Groups[1].Value }
+            }
+            if (-not $items.Contains($uid)) {
+                $items[$uid] = [pscustomobject][ordered]@{ UpdateId=$uid; Title=$title; Parser=[string]$shape.Name; ContextSha256=(Get-CatalogTextSha256 -Text $context) }
+            }
+        }
+    }
+    # Final correlated GUID search: accept only GUIDs whose nearby HTML contains the exact KB.
+    if (-not [string]::IsNullOrWhiteSpace($ExactKbId)) {
+        foreach ($m in [regex]::Matches($content, $guid)) {
+            $start = [Math]::Max(0, $m.Index - 1200)
+            $length = [Math]::Min($content.Length - $start, 2400)
+            $context = $content.Substring($start, $length)
+            if ($context.IndexOf($ExactKbId,[System.StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+            $uid = $m.Value
+            if (-not $items.Contains($uid)) {
+                $items[$uid] = [pscustomobject][ordered]@{ UpdateId=$uid; Title=''; Parser='kb-correlated-guid'; ContextSha256=(Get-CatalogTextSha256 -Text $context) }
+            }
+        }
+    }
+    return @($items.Values)
+}
+
+function ConvertFrom-CatalogJavaScriptEscapes {
+    [OutputType([string])]
+    param([AllowNull()][string]$Value)
+    $text = [string]$Value
+    $text = $text -replace '\\u0026','&'
+    $text = $text -replace '\\u003d','='
+    $text = $text -replace '\\/','/'
+    $text = [System.Net.WebUtility]::HtmlDecode($text)
+    return $text
+}
+
+function Get-CatalogDownloadFilesFromHtml {
+    [OutputType([object[]])]
+    param([AllowNull()][string]$Html)
+    $content = [string]$Html
+    $files = @{}
+    foreach ($pattern in @(
+        "(?:downloadInformation\\[\\d+\\]\\.)?files\\[(\\d+)\\]\\.(\\w+)\\s*=\\s*'([^']*)'",
+        '(?:downloadInformation\\[\\d+\\]\\.)?files\\[(\\d+)\\]\\.(\\w+)\\s*=\\s*"([^"]*)"'
+    )) {
+        foreach ($m in [regex]::Matches($content,$pattern,'IgnoreCase')) {
+            $i=[int]$m.Groups[1].Value; $field=$m.Groups[2].Value; $value=ConvertFrom-CatalogJavaScriptEscapes $m.Groups[3].Value
+            if (-not $files.ContainsKey($i)) { $files[$i]=@{} }
+            $files[$i][$field]=$value
+        }
+    }
+    $out=[System.Collections.Generic.List[object]]::new()
+    foreach ($i in @($files.Keys | Sort-Object)) {
+        $f=$files[$i]; $url=if($f.ContainsKey('url')){[string]$f['url']}else{''}
+        if (-not $url) { continue }
+        $fileName=if($f.ContainsKey('fileName')){[string]$f['fileName']}else{''}
+        if (-not $fileName) { try{$fileName=[IO.Path]::GetFileName(([uri]$url).AbsolutePath)}catch{} }
+        $out.Add([pscustomobject]@{ idx=$i; fileName=$fileName; url=$url; digest=$(if($f.ContainsKey('digest')){$f['digest']}else{''}); sha256=$(if($f.ContainsKey('sha256')){$f['sha256']}else{''}); enTitle=$(if($f.ContainsKey('enTitle')){$f['enTitle']}else{''}); parser='javascript-assignment' })|Out-Null
+    }
+    # Catalog revisions can emit direct CDN URLs without the legacy assignment object.
+    $normalizedContent = ConvertFrom-CatalogJavaScriptEscapes $content
+    $directRx='(?is)https://(?:[A-Za-z0-9-]+\.)*(?:download\.windowsupdate\.com|dl\.delivery\.mp\.microsoft\.com)/[^"''<>\s]+?\.(?:msu|cab)(?:\?[^"''<>\s]*)?'
+    foreach($m in [regex]::Matches($normalizedContent,$directRx)) {
+        $url=$m.Value
+        try { $uri=[uri]$url; $fn=[IO.Path]::GetFileName($uri.AbsolutePath) } catch { continue }
+        if (@($out | Where-Object { [string]::Equals([string]$_.url,$url,[StringComparison]::OrdinalIgnoreCase) }).Count -eq 0) {
+            $out.Add([pscustomobject]@{idx=$out.Count;fileName=$fn;url=$url;digest='';sha256='';enTitle='';parser='direct-cdn-url'})|Out-Null
+        }
+    }
+    return @($out.ToArray())
+}
 
 function Get-CatalogTransportEvidencePath {
     [OutputType([string])]
@@ -4953,11 +5110,12 @@ function Write-CatalogTransportEvidence {
         [Parameter(Mandatory)][string]$Outcome,
         [int]$StatusCode = 0,
         [bool]$Transient = $false,
-        [AllowEmptyString()][string]$Message = ''
+        [AllowEmptyString()][string]$Message = '',
+        [AllowEmptyString()][string]$RawEvidenceMetadataPath = ''
     )
     try {
         $record = [pscustomobject][ordered]@{
-            SchemaVersion = 'catalog-transport-event/1.0'
+            SchemaVersion = 'catalog-transport-event/1.1'
             TimestampUtc = [datetime]::UtcNow.ToString('o')
             Method = $Method
             Url = $Url
@@ -4968,13 +5126,12 @@ function Write-CatalogTransportEvidence {
             StatusCode = $StatusCode
             Transient = $Transient
             Message = $Message
+            RawEvidenceMetadataPath = $RawEvidenceMetadataPath
         }
         $line = $record | ConvertTo-Json -Depth 5 -Compress
         $path = Get-CatalogTransportEvidencePath
         [System.IO.File]::AppendAllText($path, $line + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
-    } catch {
-        # Evidence failure must never replace the original transport result.
-    }
+    } catch {}
 }
 
 function Invoke-CatalogWebRequest {
@@ -4991,65 +5148,35 @@ function Invoke-CatalogWebRequest {
     )
     if (-not $TimeoutScheduleSec -or $TimeoutScheduleSec.Count -eq 0) { $TimeoutScheduleSec = $script:CatTimeoutScheduleSec }
     if (-not $RetryDelayScheduleSec) { $RetryDelayScheduleSec = $script:CatRetryDelayScheduleSec }
-    $lastError = $null
-    for ($i = 0; $i -lt $TimeoutScheduleSec.Count; $i++) {
-        $attempt = $i + 1
-        $timeout = [int]$TimeoutScheduleSec[$i]
+    $lastError=$null
+    for($i=0;$i -lt $TimeoutScheduleSec.Count;$i++) {
+        $attempt=$i+1; $timeout=[int]$TimeoutScheduleSec[$i]; $response=$null; $rawMetadataPath=''
         try {
-            $request = @{
-                Uri = $Url
-                Headers = (Get-CatalogRequestHeaders)
-                UseBasicParsing = $true
-                TimeoutSec = $timeout
-                ErrorAction = 'Stop'
+            $request=@{Uri=$Url;Headers=(Get-CatalogRequestHeaders);UseBasicParsing=$true;TimeoutSec=$timeout;ErrorAction='Stop'}
+            if($Method -eq 'POST'){$request.Method='Post';$request.Body=$Body;$request.ContentType='application/x-www-form-urlencoded'}
+            $response=Invoke-WebRequest @request
+            # Persist the complete body before any parser/semantic validation.
+            $rawMetadataPath=Write-CatalogRawEvidence -Method $Method -Url $Url -Tag $Tag -Attempt $attempt -TimeoutSec $timeout -Response $response -RequestBody $Body -Outcome 'TransportSuccess'
+            if(-not $response -or [string]::IsNullOrWhiteSpace([string]$response.Content)){throw [IO.InvalidDataException]::new('Microsoft Update Catalog returned an empty response body.')}
+            if($ContentValidator){
+                $valid=$false
+                try{$valid=[bool](& $ContentValidator ([string]$response.Content))}catch{throw [IO.InvalidDataException]::new(('CATALOG_SEMANTIC_RESPONSE_INVALID: validator threw for {0}: {1}' -f $ContentValidationDescription,$_.Exception.Message),$_.Exception)}
+                if(-not $valid){$d=if([string]::IsNullOrWhiteSpace($ContentValidationDescription)){'required Catalog content markers'}else{$ContentValidationDescription};throw [IO.InvalidDataException]::new(('CATALOG_SEMANTIC_RESPONSE_INVALID: HTTP 200 response did not contain {0}.' -f $d))}
             }
-            if ($Method -eq 'POST') {
-                $request.Method = 'Post'
-                $request.Body = $Body
-                $request.ContentType = 'application/x-www-form-urlencoded'
-            }
-            $response = Invoke-WebRequest @request
-            if (-not $response -or [string]::IsNullOrWhiteSpace([string]$response.Content)) {
-                throw [System.IO.InvalidDataException]::new('Microsoft Update Catalog returned an empty response body.')
-            }
-            if ($ContentValidator) {
-                $validContent = $false
-                try {
-                    $validContent = [bool](& $ContentValidator ([string]$response.Content))
-                } catch {
-                    throw [System.IO.InvalidDataException]::new(
-                        ('CATALOG_SEMANTIC_RESPONSE_INVALID: validator threw for {0}: {1}' -f $ContentValidationDescription,$_.Exception.Message),
-                        $_.Exception
-                    )
-                }
-                if (-not $validContent) {
-                    $description = $(if ([string]::IsNullOrWhiteSpace($ContentValidationDescription)) { 'required Catalog content markers' } else { $ContentValidationDescription })
-                    throw [System.IO.InvalidDataException]::new(
-                        ('CATALOG_SEMANTIC_RESPONSE_INVALID: HTTP 200 response did not contain {0}.' -f $description)
-                    )
-                }
-            }
-            Write-CatalogTransportEvidence -Method $Method -Url $Url -Tag $Tag -Attempt $attempt -TimeoutSec $timeout -Outcome 'Success' -StatusCode 200
+            Write-CatalogTransportEvidence -Method $Method -Url $Url -Tag $Tag -Attempt $attempt -TimeoutSec $timeout -Outcome 'Success' -StatusCode 200 -RawEvidenceMetadataPath $rawMetadataPath
             return $response
         } catch {
-            $lastError = $_
-            $status = Get-CatalogHttpStatusCodeFromError -ErrorRecord $_
-            if ($status -eq 0 -and ([string]$_ -match 'CATALOG_SEMANTIC_RESPONSE_INVALID')) { $status = 200 }
-            $transient = Test-CatalogTransientFailure -ErrorRecord $_
-            Write-CatalogTransportEvidence -Method $Method -Url $Url -Tag $Tag -Attempt $attempt -TimeoutSec $timeout -Outcome 'Failure' -StatusCode $status -Transient $transient -Message $_.Exception.Message
-            $isLast = ($attempt -ge $TimeoutScheduleSec.Count)
-            if (-not $transient -or $isLast) {
-                $evidence = Get-CatalogTransportEvidencePath
-                $message = ('Microsoft Update Catalog {0} failed after {1} attempt(s); tag={2}; lastStatus={3}; timeoutSchedule={4}; evidence={5}; lastError={6}' -f $Method,$attempt,$Tag,$status,($TimeoutScheduleSec -join ','),$evidence,$_.Exception.Message)
-                throw [System.InvalidOperationException]::new($message, $_.Exception)
-            }
-            $delay = 0
-            if ($RetryDelayScheduleSec.Count -gt 0) {
-                $delay = [int]$RetryDelayScheduleSec[[Math]::Min($i, $RetryDelayScheduleSec.Count - 1)]
-            }
-            $notice = ('Microsoft Update Catalog transient failure; retrying {0}/{1} after {2}s (timeout {3}s, status {4}, tag {5}): {6}' -f ($attempt + 1),$TimeoutScheduleSec.Count,$delay,$timeout,$status,$Tag,$_.Exception.Message)
-            if (Get-Command Write-Caution -ErrorAction SilentlyContinue) { Write-Caution $notice } else { Write-Warning $notice }
-            if ($delay -gt 0) { Start-Sleep -Seconds $delay }
+            $lastError=$_; $status=Get-CatalogHttpStatusCodeFromError -ErrorRecord $_
+            if($status -eq 0 -and ([string]$_ -match 'CATALOG_SEMANTIC_RESPONSE_INVALID')){$status=200}
+            if(-not $rawMetadataPath){$rawMetadataPath=Write-CatalogRawEvidence -Method $Method -Url $Url -Tag $Tag -Attempt $attempt -TimeoutSec $timeout -Response $response -RequestBody $Body -Outcome 'Failure' -ErrorMessage $_.Exception.Message}
+            else { Update-CatalogRawEvidenceMetadata -MetadataPath $rawMetadataPath -FinalOutcome 'SemanticOrProcessingFailure' -ErrorMessage $_.Exception.Message }
+            $transient=Test-CatalogTransientFailure -ErrorRecord $_
+            Write-CatalogTransportEvidence -Method $Method -Url $Url -Tag $Tag -Attempt $attempt -TimeoutSec $timeout -Outcome 'Failure' -StatusCode $status -Transient $transient -Message $_.Exception.Message -RawEvidenceMetadataPath $rawMetadataPath
+            $last=($attempt -ge $TimeoutScheduleSec.Count)
+            if(-not $transient -or $last){$e=Get-CatalogTransportEvidencePath;$raw=Get-CatalogRawEvidenceDirectory;$msg=('Microsoft Update Catalog {0} failed after {1} attempt(s); tag={2}; lastStatus={3}; timeoutSchedule={4}; evidence={5}; rawEvidence={6}; lastError={7}' -f $Method,$attempt,$Tag,$status,($TimeoutScheduleSec -join ','),$e,$raw,$_.Exception.Message);throw [InvalidOperationException]::new($msg,$_.Exception)}
+            $delay=0;if($RetryDelayScheduleSec.Count -gt 0){$delay=[int]$RetryDelayScheduleSec[[Math]::Min($i,$RetryDelayScheduleSec.Count-1)]}
+            $notice=('Microsoft Update Catalog transient failure; retrying {0}/{1} after {2}s (timeout {3}s, status {4}, tag {5}; raw {6}): {7}' -f ($attempt+1),$TimeoutScheduleSec.Count,$delay,$timeout,$status,$Tag,$rawMetadataPath,$_.Exception.Message)
+            if(Get-Command Write-Caution -ErrorAction SilentlyContinue){Write-Caution $notice}else{Write-Warning $notice};if($delay -gt 0){Start-Sleep -Seconds $delay}
         }
     }
     throw $lastError
@@ -5103,147 +5230,27 @@ function Invoke-CatalogPost {
 }
 
 function Search-Catalog {
-    <#
-    .SYNOPSIS
-        Search Microsoft Update Catalog and return normalized rows.
-    .DESCRIPTION
-        Catalog has used at least two result-page anchor shapes:
-          * id="<GUID>_link"
-          * onclick="goToDetails(\"<GUID>\")"
-        r12.01 only parsed the first shape.  The 2026-07-12 Server 2016
-        run proved that this can return zero rows even though Catalog
-        visibly contains the requested update.  r12.02+ parses both
-        shapes and merges them by UpdateId.
-    #>
-    param(
-        [string]$Query,
-        [switch]$RefreshCache
-    )
-    $slug = [regex]::Replace($Query, '[^A-Za-z0-9]+', '_')
-    if ($slug.Length -gt 60) { $slug = $slug.Substring(0, 60) }
-    $tag = "search.$slug.raw.r1219.html"
-    if ($RefreshCache) {
-        Remove-Item -LiteralPath (Join-Path $script:CatCache $tag) -Force -ErrorAction SilentlyContinue
+    [CmdletBinding()]
+    param([string]$Query,[switch]$RefreshCache)
+    $slug=[regex]::Replace($Query,'[^A-Za-z0-9]+','_');if($slug.Length -gt 60){$slug=$slug.Substring(0,60)}
+    $tag="search.$slug.raw.r1253.html";if($RefreshCache){Remove-Item -LiteralPath (Join-Path $script:CatCache $tag) -Force -ErrorAction SilentlyContinue}
+    $validator=$null;$desc=''
+    if($Query -match '^KB\d{6,8}$'){$expected=$Query;$validator={param($c)return(@(Get-CatalogSearchCandidatesFromHtml -Html ([string]$c) -ExactKbId $expected).Count -gt 0)}.GetNewClosure();$desc="a parseable exact-KB result row for $Query"}
+    $html=Get-CatalogText -Url ($script:CatSearchUrl+'?q='+[uri]::EscapeDataString($Query)) -Tag $tag -ContentValidator $validator -ContentValidationDescription $desc
+    $byUid=@{}
+    foreach($item in @(Get-CatalogSearchCandidatesFromHtml -Html $html -ExactKbId $(if($Query -match '^KB\d{6,8}$'){$Query}else{''}))){
+        $uid=[string]$item.UpdateId;$byUid[$uid]=[pscustomobject]@{uid=$uid;title=[string]$item.Title;products='';classification='';lastUpdated='';version='';sizeText='';sizeBytes=$null;parser=[string]$item.Parser}
     }
-    $searchValidator = $null
-    $searchValidationDescription = ''
-    if ($Query -match '^KB\d{6,8}$') {
-        $expectedKb = [regex]::Escape($Query)
-        $guidPattern = '[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}'
-        $searchValidator = {
-            param($catalogContent)
-            $hasKb = [regex]::IsMatch([string]$catalogContent, $expectedKb, 'IgnoreCase')
-            $hasRowIdentity = [regex]::IsMatch([string]$catalogContent, ('(?is)(?:goToDetails\s*\(\s*["'']' + $guidPattern + '["'']|id\s*=\s*["'']' + $guidPattern + '_link["''])'))
-            return ($hasKb -and $hasRowIdentity)
-        }.GetNewClosure()
-        $searchValidationDescription = "a parseable exact-KB result row for $Query"
+    foreach($uid in @($byUid.Keys)){
+        $row=$byUid[$uid];$cells=@{}
+        for($col=0;$col -le 7;$col++){$rx=[regex]::new(('id\s*=\s*["'']'+[regex]::Escape($uid)+'_C'+$col+'_R\d+["''][^>]*>(.*?)</td>'),'Singleline,IgnoreCase');$m=$rx.Match($html);$cells[$col]=if($m.Success){Convert-HtmlToText $m.Groups[1].Value}else{''}}
+        if(-not $row.title){foreach($c in @(1,0)){if($cells[$c]){$row.title=$cells[$c];break}}}
+        $row.products=$cells[2];$row.classification=$cells[3];$row.lastUpdated=$cells[4];$row.version=$cells[5];$row.sizeText=$cells[6]
+        $sm=[regex]::Match([string]$cells[6],'(\d{4,})');if($sm.Success){$row.sizeBytes=[long]$sm.Groups[1].Value}
     }
-    $html = Get-CatalogText -Url ($script:CatSearchUrl + '?q=' + [uri]::EscapeDataString($Query)) -Tag $tag `
-        -ContentValidator $searchValidator -ContentValidationDescription $searchValidationDescription
-    $guid = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
-    $byUid = @{}
-
-    # Shape A: GUID_link anchor.  Accept both quote styles.
-    $linkRx = [regex]::new(
-        ('id\s*=\s*["''](' + $guid + ')_link["''][^>]*>(.*?)</a>'),
-        'Singleline,IgnoreCase'
-    )
-    foreach ($m in $linkRx.Matches($html)) {
-        $uid = $m.Groups[1].Value
-        $byUid[$uid] = [pscustomobject]@{
-            uid = $uid
-            title = (Convert-HtmlToText $m.Groups[2].Value)
-            products = ''
-            classification = ''
-            lastUpdated = ''
-            version = ''
-            sizeText = ''
-            sizeBytes = $null
-            parser = 'guid-link'
-        }
-    }
-
-    # Shape B: goToDetails("GUID") onclick. This is the long-lived
-    # Catalog markup and is also used by Get-UpdateIdFromCatalog.
-    $detailsRx = [regex]::new(
-        ('<a[^>]*onclick\s*=\s*(["'']?)goToDetails\(\s*["''](' + $guid + ')["'']\s*\)\s*;?\s*\1[^>]*>(.*?)</a>'),
-        'Singleline,IgnoreCase'
-    )
-    foreach ($m in $detailsRx.Matches($html)) {
-        $uid = $m.Groups[2].Value
-        $title = Convert-HtmlToText $m.Groups[3].Value
-        if (-not $byUid.ContainsKey($uid)) {
-            $byUid[$uid] = [pscustomobject]@{
-                uid = $uid
-                title = $title
-                products = ''
-                classification = ''
-                lastUpdated = ''
-                version = ''
-                sizeText = ''
-                sizeBytes = $null
-                parser = 'goToDetails'
-            }
-        } elseif (-not $byUid[$uid].title -and $title) {
-            $byUid[$uid].title = $title
-        }
-    }
-
-    # Enrich cells when Catalog exposes the legacy GUID_Cn_Rm ids.
-    foreach ($uid in @($byUid.Keys)) {
-        $row = $byUid[$uid]
-        $cells = @{}
-        for ($col = 0; $col -le 7; $col++) {
-            $crx = [regex]::new(
-                ('id\s*=\s*["'']' + [regex]::Escape($uid) + '_C' + $col + '_R\d+["''][^>]*>(.*?)</td>'),
-                'Singleline,IgnoreCase'
-            )
-            $cm = $crx.Match($html)
-            if ($cm.Success) { $cells[$col] = Convert-HtmlToText $cm.Groups[1].Value } else { $cells[$col] = '' }
-        }
-        # Different Catalog revisions have shifted the visible title
-        # column. Never replace an anchor title with a blank cell.
-        if (-not $row.title) {
-            foreach ($candidateCol in @(1, 0)) {
-                if ($cells[$candidateCol]) { $row.title = $cells[$candidateCol]; break }
-            }
-        }
-        # Products/classification are normally C2/C3. These are
-        # optional because exact-KB title matching remains authoritative.
-        $row.products = $cells[2]
-        $row.classification = $cells[3]
-        $row.lastUpdated = $cells[4]
-        $row.version = $cells[5]
-        $row.sizeText = $cells[6]
-        $smb = [regex]::Match([string]$cells[6], '(\d{4,})')
-        if ($smb.Success) { $row.sizeBytes = [long]$smb.Groups[1].Value }
-    }
-
-    # Last-resort parser operates on the SAME validated HTML. It must not
-    # repeat the network GET through a legacy fixed-timeout code path.
-    if ($byUid.Count -eq 0) {
-        foreach ($item in @(Get-UpdateIdFromCatalog -KbId $Query -Html $html)) {
-            $byUid[[string]$item.UpdateId] = [pscustomobject]@{
-                uid = [string]$item.UpdateId
-                title = [string]$item.Title
-                products = ''
-                classification = ''
-                lastUpdated = ''
-                version = ''
-                sizeText = ''
-                sizeBytes = $null
-                parser = 'legacy-goToDetails'
-            }
-        }
-    }
-    if ($byUid.Count -eq 0 -and $Query -match '^KB\d{6,8}$') {
-        $cachePath = Join-Path $script:CatCache $tag
-        throw ('Catalog exact-KB response passed transport but produced no parseable rows for {0}; cache={1}; transportEvidence={2}' -f $Query,$cachePath,(Get-CatalogTransportEvidencePath))
-    }
-
-    return @($byUid.Values | Sort-Object title, uid)
+    if($byUid.Count -eq 0 -and $Query -match '^KB\d{6,8}$'){throw ('Catalog exact-KB response produced no parseable rows for {0}; rawEvidence={1}; transportEvidence={2}' -f $Query,(Get-CatalogRawEvidenceDirectory),(Get-CatalogTransportEvidencePath))}
+    return @($byUid.Values|Sort-Object title,uid)
 }
-
 
 function Get-CatalogScopedElementText {
     <# Extract a Catalog detail field by stable ASP.NET control-id suffix. #>
@@ -5405,72 +5412,26 @@ function Test-CatalogScopedDetailAgainstRule {
 }
 
 function Resolve-CatalogDownload {
-    param(
-        [string]$Uid,
-        [switch]$RefreshCache
-    )
-    $body = 'updateIDs=[{"size":0,"languages":"","uidInfo":"' + $Uid + '","updateID":"' + $Uid + '"}]' +
-            '&updateIDsBlockedForImport=&wsusApiPresent=&contentImport=&sku=&serverName=&ssl=&portNumber=&version='
-    $tag = "dl.$($Uid.Substring(0,8)).raw.r1219.html"
-    if ($RefreshCache) {
-        Remove-Item -LiteralPath (Join-Path $script:CatCache $tag) -Force -ErrorAction SilentlyContinue
+    param([string]$Uid,[switch]$RefreshCache)
+    $body='updateIDs=[{"size":0,"languages":"","uidInfo":"'+$Uid+'","updateID":"'+$Uid+'"}]&updateIDsBlockedForImport=&wsusApiPresent=&contentImport=&sku=&serverName=&ssl=&portNumber=&version='
+    $tag="dl.$($Uid.Substring(0,8)).raw.r1253.html"
+    $cachePath=Join-Path $script:CatCache $tag
+    if($RefreshCache){Remove-Item -LiteralPath $cachePath -Force -ErrorAction SilentlyContinue}
+    $html=''
+    if(Test-Path -LiteralPath $cachePath -PathType Leaf){
+        $cached=Get-Content -LiteralPath $cachePath -Raw
+        if(@(Get-CatalogDownloadFilesFromHtml -Html $cached).Count -gt 0){$html=$cached}
+        else{Write-Caution ('Discarding unparseable Catalog DownloadDialog cache before retry: {0}' -f $cachePath);Remove-Item -LiteralPath $cachePath -Force -ErrorAction SilentlyContinue}
     }
-    $html = Invoke-CatalogPost $script:CatDownloadUrl $body $tag
-    $files = @{}
-
-    # Response shape A: files[N].field = 'value'
-    $rxA = [regex]::new("files\[(\d+)\]\.(\w+)\s*=\s*'([^']*)'", 'IgnoreCase')
-    foreach ($m in $rxA.Matches($html)) {
-        $i = [int]$m.Groups[1].Value; $field = $m.Groups[2].Value; $val = $m.Groups[3].Value
-        if (-not $files.ContainsKey($i)) { $files[$i] = @{} }
-        $files[$i][$field] = $val
+    if([string]::IsNullOrWhiteSpace($html)){
+        $validator={param($c)return(@(Get-CatalogDownloadFilesFromHtml -Html ([string]$c)).Count -gt 0)}
+        $response=Invoke-CatalogWebRequest -Url $script:CatDownloadUrl -Method POST -Tag $tag -Body $body -ContentValidator $validator -ContentValidationDescription ('downloadable .msu/.cab asset rows for UpdateId '+$Uid)
+        $html=[string]$response.Content
+        $html|Set-Content -LiteralPath $cachePath -Encoding UTF8 -NoNewline
     }
-
-    # Response shape B: downloadInformation[N].files[M].field
-    $rxB = [regex]::new("downloadInformation\[\d+\]\.files\[(\d+)\]\.(\w+)\s*=\s*'([^']*)'", 'IgnoreCase')
-    foreach ($m in $rxB.Matches($html)) {
-        $i = [int]$m.Groups[1].Value; $field = $m.Groups[2].Value; $val = $m.Groups[3].Value
-        if (-not $files.ContainsKey($i)) { $files[$i] = @{} }
-        $files[$i][$field] = $val
-    }
-
-    $out = [System.Collections.Generic.List[object]]::new()
-    foreach ($i in ($files.Keys | Sort-Object)) {
-        $f = $files[$i]
-        $url = $(if ($f.ContainsKey('url')) { [string]$f['url'] } else { '' })
-        $fileName = $(if ($f.ContainsKey('fileName')) { [string]$f['fileName'] } else { '' })
-        if (-not $fileName -and $url) {
-            try { $fileName = [System.IO.Path]::GetFileName(([uri]$url).AbsolutePath) } catch { $fileName = '' }
-        }
-        if ($url) {
-            $out.Add([pscustomobject]@{
-                idx = $i
-                fileName = $fileName
-                url      = $url
-                digest   = $(if ($f.ContainsKey('digest')) { $f['digest'] } else { '' })
-                sha256   = $(if ($f.ContainsKey('sha256')) { $f['sha256'] } else { '' })
-                enTitle  = $(if ($f.ContainsKey('enTitle')) { $f['enTitle'] } else { '' })
-                parser   = 'DownloadDialog'
-            }) | Out-Null
-        }
-    }
-
-    # Last-resort parser reuses the SAME DownloadDialog response. Do not
-    # repeat a POST through an independent timeout/retry path.
-    if ($out.Count -eq 0) {
-        foreach ($legacy in @(Get-DownloadLinkFromCatalog -UpdateId $Uid -Html $html)) {
-            $out.Add([pscustomobject]@{
-                idx = $out.Count
-                fileName = [string]$legacy.FileName
-                url      = [string]$legacy.Url
-                digest   = ''
-                sha256   = ''
-                enTitle  = ''
-                parser   = 'legacy-downloadInformation'
-            }) | Out-Null
-        }
-    }
-    return @($out.ToArray())
+    $out=@(Get-CatalogDownloadFilesFromHtml -Html $html)
+    if($out.Count -eq 0){throw ('Catalog DownloadDialog returned no parseable package URL for UpdateId {0}; rawEvidence={1}' -f $Uid,(Get-CatalogRawEvidenceDirectory))}
+    return $out
 }
 
 function Get-CatalogIdentityRule {
@@ -5771,77 +5732,64 @@ function Test-CatalogRowAgainstRule {
     return $true
 }
 
+function Test-CatalogPinnedIdentityMode {
+    [OutputType([bool])]
+    param([Parameter(Mandatory)]$Patch)
+    if($Script:EffectivePatchRefreshMode -notin @('PinOs','PinAll')){return $false}
+    if(-not $Patch.PSObject.Properties['UpdateId'] -or [string]::IsNullOrWhiteSpace([string]$Patch.UpdateId)){return $false}
+    if(-not $Patch.PSObject.Properties['FileName'] -or [string]::IsNullOrWhiteSpace([string]$Patch.FileName)){return $false}
+    return $true
+}
+
+function Get-CatalogPinnedRowForResolvedPatch {
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)]$Patch,[switch]$RefreshCache)
+    $rule=Get-CatalogIdentityRule -Patch $Patch
+    $uid=[string]$Patch.UpdateId
+    $fileName=[string]$Patch.FileName
+    if($uid -notmatch '^[0-9A-Fa-f-]{36}$'){throw ('Pinned Catalog UpdateId is invalid for {0}/{1}: {2}' -f $rule.Type,$rule.KbId,$uid)}
+    if([string]::IsNullOrWhiteSpace($fileName)){throw ('Pinned Catalog file identity is missing for {0}/{1}.' -f $rule.Type,$rule.KbId)}
+    # Under PinOs/PinAll the reviewed UpdateId + exact file name + digest are
+    # the discovery authority. Search.aspx and ScopedViewInline.aspx are
+    # presentation/scrape surfaces and are deliberately bypassed. The live
+    # DownloadDialog response, exact file selection, and post-download hashes
+    # remain mandatory and fail closed.
+    return [pscustomobject]@{
+        uid=$uid
+        title=[string]$rule.CanonicalTitle
+        products=(@($rule.CanonicalProducts)-join ', ')
+        classification=[string]$rule.CanonicalClassification
+        lastUpdated=[string]$Patch.ReleaseDate
+        version=''
+        sizeText=''
+        sizeBytes=$null
+        parser='pinned-reviewed-updateid'
+        ScopedIdentityVerified=$false
+        ScopedIdentityBasis='NotRequiredInPinnedIdentityMode'
+        ScopedArchitecture='x64'
+        ScopedRawSha256=''
+        ScopedParseBasis='BypassedSearchAndScopedView'
+        PinnedIdentityVerified=$true
+        PinnedIdentityBasis='ReviewedUpdateId+ExactFileName+ConfiguredDigest'
+    }
+}
+
 function Get-CatalogRowsForResolvedPatch {
-    <#
-    .SYNOPSIS
-        Resolve an exact KB through Search + authoritative ScopedView identity.
-    .DESCRIPTION
-        Search-result display text may be localized. Candidate rows are therefore
-        verified against each row's official Update Details page using UpdateId,
-        KB article number, product scope and architecture. The DownloadDialog file
-        identity is checked later. This prevents Server 2025 checkpoint KBs that
-        share 24H2/x64/file bytes with Windows 11 from being misclassified.
-    #>
-    [CmdletBinding()]
-    [OutputType([object[]])]
-    param(
-        [Parameter(Mandatory)]$Patch,
-        [switch]$RefreshCache
-    )
-
-    $kb = [string]$Patch.KbId
-    if ([string]::IsNullOrWhiteSpace($kb)) { return @() }
-    $rows = @(Search-Catalog -Query $kb -RefreshCache:$RefreshCache)
-    if ($rows.Count -eq 0) { return @() }
-
-    $rule = Get-CatalogIdentityRule -Patch $Patch
-    $coarse = @($rows | Where-Object { Test-CatalogRowAgainstRule -Row $_ -Rule $rule })
-    if ($coarse.Count -eq 0) {
-        $observed = @($rows | ForEach-Object {
-            '[updateId={0};titleSha256={1};productsSha256={2}]' -f
-                $_.uid, (Get-TextFingerprint -Text ([string]$_.title)),
-                (Get-TextFingerprint -Text ([string]$_.products))
-        }) -join ' | '
-        throw ('Microsoft Update Catalog returned no coarse identity row for {0}/{1} on {2}. Observed fingerprints: {3}' -f
-            $rule.Type, $rule.KbId, $Script:OsVersion, $observed)
+    [CmdletBinding()][OutputType([object[]])]
+    param([Parameter(Mandatory)]$Patch,[switch]$RefreshCache)
+    $kb=[string]$Patch.KbId;if([string]::IsNullOrWhiteSpace($kb)){return @()}
+    if(Test-CatalogPinnedIdentityMode -Patch $Patch){return @((Get-CatalogPinnedRowForResolvedPatch -Patch $Patch -RefreshCache:$RefreshCache))}
+    $rows=@(Search-Catalog -Query $kb -RefreshCache:$RefreshCache);if($rows.Count -eq 0){return @()}
+    $rule=Get-CatalogIdentityRule -Patch $Patch;$coarse=@($rows|Where-Object{Test-CatalogRowAgainstRule -Row $_ -Rule $rule})
+    if($coarse.Count -eq 0){throw ('Microsoft Update Catalog returned no coarse identity row for {0}/{1} on {2}; rawEvidence={3}' -f $rule.Type,$rule.KbId,$Script:OsVersion,(Get-CatalogRawEvidenceDirectory))}
+    $configured='';if($Patch.PSObject.Properties['UpdateId']){$configured=[string]$Patch.UpdateId}
+    if($configured){$exact=@($coarse|Where-Object{[string]::Equals([string]$_.uid,$configured,[StringComparison]::OrdinalIgnoreCase)});if($exact.Count -ne 1){throw ('Configured Catalog UpdateId {0} did not identify exactly one row for {1}/{2}; matches={3}.' -f $configured,$rule.Type,$rule.KbId,$exact.Count)};$coarse=$exact}
+    $verified=[System.Collections.Generic.List[object]]::new();$rejected=[System.Collections.Generic.List[string]]::new()
+    foreach($row in @($coarse)){
+        try{$detail=Get-CatalogScopedDetail -UpdateId ([string]$row.uid) -RefreshCache:$RefreshCache;$assessment=Test-CatalogScopedDetailAgainstRule -Detail $detail -Row $row -Rule $rule;if(-not $assessment.Verified){$rejected.Add(('[updateId={0};failures={1}]' -f $row.uid,(@($assessment.Failures)-join ',')));continue};$row | Add-Member -NotePropertyName ScopedIdentityVerified -NotePropertyValue $true -Force;$row | Add-Member -NotePropertyName ScopedIdentityBasis -NotePropertyValue ('UpdateId+KB+Product+{0}' -f $assessment.ArchitectureBasis) -Force;$row | Add-Member -NotePropertyName ScopedArchitecture -NotePropertyValue ([string]$detail.Architecture) -Force;$row | Add-Member -NotePropertyName ScopedRawSha256 -NotePropertyValue ([string]$detail.RawSha256) -Force;$row | Add-Member -NotePropertyName ScopedParseBasis -NotePropertyValue ([string]$detail.ParseBasis) -Force;$verified.Add($row)|Out-Null}catch{$rejected.Add(('[updateId={0};error={1}]' -f $row.uid,$_.Exception.Message))|Out-Null}
     }
-
-    $configuredUpdateId = ''
-    if ($Patch.PSObject.Properties['UpdateId']) { $configuredUpdateId = [string]$Patch.UpdateId }
-    if (-not [string]::IsNullOrWhiteSpace($configuredUpdateId)) {
-        $exact = @($coarse | Where-Object { [string]::Equals([string]$_.uid, $configuredUpdateId, [System.StringComparison]::OrdinalIgnoreCase) })
-        if ($exact.Count -ne 1) {
-            throw ('Configured Catalog UpdateId {0} did not identify exactly one coarse row for {1}/{2}; matches={3}. Refusing fallback to another row.' -f
-                $configuredUpdateId, $rule.Type, $rule.KbId, $exact.Count)
-        }
-        $coarse = $exact
-    }
-
-    $verified = [System.Collections.Generic.List[object]]::new()
-    $rejected = [System.Collections.Generic.List[string]]::new()
-    foreach ($row in @($coarse)) {
-        try {
-            $detail = Get-CatalogScopedDetail -UpdateId ([string]$row.uid) -RefreshCache:$RefreshCache
-            $assessment = Test-CatalogScopedDetailAgainstRule -Detail $detail -Row $row -Rule $rule
-            if (-not $assessment.Verified) {
-                $rejected.Add(('[updateId={0};failures={1};detailSha256={2}]' -f $row.uid, (@($assessment.Failures) -join ','), $detail.RawSha256))
-                continue
-            }
-            $row | Add-Member -NotePropertyName ScopedIdentityVerified -NotePropertyValue $true -Force
-            $row | Add-Member -NotePropertyName ScopedIdentityBasis -NotePropertyValue ('UpdateId+KB+Product+{0}' -f $assessment.ArchitectureBasis) -Force
-            $row | Add-Member -NotePropertyName ScopedArchitecture -NotePropertyValue ([string]$detail.Architecture) -Force
-            $row | Add-Member -NotePropertyName ScopedRawSha256 -NotePropertyValue ([string]$detail.RawSha256) -Force
-            $row | Add-Member -NotePropertyName ScopedParseBasis -NotePropertyValue ([string]$detail.ParseBasis) -Force
-            $verified.Add($row)
-        } catch {
-            $rejected.Add(('[updateId={0};errorSha256={1}]' -f $row.uid, (Get-TextFingerprint -Text $_.Exception.Message)))
-        }
-    }
-    if ($verified.Count -eq 0) {
-        throw ('Microsoft Update Catalog ScopedView identity verification rejected every candidate for {0}/{1} on {2}. Rejections: {3}' -f
-            $rule.Type, $rule.KbId, $Script:OsVersion, (@($rejected.ToArray()) -join ' | '))
-    }
-    return @($verified.ToArray() | Sort-Object lastUpdated, version -Descending)
+    if($verified.Count -eq 0){throw ('Catalog ScopedView identity verification rejected every candidate for {0}/{1}. Rejections: {2}; rawEvidence={3}' -f $rule.Type,$rule.KbId,(@($rejected.ToArray())-join ' | '),(Get-CatalogRawEvidenceDirectory))}
+    return @($verified.ToArray()|Sort-Object lastUpdated,version -Descending)
 }
 
 function Test-IsCatalogPlaceholderFileName {
@@ -5914,6 +5862,14 @@ function Get-PatchConfiguredCatalogIdentity {
     }
 }
 
+function Convert-CatalogSha1HexToBase64 {
+    [OutputType([string])]
+    param([Parameter(Mandatory)][ValidatePattern('^[0-9A-Fa-f]{40}$')][string]$Hex)
+    $bytes = [byte[]]::new(20)
+    for ($i=0; $i -lt 20; $i++) { $bytes[$i] = [Convert]::ToByte($Hex.Substring($i*2,2),16) }
+    return [Convert]::ToBase64String($bytes)
+}
+
 function Select-CatalogCandidateAsset {
     <# Pure selector used by P04 and deterministic regression fixtures. #>
     [CmdletBinding()]
@@ -5939,9 +5895,18 @@ function Select-CatalogCandidateAsset {
         $pool = $m; $basis.Add('ConfiguredFileName')
     }
     if (-not [string]::IsNullOrWhiteSpace($identity.Sha1)) {
-        $m = @($pool | Where-Object { [string]::Equals([string]$_.File.digest, $identity.Sha1, [System.StringComparison]::OrdinalIgnoreCase) })
-        if ($m.Count -eq 0) { throw ('Configured Catalog SHA-1 was not present in verified candidates: {0}' -f $identity.Sha1) }
-        $pool = $m; $basis.Add('ConfiguredSha1')
+        $m = @($pool | Where-Object {
+            $candidateDigest = [string]$_.File.digest
+            if ([string]::IsNullOrWhiteSpace($candidateDigest)) {
+                $fileHashMatch = [regex]::Match([string]$_.File.fileName, '(?i)_([0-9a-f]{40})\.(?:msu|cab)$')
+                if ($fileHashMatch.Success) {
+                    try { $candidateDigest = Convert-CatalogSha1HexToBase64 -Hex $fileHashMatch.Groups[1].Value } catch { $candidateDigest = '' }
+                }
+            }
+            [string]::Equals($candidateDigest, $identity.Sha1, [System.StringComparison]::OrdinalIgnoreCase)
+        })
+        if ($m.Count -eq 0) { throw ('Configured Catalog SHA-1 was not present in the DownloadDialog digest or exact file-name identity: {0}' -f $identity.Sha1) }
+        $pool = $m; $basis.Add('ConfiguredSha1OrFileNameDigest')
     }
     if (-not [string]::IsNullOrWhiteSpace($identity.Sha256)) {
         $m = @($pool | Where-Object { [string]::Equals([string]$_.File.sha256, $identity.Sha256, [System.StringComparison]::OrdinalIgnoreCase) })
@@ -5960,10 +5925,12 @@ function Select-CatalogCandidateAsset {
     }
     if ($pool.Count -eq 1) {
         if ($basis.Count -eq 0) { $basis.Add('SingleStableCandidate') }
-        if (-not $pool[0].Row.PSObject.Properties['ScopedIdentityVerified'] -or -not [bool]$pool[0].Row.ScopedIdentityVerified) {
-            throw 'Selected Catalog candidate did not carry successful ScopedView identity verification.'
+        $scopedVerified = [bool]($pool[0].Row.PSObject.Properties['ScopedIdentityVerified'] -and $pool[0].Row.ScopedIdentityVerified)
+        $pinnedVerified = [bool]($pool[0].Row.PSObject.Properties['PinnedIdentityVerified'] -and $pool[0].Row.PinnedIdentityVerified)
+        if (-not $scopedVerified -and -not $pinnedVerified) {
+            throw 'Selected Catalog candidate carried neither ScopedView verification nor reviewed pinned identity verification.'
         }
-        $basis.Add('ScopedViewIdentity')
+        $basis.Add($(if ($pinnedVerified) { 'PinnedReviewedIdentity' } else { 'ScopedViewIdentity' }))
     }
     if ($pool.Count -ne 1) {
         $observed = @($pool | ForEach-Object { '[updateId={0};file={1}]' -f $_.Row.uid, $_.File.fileName }) -join ' | '
@@ -6163,6 +6130,8 @@ function Resolve-ResolvedPatchAssetFromCatalog {
         CatalogScopedArchitecture = $(if ($row.PSObject.Properties['ScopedArchitecture']) { [string]$row.ScopedArchitecture } else { '' })
         CatalogScopedRawSha256 = $(if ($row.PSObject.Properties['ScopedRawSha256']) { [string]$row.ScopedRawSha256 } else { '' })
         CatalogScopedParseBasis = $(if ($row.PSObject.Properties['ScopedParseBasis']) { [string]$row.ScopedParseBasis } else { '' })
+        CatalogPinnedIdentityVerified = [bool]($row.PSObject.Properties['PinnedIdentityVerified'] -and $row.PinnedIdentityVerified)
+        CatalogPinnedIdentityBasis = $(if ($row.PSObject.Properties['PinnedIdentityBasis']) { [string]$row.PinnedIdentityBasis } else { '' })
     }
     foreach ($field in $metadataFields.Keys) {
         if (-not $Patch.PSObject.Properties[$field]) {
@@ -11086,6 +11055,7 @@ function ConvertTo-ResolvedPatchFromBaselineLine {
         LocalPath        = $(if ($fileName) { Get-PatchLocalPath -Kind ([string]$Line.Kind) -FileName $fileName } else { '' })
         KbId             = [string]$Line.KbId
         ParentKbId       = $(if ($Line.PSObject.Properties['ParentKbId']) { [string]$Line.ParentKbId } else { '' })
+        UpdateId        = $(if ($Line.PSObject.Properties['UpdateId']) { [string]$Line.UpdateId } else { '' })
         PatchType        = [string]$Line.Kind
         ApplyOrder       = $(if ($null -ne $Line.ApplyOrder) { [int]$Line.ApplyOrder } else { 99 })
         ExpectedHashes   = $expectedHashes
@@ -12588,7 +12558,9 @@ function Get-SetupDuPackageAuthority {
             $sourceHost = [string]$sourceUri.DnsSafeHost
             $trustedSourceHost = ($sourceUri.Scheme -eq 'https') -and (
                 $sourceHost -eq 'download.windowsupdate.com' -or
-                $sourceHost.EndsWith('.download.windowsupdate.com',[System.StringComparison]::OrdinalIgnoreCase)
+                $sourceHost.EndsWith('.download.windowsupdate.com',[System.StringComparison]::OrdinalIgnoreCase) -or
+                $sourceHost -eq 'dl.delivery.mp.microsoft.com' -or
+                $sourceHost.EndsWith('.dl.delivery.mp.microsoft.com',[System.StringComparison]::OrdinalIgnoreCase)
             )
         }
     } catch {
@@ -12609,11 +12581,15 @@ function Get-SetupDuPackageAuthority {
                 [string]$_.UpdateId -eq $updateId -and
                 [string]$_.FileName -eq $fileName -and
                 [string]$_.Source -eq $source -and
-                $_.CatalogScopedIdentityVerified -eq $true
+                (
+                    $_.CatalogScopedIdentityVerified -eq $true -or
+                    $_.CatalogPinnedIdentityVerified -eq $true
+                )
             }) | Select-Object -First 1
         } catch { $catalogRecord = $null }
     }
     $catalogIdentityVerified = $null -ne $catalogRecord
+    $catalogIdentityMode = if ($catalogRecord -and $catalogRecord.CatalogPinnedIdentityVerified -eq $true) { 'PinnedReviewedIdentity' } elseif ($catalogRecord) { 'ScopedLiveIdentity' } else { 'None' }
     $patchTypeValid = ([string]$Patch.PatchType -eq 'SetupDU')
     $kbIdValid = $kbId -match '^KB\d+$'
     $trusted = $patchTypeValid -and $kbIdValid -and $updateIdValid -and $trustedSourceHost -and $hashVerified -and $catalogIdentityVerified
@@ -12625,7 +12601,7 @@ function Get-SetupDuPackageAuthority {
     if (-not $trustedSourceHost) { $statusParts.Add('SourceHostUntrusted') | Out-Null }
     if (-not $hashVerified) { $statusParts.Add('LocalHashNotVerified') | Out-Null }
     if (-not $catalogIdentityVerified) { $statusParts.Add('CatalogScopedIdentityNotVerified') | Out-Null }
-    if ($statusParts.Count -eq 0) { $statusParts.Add('CatalogScopedIdentityAndLocalHashVerified') | Out-Null }
+    if ($statusParts.Count -eq 0) { $statusParts.Add($(if ($catalogIdentityMode -eq 'PinnedReviewedIdentity') { 'CatalogPinnedIdentityAndLocalHashVerified' } else { 'CatalogScopedIdentityAndLocalHashVerified' })) | Out-Null }
 
     return [pscustomobject][ordered]@{
         SchemaVersion = 'setupdu-package-authority/1.0'
@@ -12643,6 +12619,7 @@ function Get-SetupDuPackageAuthority {
         ResumeManifestEvidencePath = $manifestPath
         CatalogEvidencePath = $catalogPath
         CatalogScopedIdentityVerified = $catalogIdentityVerified
+        CatalogIdentityMode = $catalogIdentityMode
         Trusted = $trusted
         Status = ($statusParts -join ';')
     }
@@ -17413,39 +17390,16 @@ function Get-ResearchCandidateBaselineMonth {
 }
 
 function New-DotNetMonthlySelectorLine {
-    [CmdletBinding()]
-    [OutputType([pscustomobject])]
-    param(
-        [Parameter(Mandatory)][string]$OsVersion,
-        [Parameter(Mandatory)][string]$KbId,
-        [Parameter(Mandatory)][string]$DotNetVersions,
-        [Parameter(Mandatory)][string]$ReleaseDate,
-        [Parameter(Mandatory)][string]$SourceUrl
-    )
-    $runtime = ''
-    if ($DotNetVersions -match '4\.8\.1') { $runtime = '4.8.1' }
-    elseif ($DotNetVersions -match '4\.8') { $runtime = '4.8' }
-    elseif ($DotNetVersions -match '4\.7\.2') { $runtime = '4.7.2' }
-    elseif ($DotNetVersions -match '4\.6\.2') { $runtime = '4.6.2' }
-    $selector = [ordered]@{}
-    if ($DotNetVersions -match '(^|\D)3\.5(\D|$)') { $selector.NetFx3 = 'PresentOrEnabled' }
-    if ($runtime) { $selector.NetFx4Release = $runtime }
-    return [pscustomobject][ordered]@{
-        PackageId = ('{0}-{1}-x64' -f $OsVersion, $KbId)
-        Kind = 'DotNet'; KbId = $KbId; ParentKbId = $null; UpdateId = $null; Revision = $null
-        Title = ('Monthly .NET Framework CU selector: {0}' -f $DotNetVersions)
-        Products = $null; Classification = $null; Architecture = 'x64'
-        ReleaseDate = $ReleaseDate; ReleaseType = 'B'; State = 'Discovered'
-        FileName = $null; DownloadUrl = $null; Digest = $null; Sha256 = ''; SizeBytes = $null
-        ApplyOrder = 60; InScope = [pscustomobject]@{ DotNetVersions=$DotNetVersions }
-        Note = 'Resolved from the official .NET Framework monthly release-notes page at P04.'
-        Roles = @('DotNetLeaf'); TargetsByRole = [pscustomobject]@{ DotNetLeaf=@('Install') }
-        RuntimeSelector = [pscustomobject]$selector
-        Applicability = [pscustomobject]@{ Mode='IfRuntimeDetectedPerInstallIndex' }
-        Dependencies = @()
-        Integrity = [pscustomobject]@{ Sha1=$null; Sha256=$null; SizeBytes=$null; AuthenticodeStatus='NotTested' }
-        Evidence = [pscustomobject]@{ Levels=@('E1'); SourceUrls=@($SourceUrl); VerifiedAt=(Get-Date).ToUniversalTime().ToString('o'); VerifiedBy='auto:DotNetReleaseNotes'; Notes=@('Exact Catalog asset is resolved immediately after selector refresh.') }
+    [CmdletBinding()][OutputType([pscustomobject])]
+    param([Parameter(Mandatory)][string]$OsVersion,[Parameter(Mandatory)][string]$KbId,[Parameter(Mandatory)][string]$DotNetVersions,[Parameter(Mandatory)][string]$ReleaseDate,[Parameter(Mandatory)][string]$SourceUrl)
+    $runtime='';if($DotNetVersions -match '4\.8\.1'){$runtime='4.8.1'}elseif($DotNetVersions -match '4\.8'){$runtime='4.8'}elseif($DotNetVersions -match '4\.7\.2'){$runtime='4.7.2'}elseif($DotNetVersions -match '4\.6\.2'){$runtime='4.6.2'}
+    $selector=[ordered]@{};if($DotNetVersions -match '(^|\D)3\.5(\D|$)'){$selector.NetFx3='PresentOrEnabled'};if($runtime){$selector.NetFx4Release=$runtime}
+    $updateId=$null;$fileName=$null;$downloadUrl=$null;$digest=$null;$sha256='';$state='Discovered'
+    if($Script:EffectivePatchRefreshMode -in @('PinOs','PinAll')){
+        $existing=@($Script:ResolvedPatches|Where-Object{(Get-PatchEntryType -Patch $_)-eq 'DotNet' -and [string]::Equals([string]$_.KbId,$KbId,[StringComparison]::OrdinalIgnoreCase)})|Select-Object -First 1
+        if($existing){$updateId=[string]$existing.UpdateId;$fileName=[string]$existing.FileName;$downloadUrl=[string]$existing.Source;if($existing.ExpectedHashes){$digest=[string]$existing.ExpectedHashes['sha-1'];$sha256=[string]$existing.ExpectedHashes['sha-256']};$state='PinnedIdentityPreserved'}
     }
+    return [pscustomobject][ordered]@{PackageId=('{0}-{1}-x64' -f $OsVersion,$KbId);Kind='DotNet';KbId=$KbId;ParentKbId=$null;UpdateId=$updateId;Revision=$null;Title=('Monthly .NET Framework CU selector: {0}' -f $DotNetVersions);Products=$null;Classification=$null;Architecture='x64';ReleaseDate=$ReleaseDate;ReleaseType='B';State=$state;FileName=$fileName;DownloadUrl=$downloadUrl;Digest=$digest;Sha256=$sha256;SizeBytes=$null;ApplyOrder=60;InScope=[pscustomobject]@{DotNetVersions=$DotNetVersions};Note='Resolved from official .NET release notes; reviewed exact identity is preserved when the KB remains pinned.';Roles=@('DotNetLeaf');TargetsByRole=[pscustomobject]@{DotNetLeaf=@('Install')};RuntimeSelector=[pscustomobject]$selector;Applicability=[pscustomobject]@{Mode='IfRuntimeDetectedPerInstallIndex'};Dependencies=@();Integrity=[pscustomobject]@{Sha1=$(if($digest){[pscustomobject]@{Encoding='base64';Value=$digest}}else{$null});Sha256=$(if($sha256){[pscustomobject]@{Encoding='base64';Value=$sha256}}else{$null});SizeBytes=$null;AuthenticodeStatus='NotTested'};Evidence=[pscustomobject]@{Levels=@('E1');SourceUrls=@($SourceUrl);VerifiedAt=(Get-Date).ToUniversalTime().ToString('o');VerifiedBy='auto:DotNetReleaseNotes';Notes=@('Exact reviewed Catalog identity preserved under PinOs/PinAll when KB is unchanged.')}}
 }
 
 function Resolve-DotNetMonthlySelectorLines {
@@ -17607,13 +17561,18 @@ function Update-MonthlyAuxiliaryResolvedPatchesAtFetch {
         }
         Write-Step ('Monthly auxiliary identity policy: PinnedKbExactAssetWhenPinOs; SafeOSDU={0}; SetupDU={1}' -f $pinnedSafeOsKb,$pinnedSetupDuKb)
     }
-    $duResults = @(
-        (Resolve-SafeOsDu -OsKey $osShort -BaselineMonth $month -ExactKbId $(if ($usePinnedAuxIdentity) { $pinnedSafeOsKb } else { '' }))
-        (Resolve-SetupDu -OsKey $osShort -BaselineMonth $month -ExactKbId $(if ($usePinnedAuxIdentity) { $pinnedSetupDuKb } else { '' }))
-    )
-    foreach ($rawDu in $duResults) {
-        $convertedDu = @(ConvertTo-ConfigLines -OsResolved ([pscustomobject]@{os=$Script:OsVersion;lines=@($rawDu)}) -PatchModel $patchModel)
-        foreach ($x in (ConvertTo-StableObjectArray -InputObject $convertedDu)) { $freshConfigLines += ,$x }
+    $duResults = @()
+    if (-not $usePinnedAuxIdentity) {
+        $duResults = @(
+            (Resolve-SafeOsDu -OsKey $osShort -BaselineMonth $month)
+            (Resolve-SetupDu -OsKey $osShort -BaselineMonth $month)
+        )
+        foreach ($rawDu in $duResults) {
+            $convertedDu = @(ConvertTo-ConfigLines -OsResolved ([pscustomobject]@{os=$Script:OsVersion;lines=@($rawDu)}) -PatchModel $patchModel)
+            foreach ($x in (ConvertTo-StableObjectArray -InputObject $convertedDu)) { $freshConfigLines += ,$x }
+        }
+    } else {
+        Write-Step 'Pinned SafeOS/Setup DU identities retained from the reviewed OS baseline; Search.aspx discovery is bypassed.'
     }
     $dotNetLines = @(Resolve-DotNetMonthlySelectorLines -OsVersion $Script:OsVersion -BaselineMonth $month)
     foreach ($x in (ConvertTo-StableObjectArray -InputObject $dotNetLines)) { $freshConfigLines += ,$x }
@@ -17623,7 +17582,7 @@ function Update-MonthlyAuxiliaryResolvedPatchesAtFetch {
         $roles = @(Get-PatchRoles -Patch $p)
         $t = Get-PatchEntryType -Patch $p
         $isSourcePrereq = $roles -contains 'SourcePrerequisite'
-        if ($isSourcePrereq -or $t -in @('LCU','Checkpoint','BridgeLcu')) { $kept += ,$p }
+        if ($isSourcePrereq -or $t -in @('LCU','Checkpoint','BridgeLcu') -or ($usePinnedAuxIdentity -and $t -in @('SafeOSDU','SetupDU'))) { $kept += ,$p }
     }
     foreach ($line in (ConvertTo-StableObjectArray -InputObject $freshConfigLines)) {
         $resolvedLine = ConvertTo-ResolvedPatchFromBaselineLine -Line $line
@@ -22931,7 +22890,7 @@ function Repair-ResolvedPatchManifestForResume {
         Set-ResumePatchProperty -Patch $patch -Name 'LocalAssetSha256Source' -Value 'ResumePriorManifestVerified'
         Set-ResumePatchProperty -Patch $patch -Name 'IsMetadataOnly' -Value $false
         Set-ResumePatchProperty -Patch $patch -Name 'State' -Value 'ManifestRepairedFromP04Evidence'
-        foreach ($field in @('CatalogClassification','CatalogProducts','CatalogSelectionBasis','CatalogObservedMetadataStatus','CatalogScopedIdentityVerified','CatalogScopedIdentityBasis','CatalogScopedArchitecture','CatalogScopedRawSha256','CatalogScopedParseBasis')) {
+        foreach ($field in @('CatalogClassification','CatalogProducts','CatalogSelectionBasis','CatalogObservedMetadataStatus','CatalogScopedIdentityVerified','CatalogScopedIdentityBasis','CatalogScopedArchitecture','CatalogScopedRawSha256','CatalogScopedParseBasis','CatalogPinnedIdentityVerified','CatalogPinnedIdentityBasis')) {
             if ($catalog.PSObject.Properties[$field]) {
                 Set-ResumePatchProperty -Patch $patch -Name $field -Value $catalog.$field
             }
@@ -23131,7 +23090,7 @@ function Restore-ResolvedPatchAssetsForResume {
         Set-ResumePatchProperty -Patch $patch -Name 'LocalAssetSha256Source' -Value 'ResumePriorManifestVerified'
         Set-ResumePatchProperty -Patch $patch -Name 'IsMetadataOnly' -Value $false
         Set-ResumePatchProperty -Patch $patch -Name 'State' -Value 'ResolvedFromResumeEvidence'
-        foreach ($field in @('CatalogClassification','CatalogProducts','CatalogSelectionBasis','CatalogObservedMetadataStatus','CatalogScopedIdentityVerified','CatalogScopedIdentityBasis','CatalogScopedArchitecture','CatalogScopedRawSha256','CatalogScopedParseBasis')) {
+        foreach ($field in @('CatalogClassification','CatalogProducts','CatalogSelectionBasis','CatalogObservedMetadataStatus','CatalogScopedIdentityVerified','CatalogScopedIdentityBasis','CatalogScopedArchitecture','CatalogScopedRawSha256','CatalogScopedParseBasis','CatalogPinnedIdentityVerified','CatalogPinnedIdentityBasis')) {
             if ($catalog.PSObject.Properties[$field]) {
                 Set-ResumePatchProperty -Patch $patch -Name $field -Value $catalog.$field
             }
