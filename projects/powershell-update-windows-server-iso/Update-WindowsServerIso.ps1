@@ -703,7 +703,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.01-r12.50'
+$Script:ScriptVersion = 'update-wsi-2026.08.01-r12.51'
 # Validation marker: r12.49 portable static regression complete; Windows-native gates remain required.
 $Script:ScriptTag     = 'setupdu-language-allowlist'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
@@ -4895,6 +4895,147 @@ function Get-CatalogRequestHeaders {
 }
 
 # ============================================================================
+# Catalog pages occasionally take longer than a single 60-second request.
+# Keep transport retry policy centralized and deterministic so a transient
+# timeout cannot terminate a multi-hour build before any asset is modified.
+$script:CatTimeoutScheduleSec = [int[]]@(60, 120, 180)
+$script:CatRetryDelayScheduleSec = [int[]]@(2, 5)
+
+function Get-CatalogTransportEvidencePath {
+    [OutputType([string])]
+    param()
+    $base = ''
+    if ($Script:LogsDir) { $base = [string]$Script:LogsDir }
+    elseif ($script:CatCache) { $base = [string]$script:CatCache }
+    else { $base = [System.IO.Path]::GetTempPath() }
+    if (-not (Test-Path -LiteralPath $base)) { New-Item -ItemType Directory -Path $base -Force | Out-Null }
+    return (Join-Path $base 'P04_catalog_transport.jsonl')
+}
+
+function Get-CatalogHttpStatusCodeFromError {
+    [OutputType([int])]
+    param([Parameter(Mandatory)]$ErrorRecord)
+    try {
+        $response = $ErrorRecord.Exception.Response
+        if ($response -and $response.PSObject.Properties['StatusCode']) {
+            return [int]$response.StatusCode
+        }
+    } catch {}
+    return 0
+}
+
+function Test-CatalogTransientFailure {
+    [OutputType([bool])]
+    param([Parameter(Mandatory)]$ErrorRecord)
+    $status = Get-CatalogHttpStatusCodeFromError -ErrorRecord $ErrorRecord
+    if ($status -in @(408, 429, 500, 502, 503, 504)) { return $true }
+    $ex = $ErrorRecord.Exception
+    while ($ex) {
+        $typeName = $ex.GetType().FullName
+        if ($typeName -in @(
+            'System.TimeoutException',
+            'System.Threading.Tasks.TaskCanceledException',
+            'System.Net.Http.HttpRequestException',
+            'System.Net.WebException'
+        )) { return $true }
+        $ex = $ex.InnerException
+    }
+    $message = [string]$ErrorRecord
+    return [bool]($message -match '(?i)timed?\s*out|timeout|configured HttpClient\.Timeout|request was canceled|temporarily unavailable|connection.*(?:closed|reset|aborted)|name resolution|no such host|remote name could not be resolved')
+}
+
+function Write-CatalogTransportEvidence {
+    param(
+        [Parameter(Mandatory)][string]$Method,
+        [Parameter(Mandatory)][string]$Url,
+        [Parameter(Mandatory)][string]$Tag,
+        [Parameter(Mandatory)][int]$Attempt,
+        [Parameter(Mandatory)][int]$TimeoutSec,
+        [Parameter(Mandatory)][string]$Outcome,
+        [int]$StatusCode = 0,
+        [bool]$Transient = $false,
+        [AllowEmptyString()][string]$Message = ''
+    )
+    try {
+        $record = [pscustomobject][ordered]@{
+            SchemaVersion = 'catalog-transport-event/1.0'
+            TimestampUtc = [datetime]::UtcNow.ToString('o')
+            Method = $Method
+            Url = $Url
+            Tag = $Tag
+            Attempt = $Attempt
+            TimeoutSec = $TimeoutSec
+            Outcome = $Outcome
+            StatusCode = $StatusCode
+            Transient = $Transient
+            Message = $Message
+        }
+        $line = $record | ConvertTo-Json -Depth 5 -Compress
+        $path = Get-CatalogTransportEvidencePath
+        [System.IO.File]::AppendAllText($path, $line + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+    } catch {
+        # Evidence failure must never replace the original transport result.
+    }
+}
+
+function Invoke-CatalogWebRequest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Url,
+        [Parameter(Mandatory)][ValidateSet('GET','POST')][string]$Method,
+        [Parameter(Mandatory)][string]$Tag,
+        [AllowEmptyString()][string]$Body = '',
+        [AllowNull()][int[]]$TimeoutScheduleSec,
+        [AllowNull()][int[]]$RetryDelayScheduleSec
+    )
+    if (-not $TimeoutScheduleSec -or $TimeoutScheduleSec.Count -eq 0) { $TimeoutScheduleSec = $script:CatTimeoutScheduleSec }
+    if (-not $RetryDelayScheduleSec) { $RetryDelayScheduleSec = $script:CatRetryDelayScheduleSec }
+    $lastError = $null
+    for ($i = 0; $i -lt $TimeoutScheduleSec.Count; $i++) {
+        $attempt = $i + 1
+        $timeout = [int]$TimeoutScheduleSec[$i]
+        try {
+            $request = @{
+                Uri = $Url
+                Headers = (Get-CatalogRequestHeaders)
+                UseBasicParsing = $true
+                TimeoutSec = $timeout
+                ErrorAction = 'Stop'
+            }
+            if ($Method -eq 'POST') {
+                $request.Method = 'Post'
+                $request.Body = $Body
+                $request.ContentType = 'application/x-www-form-urlencoded'
+            }
+            $response = Invoke-WebRequest @request
+            if (-not $response -or [string]::IsNullOrWhiteSpace([string]$response.Content)) {
+                throw [System.IO.InvalidDataException]::new('Microsoft Update Catalog returned an empty response body.')
+            }
+            Write-CatalogTransportEvidence -Method $Method -Url $Url -Tag $Tag -Attempt $attempt -TimeoutSec $timeout -Outcome 'Success' -StatusCode 200
+            return $response
+        } catch {
+            $lastError = $_
+            $status = Get-CatalogHttpStatusCodeFromError -ErrorRecord $_
+            $transient = Test-CatalogTransientFailure -ErrorRecord $_
+            Write-CatalogTransportEvidence -Method $Method -Url $Url -Tag $Tag -Attempt $attempt -TimeoutSec $timeout -Outcome 'Failure' -StatusCode $status -Transient $transient -Message $_.Exception.Message
+            $isLast = ($attempt -ge $TimeoutScheduleSec.Count)
+            if (-not $transient -or $isLast) {
+                $evidence = Get-CatalogTransportEvidencePath
+                $message = ('Microsoft Update Catalog {0} failed after {1} attempt(s); tag={2}; lastStatus={3}; timeoutSchedule={4}; evidence={5}; lastError={6}' -f $Method,$attempt,$Tag,$status,($TimeoutScheduleSec -join ','),$evidence,$_.Exception.Message)
+                throw [System.InvalidOperationException]::new($message, $_.Exception)
+            }
+            $delay = 0
+            if ($RetryDelayScheduleSec.Count -gt 0) {
+                $delay = [int]$RetryDelayScheduleSec[[Math]::Min($i, $RetryDelayScheduleSec.Count - 1)]
+            }
+            $notice = ('Microsoft Update Catalog transient failure; retrying {0}/{1} after {2}s (timeout {3}s, status {4}, tag {5}): {6}' -f ($attempt + 1),$TimeoutScheduleSec.Count,$delay,$timeout,$status,$Tag,$_.Exception.Message)
+            if (Get-Command Write-Caution -ErrorAction SilentlyContinue) { Write-Caution $notice } else { Write-Warning $notice }
+            if ($delay -gt 0) { Start-Sleep -Seconds $delay }
+        }
+    }
+    throw $lastError
+}
+
 function Convert-HtmlToText {
     param([string]$s)
     if ($null -eq $s) { return '' }
@@ -4909,7 +5050,7 @@ function Get-CatalogText {
     if (-not (Test-Path -LiteralPath $script:CatCache)) { New-Item -ItemType Directory -Path $script:CatCache -Force | Out-Null }
     $p = Join-Path $script:CatCache $Tag
     if (Test-Path $p) { return (Get-Content -LiteralPath $p -Raw) }
-    $r = Invoke-WebRequest -Uri $Url -Headers (Get-CatalogRequestHeaders) -UseBasicParsing -TimeoutSec 60
+    $r = Invoke-CatalogWebRequest -Url $Url -Method GET -Tag $Tag
     $r.Content | Set-Content -LiteralPath $p -Encoding UTF8 -NoNewline
     Start-Sleep -Milliseconds 600
     return $r.Content
@@ -4920,9 +5061,7 @@ function Invoke-CatalogPost {
     if (-not (Test-Path -LiteralPath $script:CatCache)) { New-Item -ItemType Directory -Path $script:CatCache -Force | Out-Null }
     $p = Join-Path $script:CatCache $Tag
     if (Test-Path $p) { return (Get-Content -LiteralPath $p -Raw) }
-    $r = Invoke-WebRequest -Uri $Url -Method Post -Body $Body `
-        -ContentType 'application/x-www-form-urlencoded' `
-        -Headers (Get-CatalogRequestHeaders) -UseBasicParsing -TimeoutSec 60
+    $r = Invoke-CatalogWebRequest -Url $Url -Method POST -Tag $Tag -Body $Body
     $r.Content | Set-Content -LiteralPath $p -Encoding UTF8 -NoNewline
     Start-Sleep -Milliseconds 600
     return $r.Content
@@ -6184,7 +6323,7 @@ function Resolve-Net {
 }
 
 function Resolve-SafeOsDu {
-    param([string]$OsKey, [AllowNull()][string]$BaselineMonth)
+    param([string]$OsKey, [AllowNull()][string]$BaselineMonth, [AllowNull()][string]$ExactKbId)
     $aliases = @{
         '2016' = @{ Query='Dynamic Update Windows 10 Version 1607 x64'; Token='Version 1607' }
         '2019' = @{ Query='Dynamic Update Windows 10 Version 1809 x64'; Token='Version 1809' }
@@ -6192,18 +6331,26 @@ function Resolve-SafeOsDu {
         '2025' = @{ Query='Safe OS Dynamic Update Microsoft server operating system version 24H2 x64'; Token='24H2' }
     }
     $a = $aliases[$OsKey]
-    $rows = Search-Catalog $a.Query
+    $normalizedExactKb = if ([string]::IsNullOrWhiteSpace($ExactKbId)) { '' } else { $ExactKbId.Trim().ToUpperInvariant() }
+    if ($normalizedExactKb -and $normalizedExactKb -notmatch '^KB\d{6,8}$') { throw ('Invalid pinned SafeOS DU KB identity: {0}' -f $ExactKbId) }
+    $query = if ($normalizedExactKb) { $normalizedExactKb } else { $a.Query }
+    $rows = Search-Catalog $query
     $cands = @($rows | Where-Object {
         $_.products.Contains('Safe OS Dynamic Update') -and
         $_.title.Contains($a.Token) -and
         $_.title.ToLower().Contains('x64') -and
-        ($_.title.ToLower() -notmatch 'arm64|x86-based')
+        ($_.title.ToLower() -notmatch 'arm64|x86-based') -and
+        ((-not $normalizedExactKb) -or ((Get-KbOf ([string]$_.title)) -eq $normalizedExactKb))
     })
     $row = Get-NewestAtOrBeforeMonth -Rows $cands -BaselineMonth $BaselineMonth
+    if ($normalizedExactKb -and -not $row) { throw ('Pinned SafeOS DU {0} was not found in the scoped Catalog result for Server{1}.' -f $normalizedExactKb,$OsKey) }
     $files = if ($row) { Resolve-CatalogDownload $row.uid } else { @() }
     $x64 = @($files | Where-Object { $_.fileName.ToLower().Contains('x64') -and $_.fileName.ToLower().EndsWith('.cab') })
-    $inScope = [pscustomobject]@{ files=@($x64 | ForEach-Object { $_.fileName }); selection='same-month-or-latest-prior' }
-    return (New-Line 'SafeOSDU' $row $x64 $inScope "Products contains Windows Safe OS Dynamic Update; OS build-family alias matched")
+    if ($normalizedExactKb -and $x64.Count -eq 0) { throw ('Pinned SafeOS DU {0} resolved no x64 CAB asset.' -f $normalizedExactKb) }
+    $selection = if ($normalizedExactKb) { 'pinned-kb-exact-asset' } else { 'same-month-or-latest-prior' }
+    $inScope = [pscustomobject]@{ files=@($x64 | ForEach-Object { $_.fileName }); selection=$selection }
+    $note = if ($normalizedExactKb) { 'Pinned KB identity; exact Catalog asset refreshed and scoped to SafeOS/build family/x64' } else { 'Products contains Windows Safe OS Dynamic Update; OS build-family alias matched' }
+    return (New-Line 'SafeOSDU' $row $x64 $inScope $note)
 }
 
 function Select-SetupDuCandidate {
@@ -6228,7 +6375,7 @@ function Select-SetupDuCandidate {
 }
 
 function Resolve-SetupDu { # psa-disable-line PSA6003 -- dynamic-update abbreviation
-    param([string]$OsKey, [AllowNull()][string]$BaselineMonth)
+    param([string]$OsKey, [AllowNull()][string]$BaselineMonth, [AllowNull()][string]$ExactKbId)
     $aliases = @{
         '2016' = @{ Query='Dynamic Update Windows 10 Version 1607 x64'; Token='Version 1607' }
         '2019' = @{ Query='Dynamic Update Windows 10 Version 1809 x64'; Token='Version 1809' }
@@ -6236,13 +6383,21 @@ function Resolve-SetupDu { # psa-disable-line PSA6003 -- dynamic-update abbrevia
         '2025' = @{ Query='Setup Dynamic Update Microsoft server operating system version 24H2 x64'; Token='24H2' }
     }
     $a = $aliases[$OsKey]
-    $rows = Search-Catalog $a.Query
-    $cands = Select-SetupDuCandidate -Rows @($rows) -VersionToken $a.Token
+    $normalizedExactKb = if ([string]::IsNullOrWhiteSpace($ExactKbId)) { '' } else { $ExactKbId.Trim().ToUpperInvariant() }
+    if ($normalizedExactKb -and $normalizedExactKb -notmatch '^KB\d{6,8}$') { throw ('Invalid pinned Setup DU KB identity: {0}' -f $ExactKbId) }
+    $query = if ($normalizedExactKb) { $normalizedExactKb } else { $a.Query }
+    $rows = Search-Catalog $query
+    $cands = @(Select-SetupDuCandidate -Rows @($rows) -VersionToken $a.Token)
+    if ($normalizedExactKb) { $cands = @($cands | Where-Object { (Get-KbOf ([string]$_.title)) -eq $normalizedExactKb }) }
     $row = Get-NewestAtOrBeforeMonth -Rows $cands -BaselineMonth $BaselineMonth
+    if ($normalizedExactKb -and -not $row) { throw ('Pinned Setup DU {0} was not found in the scoped Catalog result for Server{1}.' -f $normalizedExactKb,$OsKey) }
     $files = if ($row) { Resolve-CatalogDownload $row.uid } else { @() }
     $x64 = @($files | Where-Object { $_.fileName.ToLower().Contains('x64') -and $_.fileName.ToLower().EndsWith('.cab') })
-    $inScope = [pscustomobject]@{ files=@($x64 | ForEach-Object { $_.fileName }); selection='same-month-or-latest-prior' }
-    return (New-Line 'SetupDU' $row $x64 $inScope 'Generic Dynamic Update product minus SafeOS; Support KB must confirm Setup role')
+    if ($normalizedExactKb -and $x64.Count -eq 0) { throw ('Pinned Setup DU {0} resolved no x64 CAB asset.' -f $normalizedExactKb) }
+    $selection = if ($normalizedExactKb) { 'pinned-kb-exact-asset' } else { 'same-month-or-latest-prior' }
+    $inScope = [pscustomobject]@{ files=@($x64 | ForEach-Object { $_.fileName }); selection=$selection }
+    $note = if ($normalizedExactKb) { 'Pinned KB identity; exact Catalog asset refreshed and scoped to SetupDU/build family/x64' } else { 'Generic Dynamic Update product minus SafeOS; Support KB must confirm Setup role' }
+    return (New-Line 'SetupDU' $row $x64 $inScope $note)
 }
 
 function Resolve-Os { # psa-disable-line PSA6003 -- noun is 'OS' (operating system), not a plural; ported reference contract
@@ -16574,7 +16729,7 @@ function New-Server2025ServicingContract {
     param()
     return [pscustomobject][ordered]@{
         SchemaVersion='servicing-contract/2.1'
-        ContractRevision='Server2025-r6'
+        ContractRevision='Server2025-r7'
         OsKey='Server2025'
         PatchModel='uup-checkpoint'
         VersionDecisionPolicy='StrictFailClosed'
@@ -16582,7 +16737,7 @@ function New-Server2025ServicingContract {
         Boot=[pscustomobject][ordered]@{UpdateModel='FullLCU';PackageMode='DirectMsu';VerificationMode='FullLcuTarget';FailurePolicy='FailBuild';SmokeTestRequired=$true}
         WinRE=[pscustomobject][ordered]@{UpdateModel='CheckpointAwareLCUThenSafeOSDU';VerificationMode='RollupSafeOsAndSsuEvidence';DistributionPolicy='ServiceOnceCopyToAllInstallIndexes'}
         Ssu=[pscustomobject][ordered]@{StateResolver='InstalledPackageIdentity';Monotonic=$true;CheckpointPolicy='ValidateOrderedCoLocatedChain'}
-        Discovery=[pscustomobject][ordered]@{ResolveStandaloneSsuMonthly=$false}
+        Discovery=[pscustomobject][ordered]@{ResolveStandaloneSsuMonthly=$false;MonthlyAuxiliaryIdentityPolicy='PinnedKbExactAssetWhenPinOs'}
         DotNet=[pscustomobject][ordered]@{SupportedRuntimeSelectors=@('4.8.1')}
         Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After';SameVersionDifferentContentPolicy='ApplyTrustedPackagePayload';PackageAuthorityPolicy='CatalogScopedIdentityAndLocalHash';RequireTrustedPackage=$true;LanguageResourcePolicy='EnUsAndTargetOnly'}
         RoleTargets=[pscustomobject][ordered]@{
@@ -17379,9 +17534,28 @@ function Update-MonthlyAuxiliaryResolvedPatchesAtFetch {
         $convertedSsu = @(ConvertTo-ConfigLines -OsResolved ([pscustomobject]@{os=$Script:OsVersion;lines=@($rawSsu)}) -PatchModel $patchModel)
         foreach ($x in (ConvertTo-StableObjectArray -InputObject $convertedSsu)) { $freshConfigLines += ,$x }
     }
+    $usePinnedAuxIdentity = [bool](
+        $Script:EffectivePatchRefreshMode -eq 'PinOs' -and
+        $auxContract.Discovery -and
+        $auxContract.Discovery.PSObject.Properties['MonthlyAuxiliaryIdentityPolicy'] -and
+        [string]$auxContract.Discovery.MonthlyAuxiliaryIdentityPolicy -eq 'PinnedKbExactAssetWhenPinOs'
+    )
+    $pinnedSafeOsKb = ''
+    $pinnedSetupDuKb = ''
+    if ($usePinnedAuxIdentity) {
+        foreach ($existingPatch in @($Script:ResolvedPatches)) {
+            $existingType = Get-PatchEntryType -Patch $existingPatch
+            if ($existingType -eq 'SafeOSDU' -and -not $pinnedSafeOsKb) { $pinnedSafeOsKb = [string]$existingPatch.KbId }
+            if ($existingType -eq 'SetupDU' -and -not $pinnedSetupDuKb) { $pinnedSetupDuKb = [string]$existingPatch.KbId }
+        }
+        if ($pinnedSafeOsKb -notmatch '^KB\d{6,8}$' -or $pinnedSetupDuKb -notmatch '^KB\d{6,8}$') {
+            throw ('Pinned monthly auxiliary identity policy requires valid configured KBs; SafeOSDU={0}; SetupDU={1}.' -f $pinnedSafeOsKb,$pinnedSetupDuKb)
+        }
+        Write-Step ('Monthly auxiliary identity policy: PinnedKbExactAssetWhenPinOs; SafeOSDU={0}; SetupDU={1}' -f $pinnedSafeOsKb,$pinnedSetupDuKb)
+    }
     $duResults = @(
-        (Resolve-SafeOsDu -OsKey $osShort -BaselineMonth $month)
-        (Resolve-SetupDu -OsKey $osShort -BaselineMonth $month)
+        (Resolve-SafeOsDu -OsKey $osShort -BaselineMonth $month -ExactKbId $(if ($usePinnedAuxIdentity) { $pinnedSafeOsKb } else { '' }))
+        (Resolve-SetupDu -OsKey $osShort -BaselineMonth $month -ExactKbId $(if ($usePinnedAuxIdentity) { $pinnedSetupDuKb } else { '' }))
     )
     foreach ($rawDu in $duResults) {
         $convertedDu = @(ConvertTo-ConfigLines -OsResolved ([pscustomobject]@{os=$Script:OsVersion;lines=@($rawDu)}) -PatchModel $patchModel)

@@ -22,6 +22,49 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.01-r12.51] - 2026-08-02
+
+Tag retained: `setupdu-language-allowlist`.
+
+### Added
+
+- **Catalog transport hardening**: a centralized, deterministic
+  retry policy for Microsoft Update Catalog requests — escalating
+  timeout schedule (60/120/180 s) with fixed retry delays — so a
+  transient Catalog timeout cannot terminate a multi-hour build
+  before any asset is modified. Each transport attempt is recorded
+  as evidence under the logs directory, and the Catalog POST path
+  now sends the same pinned request headers as the page-fetch path.
+- **Pinned monthly-auxiliary identity under `PinOs`**: the
+  Server 2025 contract (advanced to `-r7`) declares
+  `Discovery.MonthlyAuxiliaryIdentityPolicy`
+  (`PinnedKbExactAssetWhenPinOs`). When the effective patch-refresh
+  mode is `PinOs`, SafeOS DU and Setup DU resolution queries the
+  Catalog by the exact pinned KB identity and fails closed if the
+  pinned KB is absent from the scoped result or resolves no x64
+  asset; the decision evidence records the selection mode
+  (`pinned-kb-exact-asset` vs `same-month-or-latest-prior`).
+
+### Changed
+
+- **Servicing-contract baselines advanced**: schema `2.5` → `2.6`;
+  the Server 2025 contract revision `-r6` → `-r7` with re-pinned
+  component hashes (declared change; the other three contracts are
+  unchanged; T45 totals unchanged at 21).
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.01-r12.51`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/120/64/112 + T45 21. PSA committed 5E/113W/11I (raw sweep
+  5E/114W/11I: +1W is the PSA7002 LF artefact; declared series
+  debt). The snapshot script remains BOM-absent at r12.51 (O1 watch
+  continues).
+
 ## [update-wsi-2026.08.01-r12.50] - 2026-08-02
 
 Tag retained: `setupdu-language-allowlist`.

@@ -1,5 +1,5 @@
 {
-  "SchemaVersion": "servicing-contract-baselines/2.5",
+  "SchemaVersion": "servicing-contract-baselines/2.6",
   "Purpose": "Fail closed when any OS-specific servicing contract or component changes without an explicitly reviewed baseline update. r12.50 preserves the validated Server 2016/2019/2022 contracts and hardens Server 2025 with a pre-P07 boot.wim checkpoint-chain smoke test plus trusted Catalog/hash-bound Setup DU replacement semantics.",
   "Contracts": {
     "Server2016": {
@@ -39,14 +39,14 @@
       "SetupSha256": "5c41fd64112aadfeda42176f311a2778b75b0be18f6a01d0decf92eef5bbf23d"
     },
     "Server2025": {
-      "ContractRevision": "Server2025-r6",
-      "Sha256": "ea26d06423bf01311507755c26788ff04adf8882b48be4613fc24a1bece579e9",
-      "ContractSha256": "ea26d06423bf01311507755c26788ff04adf8882b48be4613fc24a1bece579e9",
+      "ContractRevision": "Server2025-r7",
+      "Sha256": "cd9e31ca5270daeafa6ba6a30b4b2f05679b37b3173f426d1d40915f4136bd18",
+      "ContractSha256": "cd9e31ca5270daeafa6ba6a30b4b2f05679b37b3173f426d1d40915f4136bd18",
       "TargetMapSha256": "1cdfded2d110c14ceae357fef1ce14f5c33c125531b1981a01bc3a18737f498d",
       "SequenceSha256": "4baea8f20294967de9e64f75048b2fd613810cc01c85b58d0f97b78303951c75",
       "VerificationSha256": "1292a0ac6df8fe5ac5799a4eab86daa539e327bd10333d6c8b02238770167f37",
       "ObservationSha256": "77bf86a203a6700f11cc88cbdd92ed6aee9f7471844eb220c40c014afa4f15df",
-      "DiscoverySha256": "5299d46526c2198d6c32f324ddc2bea5f80f41c7265fcad705e8aec4d16e8848",
+      "DiscoverySha256": "f687f2d132a366b7789583c8e692d82b470ec6afcdf1fd9f25d7f59c883203c9",
       "DotNetSha256": "da96332fd55393a8e6ebd6f68c910f112c979eb0d4d02398a082783895e66097",
       "SetupSha256": "5c41fd64112aadfeda42176f311a2778b75b0be18f6a01d0decf92eef5bbf23d"
     }
