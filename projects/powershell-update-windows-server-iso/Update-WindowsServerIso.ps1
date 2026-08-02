@@ -702,7 +702,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.28-r12.41'
+$Script:ScriptVersion = 'update-wsi-2026.07.28-r12.42'
 # Validation marker: pwsh7-runtime-validated on PowerShell 7.6.4 Linux x64; Windows-native gates remain required.
 $Script:ScriptTag     = 'all-os-version-decision-hardening'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
@@ -824,7 +824,7 @@ $Script:OsConfigFieldGroups = @(
 #   - SSU / servicing-stack carrier: required on every serviced WIM
 #   - LCU             : role-dependent. FinalLCU -> Install/Boot; a combined LCU may also be ServicingStackCarrier -> Install/Boot/WinRE
 #   - DotNet          : Install only (.NET 4.x runtime KB lives in install.wim)
-#   - SafeOSDU        : WinRE only (WinRE is the "Safe OS")
+#   - SafeOSDU        : WinRE by default; Server 2019 may explicitly target Boot + WinRE when BootWimUpdateModel=SafeOSDU
 #   - SetupDU         : Setup binaries (sources overlay; not WIM-mounted)
 #   - LanguagePack    : Install + WinRE (user-facing UI + recovery UI)
 #   - LXP             : Install only (LXPs are Store apps; no WinRE)
@@ -6438,10 +6438,19 @@ function ConvertTo-ConfigLines { # psa-disable-line PSA6003 -- returns the Lines
             $targets = [ordered]@{}
             foreach ($role in $roles) {
                 $targets[$role] = switch ($role) {
-                    'ServicingStackCarrier' { @('Install','Boot','WinRE') }
-                    'FinalLCU'              { @('Install','Boot') }
+                    'ServicingStackCarrier' {
+                        if ($OsResolved.os -eq 'Server2019') { @('Install','WinRE') }
+                        else { @('Install','Boot','WinRE') }
+                    }
+                    'FinalLCU'              {
+                        if ($OsResolved.os -eq 'Server2019') { @('Install') }
+                        else { @('Install','Boot') }
+                    }
                     'DotNetLeaf'            { @('Install') }
-                    'SafeOSDU'              { @('WinRE') }
+                    'SafeOSDU'              {
+                        if ($OsResolved.os -eq 'Server2019') { @('Boot','WinRE') }
+                        else { @('WinRE') }
+                    }
                     'SetupDU'               { @('Setup') }
                     default                 { @() }
                 }
@@ -10662,9 +10671,10 @@ function Resolve-BootWimLcuPolicyValue {
         property of the committed source media, not a global truth:
           - 2016 (WinPE 1607): LCU applies cleanly AND materialises
             the EFI_EX/FONTS_EX/DVD_EX PCA2023 staging set -> enabled.
-          - 2019 EVAL media: structurally closed (0x80070032 at CBS
-            finalize; the 2026-06-12 D1 probe closed all 6 variants)
-            -> disabled.
+          - 2019 EVAL media: full LCU servicing is structurally closed
+            (0x80070032 at CBS/CSI on both ja-jp and en-us media), while
+            Microsoft documents SafeOS CU as a supported boot-image
+            alternative -> enabled with BootWimUpdateModel=SafeOSDU.
           - 2022: never reached P08 in the E2E (P07 axis-3 failure);
             serviceability UNKNOWN -> tolerate (attempt, downgrade
             failure to Caution, discard the index, continue).
@@ -11140,7 +11150,15 @@ function Get-PatchTargetsForRole {
         'FinalLCU'               { return [string[]]@('Install','Boot') }
         'CheckpointDependency'   { return [string[]]@() }
         'DotNetLeaf'             { return [string[]]@('Install') }
-        'SafeOSDU'               { return [string[]]@('WinRE') }
+        'SafeOSDU'               {
+            if ([string]$Script:OsVersion -eq 'Server2019' -and
+                $Script:OsProfile -and
+                $Script:OsProfile.Common -and
+                [string]$Script:OsProfile.Common.BootWimUpdateModel -eq 'SafeOSDU') {
+                return [string[]]@('Boot','WinRE')
+            }
+            return [string[]]@('WinRE')
+        }
         'SetupDU'                { return [string[]]@('Setup') }
         'LanguagePack'           { return [string[]]@('Install','WinRE') }
         'WinPeLanguagePack'      { return [string[]]@('Boot') }
@@ -12375,23 +12393,48 @@ function Build-BootApplySequence {
     $stack  = Get-PatchesForRole -Patches $BootPatches -Roles @('ServicingStackCarrier')
     $lp     = Get-PatchesForRole -Patches $BootPatches -Roles @('WinPeLanguagePack','LanguagePack')
     $lcu    = Get-PatchesForRole -Patches $BootPatches -Roles @('FinalLCU')
+    $safeOs = Get-PatchesForRole -Patches $BootPatches -Roles @('SafeOSDU')
+
+    # A boot image must use one cumulative-update model at a time.  Server 2019
+    # uses the Microsoft-documented SafeOS CU alternative because the full
+    # KB5099538 transaction fails on both en-us and ja-jp evaluation-media
+    # boot.wim with the same deleted qps-ploc PXE component (0x80070032).
+    if ($safeOs.Count -gt 0 -and ($stack.Count -gt 0 -or $lcu.Count -gt 0)) {
+        throw ('boot.wim update plan is ambiguous: SafeOSDU={0}, ServicingStackCarrier={1}, FinalLCU={2}. Select one cumulative-update model.' -f $safeOs.Count,$stack.Count,$lcu.Count)
+    }
+    $actualBootUpdateModel = if ($safeOs.Count -gt 0) { 'SafeOSDU' } else { 'FullLCU' }
+    $configuredBootUpdateModel = ''
+    if ($Script:OsProfile -and $Script:OsProfile.Common -and
+        $Script:OsProfile.Common.PSObject.Properties['BootWimUpdateModel']) {
+        $configuredBootUpdateModel = [string]$Script:OsProfile.Common.BootWimUpdateModel
+    }
+    if (-not [string]::IsNullOrWhiteSpace($configuredBootUpdateModel) -and
+        $configuredBootUpdateModel -ne $actualBootUpdateModel) {
+        throw ('boot.wim update model mismatch: configured={0}; resolved-plan={1}. Refusing to service with a Catalog-refresh target regression.' -f $configuredBootUpdateModel,$actualBootUpdateModel)
+    }
 
     $seq = [System.Collections.Generic.List[object]]::new()
-    $seq.Add([pscustomobject]@{ Name='B0.SourcePrerequisite'; Description='Source-media prerequisite, conditionally injected'; Patches=$prereq; RequiresRemount=$false }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='B0.SourcePrerequisite'; Description='Source-media prerequisite, conditionally injected'; Patches=$prereq; RequiresRemount=$false; BootUpdateModel=$actualBootUpdateModel }) | Out-Null
+
     $packageMode = Get-BootWimPackageMode
     $servicingStrategy = Get-BootWimServicingStrategy
-    $sameCombinedAsset = (Test-PatchSetsShareAsset -First $stack -Second $lcu)
-    $policyDecision = Get-BootSequencePolicyDecision -PackageMode $packageMode -SameCombinedAsset $sameCombinedAsset -LanguagePackCount $lp.Count -ServicingStrategy $servicingStrategy
-    $expandedBoot = ($servicingStrategy -in @('ExpandedCombinedCab','ExpandedSplitCab'))
-    $stackSet = if($policyDecision.SuppressServicingStackCarrier){@()}else{$stack}
-    $stackDescription = if($policyDecision.SuppressServicingStackCarrier){'Skipped: combined CAB is the sole servicing transaction'}else{'Standalone SSU or combined-LCU servicing-stack carrier'}
-    $seq.Add([pscustomobject]@{ Name='B1.ServicingStack'; Description=$stackDescription; Patches=$stackSet; RequiresRemount=$policyDecision.RequiresServicingStackRemount; DuplicateApplySuppressed=$policyDecision.SuppressServicingStackCarrier; ServicingStrategy=$servicingStrategy }) | Out-Null
-    $seq.Add([pscustomobject]@{ Name='B2.LanguagePack'; Description='WinPE language pack'; Patches=$lp; RequiresRemount=$false; ServicingStrategy=$servicingStrategy }) | Out-Null
-    $needsFinalLcu = [bool]$policyDecision.NeedsFinalLcu
-    $finalLcuSet = if ($needsFinalLcu) { $lcu } else { @() }
-    $finalDescription = if($servicingStrategy -eq 'ExpandedCombinedCab'){'Apply the combined LCU CAB exactly once (embedded SSU + RollupFix)'}elseif($servicingStrategy -eq 'ExpandedSplitCab'){'Final cumulative payload after standalone SSU commit/remount'}elseif($needsFinalLcu){'Final cumulative update'}else{'Skipped: combined LCU already applied and no intervening WinPE language changes occurred'}
-    $seq.Add([pscustomobject]@{ Name='B3.FinalLCU'; Description=$finalDescription; Patches=$finalLcuSet; RequiresRemount=$false; DuplicateApplySuppressed=$policyDecision.DuplicateApplySuppressed; ServicingStrategy=$servicingStrategy }) | Out-Null
-    $seq.Add([pscustomobject]@{ Name='B4.Cleanup'; Description='Cleanup + export'; Patches=@(); RequiresRemount=$false; IsCleanupMarker=$true }) | Out-Null
+    if ($safeOs.Count -gt 0) {
+        $seq.Add([pscustomobject]@{ Name='B1.ServicingStack'; Description='Not required: selected SafeOS DU declares no prerequisite and is serviced as the boot-image cumulative package'; Patches=@(); RequiresRemount=$false; DuplicateApplySuppressed=$true; ServicingStrategy=$servicingStrategy; BootUpdateModel='SafeOSDU' }) | Out-Null
+        $seq.Add([pscustomobject]@{ Name='B2.LanguagePack'; Description='WinPE language pack'; Patches=$lp; RequiresRemount=$false; ServicingStrategy=$servicingStrategy; BootUpdateModel='SafeOSDU' }) | Out-Null
+        $seq.Add([pscustomobject]@{ Name='B3.BootCumulativeUpdate'; Description='Apply SafeOS cumulative update as the Microsoft-documented boot-image alternative to the full LCU'; Patches=$safeOs; RequiresRemount=$false; DuplicateApplySuppressed=$false; ServicingStrategy=$servicingStrategy; BootUpdateModel='SafeOSDU' }) | Out-Null
+    } else {
+        $sameCombinedAsset = (Test-PatchSetsShareAsset -First $stack -Second $lcu)
+        $policyDecision = Get-BootSequencePolicyDecision -PackageMode $packageMode -SameCombinedAsset $sameCombinedAsset -LanguagePackCount $lp.Count -ServicingStrategy $servicingStrategy
+        $stackSet = if($policyDecision.SuppressServicingStackCarrier){@()}else{$stack}
+        $stackDescription = if($policyDecision.SuppressServicingStackCarrier){'Skipped: combined CAB is the sole servicing transaction'}else{'Standalone SSU or combined-LCU servicing-stack carrier'}
+        $seq.Add([pscustomobject]@{ Name='B1.ServicingStack'; Description=$stackDescription; Patches=$stackSet; RequiresRemount=$policyDecision.RequiresServicingStackRemount; DuplicateApplySuppressed=$policyDecision.SuppressServicingStackCarrier; ServicingStrategy=$servicingStrategy; BootUpdateModel='FullLCU' }) | Out-Null
+        $seq.Add([pscustomobject]@{ Name='B2.LanguagePack'; Description='WinPE language pack'; Patches=$lp; RequiresRemount=$false; ServicingStrategy=$servicingStrategy; BootUpdateModel='FullLCU' }) | Out-Null
+        $needsFinalLcu = [bool]$policyDecision.NeedsFinalLcu
+        $finalLcuSet = if ($needsFinalLcu) { $lcu } else { @() }
+        $finalDescription = if($servicingStrategy -eq 'ExpandedCombinedCab'){'Apply the combined LCU CAB exactly once (embedded SSU + RollupFix)'}elseif($servicingStrategy -eq 'ExpandedSplitCab'){'Final cumulative payload after standalone SSU commit/remount'}elseif($needsFinalLcu){'Final cumulative update'}else{'Skipped: combined LCU already applied and no intervening WinPE language changes occurred'}
+        $seq.Add([pscustomobject]@{ Name='B3.FinalLCU'; Description=$finalDescription; Patches=$finalLcuSet; RequiresRemount=$false; DuplicateApplySuppressed=$policyDecision.DuplicateApplySuppressed; ServicingStrategy=$servicingStrategy; BootUpdateModel='FullLCU' }) | Out-Null
+    }
+    $seq.Add([pscustomobject]@{ Name='B4.Cleanup'; Description='Cleanup + export'; Patches=@(); RequiresRemount=$false; IsCleanupMarker=$true; BootUpdateModel=$actualBootUpdateModel }) | Out-Null
     return $seq.ToArray()
 }
 
@@ -13351,7 +13394,8 @@ function Invoke-PatchSubPhase {
 
         Set-DebugStep -Step ('add-pkg:{0}:{1}' -f $SubPhase.Name, $kb)
         Write-Step ('    Applying {0}/{1} ({2})' -f $type, $kb, [System.IO.Path]::GetFileName($pkgPath))
-        $phaseForEvidence = if ($ImageLabel -like 'install.wim:*') { 'P07' } else { 'P08' }
+        $phaseForEvidence = if ($ImageLabel -like 'P06-smoke:boot.wim:*') { 'P06' } elseif ($ImageLabel -like 'install.wim:*') { 'P07' } else { 'P08' }
+        $isBootImageLabel = ($ImageLabel -like 'boot.wim:*' -or $ImageLabel -like 'P06-smoke:boot.wim:*')
         try {
             $evidenceMetadata = @{
                 Phase=$phaseForEvidence; ImageLabel=$ImageLabel; SubPhase=[string]$SubPhase.Name
@@ -13367,9 +13411,9 @@ function Invoke-PatchSubPhase {
                 ((Test-PatchHasRole -Patch $p -Role 'ServicingStackCarrier') -or
                  (Test-PatchHasRole -Patch $p -Role 'SourcePrerequisite'))
             )
-            $bootServicingStrategy = if($ImageLabel -like 'boot.wim:*'){Get-BootWimServicingStrategy}else{'DirectMsu'}
+            $bootServicingStrategy = if($isBootImageLabel){Get-BootWimServicingStrategy}else{'DirectMsu'}
             $useExpandedMsu = (
-                $ImageLabel -like 'boot.wim:*' -and
+                $isBootImageLabel -and
                 $bootServicingStrategy -in @('ExpandedCombinedCab','ExpandedSplitCab') -and
                 $type -eq 'LCU' -and
                 [System.IO.Path]::GetExtension($pkgPath) -ieq '.msu'
@@ -16889,14 +16933,14 @@ function Invoke-BootWimServicingSmokeTest {
     $required=([string]$Script:OsVersion -eq 'Server2019' -and [string]$Script:OsProfile.BootWimLcuPolicy -eq 'enabled')
     if(-not $required){
         $notRequired=[pscustomobject][ordered]@{
-            SchemaVersion='P06-bootwim-servicing-smoke-test/1.1'
+            SchemaVersion='P06-bootwim-servicing-smoke-test/2.0'
             CreatedAtUtc=[datetime]::UtcNow.ToString('o')
             RunId=$Script:RunId
             OsKey=$Script:OsVersion
             OsLanguage=$Script:OsLanguage
             Required=$false
             Status='NotRequired'
-            Reason='The compatibility smoke test is currently mandatory for Server2019 boot.wim LCU servicing.'
+            Reason='The compatibility smoke test is currently mandatory for Server2019 boot.wim cumulative servicing.'
         }
         Save-CanonicalJsonFile -InputObject $notRequired -Path $evidencePath -Depth 12
         return $notRequired
@@ -16912,162 +16956,139 @@ function Invoke-BootWimServicingSmokeTest {
     $patches=@($sequence | Where-Object {
         -not ($_.PSObject.Properties['IsCleanupMarker'] -and $_.IsCleanupMarker)
     } | ForEach-Object { $_.Patches }) | Where-Object { $_ }
+    $safeOsPatches=@($patches | Where-Object { Test-PatchHasRole -Patch $_ -Role 'SafeOSDU' })
+    $fullLcuPatches=@($patches | Where-Object { (Test-PatchHasRole -Patch $_ -Role 'FinalLCU') -or (Test-PatchHasRole -Patch $_ -Role 'ServicingStackCarrier') })
+    $bootUpdateModel=if($safeOsPatches.Count -gt 0){'SafeOSDU'}else{'FullLCU'}
+    if($safeOsPatches.Count -gt 0 -and $fullLcuPatches.Count -gt 0){
+        throw 'P06 boot.wim smoke test found an ambiguous plan containing both SafeOSDU and full-LCU roles.'
+    }
+    $configuredBootUpdateModel=''
+    if($Script:OsProfile.Common -and $Script:OsProfile.Common.PSObject.Properties['BootWimUpdateModel']){
+        $configuredBootUpdateModel=[string]$Script:OsProfile.Common.BootWimUpdateModel
+    }
+    if(-not [string]::IsNullOrWhiteSpace($configuredBootUpdateModel) -and $configuredBootUpdateModel -ne $bootUpdateModel){
+        throw ('P06 boot.wim smoke test resolved the wrong update model: configured={0}; resolved={1}. Catalog refresh may have dropped a target assignment.' -f $configuredBootUpdateModel,$bootUpdateModel)
+    }
 
     $indexes=@($Script:OsProfile.BootWimIndexes)
     if($indexes.Count -eq 0){$indexes=@(1,2)}
-    $index=[int]$indexes[0]
-    $smokeRoot=Join-Path $Script:WorkRoot 'work\p06_bootwim_smoke_test'
-    $smokeWim=Join-Path $smokeRoot 'boot.wim'
-    $mount=Join-Path $smokeRoot 'mount'
-    $mountLogPath=Join-Path $Script:LogsDir ('P06_bootwim_smoke_mount_idx{0}.log' -f $index)
-    if(Test-Path -LiteralPath $smokeRoot){Remove-Item -LiteralPath $smokeRoot -Recurse -Force -ErrorAction SilentlyContinue}
-    Initialize-RuntimeDirectories -Directory @($smokeRoot,$mount)
-
-    $smokeStage='PrepareCopy'
-    $failureCategory=''
-    $sourceAttributes=''
-    $copyAttributesBeforeMount=''
-    $copyWasReadOnlyBeforeMount=$false
-    $copyAttributesAfterMountPreparation=''
-    $copyIsReadOnlyAfterMountPreparation=$null
-
-    Copy-Item -LiteralPath $bootWim -Destination $smokeWim -Force
     $sourceItem=Get-Item -LiteralPath $bootWim -Force -ErrorAction Stop
-    $copyItem=Get-Item -LiteralPath $smokeWim -Force -ErrorAction Stop
-    $sourceAttributes=[string]$sourceItem.Attributes
-    $copyAttributesBeforeMount=[string]$copyItem.Attributes
-    $copyWasReadOnlyBeforeMount=[bool]$copyItem.IsReadOnly
-    Write-Step ('P06 smoke-test WIM copy attributes before mount: {0}; ReadOnly={1}' -f $copyAttributesBeforeMount,$copyWasReadOnlyBeforeMount)
-
     $sourceHash=(Get-FileHash -LiteralPath $bootWim -Algorithm SHA256).Hash.ToLowerInvariant()
-    $copyHash=(Get-FileHash -LiteralPath $smokeWim -Algorithm SHA256).Hash.ToLowerInvariant()
-    if($sourceHash -ne $copyHash){throw ('P06 boot.wim smoke-test copy hash mismatch: source={0}; copy={1}' -f $sourceHash,$copyHash)}
+    $overallStarted=[datetime]::UtcNow
+    $results=[System.Collections.Generic.List[object]]::new()
 
-    $started=[datetime]::UtcNow
-    $mounted=$false
-    $passed=$false
-    $failedSubPhase=''
-    $errorMessage=''
-    $errorType=''
-    $hresult=''
-    try{
-        Write-Step ('P06 boot.wim servicing smoke test: Server2019 index {0} on verified disposable copy.' -f $index)
-        $smokeStage='Mount'
-        Invoke-WimMountSafe -ImagePath $smokeWim -Index $index -Path $mount -LogDir $Script:LogsDir -LogPath $mountLogPath|Out-Null
-        $mounted=$true
-        $copyItemAfterMount=Get-Item -LiteralPath $smokeWim -Force -ErrorAction Stop
-        $copyAttributesAfterMountPreparation=[string]$copyItemAfterMount.Attributes
-        $copyIsReadOnlyAfterMountPreparation=[bool]$copyItemAfterMount.IsReadOnly
-        if($copyIsReadOnlyAfterMountPreparation){
-            throw ('P06 smoke-test WIM remained ReadOnly after writable-mount preparation: {0}' -f $smokeWim)
-        }
+    foreach($rawIndex in $indexes){
+        $index=[int]$rawIndex
+        $smokeRoot=Join-Path $Script:WorkRoot ('work\p06_bootwim_smoke_test\idx{0}' -f $index)
+        $smokeWim=Join-Path $smokeRoot 'boot.wim'
+        $mount=Join-Path $smokeRoot 'mount'
+        $mountLogPath=Join-Path $Script:LogsDir ('P06_bootwim_smoke_mount_idx{0}.log' -f $index)
+        if(Test-Path -LiteralPath $smokeRoot){Remove-Item -LiteralPath $smokeRoot -Recurse -Force -ErrorAction SilentlyContinue}
+        Initialize-RuntimeDirectories -Directory @($smokeRoot,$mount)
 
-        $smokeStage='Readiness'
-        Test-PatchServicingReadinessOnMount -MountPath $mount -PatchesToApply $patches -ImageLabel ('P06-smoke:boot.wim:idx{0}' -f $index)|Out-Null
-        foreach($sp in $sequence){
-            if($sp.PSObject.Properties['IsCleanupMarker'] -and $sp.IsCleanupMarker){continue}
-            $failedSubPhase=[string]$sp.Name
-            $smokeStage='ApplySubPhase'
-            Invoke-PatchSubPhase -SubPhase $sp -MountPath $mount -ImageLabel ('P06-smoke:boot.wim:idx{0}' -f $index)|Out-Null
-            if($sp.PSObject.Properties['RequiresRemount'] -and [bool]$sp.RequiresRemount){
-                $smokeStage='Remount'
-                Invoke-WimDismountSafe -Path $mount -LogDir $Script:LogsDir
-                $mounted=$false
-                Invoke-WimMountSafe -ImagePath $smokeWim -Index $index -Path $mount -LogDir $Script:LogsDir|Out-Null
-                $mounted=$true
+        $smokeStage='PrepareCopy';$failureCategory='';$failedSubPhase='';$errorMessage='';$errorType='';$hresult=''
+        $copyAttributesBeforeMount='';$copyWasReadOnlyBeforeMount=$false;$copyAttributesAfterMountPreparation='';$copyIsReadOnlyAfterMountPreparation=$null
+        $started=[datetime]::UtcNow;$mounted=$false;$passed=$false;$copyHash=''
+        try{
+            Copy-Item -LiteralPath $bootWim -Destination $smokeWim -Force
+            $copyItem=Get-Item -LiteralPath $smokeWim -Force -ErrorAction Stop
+            $copyAttributesBeforeMount=[string]$copyItem.Attributes
+            $copyWasReadOnlyBeforeMount=[bool]$copyItem.IsReadOnly
+            Write-Step ('P06 smoke-test idx {0} WIM copy attributes before mount: {1}; ReadOnly={2}' -f $index,$copyAttributesBeforeMount,$copyWasReadOnlyBeforeMount)
+            $copyHash=(Get-FileHash -LiteralPath $smokeWim -Algorithm SHA256).Hash.ToLowerInvariant()
+            if($sourceHash -ne $copyHash){throw ('P06 boot.wim smoke-test copy hash mismatch for index {0}: source={1}; copy={2}' -f $index,$sourceHash,$copyHash)}
+
+            Write-Step ('P06 boot.wim servicing smoke test: Server2019 index {0} on verified disposable copy; update model={1}.' -f $index,$bootUpdateModel)
+            $smokeStage='Mount'
+            Invoke-WimMountSafe -ImagePath $smokeWim -Index $index -Path $mount -LogDir $Script:LogsDir -LogPath $mountLogPath|Out-Null
+            $mounted=$true
+            $copyItemAfterMount=Get-Item -LiteralPath $smokeWim -Force -ErrorAction Stop
+            $copyAttributesAfterMountPreparation=[string]$copyItemAfterMount.Attributes
+            $copyIsReadOnlyAfterMountPreparation=[bool]$copyItemAfterMount.IsReadOnly
+            if($copyIsReadOnlyAfterMountPreparation){throw ('P06 smoke-test WIM remained ReadOnly after writable-mount preparation: {0}' -f $smokeWim)}
+
+            $smokeStage='Readiness'
+            Test-PatchServicingReadinessOnMount -MountPath $mount -PatchesToApply $patches -ImageLabel ('P06-smoke:boot.wim:idx{0}' -f $index)|Out-Null
+            foreach($sp in $sequence){
+                if($sp.PSObject.Properties['IsCleanupMarker'] -and $sp.IsCleanupMarker){continue}
+                $failedSubPhase=[string]$sp.Name
+                $smokeStage='ApplySubPhase'
+                Invoke-PatchSubPhase -SubPhase $sp -MountPath $mount -ImageLabel ('P06-smoke:boot.wim:idx{0}' -f $index)|Out-Null
+                if($sp.PSObject.Properties['RequiresRemount'] -and [bool]$sp.RequiresRemount){
+                    $smokeStage='Remount'
+                    Invoke-WimDismountSafe -Path $mount -LogDir $Script:LogsDir
+                    $mounted=$false
+                    Invoke-WimMountSafe -ImagePath $smokeWim -Index $index -Path $mount -LogDir $Script:LogsDir|Out-Null
+                    $mounted=$true
+                }
+            }
+            $passed=$true;$failedSubPhase='';$smokeStage='Completed'
+        }catch{
+            $errorMessage=[string]$_.Exception.Message
+            $errorType=$_.Exception.GetType().FullName
+            try{$hresult=('0x{0:X8}' -f ([System.BitConverter]::ToUInt32([System.BitConverter]::GetBytes([int32]$_.Exception.HResult),0)))}catch{$hresult=''}
+            switch($smokeStage){
+                'PrepareCopy' {$failureCategory='SmokeTestPreparationFailure'}
+                'Mount' {$failureCategory='SmokeTestInfrastructureFailure'}
+                'Remount' {$failureCategory='SmokeTestInfrastructureFailure'}
+                'Readiness' {$failureCategory='ServicingReadinessFailure'}
+                'ApplySubPhase' {$failureCategory='BootWimServicingCompatibilityFailure'}
+                default {$failureCategory='SmokeTestInfrastructureFailure'}
+            }
+        }finally{
+            if($mounted){Invoke-WimDismountSafe -Path $mount -Discard -LogDir $Script:LogsDir}
+            if(Test-Path -LiteralPath $smokeWim -PathType Leaf){
+                try{
+                    $copyItemFinal=Get-Item -LiteralPath $smokeWim -Force -ErrorAction Stop
+                    if([string]::IsNullOrWhiteSpace($copyAttributesAfterMountPreparation)){
+                        $copyAttributesAfterMountPreparation=[string]$copyItemFinal.Attributes
+                        $copyIsReadOnlyAfterMountPreparation=[bool]$copyItemFinal.IsReadOnly
+                    }
+                }catch{$null=$_}
             }
         }
-        $passed=$true
-        $failedSubPhase=''
-        $smokeStage='Completed'
-    }catch{
-        $errorMessage=[string]$_.Exception.Message
-        $errorType=$_.Exception.GetType().FullName
-        try{$hresult=('0x{0:X8}' -f ([System.BitConverter]::ToUInt32([System.BitConverter]::GetBytes([int32]$_.Exception.HResult),0)))}catch{$hresult=''}
-        switch($smokeStage){
-            'PrepareCopy' {$failureCategory='SmokeTestPreparationFailure'}
-            'Mount' {$failureCategory='SmokeTestInfrastructureFailure'}
-            'Remount' {$failureCategory='SmokeTestInfrastructureFailure'}
-            'Readiness' {$failureCategory='ServicingReadinessFailure'}
-            'ApplySubPhase' {$failureCategory='BootWimServicingCompatibilityFailure'}
-            default {$failureCategory='SmokeTestInfrastructureFailure'}
+        $ended=[datetime]::UtcNow
+        $result=[pscustomobject][ordered]@{
+            Index=$index;Status=$(if($passed){'Passed'}else{'Failed'});BootUpdateModel=$bootUpdateModel
+            SourceBootWimSha256=$sourceHash;DisposableCopySha256=$copyHash
+            DisposableCopyAttributesBeforeMount=$copyAttributesBeforeMount;DisposableCopyWasReadOnlyBeforeMount=$copyWasReadOnlyBeforeMount
+            MountPreparation='Invoke-WimMountSafe';DisposableCopyAttributesAfterMountPreparation=$copyAttributesAfterMountPreparation
+            DisposableCopyIsReadOnlyAfterMountPreparation=$copyIsReadOnlyAfterMountPreparation;MountLogPath=$mountLogPath
+            PatchIds=@($patches|ForEach-Object{[string]$_.PackageId});KbIds=@($patches|ForEach-Object{[string]$_.KbId})
+            SafeOsDuKbIds=@($safeOsPatches|ForEach-Object{[string]$_.KbId});FullLcuKbIds=@($fullLcuPatches|ForEach-Object{[string]$_.KbId})
+            StartedAtUtc=$started.ToString('o');EndedAtUtc=$ended.ToString('o');ElapsedSeconds=[math]::Round(($ended-$started).TotalSeconds,3)
+            SmokeTestStage=$smokeStage;FailedSubPhase=$failedSubPhase;FailureCategory=$failureCategory;ErrorType=$errorType;HResult=$hresult;ErrorMessage=$errorMessage
+            DisposableWorkspace=$smokeRoot;DisposableWorkspaceRemoved=$false
         }
-    }finally{
-        if($mounted){
-            Invoke-WimDismountSafe -Path $mount -Discard -LogDir $Script:LogsDir
-        }
-        if(Test-Path -LiteralPath $smokeWim -PathType Leaf){
-            try{
-                $copyItemFinal=Get-Item -LiteralPath $smokeWim -Force -ErrorAction Stop
-                if([string]::IsNullOrWhiteSpace($copyAttributesAfterMountPreparation)){
-                    $copyAttributesAfterMountPreparation=[string]$copyItemFinal.Attributes
-                    $copyIsReadOnlyAfterMountPreparation=[bool]$copyItemFinal.IsReadOnly
-                }
-            }catch{$null=$_}
-        }
+        Remove-Item -LiteralPath $smokeRoot -Recurse -Force -ErrorAction SilentlyContinue
+        $result.DisposableWorkspaceRemoved=(-not (Test-Path -LiteralPath $smokeRoot))
+        $results.Add($result)|Out-Null
     }
 
-    if($passed){$failureCategory=''}
-    $ended=[datetime]::UtcNow
-    $resultMeaning=''
-    if($passed){
-        $resultMeaning='The selected boot.wim index accepted the resolved servicing sequence on a writable disposable copy.'
-    }
-    elseif($failureCategory -eq 'BootWimServicingCompatibilityFailure' -or $failureCategory -eq 'ServicingReadinessFailure'){
-        $resultMeaning='The source-media boot.wim and resolved patch set did not pass offline-servicing compatibility evaluation. No production WIM was changed.'
-    }
-    else{
-        $resultMeaning='The smoke-test infrastructure failed before source-media and patch compatibility could be evaluated. No production WIM was changed.'
-    }
-
+    $overallEnded=[datetime]::UtcNow
+    $failures=@($results.ToArray()|Where-Object{[string]$_.Status -ne 'Passed'})
+    $passedAll=($failures.Count -eq 0)
     $evidence=[pscustomobject][ordered]@{
-        SchemaVersion='P06-bootwim-servicing-smoke-test/1.1'
-        CreatedAtUtc=$ended.ToString('o')
-        RunId=$Script:RunId
-        OsKey=$Script:OsVersion
-        OsLanguage=$Script:OsLanguage
-        Required=$true
-        Status=$(if($passed){'Passed'}else{'Failed'})
-        SourceBootWim=$bootWim
-        SourceBootWimSha256=$sourceHash
-        SourceFileAttributes=$sourceAttributes
-        DisposableCopySha256=$copyHash
-        DisposableCopyAttributesBeforeMount=$copyAttributesBeforeMount
-        DisposableCopyWasReadOnlyBeforeMount=$copyWasReadOnlyBeforeMount
-        MountPreparation='Invoke-WimMountSafe'
-        DisposableCopyAttributesAfterMountPreparation=$copyAttributesAfterMountPreparation
-        DisposableCopyIsReadOnlyAfterMountPreparation=$copyIsReadOnlyAfterMountPreparation
-        MountLogPath=$mountLogPath
-        Index=$index
-        PatchIds=@($patches|ForEach-Object{[string]$_.PackageId})
-        KbIds=@($patches|ForEach-Object{[string]$_.KbId})
-        ServicingStrategy=(Get-BootWimServicingStrategy)
-        FailurePolicy=[string]$Script:OsProfile.BootWimFailurePolicy
-        StartedAtUtc=$started.ToString('o')
-        EndedAtUtc=$ended.ToString('o')
-        ElapsedSeconds=[math]::Round(($ended-$started).TotalSeconds,3)
-        SmokeTestStage=$smokeStage
-        FailedSubPhase=$failedSubPhase
-        FailureCategory=$failureCategory
-        ErrorType=$errorType
-        HResult=$hresult
-        ErrorMessage=$errorMessage
-        DisposableWorkspace=$smokeRoot
-        DisposableWorkspaceRemoved=$false
-        ResultMeaning=$resultMeaning
+        SchemaVersion='P06-bootwim-servicing-smoke-test/2.0';CreatedAtUtc=$overallEnded.ToString('o');RunId=$Script:RunId
+        OsKey=$Script:OsVersion;OsLanguage=$Script:OsLanguage;Required=$true;Status=$(if($passedAll){'Passed'}else{'Failed'})
+        BootUpdateModel=$bootUpdateModel;ConfiguredBootUpdateModel=$configuredBootUpdateModel;SourceBootWim=$bootWim;SourceBootWimSha256=$sourceHash;SourceFileAttributes=[string]$sourceItem.Attributes
+        TestedIndexes=@($indexes|ForEach-Object{[int]$_});PatchIds=@($patches|ForEach-Object{[string]$_.PackageId});KbIds=@($patches|ForEach-Object{[string]$_.KbId})
+        SafeOsDuKbIds=@($safeOsPatches|ForEach-Object{[string]$_.KbId});FullLcuKbIds=@($fullLcuPatches|ForEach-Object{[string]$_.KbId})
+        FullLcuExcludedFromBoot=($bootUpdateModel -eq 'SafeOSDU' -and $fullLcuPatches.Count -eq 0)
+        ServicingStrategy=(Get-BootWimServicingStrategy);FailurePolicy=[string]$Script:OsProfile.BootWimFailurePolicy
+        StartedAtUtc=$overallStarted.ToString('o');EndedAtUtc=$overallEnded.ToString('o');ElapsedSeconds=[math]::Round(($overallEnded-$overallStarted).TotalSeconds,3)
+        IndexResults=$results.ToArray();FailedIndexCount=$failures.Count
+        ResultMeaning=$(if($passedAll){'Every selected boot.wim index accepted the configured boot cumulative-update model on an independent writable disposable copy.'}else{'At least one selected boot.wim index did not pass the configured boot cumulative-update model. No production WIM was changed.'})
     }
-    Save-CanonicalJsonFile -InputObject $evidence -Path $evidencePath -Depth 16
-    Remove-Item -LiteralPath $smokeRoot -Recurse -Force -ErrorAction SilentlyContinue
-    $evidence.DisposableWorkspaceRemoved=(-not (Test-Path -LiteralPath $smokeRoot))
-    Save-CanonicalJsonFile -InputObject $evidence -Path $evidencePath -Depth 16
+    Save-CanonicalJsonFile -InputObject $evidence -Path $evidencePath -Depth 20
+    $parentSmokeRoot=Join-Path $Script:WorkRoot 'work\p06_bootwim_smoke_test'
+    Remove-Item -LiteralPath $parentSmokeRoot -Recurse -Force -ErrorAction SilentlyContinue
 
-    if(-not $passed){
-        if($failureCategory -eq 'BootWimServicingCompatibilityFailure' -or $failureCategory -eq 'ServicingReadinessFailure'){
-            throw ('P06 boot.wim servicing smoke test failed before install.wim servicing. Source media and patch set did not pass compatibility evaluation: stage={0}; sub-phase={1}; HRESULT={2}; error={3}. Evidence: {4}' -f $smokeStage,$failedSubPhase,$hresult,$errorMessage,$evidencePath)
-        }
-        throw ('P06 boot.wim servicing smoke-test infrastructure failed before compatibility could be evaluated: stage={0}; HRESULT={1}; error={2}. Evidence: {3}' -f $smokeStage,$hresult,$errorMessage,$evidencePath)
+    if(-not $passedAll){
+        $summary=@($failures|ForEach-Object{'idx{0}:stage={1};sub-phase={2};HRESULT={3};category={4}' -f $_.Index,$_.SmokeTestStage,$_.FailedSubPhase,$_.HResult,$_.FailureCategory}) -join ' | '
+        throw ('P06 boot.wim servicing smoke test failed before install.wim servicing. update model={0}; {1}. Evidence: {2}' -f $bootUpdateModel,$summary,$evidencePath)
     }
-    Write-Ok ('P06 boot.wim servicing smoke test passed for index {0}.' -f $index)
+    Write-Ok ('P06 boot.wim servicing smoke test passed for indexes {0}; update model={1}.' -f (($indexes|ForEach-Object{[string]$_}) -join ','),$bootUpdateModel)
     return $evidence
 }
 
@@ -17649,7 +17670,7 @@ function Invoke-BuildPhase08_PatchBootWim {
         $bootPolicyException = $null
         $bootPolicyExceptionPath = Join-Path $Script:LogsDir 'P08_bootwim_policy_exception.json'
         Remove-Item -LiteralPath $bootPolicyExceptionPath -Force -ErrorAction SilentlyContinue
-        Write-Step ('boot.wim LCU policy: {0}; failure policy: {1}; servicing strategy: {2}' -f $bootPolicy,$bootFailurePolicy,$bootServicingStrategy)
+        Write-Step ('boot.wim cumulative-update policy: {0}; failure policy: {1}; servicing strategy: {2}' -f $bootPolicy,$bootFailurePolicy,$bootServicingStrategy)
         $bootWim = Join-Path $Script:ExtractedDir 'sources\boot.wim'
         if (-not (Test-Path -LiteralPath $bootWim)) {
             if ($Script:SyntheticTestMode) {
@@ -17685,7 +17706,7 @@ function Invoke-BuildPhase08_PatchBootWim {
         $plan = Get-OrInitPatchPlan
 
         if ($bootPolicy -eq 'disabled') {
-            Write-Skip 'BootWimLcuPolicy=disabled; boot.wim left as shipped (2019 EVAL media: LCU-on-WinPE is structurally closed). WinRE servicing below still runs.'
+            Write-Skip 'BootWimLcuPolicy=disabled; boot.wim is intentionally left as shipped by the active OS policy. WinRE servicing below still runs.'
         } else {
         $patches = Get-PatchListForBootWim
         Write-Step ('boot.wim-targeted patches: {0}' -f $patches.Count)
@@ -17695,9 +17716,14 @@ function Invoke-BuildPhase08_PatchBootWim {
             $bootIndexes = @(1, 2)
         }
 
-        # Pull the role-based boot.wim sequence (prerequisite/carrier -> language -> final LCU -> cleanup/export)
+        # Pull the role-based boot.wim sequence. Server2019 may use the SafeOS CU alternative; other generations use the full-LCU model.
         $bootSequence = @($plan.BootSequence)
-        Write-Step ('boot.wim apply sequence: {0} sub-phase(s)' -f $bootSequence.Count)
+        $bootUpdateModel=if(@($bootSequence|Where-Object{$_.PSObject.Properties['BootUpdateModel'] -and [string]$_.BootUpdateModel -eq 'SafeOSDU'}).Count -gt 0){'SafeOSDU'}else{'FullLCU'}
+        $configuredBootUpdateModel=if($Script:OsProfile.Common -and $Script:OsProfile.Common.PSObject.Properties['BootWimUpdateModel']){[string]$Script:OsProfile.Common.BootWimUpdateModel}else{''}
+        if(-not [string]::IsNullOrWhiteSpace($configuredBootUpdateModel) -and $configuredBootUpdateModel -ne $bootUpdateModel){
+            throw ('P08 boot.wim update model mismatch: configured={0}; sequence={1}.' -f $configuredBootUpdateModel,$bootUpdateModel)
+        }
+        Write-Step ('boot.wim apply sequence: {0} sub-phase(s); update model: {1}' -f $bootSequence.Count,$bootUpdateModel)
 
         foreach ($idx in $bootIndexes) {
             Write-SubSection ('boot.wim index {0}' -f $idx)
@@ -19059,8 +19085,13 @@ function Invoke-VerifyPhase11_StaticVerify {
                 }
                 $bootPolicyForVerify=Resolve-BootWimLcuPolicyValue -RawValue $Script:OsProfile.BootWimLcuPolicy
                 if ($bootPolicyForVerify -eq 'enabled') {
+                    $configuredBootUpdateModel=if($Script:OsProfile.Common -and $Script:OsProfile.Common.PSObject.Properties['BootWimUpdateModel']){[string]$Script:OsProfile.Common.BootWimUpdateModel}else{'FullLCU'}
+                    $bootSafeLines=@($Script:ResolvedPatches | Where-Object { $_.PatchType -eq 'SafeOSDU' -and ((Get-PatchTargetsForEntry -Patch $_) -contains 'Boot') })
+                    $bootFullLcuLines=@($Script:ResolvedPatches | Where-Object { $_.PatchType -eq 'LCU' -and ((Get-PatchTargetsForEntry -Patch $_) -contains 'Boot') })
+                    $resolvedBootUpdateModel=if($bootSafeLines.Count -gt 0 -and $bootFullLcuLines.Count -eq 0){'SafeOSDU'}elseif($bootSafeLines.Count -eq 0 -and $bootFullLcuLines.Count -gt 0){'FullLCU'}else{'AmbiguousOrMissing'}
+                    Add-VRow -Check 'BootWimUpdateModel' -Expected $configuredBootUpdateModel -Actual $resolvedBootUpdateModel -Status $(if($configuredBootUpdateModel -eq $resolvedBootUpdateModel){'Pass'}else{'Fail'}) -Notes ('SafeOSDU=' + (($bootSafeLines|ForEach-Object{$_.KbId}) -join ',') + '; FullLCU=' + (($bootFullLcuLines|ForEach-Object{$_.KbId}) -join ','))
                     if($hasBootPolicyException){
-                        Add-VRow -Check 'BootWimServicingPolicy' -Expected 'LCU applied or source preserved only under an explicit measured policy exception' -Actual ('PolicyException ' + [string]$bootPolicyException.ErrorCode) -Status 'PolicyException' -Notes $bootPolicyExceptionPath
+                        Add-VRow -Check 'BootWimServicingPolicy' -Expected 'configured cumulative-update model applied or source preserved only under an explicit measured policy exception' -Actual ('PolicyException ' + [string]$bootPolicyException.ErrorCode) -Status 'PolicyException' -Notes $bootPolicyExceptionPath
                     }
                     foreach ($brec in @($postInsp.BootWim.Indexes)) {
                         if (-not $brec -or $brec.ErrorMessage) {
@@ -19072,7 +19103,13 @@ function Invoke-VerifyPhase11_StaticVerify {
                             Add-VRow -Check ('BootIndex' + $brec.Index + '_LcuTargetApplied') -Expected ('PolicyException: source build preserved; P14 Install required instead of target ' + $expectedBuildAll) -Actual $observedBootBuild -Status 'PolicyException' -Notes ([string]$bootPolicyException.Reason)
                         } else {
                             $br=Test-LcuTargetApplied -OsKey $Script:OsVersion -ExpectedKbId $expectedLcuKbAll -ExpectedBuild $expectedBuildAll -Evidence $brec.Evidence
-                            Add-VRow -Check ('BootIndex' + $brec.Index + '_LcuTargetApplied') -Expected $br.Expected -Actual $br.Actual -Status $br.Status -Notes $br.Notes
+                            $bootBuildCheckName=if($resolvedBootUpdateModel -eq 'SafeOSDU'){'BootIndex' + $brec.Index + '_SafeOsTargetBuild'}else{'BootIndex' + $brec.Index + '_LcuTargetApplied'}
+                            Add-VRow -Check $bootBuildCheckName -Expected $br.Expected -Actual $br.Actual -Status $br.Status -Notes ($br.Notes + '; model=' + $resolvedBootUpdateModel)
+                            if($resolvedBootUpdateModel -eq 'SafeOSDU'){
+                                $safePackageNames=@($brec.PackageNames | Where-Object { ([string]$_) -match '(?i)SafeOSDU|SafeOS' })
+                                $expectedBootSafeKb=(($bootSafeLines|ForEach-Object{[string]$_.KbId}|Sort-Object -Unique) -join ',')
+                                Add-VRow -Check ('BootIndex' + $brec.Index + '_SafeOsPackageEvidence') -Expected $(if($expectedBootSafeKb){$expectedBootSafeKb}else{'SafeOS package identity'}) -Actual $(if($safePackageNames.Count -gt 0){$safePackageNames -join ';'}else{'Absent'}) -Status $(if($safePackageNames.Count -gt 0){'Pass'}else{'Fail'}) -Notes 'SafeOS DU is the configured Microsoft-documented boot-image cumulative alternative; build and package identity are both required.'
+                            }
                         }
                     }
                 }
@@ -19115,11 +19152,11 @@ function Invoke-VerifyPhase11_StaticVerify {
                     #   LCU / Checkpoint -> LcuTargetApplied (measured build)
                     #   DotNet           -> DotNetRollupApplied (census below)
                     #   SafeOSDU / SetupDU -> not install.wim idx-1 packages
-                    #                         (WinRE payload / sources files);
+                    #                         (WinRE/boot payload / sources files);
                     #                         excluded here, stated in scope.
                     Add-VRow -Check 'KindVerificationScope' -Expected 'documented' `
                         -Actual 'documented' -Status 'Pass' `
-                        -Notes 'LCU/Checkpoint via LcuTargetApplied (measured build); DotNet via DotNetRollupApplied; SafeOSDU (WinRE payload) and SetupDU (sources files) are not verifiable as install.wim packages; Server2016 additionally verifies KB-named packages.'
+                        -Notes 'LCU/Checkpoint via LcuTargetApplied (measured build); DotNet via DotNetRollupApplied; SafeOSDU (WinRE and, for Server2019, boot.wim payload) and SetupDU (sources files) are not verifiable as install.wim packages; Server2016 additionally verifies KB-named packages.'
 
                     if ($Script:OsVersion -eq 'Server2016') {
                         # Server 2016 SSU/source-prerequisite package identities

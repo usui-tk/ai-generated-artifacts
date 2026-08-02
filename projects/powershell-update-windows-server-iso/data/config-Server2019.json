@@ -30,7 +30,8 @@
     "BootWimPackageMode": "DirectMsu",
     "BootWimServicingStrategy": "DirectMsu",
     "VersionDecisionPolicy": "StrictFailClosed",
-    "VersionDecisionEvidenceSchema": "patch-version-decision/1.0"
+    "VersionDecisionEvidenceSchema": "patch-version-decision/1.0",
+    "BootWimUpdateModel": "SafeOSDU"
   },
   "ServicingModel": {
     "MonthlyServicingStyle": "CombinedSSULCU",
@@ -108,14 +109,6 @@
         },
         {
           "Order": 20,
-          "Step": "ServicingStack",
-          "Roles": [
-            "ServicingStackCarrier"
-          ],
-          "Condition": "Required"
-        },
-        {
-          "Order": 30,
           "Step": "WinPeLanguage",
           "Roles": [
             "WinPeLanguagePack"
@@ -123,21 +116,21 @@
           "Condition": "IfConfigured"
         },
         {
-          "Order": 40,
-          "Step": "FinalLCU",
+          "Order": 30,
+          "Step": "BootCumulativeUpdate",
           "Roles": [
-            "FinalLCU"
+            "SafeOSDU"
           ],
-          "Condition": "Required"
+          "Condition": "RequiredForServer2019"
         },
         {
-          "Order": 50,
+          "Order": 40,
           "Step": "Cleanup",
           "Operation": "StartComponentCleanup",
           "Condition": "Required"
         },
         {
-          "Order": 60,
+          "Order": 50,
           "Step": "Export",
           "Operation": "ExportImage",
           "Condition": "Required"
@@ -324,7 +317,6 @@
         ],
         "Targets": [
           "Install",
-          "Boot",
           "WinRE"
         ],
         "Condition": {
@@ -361,7 +353,8 @@
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
           "Notes": [
-            "Current monthly packages are combined SSU/LCU, but older source media may still require this standalone prerequisite."
+            "Current monthly packages are combined SSU/LCU, but older source media may still require this standalone prerequisite.",
+            "r12.42: boot.wim uses KB5099549 SafeOS DU, which declares no prerequisite; KB5005112 remains Install/WinRE-only and version-gated."
           ]
         },
         "VersionPolicy": {
@@ -406,12 +399,10 @@
         "TargetsByRole": {
           "ServicingStackCarrier": [
             "Install",
-            "Boot",
             "WinRE"
           ],
           "FinalLCU": [
-            "Install",
-            "Boot"
+            "Install"
           ]
         },
         "RuntimeSelector": null,
@@ -441,7 +432,8 @@
           "VerifiedBy": "ChatGPT+official-Microsoft-sources",
           "Notes": [
             "Target OS build 17763.9020. Exact Catalog asset is re-resolved at P04.",
-            "Embedded SSU KB5104020 build 17763.9015."
+            "Embedded SSU KB5104020 build 17763.9015.",
+            "r12.42: full LCU remains mandatory for install.wim and as the WinRE servicing-stack carrier, but is excluded from boot.wim after identical 0x80070032 qps-ploc PXE failures on en-us and ja-jp media."
           ]
         },
         "VersionPolicy": {
@@ -629,6 +621,7 @@
         ],
         "TargetsByRole": {
           "SafeOSDU": [
+            "Boot",
             "WinRE"
           ]
         },
@@ -657,7 +650,8 @@
           "VerifiedBy": "ChatGPT+official-Microsoft-sources",
           "Notes": [
             "July 2026 Safe OS Dynamic Update for Windows 10 version 1809 and Windows Server 2019.",
-            "The July 2026 Server image inventory is the authoritative month-to-KB cross-check; exact Catalog asset identity is resolved and integrity-checked at P04."
+            "The July 2026 Server image inventory is the authoritative month-to-KB cross-check; exact Catalog asset identity is resolved and integrity-checked at P04.",
+            "r12.42: selected as the Microsoft-documented boot-image cumulative-update alternative after the full LCU failed on both localized Server 2019 boot images."
           ]
         },
         "VersionPolicy": {
