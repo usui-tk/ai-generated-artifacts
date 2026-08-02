@@ -22,6 +22,32 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.25-r12.32] - 2026-08-02
+
+Tag: `rawxml-filetime-conversion-regression-fix` (the tag is
+retained). The native preflight stops assuming a full-inventory
+snapshot.
+
+### Fixed
+
+- **Subset-inventory consistency check**: a new
+  `Test-WimInventorySnapshotConsistency` helper validates the
+  display-date snapshot against the before/after WIM inventories when
+  only a subset of image indexes is serviced — requested indexes must
+  be non-empty and duplicate-free, and before/after inventories must
+  agree on the index set outside the snapshot. The r12.29 preflight
+  implicitly assumed the snapshot covered every image index.
+  Script-only change.
+- **T40**: release pin advanced to `update-wsi-2026.07.25-r12.32`
+  (tag retained per the deliverable).
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **5E/73W/8I** on
+the committed tree — unchanged from r12.31; committed verbatim per
+the no-fix-forward rule.
+
 ## [update-wsi-2026.07.25-r12.31] - 2026-08-02
 
 Tag: `rawxml-filetime-conversion-regression-fix` (the tag is

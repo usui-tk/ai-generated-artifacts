@@ -168,7 +168,7 @@
     Optional display date for serviced install.wim indexes, in yyyy-MM-dd
     format. The Windows Setup edition list uses the WIM IMAGE CREATIONTIME
     field on the measured Server 2016 and Server 2022 media. When specified,
-    r12.31 writes noon UTC on the requested calendar date. When omitted, each
+    r12.32 writes noon UTC on the requested calendar date. When omitted, each
     serviced IMAGE copies its own LASTMODIFICATIONTIME FILETIME to CREATIONTIME.
     Only indexes that P07 actually services are changed. The update preserves
     raw XML byte length, encoding, BOM, terminators, resource descriptors and
@@ -699,7 +699,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.25-r12.31'
+$Script:ScriptVersion = 'update-wsi-2026.07.25-r12.32'
 # Validation marker: pwsh7-runtime-validated on PowerShell 7.6.4 Linux x64; Windows-native gates remain required.
 $Script:ScriptTag     = 'rawxml-filetime-conversion-regression-fix'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
@@ -7296,7 +7296,7 @@ function Get-DismExportArgumentList {
 }
 
 # ============================================================
-# install.wim display-date metadata (r12.31 pwsh7-runtime-validated FILETIME fix)
+# install.wim display-date metadata (r12.32 native-preflight subset inventory fix)
 # ============================================================
 # Measured Server 2016/2022 evidence proves that Windows Setup's edition-list
 # "Modified" / "更新日" column maps to IMAGE/CREATIONTIME on the tested media.
@@ -8674,6 +8674,80 @@ function Set-WimRawXmlCreationTimeMetadata {
     }
 }
 
+function Test-WimInventorySnapshotConsistency {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][object[]]$BeforeInventory,
+        [Parameter(Mandatory)][object[]]$AfterInventory,
+        [Parameter(Mandatory)][pscustomobject]$Snapshot,
+        [Parameter(Mandatory)][int[]]$SnapshotImageIndexes
+    )
+
+    $issues = [System.Collections.Generic.List[string]]::new()
+    $requestedRaw = @($SnapshotImageIndexes | ForEach-Object { [int]$_ })
+    $requested = @($requestedRaw | Sort-Object -Unique)
+    if ($requested.Count -eq 0) {
+        $issues.Add('No snapshot image indexes were requested.') | Out-Null
+    }
+    if ($requested.Count -ne $requestedRaw.Count) {
+        $issues.Add('Snapshot image indexes contain duplicates.') | Out-Null
+    }
+
+    $beforeIndexes = @($BeforeInventory | ForEach-Object { [int]$_.ImageIndex } | Sort-Object)
+    $afterIndexes = @($AfterInventory | ForEach-Object { [int]$_.ImageIndex } | Sort-Object)
+    $beforeUnique = @($beforeIndexes | Sort-Object -Unique)
+    $afterUnique = @($afterIndexes | Sort-Object -Unique)
+    if ($beforeIndexes.Count -ne $beforeUnique.Count) {
+        $issues.Add('DISM inventory before the raw metadata write contains duplicate image indexes.') | Out-Null
+    }
+    if ($afterIndexes.Count -ne $afterUnique.Count) {
+        $issues.Add('DISM inventory after the raw metadata write contains duplicate image indexes.') | Out-Null
+    }
+    if ($beforeIndexes.Count -eq 0) {
+        $issues.Add('DISM inventory before the raw metadata write is empty.') | Out-Null
+    }
+    if ($afterIndexes.Count -ne $beforeIndexes.Count) {
+        $issues.Add(('DISM image count changed after raw metadata write: before={0}; after={1}.' -f $beforeIndexes.Count, $afterIndexes.Count)) | Out-Null
+    }
+    $inventoryDiff = @(Compare-Object -ReferenceObject $beforeIndexes -DifferenceObject $afterIndexes)
+    if ($inventoryDiff.Count -gt 0) {
+        $issues.Add(('DISM image indexes changed after raw metadata write: {0}' -f (($inventoryDiff | ForEach-Object { '{0}:{1}' -f $_.InputObject, $_.SideIndicator }) -join ', '))) | Out-Null
+    }
+
+    $snapshotImages = @($Snapshot.Images)
+    $snapshotIndexes = @($snapshotImages | ForEach-Object { [int]$_.ImageIndex } | Sort-Object)
+    $snapshotUnique = @($snapshotIndexes | Sort-Object -Unique)
+    if ($snapshotIndexes.Count -ne $snapshotUnique.Count) {
+        $issues.Add('WIMGAPI snapshot contains duplicate image indexes.') | Out-Null
+    }
+    if ($snapshotIndexes.Count -ne $requested.Count) {
+        $issues.Add(('WIMGAPI snapshot image count is {0}; requested snapshot count is {1}.' -f $snapshotIndexes.Count, $requested.Count)) | Out-Null
+    }
+    $snapshotDiff = @(Compare-Object -ReferenceObject $requested -DifferenceObject $snapshotIndexes)
+    if ($snapshotDiff.Count -gt 0) {
+        $issues.Add(('WIMGAPI snapshot indexes differ from the requested subset: {0}' -f (($snapshotDiff | ForEach-Object { '{0}:{1}' -f $_.InputObject, $_.SideIndicator }) -join ', '))) | Out-Null
+    }
+    foreach ($index in $requested) {
+        if ($afterIndexes -notcontains $index) {
+            $issues.Add(('Requested snapshot index {0} is absent from the post-write DISM inventory.' -f $index)) | Out-Null
+        }
+    }
+
+    [pscustomobject][ordered]@{
+        SchemaVersion = 'wim-inventory-snapshot-consistency/1.0'
+        Passed = ($issues.Count -eq 0)
+        BeforeImageCount = $beforeIndexes.Count
+        AfterImageCount = $afterIndexes.Count
+        BeforeImageIndexes = $beforeIndexes
+        AfterImageIndexes = $afterIndexes
+        RequestedSnapshotImageIndexes = $requested
+        SnapshotImageIndexes = $snapshotIndexes
+        SnapshotIsSubset = ($requested.Count -lt $afterIndexes.Count)
+        Issues = $issues.ToArray()
+    }
+}
+
 function Set-InstallWimDisplayDateMetadata {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -8685,14 +8759,24 @@ function Set-InstallWimDisplayDateMetadata {
         [Parameter(Mandatory)][string]$TemporaryPath
     )
 
+    $normalizedSnapshotIndexes = @($SnapshotImageIndexes | ForEach-Object { [int]$_ } | Sort-Object -Unique)
+    if ($normalizedSnapshotIndexes.Count -ne @($SnapshotImageIndexes).Count) {
+        throw 'SnapshotImageIndexes contains duplicate image indexes.'
+    }
+    $inventoryBefore = @(Get-WimIndexInventory -WimPath $WimPath)
     $writeEvidence = Set-WimRawXmlCreationTimeMetadata -WimPath $WimPath -ImageIndexes $TargetImageIndexes -DateDecision $DateDecision
     if (-not $writeEvidence.Passed) {
         throw ('Raw install.wim metadata write failed validation: {0}' -f ($writeEvidence.ValidationIssues -join '; '))
     }
-    $snapshot = Get-WimImageMetadataSnapshot -WimPath $WimPath -ImageIndexes $SnapshotImageIndexes -TemporaryPath $TemporaryPath
-    $inventory = @(Get-WimIndexInventory -WimPath $WimPath)
-    if ($inventory.Count -ne @($SnapshotImageIndexes).Count) {
-        throw ('DISM image count after raw metadata write is {0}; expected {1}.' -f $inventory.Count, @($SnapshotImageIndexes).Count)
+    $snapshot = Get-WimImageMetadataSnapshot -WimPath $WimPath -ImageIndexes $normalizedSnapshotIndexes -TemporaryPath $TemporaryPath
+    $inventoryAfter = @(Get-WimIndexInventory -WimPath $WimPath)
+    $consistency = Test-WimInventorySnapshotConsistency `
+        -BeforeInventory $inventoryBefore `
+        -AfterInventory $inventoryAfter `
+        -Snapshot $snapshot `
+        -SnapshotImageIndexes $normalizedSnapshotIndexes
+    if (-not $consistency.Passed) {
+        throw ('WIM inventory/snapshot consistency validation failed: {0}' -f ($consistency.Issues -join '; '))
     }
     [pscustomobject][ordered]@{
         SchemaVersion = 'install-wim-display-metadata-write/2.0'
@@ -8705,8 +8789,10 @@ function Set-InstallWimDisplayDateMetadata {
         }
         DismGetWimInfo = [pscustomobject][ordered]@{
             Passed = $true
-            ImageCount = $inventory.Count
-            Images = @($inventory)
+            ImageCount = $inventoryAfter.Count
+            Images = @($inventoryAfter)
+            InventoryBefore = @($inventoryBefore)
+            Consistency = $consistency
         }
         Snapshot = $snapshot
     }
@@ -20423,7 +20509,7 @@ try {
         $phaseList = Get-PhaseListByAction -ActionName $Action
     }
 
-    # r12.31 fail-fast guard: exercise the explicit DateTime -> FILETIME path
+    # r12.32 fail-fast guard: exercise the explicit DateTime -> FILETIME path
     # before downloads, ISO extraction, or DISM inspection can consume time.
     $Script:InstallWimDisplayDateStartupPreflight = $null
     if (($phaseList -contains 'P07') -and -not [string]::IsNullOrWhiteSpace($Script:ImageDisplayDate)) {
