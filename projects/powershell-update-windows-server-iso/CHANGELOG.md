@@ -22,6 +22,44 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.20-r12.25] - 2026-08-02
+
+Tag: `measured-e2e-os-specific-servicing-and-catalog-rehydration` (the
+tag advances; the version date component moves 07.19 → 07.20).
+Measured-E2E corrections to per-OS boot.wim servicing, declared in the
+schema.
+
+### Changed
+
+- **Boot.wim servicing declared per OS**: four new resolver/decision
+  helpers (`Resolve-BootWimFailurePolicyValue`,
+  `Resolve-BootWimServicingStrategyValue`,
+  `Get-BootWimFailurePolicyDecision`, `Get-BootWimServicingStrategy`)
+  consume a widened declaration — `schema/config.schema.v4.json`
+  constrains the failure-policy fields to enumerated values
+  (`enabled/disabled/tolerate`; reason codes `FailBuild`,
+  `UnsupportedByPinnedSourceMedia`,
+  `ResearchTolerateNotReleaseEligible`, `LegacyPolicy`) and adds a
+  `BootWimServicingStrategy` enum. `config-Server2019.json` declares
+  `BootWimServicingStrategy: ExpandedCombinedCab`.
+- **Stale pre-download digest removed, Catalog rehydration**
+  (`config-Server2025.json`): a pre-download SHA-256 that failed a
+  measured P04 run is removed (`Sha256: null`); the mutable candidate
+  rehydrates the Catalog SHA-256 after stable-identity selection
+  (declared in the line's Notes). T43 tracks the declaration:
+  123 → 120 asserts per its declaration-derived count, matching the
+  convergence-matrix row for this revision.
+- **T40**: release pin advanced to `update-wsi-2026.07.20-r12.25`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (T43 moves with the declaration —
+a declared change, not a regression). PSA **5E/49W/7I** on the
+committed tree — one warning joins the debt; committed verbatim per
+the no-fix-forward rule.
+
 ## [update-wsi-2026.07.19-r12.24] - 2026-08-02
 
 Tag: `evidence-audit-and-pca2023-verdict-provenance` (the tag

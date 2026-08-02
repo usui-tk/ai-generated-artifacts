@@ -470,11 +470,7 @@
             "Value": "Yuwje/99LEBlk2srK1i+V88NZo0=",
             "Hex": "62ec237bff7d2c4065936b2b2b58be57cf0d668d"
           },
-          "Sha256": {
-            "Encoding": "base64",
-            "Value": "989kXeuFH+u063587IKQFA0qKpdUyFxVYzINJN5or6U=",
-            "Hex": "f7cf645deb851febb4eb7e7cec8290140d2a2a9754c85c5563320d24de68afa5"
-          },
+          "Sha256": null,
           "SizeBytes": null,
           "AuthenticodeStatus": "NotTested"
         },
@@ -490,7 +486,8 @@
           "VerifiedBy": "ChatGPT+official-Microsoft-sources",
           "Notes": [
             "Target OS build 26100.33158. Exact Catalog asset is re-resolved at P04.",
-            "Embedded SSU KB5101372 build 26100.33150."
+            "Embedded SSU KB5101372 build 26100.33150.",
+            "r12.25: stale pre-download SHA-256 removed after measured P04 failure; mutable candidate rehydrates Catalog SHA-256 after stable identity selection."
           ]
         }
       },

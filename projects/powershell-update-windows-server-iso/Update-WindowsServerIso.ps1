@@ -669,8 +669,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.19-r12.24'
-$Script:ScriptTag     = 'evidence-audit-and-pca2023-verdict-provenance'
+$Script:ScriptVersion = 'update-wsi-2026.07.20-r12.25'
+$Script:ScriptTag     = 'measured-e2e-os-specific-servicing-and-catalog-rehydration'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -3030,7 +3030,8 @@ function Get-ConfigProfile {
         EnableWinREUpdate         = $json.Common.EnableWinREUpdate
         UpdateAllInstallWimIndexes = $(if ($json.Common.PSObject.Properties['UpdateAllInstallWimIndexes']) { [bool]$json.Common.UpdateAllInstallWimIndexes } else { $true })
         WinReDistributionPolicy   = $(if ($json.Common.PSObject.Properties['WinReDistributionPolicy']) { [string]$json.Common.WinReDistributionPolicy } else { 'ServiceOnceCopyToAllInstallIndexes' })
-        BootWimFailurePolicy      = $(if ($json.Common.PSObject.Properties['BootWimFailurePolicy']) { [string]$json.Common.BootWimFailurePolicy } else { 'LegacyPolicy' })
+        BootWimFailurePolicy      = Resolve-BootWimFailurePolicyValue -RawValue $(if ($json.Common.PSObject.Properties['BootWimFailurePolicy']) { [string]$json.Common.BootWimFailurePolicy } else { 'LegacyPolicy' })
+        BootWimServicingStrategy  = Resolve-BootWimServicingStrategyValue -RawValue $(if ($json.Common.PSObject.Properties['BootWimServicingStrategy']) { [string]$json.Common.BootWimServicingStrategy } else { '' }) -PackageMode $(if ($json.Common.PSObject.Properties['BootWimPackageMode']) { [string]$json.Common.BootWimPackageMode } else { 'DirectMsu' })
         Common                    = $json.Common
         ServicingModel            = $(if ($json.PSObject.Properties['ServicingModel']) { $json.ServicingModel } else { $null })
         DiscoveryPolicy           = $(if ($json.PSObject.Properties['DiscoveryPolicy']) { $json.DiscoveryPolicy } else { $null })
@@ -5689,7 +5690,8 @@ function Select-CatalogCandidateAsset {
     [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)]$Patch,
-        [Parameter(Mandatory)][object[]]$Candidates
+        [Parameter(Mandatory)][object[]]$Candidates,
+        [switch]$AllowSha256Refresh
     )
     $pool = @($Candidates)
     if ($pool.Count -eq 0) { throw 'No Catalog row/file candidates were supplied.' }
@@ -5713,8 +5715,18 @@ function Select-CatalogCandidateAsset {
     }
     if (-not [string]::IsNullOrWhiteSpace($identity.Sha256)) {
         $m = @($pool | Where-Object { [string]::Equals([string]$_.File.sha256, $identity.Sha256, [System.StringComparison]::OrdinalIgnoreCase) })
-        if ($m.Count -eq 0) { throw ('Configured Catalog SHA-256 was not present in verified candidates: {0}' -f $identity.Sha256) }
-        $pool = $m; $basis.Add('ConfiguredSha256')
+        if ($m.Count -eq 0) {
+            if (-not $AllowSha256Refresh) {
+                throw ('Configured Catalog SHA-256 was not present in verified candidates: {0}' -f $identity.Sha256)
+            }
+            # Mutable ResearchCandidate/Discovered/Resolved baselines may carry
+            # a stale transport digest. Keep the stable UpdateId/file/SHA-1
+            # constraints, select exactly one scoped asset, then rehydrate the
+            # SHA-256 below. Frozen/Approved baselines never take this path.
+            $basis.Add('ConfiguredSha256StaleAllowed')
+        } else {
+            $pool = $m; $basis.Add('ConfiguredSha256')
+        }
     }
     if ($pool.Count -eq 1) {
         if ($basis.Count -eq 0) { $basis.Add('SingleStableCandidate') }
@@ -5819,7 +5831,23 @@ function Resolve-ResolvedPatchAssetFromCatalog {
         throw ('Catalog DownloadDialog returned no matching {0} x64 asset for {1}/{2}; row UpdateIds: {3}' -f
             $rule.ExpectedExtension, $type, $kb, $ids)
     }
-    $selection = Select-CatalogCandidateAsset -Patch $Patch -Candidates @($candidateAssets.ToArray())
+    # Decide mutability before candidate selection. r12.24 performed this
+    # after Select-CatalogCandidateAsset, so a stale SHA-256 on a mutable
+    # ResearchCandidate failed before the documented rehydration path ran.
+    $baselineStatus = ''
+    if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline -and $Script:OsProfile.PatchBaseline.PSObject.Properties['Status']) {
+        $baselineStatus = [string]$Script:OsProfile.PatchBaseline.Status
+    }
+    $identityDecision = Get-CatalogIdentityRefreshDecision `
+        -BaselineStatus $baselineStatus `
+        -UseBaselineOnly ([bool]$Script:UseBaselineOnly)
+    $allowIdentityRefresh = [bool]$identityDecision.AllowIdentityRefresh
+    $selectionParameters = @{
+        Patch = $Patch
+        Candidates = @($candidateAssets.ToArray())
+        AllowSha256Refresh = $allowIdentityRefresh
+    }
+    $selection = Select-CatalogCandidateAsset @selectionParameters
     $row = $selection.Row
     $file = $selection.File
     $displayAssessment = Get-CatalogDisplayMetadataAssessment -Row $row -Rule $rule
@@ -5842,18 +5870,10 @@ function Resolve-ResolvedPatchAssetFromCatalog {
     if ($Patch.PSObject.Properties['FileName']) { $Patch.FileName = [string]$file.fileName } else { $Patch | Add-Member -NotePropertyName FileName -NotePropertyValue ([string]$file.fileName) -Force }
     if ($Patch.PSObject.Properties['FileNameOrigin']) { $Patch.FileNameOrigin = 'CatalogResolved' } else { $Patch | Add-Member -NotePropertyName FileNameOrigin -NotePropertyValue 'CatalogResolved' -Force }
 
-    # Research candidates are intentionally mutable until Freeze.  The exact
-    # KB remains fixed, but Catalog may republish the row/file identity or a
-    # committed CDN URL may expire.  Frozen/E3/E4/E5/Approved baselines must
-    # never have their expected digest silently rewritten.
-    $baselineStatus = ''
-    if ($Script:OsProfile -and $Script:OsProfile.PatchBaseline -and $Script:OsProfile.PatchBaseline.PSObject.Properties['Status']) {
-        $baselineStatus = [string]$Script:OsProfile.PatchBaseline.Status
-    }
-    $identityDecision = Get-CatalogIdentityRefreshDecision `
-        -BaselineStatus $baselineStatus `
-        -UseBaselineOnly ([bool]$Script:UseBaselineOnly)
-    $allowIdentityRefresh = [bool]$identityDecision.AllowIdentityRefresh
+    # Research candidates are intentionally mutable until Freeze. The exact
+    # KB remains fixed while the selected Catalog transport identity is
+    # rehydrated. The mutability decision was intentionally made before
+    # candidate selection above; immutable baselines still fail on changes.
     $hashes = @{}
     if ($Patch.PSObject.Properties['ExpectedHashes'] -and $Patch.ExpectedHashes) {
         foreach ($key in $Patch.ExpectedHashes.Keys) { $hashes[$key] = $Patch.ExpectedHashes[$key] }
@@ -8785,6 +8805,73 @@ function Resolve-BootWimLcuPolicyValue {
     throw ("Common.BootWimLcuPolicy has unknown value '{0}' (expected enabled | disabled | tolerate)." -f $RawValue)
 }
 
+function Resolve-BootWimFailurePolicyValue {
+    <# Normalize the per-OS boot.wim failure policy. Only measured policies are executable. #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([AllowEmptyString()][string]$RawValue='')
+    $v=[string]$RawValue
+    if([string]::IsNullOrWhiteSpace($v)){return 'LegacyPolicy'}
+    $v=$v.Trim()
+    if($v -in @('FailBuild','UnsupportedByPinnedSourceMedia','ResearchTolerateNotReleaseEligible','LegacyPolicy')){return $v}
+    throw ("Common.BootWimFailurePolicy has unknown value '{0}'." -f $RawValue)
+}
+
+function Resolve-BootWimServicingStrategyValue {
+    <# Resolve an OS-specific boot.wim package strategy, preserving legacy defaults. #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [AllowEmptyString()][string]$RawValue='',
+        [ValidateSet('DirectMsu','ExpandedCab')][string]$PackageMode='DirectMsu'
+    )
+    $v=[string]$RawValue
+    if([string]::IsNullOrWhiteSpace($v)){
+        return $(if($PackageMode -eq 'ExpandedCab'){'ExpandedSplitCab'}else{'DirectMsu'})
+    }
+    $v=$v.Trim()
+    if($v -in @('DirectMsu','ExpandedCombinedCab','ExpandedSplitCab')){return $v}
+    throw ("Common.BootWimServicingStrategy has unknown value '{0}'." -f $RawValue)
+}
+
+function Get-BootWimFailurePolicyDecision {
+    <#
+    .SYNOPSIS
+        Pure decision for measured boot.wim servicing failures.
+    .DESCRIPTION
+        Server 2019 evaluation media has produced 0x8007371b and 0x80070032
+        while install.wim servicing succeeded. Only the explicit
+        UnsupportedByPinnedSourceMedia policy may preserve the shipped
+        boot.wim for these known codes. Every other error remains fatal.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [AllowEmptyString()][string]$FailurePolicy='',
+        [AllowEmptyString()][string]$ErrorText='',
+        [AllowEmptyString()][string]$ImageLabel=''
+    )
+    $policy=Resolve-BootWimFailurePolicyValue -RawValue $FailurePolicy
+    $code=''
+    foreach($known in @('0x8007371b','0x80070032')){
+        if($ErrorText -match [regex]::Escape($known)){$code=$known;break}
+    }
+    $knownFailure=(-not [string]::IsNullOrWhiteSpace($code))
+    $allowed=($policy -eq 'UnsupportedByPinnedSourceMedia' -and $knownFailure)
+    $reason=if($allowed){
+        ('Measured known boot.wim servicing failure {0}; preserve source boot.wim and require P14 Install validation.' -f $code)
+    } elseif($policy -eq 'UnsupportedByPinnedSourceMedia') {
+        'Failure is outside the measured allow-list; build must fail.'
+    } else {
+        ('Policy {0} does not authorize source boot.wim preservation.' -f $policy)
+    }
+    return [pscustomobject][ordered]@{
+        Policy=$policy;Allowed=$allowed;KnownFailure=$knownFailure;ErrorCode=$code
+        ImageLabel=$ImageLabel;PreserveSourceBootWim=$allowed
+        RequiresInstallValidation=$allowed;Reason=$reason
+    }
+}
+
 function ConvertTo-BridgeLcuResolvedPatch {
     <#
     .SYNOPSIS
@@ -9379,9 +9466,15 @@ function Get-StaticVerificationAssessment {
     }
     $identityCheck = Test-ReleaseEvidenceIdentity -Expected $marker.Identity -Actual $current
     $hashOk = ([string]$marker.EvidenceSha256 -eq (Get-FileSha256OrEmpty -Path $evidencePath))
-    $pass = $identityCheck.Match -and $hashOk -and ([string]$evidence.Status -eq 'Pass')
-    $reason = if ($pass) { '' } elseif (-not $identityCheck.Match) { 'P11 evidence identity mismatch: ' + ($identityCheck.Mismatches -join '; ') } elseif (-not $hashOk) { 'P11 evidence file hash does not match P11.ok.' } else { 'P11 static verification status is not Pass.' }
-    return [pscustomobject]@{ Eligible=$pass; Status=$(if ($pass){'Pass'}else{'Fail'}); Reason=$reason }
+    $status=[string]$evidence.Status
+    $policyPath=if($evidence.PSObject.Properties['PolicyExceptionEvidencePath']){[string]$evidence.PolicyExceptionEvidencePath}else{''}
+    $policyHash=if($evidence.PSObject.Properties['PolicyExceptionEvidenceSha256']){[string]$evidence.PolicyExceptionEvidenceSha256}else{''}
+    $policyCount=if($evidence.PSObject.Properties['PolicyExceptionCount']){[int]$evidence.PolicyExceptionCount}else{0}
+    $policyValid=($status -eq 'PolicyException' -and $policyCount -gt 0 -and -not [string]::IsNullOrWhiteSpace($policyPath) -and (Test-Path -LiteralPath $policyPath -PathType Leaf) -and $policyHash -eq (Get-FileSha256OrEmpty -Path $policyPath))
+    $acceptedStatus=($status -eq 'Pass' -or $policyValid)
+    $eligible=$identityCheck.Match -and $hashOk -and $acceptedStatus
+    $reason = if ($eligible -and $policyValid) { 'P11 accepted an explicit boot.wim source-preservation policy exception; P14 Install validation is mandatory.' } elseif ($eligible) { '' } elseif (-not $identityCheck.Match) { 'P11 evidence identity mismatch: ' + ($identityCheck.Mismatches -join '; ') } elseif (-not $hashOk) { 'P11 evidence file hash does not match P11.ok.' } elseif ($status -eq 'PolicyException') { 'P11 policy-exception evidence is missing or its SHA-256 does not match.' } else { 'P11 static verification status is neither Pass nor an accepted PolicyException.' }
+    return [pscustomobject]@{ Eligible=$eligible; Status=$(if($eligible){$status}else{'Fail'}); RequiresInstallValidation=$policyValid; PolicyExceptionEvidencePath=$policyPath; Reason=$reason }
 }
 
 function Get-AuxiliaryFreshnessAssessment {
@@ -9631,10 +9724,10 @@ function Get-BootValidationAssessment {
     $marker = Read-ReleaseJsonFile -Path $markerPath
     $evidence = Read-ReleaseJsonFile -Path $evidencePath
     if (-not $marker -or -not $evidence) {
-        return [pscustomobject]@{ Performed=[bool]$evidence; Eligible=$false; Status=$(if($evidence){'ReviewRequired'}else{'NotPerformed'}); Reason=$(if($evidence){'Boot evidence exists but has not been approved or InstallValidated.'}else{'Hyper-V or equivalent boot/install validation was not performed for this output ISO.'}) }
+        return [pscustomobject]@{ Performed=[bool]$evidence; Eligible=$false; Status=$(if($evidence){'ReviewRequired'}else{'NotPerformed'}); Mode=$(if($evidence -and $evidence.PSObject.Properties['Mode']){[string]$evidence.Mode}else{''}); Reason=$(if($evidence){'Boot evidence exists but has not been approved or InstallValidated.'}else{'Hyper-V or equivalent boot/install validation was not performed for this output ISO.'}) }
     }
     try { $current = Get-ReleaseEvidenceIdentity } catch {
-        return [pscustomobject]@{ Performed=$true; Eligible=$false; Status='Fail'; Reason=$_.Exception.Message }
+        return [pscustomobject]@{ Performed=$true; Eligible=$false; Status='Fail'; Mode=$(if($evidence -and $evidence.PSObject.Properties['Mode']){[string]$evidence.Mode}else{''}); Reason=$_.Exception.Message }
     }
     $identityCheck = Test-ReleaseEvidenceIdentity -Expected $marker.Identity -Actual $current
     $hashOk = ([string]$marker.EvidenceSha256 -eq (Get-FileSha256OrEmpty -Path $evidencePath))
@@ -9656,7 +9749,7 @@ function Get-BootValidationAssessment {
         elseif (-not $artifactCheck.Valid) { 'P14 evidence artifact validation failed: ' + ($artifactCheck.Issues -join '; ') } `
         elseif (-not $approvalHashOk) { 'BootOnly approval evidence is missing or its SHA256 does not match P14.ok.' } `
         else { 'P14 evidence is not approved.' }
-    return [pscustomobject]@{ Performed=$true; Eligible=$eligible; Status=$(if($eligible){'Pass'}else{'Fail'}); Reason=$reason }
+    return [pscustomobject]@{ Performed=$true; Eligible=$eligible; Status=$(if($eligible){'Pass'}else{'Fail'}); Mode=[string]$evidence.Mode; Reason=$reason }
 }
 
 function Save-ReleaseEvidenceIndex {
@@ -9933,6 +10026,20 @@ function Get-BootWimPackageMode {
     return $mode
 }
 
+function Get-BootWimServicingStrategy {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param()
+    $mode=Get-BootWimPackageMode
+    $raw=''
+    if($Script:OsProfile -and $Script:OsProfile.PSObject.Properties['BootWimServicingStrategy']){
+        $raw=[string]$Script:OsProfile.BootWimServicingStrategy
+    } elseif($Script:OsProfile -and $Script:OsProfile.Common -and $Script:OsProfile.Common.PSObject.Properties['BootWimServicingStrategy']){
+        $raw=[string]$Script:OsProfile.Common.BootWimServicingStrategy
+    }
+    return (Resolve-BootWimServicingStrategyValue -RawValue $raw -PackageMode $mode)
+}
+
 function Get-ExpandedMsuCabPlan {
     <# Expand an MSU once and select only package-bearing CAB payloads. #>
     [CmdletBinding()]
@@ -10012,6 +10119,9 @@ function Add-WindowsPackageFromExpandedMsu {
     )
     $plan = @(Get-ExpandedMsuCabPlan -MsuPath $MsuPath -KbId $KbId | Where-Object { $CabRoles -contains [string]$_.Role })
     if($plan.Count -eq 0){throw ('Expanded MSU has no CAB matching roles [{0}] for {1}.' -f ($CabRoles -join ','),$KbId)}
+    if($CabRoles.Count -eq 1 -and $CabRoles[0] -eq 'Combined' -and $plan.Count -ne 1){
+        throw ('ExpandedCombinedCab requires exactly one Combined CAB for {0}; found {1}.' -f $KbId,$plan.Count)
+    }
     $statuses = [System.Collections.Generic.List[string]]::new()
     foreach ($entry in $plan) {
         Write-Step ('      Expanded MSU CAB [{0}]: {1}' -f $entry.Role, $entry.FileName)
@@ -10029,11 +10139,29 @@ function Add-WindowsPackageFromExpandedMsu {
 function Get-ExpandedMsuCabRolesForSubPhase {
     [CmdletBinding()]
     [OutputType([string[]])]
-    param([Parameter(Mandatory)][string]$SubPhaseName)
+    param(
+        [Parameter(Mandatory)][string]$SubPhaseName,
+        [AllowEmptyString()][string]$ServicingStrategy=''
+    )
+    if($ServicingStrategy -eq 'ExpandedCombinedCab'){
+        switch($SubPhaseName){
+            'B1.ServicingStack' { return [string[]]@() }
+            'B3.FinalLCU' { return [string[]]@('Combined') }
+            default { return [string[]]@('Combined') }
+        }
+    }
+    if($ServicingStrategy -eq 'ExpandedSplitCab'){
+        switch($SubPhaseName){
+            'B1.ServicingStack' { return [string[]]@('ServicingStack') }
+            'B3.FinalLCU' { return [string[]]@('RollupFix','UpdatePayload') }
+            default { return [string[]]@('ServicingStack','RollupFix','UpdatePayload') }
+        }
+    }
+    # Backward-compatible contract used by historical regression fixtures.
     switch ($SubPhaseName) {
-        'B1.ServicingStack' { return @('ServicingStack') }
-        'B3.FinalLCU' { return @('Combined','RollupFix','UpdatePayload') }
-        default { return @('ServicingStack','Combined','RollupFix','UpdatePayload') }
+        'B1.ServicingStack' { return [string[]]@('ServicingStack') }
+        'B3.FinalLCU' { return [string[]]@('Combined','RollupFix','UpdatePayload') }
+        default { return [string[]]@('ServicingStack','Combined','RollupFix','UpdatePayload') }
     }
 }
 
@@ -10043,14 +10171,35 @@ function Get-BootSequencePolicyDecision {
     param(
         [Parameter(Mandatory)][ValidateSet('DirectMsu','ExpandedCab')][string]$PackageMode,
         [Parameter(Mandatory)][bool]$SameCombinedAsset,
-        [int]$LanguagePackCount=0
+        [int]$LanguagePackCount=0,
+        [AllowEmptyString()][string]$ServicingStrategy=''
     )
-    $expanded=($PackageMode -eq 'ExpandedCab')
-    $needsFinal=$expanded -or (-not $SameCombinedAsset) -or ($LanguagePackCount -gt 0)
+    $strategy=Resolve-BootWimServicingStrategyValue -RawValue $ServicingStrategy -PackageMode $PackageMode
+    $requiresRemount=$false
+    $needsFinal=$false
+    $suppressCarrier=$false
+    switch($strategy){
+        'DirectMsu' {
+            $needsFinal=(-not $SameCombinedAsset) -or ($LanguagePackCount -gt 0)
+        }
+        'ExpandedCombinedCab' {
+            # The combined CAB already contains the servicing-stack carrier.
+            # Applying its sibling SSU CAB first duplicates that transaction
+            # and produced 0x8007371b on measured Server 2019 boot.wim.
+            $needsFinal=$true
+            $suppressCarrier=$true
+        }
+        'ExpandedSplitCab' {
+            $requiresRemount=$true
+            $needsFinal=$true
+        }
+    }
     [pscustomobject]@{
-        RequiresServicingStackRemount=$expanded
+        ServicingStrategy=$strategy
+        RequiresServicingStackRemount=$requiresRemount
         NeedsFinalLcu=$needsFinal
-        DuplicateApplySuppressed=(-not $needsFinal)
+        SuppressServicingStackCarrier=$suppressCarrier
+        DuplicateApplySuppressed=($suppressCarrier -or (-not $needsFinal))
     }
 }
 
@@ -10103,14 +10252,18 @@ function Build-BootApplySequence {
     $seq = [System.Collections.Generic.List[object]]::new()
     $seq.Add([pscustomobject]@{ Name='B0.SourcePrerequisite'; Description='Source-media prerequisite, conditionally injected'; Patches=$prereq; RequiresRemount=$false }) | Out-Null
     $packageMode = Get-BootWimPackageMode
+    $servicingStrategy = Get-BootWimServicingStrategy
     $sameCombinedAsset = (Test-PatchSetsShareAsset -First $stack -Second $lcu)
-    $policyDecision = Get-BootSequencePolicyDecision -PackageMode $packageMode -SameCombinedAsset $sameCombinedAsset -LanguagePackCount $lp.Count
-    $expandedBoot = ($packageMode -eq 'ExpandedCab')
-    $seq.Add([pscustomobject]@{ Name='B1.ServicingStack'; Description='Standalone SSU or combined-LCU servicing-stack carrier'; Patches=$stack; RequiresRemount=$policyDecision.RequiresServicingStackRemount }) | Out-Null
-    $seq.Add([pscustomobject]@{ Name='B2.LanguagePack'; Description='WinPE language pack'; Patches=$lp; RequiresRemount=$false }) | Out-Null
+    $policyDecision = Get-BootSequencePolicyDecision -PackageMode $packageMode -SameCombinedAsset $sameCombinedAsset -LanguagePackCount $lp.Count -ServicingStrategy $servicingStrategy
+    $expandedBoot = ($servicingStrategy -in @('ExpandedCombinedCab','ExpandedSplitCab'))
+    $stackSet = if($policyDecision.SuppressServicingStackCarrier){@()}else{$stack}
+    $stackDescription = if($policyDecision.SuppressServicingStackCarrier){'Skipped: combined CAB is the sole servicing transaction'}else{'Standalone SSU or combined-LCU servicing-stack carrier'}
+    $seq.Add([pscustomobject]@{ Name='B1.ServicingStack'; Description=$stackDescription; Patches=$stackSet; RequiresRemount=$policyDecision.RequiresServicingStackRemount; DuplicateApplySuppressed=$policyDecision.SuppressServicingStackCarrier; ServicingStrategy=$servicingStrategy }) | Out-Null
+    $seq.Add([pscustomobject]@{ Name='B2.LanguagePack'; Description='WinPE language pack'; Patches=$lp; RequiresRemount=$false; ServicingStrategy=$servicingStrategy }) | Out-Null
     $needsFinalLcu = [bool]$policyDecision.NeedsFinalLcu
     $finalLcuSet = if ($needsFinalLcu) { $lcu } else { @() }
-    $seq.Add([pscustomobject]@{ Name='B3.FinalLCU'; Description=$(if ($expandedBoot) { 'Final cumulative update after SSU commit/remount' } elseif ($needsFinalLcu) { 'Final cumulative update' } else { 'Skipped: combined LCU already applied and no intervening WinPE language changes occurred' }); Patches=$finalLcuSet; RequiresRemount=$false; DuplicateApplySuppressed=$policyDecision.DuplicateApplySuppressed }) | Out-Null
+    $finalDescription = if($servicingStrategy -eq 'ExpandedCombinedCab'){'Apply the combined LCU CAB exactly once (embedded SSU + RollupFix)'}elseif($servicingStrategy -eq 'ExpandedSplitCab'){'Final cumulative payload after standalone SSU commit/remount'}elseif($needsFinalLcu){'Final cumulative update'}else{'Skipped: combined LCU already applied and no intervening WinPE language changes occurred'}
+    $seq.Add([pscustomobject]@{ Name='B3.FinalLCU'; Description=$finalDescription; Patches=$finalLcuSet; RequiresRemount=$false; DuplicateApplySuppressed=$policyDecision.DuplicateApplySuppressed; ServicingStrategy=$servicingStrategy }) | Out-Null
     $seq.Add([pscustomobject]@{ Name='B4.Cleanup'; Description='Cleanup + export'; Patches=@(); RequiresRemount=$false; IsCleanupMarker=$true }) | Out-Null
     return $seq.ToArray()
 }
@@ -10530,15 +10683,16 @@ function Invoke-PatchSubPhase {
                 ((Test-PatchHasRole -Patch $p -Role 'ServicingStackCarrier') -or
                  (Test-PatchHasRole -Patch $p -Role 'SourcePrerequisite'))
             )
+            $bootServicingStrategy = if($ImageLabel -like 'boot.wim:*'){Get-BootWimServicingStrategy}else{'DirectMsu'}
             $useExpandedMsu = (
                 $ImageLabel -like 'boot.wim:*' -and
-                (Get-BootWimPackageMode) -eq 'ExpandedCab' -and
+                $bootServicingStrategy -in @('ExpandedCombinedCab','ExpandedSplitCab') -and
                 $type -eq 'LCU' -and
                 [System.IO.Path]::GetExtension($pkgPath) -ieq '.msu'
             )
             if ($useExpandedMsu) {
-                Write-Step ('      Server 2019 boot.wim: using expanded CAB mode to bypass MSU Unattend processing.')
-                $cabRoles = @(Get-ExpandedMsuCabRolesForSubPhase -SubPhaseName ([string]$SubPhase.Name))
+                Write-Step ('      boot.wim servicing strategy: {0}; using selected expanded CAB payload(s).' -f $bootServicingStrategy)
+                $cabRoles = @(Get-ExpandedMsuCabRolesForSubPhase -SubPhaseName ([string]$SubPhase.Name) -ServicingStrategy $bootServicingStrategy)
                 $status = Add-WindowsPackageFromExpandedMsu -MountPath $MountPath -MsuPath $pkgPath -KbId $kb -LogDir $Script:LogsDir -CabRoles $cabRoles -EvidenceMetadata $evidenceMetadata
             } else {
                 $status = Add-WindowsPackageWithRetry -MountPath $MountPath `
@@ -14346,7 +14500,12 @@ function Invoke-BuildPhase08_PatchBootWim {
     $p08InstallBackup = ''
     try {
         $bootPolicy = Resolve-BootWimLcuPolicyValue -RawValue $Script:OsProfile.BootWimLcuPolicy
-        Write-Step ('boot.wim LCU policy: {0}' -f $bootPolicy)
+        $bootFailurePolicy = Resolve-BootWimFailurePolicyValue -RawValue $Script:OsProfile.BootWimFailurePolicy
+        $bootServicingStrategy = Get-BootWimServicingStrategy
+        $bootPolicyException = $null
+        $bootPolicyExceptionPath = Join-Path $Script:LogsDir 'P08_bootwim_policy_exception.json'
+        Remove-Item -LiteralPath $bootPolicyExceptionPath -Force -ErrorAction SilentlyContinue
+        Write-Step ('boot.wim LCU policy: {0}; failure policy: {1}; servicing strategy: {2}' -f $bootPolicy,$bootFailurePolicy,$bootServicingStrategy)
         $bootWim = Join-Path $Script:ExtractedDir 'sources\boot.wim'
         if (-not (Test-Path -LiteralPath $bootWim)) {
             if ($Script:SyntheticTestMode) {
@@ -14441,10 +14600,27 @@ function Invoke-BuildPhase08_PatchBootWim {
                     Assert-ExpandedBootLcuTarget -MountPath $mountDir -ImageLabel $imgLabel
                     $idxSucceeded = $true
                 } catch {
-                    if ($bootPolicy -ne 'tolerate') { throw }
-                    $idxFailed = $true
-                    Write-Caution ('{0}: boot.wim servicing failed under BootWimLcuPolicy=tolerate; DISCARDING this index and continuing. Error: {1}' -f $imgLabel, $_.Exception.Message)
-                    Add-ErrorJsonlEntry -Phase 'P08' -Kind 'bootwim-tolerated-failure' -Properties @{exType=$_.Exception.GetType().FullName;msg=$_.Exception.Message;image=$imgLabel}
+                    $failureDecision=Get-BootWimFailurePolicyDecision -FailurePolicy $bootFailurePolicy -ErrorText ([string]$_.Exception.Message) -ImageLabel $imgLabel
+                    if($failureDecision.Allowed){
+                        $idxFailed=$true
+                        $bootPolicyException=[pscustomobject][ordered]@{
+                            SchemaVersion='P08-bootwim-policy-exception/1.0';Active=$true
+                            CreatedAtUtc=([datetime]::UtcNow.ToString('o'));OsKey=$Script:OsVersion
+                            ImageLabel=$imgLabel;BootWimLcuPolicy=$bootPolicy
+                            BootWimFailurePolicy=$bootFailurePolicy;BootWimServicingStrategy=$bootServicingStrategy
+                            ErrorCode=$failureDecision.ErrorCode;ErrorMessage=[string]$_.Exception.Message
+                            PreserveSourceBootWim=$true;RequiresInstallValidation=$true
+                            Reason=$failureDecision.Reason
+                        }
+                        Write-Caution ('{0}: {1} The mounted index will be discarded; the complete source boot.wim will be restored.' -f $imgLabel,$failureDecision.Reason)
+                        Add-ErrorJsonlEntry -Phase 'P08' -Kind 'bootwim-policy-exception' -Properties @{exType=$_.Exception.GetType().FullName;msg=$_.Exception.Message;image=$imgLabel;policy=$bootFailurePolicy;strategy=$bootServicingStrategy;errorCode=$failureDecision.ErrorCode;requiresInstallValidation=$true}
+                    } elseif ($bootPolicy -eq 'tolerate') {
+                        $idxFailed = $true
+                        Write-Caution ('{0}: boot.wim servicing failed under BootWimLcuPolicy=tolerate; DISCARDING this index and continuing. Error: {1}' -f $imgLabel, $_.Exception.Message)
+                        Add-ErrorJsonlEntry -Phase 'P08' -Kind 'bootwim-tolerated-failure' -Properties @{exType=$_.Exception.GetType().FullName;msg=$_.Exception.Message;image=$imgLabel}
+                    } else {
+                        throw
+                    }
                 }
             } finally {
                 if ($isMounted) {
@@ -14452,6 +14628,25 @@ function Invoke-BuildPhase08_PatchBootWim {
                     else { Invoke-WimDismountSafe -Path $mountDir -LogDir $Script:LogsDir }
                 }
             }
+            if($bootPolicyException){break}
+        }
+        if($bootPolicyException){
+            if(-not $p08BootBackup -or -not (Test-Path -LiteralPath $p08BootBackup -PathType Leaf)){
+                throw 'boot.wim policy exception was authorized, but the P08 source boot.wim backup is unavailable.'
+            }
+            $sourceBootWimSha256=(Get-FileHash -LiteralPath $p08BootBackup -Algorithm SHA256).Hash.ToLowerInvariant()
+            Copy-Item -LiteralPath $p08BootBackup -Destination $bootWim -Force
+            $restoredBootWimSha256=(Get-FileHash -LiteralPath $bootWim -Algorithm SHA256).Hash.ToLowerInvariant()
+            if($sourceBootWimSha256 -ne $restoredBootWimSha256){
+                throw ('boot.wim policy-exception restore hash mismatch: source={0}; restored={1}' -f $sourceBootWimSha256,$restoredBootWimSha256)
+            }
+            $bootPolicyException | Add-Member -NotePropertyName SourceBootWimSha256 -NotePropertyValue $sourceBootWimSha256 -Force
+            $bootPolicyException | Add-Member -NotePropertyName RestoredBootWimSha256 -NotePropertyValue $restoredBootWimSha256 -Force
+            $bootPolicyException | Add-Member -NotePropertyName RestoreVerified -NotePropertyValue $true -Force
+            $bootPolicyException | Add-Member -NotePropertyName EvidencePath -NotePropertyValue $bootPolicyExceptionPath -Force
+            Save-CanonicalJsonFile -InputObject $bootPolicyException -Path $bootPolicyExceptionPath -Depth 12
+            $Script:BootWimPolicyException=$bootPolicyException
+            Write-Caution ('Source boot.wim restored under explicit policy exception. Evidence: {0}. P14 Hyper-V Install validation is mandatory.' -f $bootPolicyExceptionPath)
         }
         }
 
@@ -15440,12 +15635,30 @@ function Invoke-VerifyPhase11_StaticVerify {
         }
 
         $rows = [System.Collections.Generic.List[object]]::new()
+        $bootPolicyExceptionPath = Join-Path $Script:LogsDir 'P08_bootwim_policy_exception.json'
+        $bootPolicyException = Read-ReleaseJsonFile -Path $bootPolicyExceptionPath
+        $bootPolicyExceptionIssues=[System.Collections.Generic.List[string]]::new()
+        if($bootPolicyException){
+            if(-not ($bootPolicyException.PSObject.Properties['Active'] -and $bootPolicyException.Active)){$bootPolicyExceptionIssues.Add('Active is not true.')|Out-Null}
+            if([string]$bootPolicyException.OsKey -ne [string]$Script:OsVersion){$bootPolicyExceptionIssues.Add('OsKey does not match the current run.')|Out-Null}
+            if([string]$bootPolicyException.BootWimFailurePolicy -ne 'UnsupportedByPinnedSourceMedia'){$bootPolicyExceptionIssues.Add('Failure policy is not UnsupportedByPinnedSourceMedia.')|Out-Null}
+            if([string]$bootPolicyException.ErrorCode -notin @('0x8007371b','0x80070032')){$bootPolicyExceptionIssues.Add('ErrorCode is outside the measured allow-list.')|Out-Null}
+            if(-not ($bootPolicyException.PSObject.Properties['PreserveSourceBootWim'] -and $bootPolicyException.PreserveSourceBootWim)){$bootPolicyExceptionIssues.Add('PreserveSourceBootWim is not true.')|Out-Null}
+            if(-not ($bootPolicyException.PSObject.Properties['RequiresInstallValidation'] -and $bootPolicyException.RequiresInstallValidation)){$bootPolicyExceptionIssues.Add('RequiresInstallValidation is not true.')|Out-Null}
+            if(-not ($bootPolicyException.PSObject.Properties['RestoreVerified'] -and $bootPolicyException.RestoreVerified)){$bootPolicyExceptionIssues.Add('RestoreVerified is not true.')|Out-Null}
+            if([string]::IsNullOrWhiteSpace([string]$bootPolicyException.SourceBootWimSha256) -or [string]$bootPolicyException.SourceBootWimSha256 -ne [string]$bootPolicyException.RestoredBootWimSha256){$bootPolicyExceptionIssues.Add('Source/restored boot.wim SHA-256 evidence is absent or mismatched.')|Out-Null}
+        }
+        $hasBootPolicyException = [bool]($bootPolicyException -and $bootPolicyExceptionIssues.Count -eq 0)
         function Add-VRow {
             param([string]$Check, [string]$Expected, [string]$Actual, [string]$Status, [string]$Notes)
             $rows.Add([pscustomobject]@{
                 Check = $Check; Expected = $Expected; Actual = $Actual
                 Status = $Status; Notes = $Notes
             }) | Out-Null
+        }
+
+        if($bootPolicyException -and -not $hasBootPolicyException){
+            Add-VRow -Check 'BootWimPolicyExceptionEvidence' -Expected 'identity-consistent measured policy evidence with verified source restore' -Actual 'invalid' -Status 'Fail' -Notes ($bootPolicyExceptionIssues.ToArray() -join ' ')
         }
 
         # Step 1: file existence + size
@@ -15594,13 +15807,21 @@ function Invoke-VerifyPhase11_StaticVerify {
                 }
                 $bootPolicyForVerify=Resolve-BootWimLcuPolicyValue -RawValue $Script:OsProfile.BootWimLcuPolicy
                 if ($bootPolicyForVerify -eq 'enabled') {
+                    if($hasBootPolicyException){
+                        Add-VRow -Check 'BootWimServicingPolicy' -Expected 'LCU applied or source preserved only under an explicit measured policy exception' -Actual ('PolicyException ' + [string]$bootPolicyException.ErrorCode) -Status 'PolicyException' -Notes $bootPolicyExceptionPath
+                    }
                     foreach ($brec in @($postInsp.BootWim.Indexes)) {
                         if (-not $brec -or $brec.ErrorMessage) {
                             Add-VRow -Check ('BootIndex_' + $(if ($brec) { $brec.Index } else { 'unknown' })) -Expected 'inspectable' -Actual 'error' -Status 'Fail' -Notes $(if ($brec) { $brec.ErrorMessage } else { 'missing record' })
                             continue
                         }
-                        $br=Test-LcuTargetApplied -OsKey $Script:OsVersion -ExpectedKbId $expectedLcuKbAll -ExpectedBuild $expectedBuildAll -Evidence $brec.Evidence
-                        Add-VRow -Check ('BootIndex' + $brec.Index + '_LcuTargetApplied') -Expected $br.Expected -Actual $br.Actual -Status $br.Status -Notes $br.Notes
+                        if($hasBootPolicyException){
+                            $observedBootBuild=if($brec.Evidence -and $brec.Evidence.Build){[string]$brec.Evidence.Build}else{'unknown'}
+                            Add-VRow -Check ('BootIndex' + $brec.Index + '_LcuTargetApplied') -Expected ('PolicyException: source build preserved; P14 Install required instead of target ' + $expectedBuildAll) -Actual $observedBootBuild -Status 'PolicyException' -Notes ([string]$bootPolicyException.Reason)
+                        } else {
+                            $br=Test-LcuTargetApplied -OsKey $Script:OsVersion -ExpectedKbId $expectedLcuKbAll -ExpectedBuild $expectedBuildAll -Evidence $brec.Evidence
+                            Add-VRow -Check ('BootIndex' + $brec.Index + '_LcuTargetApplied') -Expected $br.Expected -Actual $br.Actual -Status $br.Status -Notes $br.Notes
+                        }
                     }
                 }
 
@@ -15764,6 +15985,10 @@ function Invoke-VerifyPhase11_StaticVerify {
                         Add-VRow -Check ('SetupBinarySync_' + $sbFile) -Expected 'media SHA-256 == boot.wim idx2' `
                             -Actual 'source-absent' -Status 'Warn' -Notes ('planned by build gate but absent in boot.wim idx2; ' + $sbNotes)
                         Write-Caution ('SetupBinarySync {0}: absent in boot.wim idx2.' -f $sbFile)
+                    } elseif($hasBootPolicyException) {
+                        Add-VRow -Check ('SetupBinarySync_' + $sbFile) -Expected 'PolicyException: source boot.wim preserved; P14 Install must prove the effective Setup path' `
+                            -Actual 'MISMATCH' -Status 'PolicyException' -Notes ('The mismatch remains explicit and is not accepted as a static pass. ' + $sbNotes)
+                        Write-Caution ('SetupBinarySync {0}: media does not match the restored source boot.wim under the measured policy exception; P14 Install validation is mandatory.' -f $sbFile)
                     } else {
                         Add-VRow -Check ('SetupBinarySync_' + $sbFile) -Expected 'media SHA-256 == boot.wim idx2' `
                             -Actual 'MISMATCH' -Status 'Fail' -Notes ('Setup will fail during installation per MS media-dynamic-update; ' + $sbNotes)
@@ -15781,9 +16006,11 @@ function Invoke-VerifyPhase11_StaticVerify {
         Write-Ok ('Wrote: {0}' -f $csvPath)
 
         $failed = @($rows | Where-Object { $_.Status -eq 'Fail' })
+        $policyExceptionRows=@($rows | Where-Object { $_.Status -eq 'PolicyException' })
         if ($failed.Count -gt 0) {
             throw ('P11 verification failed: {0} hard failures.' -f $failed.Count)
         }
+        $p11Status=$(if($policyExceptionRows.Count -gt 0){'PolicyException'}else{'Pass'})
 
         $patchManifestPath = Join-Path $Script:LogsDir 'resolved_patch_manifest.json'
         Save-CanonicalJsonFile -InputObject (New-ResolvedPatchEvidenceManifest) -Path $patchManifestPath -Depth 16
@@ -15794,7 +16021,7 @@ function Invoke-VerifyPhase11_StaticVerify {
         # r12.17 uses constructor-created lists globally and reads Count directly.
         $p11Evidence = [pscustomobject][ordered]@{
             SchemaVersion='P11-static-verification/1.0'
-            Status='Pass'
+            Status=$p11Status
             CreatedAtUtc=([datetime]::UtcNow.ToString('o'))
             Identity=$identity
             VerificationCsvPath=$csvPath
@@ -15803,9 +16030,12 @@ function Invoke-VerifyPhase11_StaticVerify {
             PostInspectionSha256=(Get-FileSha256OrEmpty -Path (Join-Path $Script:LogsDir 'inspection_post.json'))
             RowCount=$rows.Count
             FailureCount=0
+            PolicyExceptionCount=$policyExceptionRows.Count
+            PolicyExceptionEvidencePath=$(if($hasBootPolicyException){$bootPolicyExceptionPath}else{''})
+            PolicyExceptionEvidenceSha256=$(if($hasBootPolicyException){Get-FileSha256OrEmpty -Path $bootPolicyExceptionPath}else{''})
         }
         Save-CanonicalJsonFile -InputObject $p11Evidence -Path $p11EvidencePath -Depth 16
-        Write-ReleaseEvidenceMarker -Name 'P11.ok' -Identity $identity -EvidencePath $p11EvidencePath -Status 'Pass' | Out-Null
+        Write-ReleaseEvidenceMarker -Name 'P11.ok' -Identity $identity -EvidencePath $p11EvidencePath -Status $p11Status | Out-Null
     } finally {
         Stop-DebugTrace
     }
@@ -15956,6 +16186,8 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
         $staticVerification = Get-StaticVerificationAssessment
         $bootValidation = Get-BootValidationAssessment
         $staticEligible = $staticVerification.Eligible -and $compliance.ReleaseEligible -and $freshness.IsFresh
+        $requiresInstallValidation=[bool]($staticVerification.PSObject.Properties['RequiresInstallValidation'] -and $staticVerification.RequiresInstallValidation)
+        $bootValidationEligibleForRelease=($bootValidation.Eligible -and (-not $requiresInstallValidation -or [string]$bootValidation.Mode -eq 'Install'))
         $reasons = [System.Collections.Generic.List[string]]::new()
         if (-not $staticVerification.Eligible -and $staticVerification.Reason) { $reasons.Add([string]$staticVerification.Reason) | Out-Null }
         foreach ($reason in @($compliance.Reasons)) { if ($reason) { $reasons.Add([string]$reason) | Out-Null } }
@@ -15963,8 +16195,9 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
             $reasons.Add(('{0} freshness {1} {2}: {3} (release={4}; baseline={5}).' -f $freshness.Status,$item.Kind,$item.KbId,$item.Issue,$item.ReleaseMonth,$item.BaselineMonth)) | Out-Null
         }
         if (-not $bootValidation.Eligible -and $bootValidation.Reason) { $reasons.Add($bootValidation.Reason) | Out-Null }
-        $releaseEligible = $staticEligible -and $bootValidation.Eligible
-        $releaseStatus = if ($releaseEligible) { 'ReleaseReady' } elseif ($staticEligible -and $bootValidation.Status -eq 'ReviewRequired') { 'BootEvidenceReviewRequired' } elseif ($staticEligible) { 'Candidate-BootTestRequired' } else { 'NotEligible' }
+        if($requiresInstallValidation -and $bootValidation.Eligible -and [string]$bootValidation.Mode -ne 'Install'){ $reasons.Add('The boot.wim policy exception requires P14 Install validation; BootOnly evidence cannot close it.') | Out-Null }
+        $releaseEligible = $staticEligible -and $bootValidationEligibleForRelease
+        $releaseStatus = if ($releaseEligible) { 'ReleaseReady' } elseif ($staticEligible -and $requiresInstallValidation) { 'Candidate-InstallTestRequired' } elseif ($staticEligible -and $bootValidation.Status -eq 'ReviewRequired') { 'BootEvidenceReviewRequired' } elseif ($staticEligible) { 'Candidate-BootTestRequired' } else { 'NotEligible' }
         $Script:ReleaseEligibility = [pscustomobject][ordered]@{
             SchemaVersion='release-eligibility/1.3'
             RunId=$Script:RunId
@@ -15978,8 +16211,12 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
             AuxiliaryNotApplicableItemCount=$freshness.NotApplicableItemCount
             StaticEligible=$staticEligible
             BootTestStatus=$bootValidation.Status
-            BootTestEligible=$bootValidation.Eligible
-            BootValidationRequired=($staticEligible -and -not $bootValidation.Eligible)
+            BootEvidenceEligible=$bootValidation.Eligible
+            BootTestEligible=$bootValidationEligibleForRelease
+            BootValidationRequired=($staticEligible -and -not $bootValidationEligibleForRelease)
+            RequiresInstallValidation=$requiresInstallValidation
+            StaticPolicyException=($staticVerification.Status -eq 'PolicyException')
+            StaticPolicyExceptionReason=$(if($staticVerification.Status -eq 'PolicyException'){$staticVerification.Reason}else{''})
             ReleaseStatus=$releaseStatus
             ReleaseEligible=$releaseEligible
             Reasons=$reasons.ToArray()
@@ -17783,6 +18020,9 @@ function Invoke-VerifyPhase14_HyperVValidation {
         # Approval is a second, explicit operation over an already captured
         # BootOnly evidence file. It never reruns or silently replaces evidence.
         if ($Script:BootEvidenceApprovalPath) {
+            if($Script:ReleaseEligibility -and $Script:ReleaseEligibility.PSObject.Properties['RequiresInstallValidation'] -and $Script:ReleaseEligibility.RequiresInstallValidation){
+                throw 'BootOnly approval cannot satisfy the active boot.wim policy exception. Run P14 with -HyperVValidationMode Install.'
+            }
             $approvalPath = Resolve-RelativeToScript $Script:BootEvidenceApprovalPath
             $existing = Read-ReleaseJsonFile -Path $path
             if (-not $existing -or [string]$existing.Mode -ne 'BootOnly' -or -not $existing.Identity) {
@@ -17833,7 +18073,7 @@ function Invoke-VerifyPhase14_HyperVValidation {
                 $Script:ReleaseEligibility.BootTestEligible=$false
                 $Script:ReleaseEligibility | Add-Member -NotePropertyName BootValidationRequired -NotePropertyValue $true -Force
                 $Script:ReleaseEligibility.ReleaseEligible=$false
-                $Script:ReleaseEligibility.ReleaseStatus=$(if($Script:ReleaseEligibility.StaticEligible){'BootEvidenceReviewRequired'}else{'NotEligible'})
+                $Script:ReleaseEligibility.ReleaseStatus=$(if($Script:ReleaseEligibility.StaticEligible -and $Script:ReleaseEligibility.PSObject.Properties['RequiresInstallValidation'] -and $Script:ReleaseEligibility.RequiresInstallValidation){'Candidate-InstallTestRequired'}elseif($Script:ReleaseEligibility.StaticEligible){'BootEvidenceReviewRequired'}else{'NotEligible'})
                 $Script:ReleaseEligibility.Reasons=@($Script:ReleaseEligibility.Reasons | Where-Object { $_ -notlike '*boot/install validation*' }) + @('BootOnly screenshots require explicit operator approval before release.')
             }
             Write-Caution ('P14 BootOnly evidence captured but not release-approved: {0}' -f $path)

@@ -93,7 +93,11 @@
           "type": "boolean"
         },
         "BootWimLcuPolicy": {
-          "type": "string"
+          "enum": [
+            "enabled",
+            "disabled",
+            "tolerate"
+          ]
         },
         "EnableWinREUpdate": {
           "type": "boolean"
@@ -105,7 +109,12 @@
           "type": "string"
         },
         "BootWimFailurePolicy": {
-          "type": "string"
+          "enum": [
+            "FailBuild",
+            "UnsupportedByPinnedSourceMedia",
+            "ResearchTolerateNotReleaseEligible",
+            "LegacyPolicy"
+          ]
         },
         "_VerifiedDate": {
           "type": [
@@ -123,6 +132,13 @@
           "enum": [
             "DirectMsu",
             "ExpandedCab"
+          ]
+        },
+        "BootWimServicingStrategy": {
+          "enum": [
+            "DirectMsu",
+            "ExpandedCombinedCab",
+            "ExpandedSplitCab"
           ]
         }
       },
