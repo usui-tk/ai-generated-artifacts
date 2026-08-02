@@ -22,6 +22,57 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.31-r12.49] - 2026-08-02
+
+Tag: `setupdu-language-allowlist`.
+
+### Added
+
+- **Setup DU language-resource allowlist**: every per-OS servicing
+  contract now declares `Setup.LanguageResourcePolicy`
+  (`EnUsAndTargetOnly`) — the allowed Setup DU language directories
+  are en-us plus the target media language. The overlay records a
+  `SkipLanguageResource` decision for package payloads outside the
+  allowlist, and disallowed locale directories already present on the
+  media are cleaned up only when their content can be safely
+  attributed to a prior verified overlay; unattributable content
+  fails closed before the media is touched.
+- **P11 verifies the language scope**: new
+  `SetupDuLanguageResourceAllowlist` verification row (observed
+  locale directories must all be within the declared allowlist) and
+  the `SetupDuFinalManifest` row additionally proves excluded
+  language files are absent, driven by the overlay manifest's
+  `Policy.AllowedLanguageDirectories`.
+
+### Changed
+
+- **Servicing-contract baselines advanced**: schema `2.3` → `2.4`;
+  all four contract revisions move (Server 2016/2019 `-r4` → `-r5`,
+  Server 2022 `-r5` → `-r6`, Server 2025 `-r4` → `-r5`) with
+  re-pinned component hashes (declared change; T45 totals unchanged
+  at 21).
+- **E2E baselines record the language-scope supersession**:
+  `data/servicing-e2e-baselines.json` schema `1.1` → `1.2`; the four
+  existing cases carry `SetupDuLanguageScopeStatus`
+  `SupersededByR1249LanguageAllowlist`, and a new
+  `Server2022-ja-jp-r12.48` case records the r12.48 static build as
+  passed under pre-r12.49 checks but language-scope non-compliant
+  (`RequiresR1249P09Repair`).
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.07.31-r12.49`
+  with the measured tag `setupdu-language-allowlist`. No terminal
+  D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/120/64/112 + T45 21. PSA committed 5E/112W/10I (raw sweep
+  5E/113W/10I: +1W is the PSA7002 LF artefact; declared series
+  debt). The snapshot script remains BOM-absent at r12.49 (O1 watch
+  continues).
+
 ## [update-wsi-2026.07.31-r12.48] - 2026-08-02
 
 Tag: `server2022-setupdu-resume-hash`.

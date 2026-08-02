@@ -1,6 +1,6 @@
 {
-  "SchemaVersion": "servicing-e2e-baselines/1.1",
-  "Purpose": "Compact measured baselines used to review OS- and language-specific behavior without embedding ISO/WIM payloads. r12.45 completed static ISO creation for Server 2016/2019 in ja-jp and en-us. These records do not replace Windows E2E execution after shared-core changes.",
+  "SchemaVersion": "servicing-e2e-baselines/1.2",
+  "Purpose": "Compact measured baselines without ISO/WIM payloads. Functional build/boot/install evidence is retained, while r12.49 separately records that pre-r12.49 Setup DU overlays were not language-scoped and therefore are superseded for final language-purity compliance.",
   "Cases": {
     "Server2016-ja-jp": {
       "Status": "UserValidatedBootAndInstallPlusR1245StaticBuild",
@@ -15,7 +15,11 @@
       "P11PassCount": 29,
       "P06DecisionCount": 34,
       "OperationEvidenceCount": 21,
-      "EvidenceNote": "Latest r12.45 Japanese static build passed. Secure Boot boot and installation were previously confirmed by the user."
+      "EvidenceNote": "Latest r12.45 Japanese static build passed. Secure Boot boot and installation were previously confirmed by the user.",
+      "SetupDuLanguageScopeStatus": "SupersededByR1249LanguageAllowlist",
+      "SetupDuLocaleFileCount": 38,
+      "SetupDuOutOfScopeFileCount": 36,
+      "SetupDuChineseLocaleFileCount": 2
     },
     "Server2016-en-us": {
       "Status": "R1245StaticBuildValidated",
@@ -30,7 +34,11 @@
       "P11PassCount": 29,
       "P06DecisionCount": 34,
       "OperationEvidenceCount": 21,
-      "EvidenceNote": "English Server 2016 ISO creation completed with the same semantic patch plan and target builds as ja-jp. External boot/install validation is still separate."
+      "EvidenceNote": "English Server 2016 ISO creation completed with the same semantic patch plan and target builds as ja-jp. External boot/install validation is still separate.",
+      "SetupDuLanguageScopeStatus": "SupersededByR1249LanguageAllowlist",
+      "SetupDuLocaleFileCount": 38,
+      "SetupDuOutOfScopeFileCount": 37,
+      "SetupDuChineseLocaleFileCount": 2
     },
     "Server2019-en-us": {
       "Status": "UserValidatedBootAndInstallPlusR1245StaticBuild",
@@ -45,7 +53,11 @@
       "P11PassCount": 35,
       "P06DecisionCount": 30,
       "OperationEvidenceCount": 14,
-      "EvidenceNote": "Latest r12.45 English static build passed. Secure Boot boot and complete installation were confirmed by the user for the SafeOS DU boot model."
+      "EvidenceNote": "Latest r12.45 English static build passed. Secure Boot boot and complete installation were confirmed by the user for the SafeOS DU boot model.",
+      "SetupDuLanguageScopeStatus": "SupersededByR1249LanguageAllowlist",
+      "SetupDuLocaleFileCount": 76,
+      "SetupDuOutOfScopeFileCount": 74,
+      "SetupDuChineseLocaleFileCount": 4
     },
     "Server2019-ja-jp": {
       "Status": "UserValidatedBootAndInstallPlusR1245StaticBuild",
@@ -60,7 +72,28 @@
       "P11PassCount": 35,
       "P06DecisionCount": 30,
       "OperationEvidenceCount": 14,
-      "EvidenceNote": "Latest r12.45 Japanese static build passed. Hyper-V Generation 2 Secure Boot, Japanese Setup, and complete installation were confirmed by the user."
+      "EvidenceNote": "Latest r12.45 Japanese static build passed. Hyper-V Generation 2 Secure Boot, Japanese Setup, and complete installation were confirmed by the user.",
+      "SetupDuLanguageScopeStatus": "SupersededByR1249LanguageAllowlist",
+      "SetupDuLocaleFileCount": 76,
+      "SetupDuOutOfScopeFileCount": 72,
+      "SetupDuChineseLocaleFileCount": 4
+    },
+    "Server2022-ja-jp-r12.48": {
+      "Status": "R1248StaticBuildPassedButLanguageScopeNonCompliant",
+      "ImplementationBaseline": "r12.48",
+      "StaticVerificationStatus": "PassUnderPreR1249Checks",
+      "OutputIsoSha256": "74ac36842fb55e60b90c87ff2704c771bcb19879c2a95ffa54557311ae10e272",
+      "OutputIsoSizeBytes": 7183140864,
+      "InstallBuild": "20348.5386",
+      "BootBuild": "20348.5386",
+      "WinReSafeOsVersion": "20348.5386.1.17",
+      "ServicingStackVersion": "20348.5384.1.1",
+      "P11PassCount": 31,
+      "SetupDuLanguageScopeStatus": "RequiresR1249P09Repair",
+      "SetupDuLocaleFileCount": 76,
+      "SetupDuOutOfScopeFileCount": 72,
+      "SetupDuChineseLocaleFileCount": 4,
+      "EvidenceNote": "WIM servicing and static verification succeeded, but the common Setup DU overlay copied 36 non-allowed locale directories. Do not use as the final project-compliant ISO until repaired with r12.49."
     }
   }
 }

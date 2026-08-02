@@ -703,9 +703,9 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.07.31-r12.48'
-# Validation marker: r12.48 portable static regression complete; Windows-native gates remain required.
-$Script:ScriptTag     = 'server2022-setupdu-resume-hash'
+$Script:ScriptVersion = 'update-wsi-2026.07.31-r12.49'
+# Validation marker: r12.49 portable static regression complete; Windows-native gates remain required.
+$Script:ScriptTag     = 'setupdu-language-allowlist'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -12069,6 +12069,148 @@ function Get-SetupDuFileManifest {
     return $rows.ToArray()
 }
 
+function Test-SetupDuLanguageDirectoryName {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param([AllowEmptyString()][string]$Name)
+    if ([string]::IsNullOrWhiteSpace($Name)) { return $false }
+    # Covers the Windows locale directory forms present in Setup DU payloads,
+    # including ja-jp / zh-cn and script-qualified names such as sr-latn-rs.
+    return ([string]$Name).ToLowerInvariant() -match '^[a-z]{2,3}(?:-[a-z]{4})?-[a-z]{2}$'
+}
+
+function Get-SetupDuRelativeLanguageDirectory {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([AllowEmptyString()][string]$RelativePath)
+    if ([string]::IsNullOrWhiteSpace($RelativePath)) { return '' }
+    $top = @($RelativePath -split '[\\/]', 2)[0]
+    if (Test-SetupDuLanguageDirectoryName -Name $top) { return ([string]$top).ToLowerInvariant() }
+    return ''
+}
+
+function Get-SetupDuAllowedLanguageDirectories {
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [ValidateSet('EnUsAndTargetOnly')][string]$Policy='EnUsAndTargetOnly',
+        [AllowEmptyString()][string]$OsLanguage=''
+    )
+    if ([string]::IsNullOrWhiteSpace($OsLanguage)) { $OsLanguage = [string]$Script:OsLanguage }
+    $normalized = ([string]$OsLanguage).ToLowerInvariant()
+    if ($normalized -notin @('en-us','ja-jp')) {
+        throw ('Unsupported media language for Setup DU language allowlist: {0}' -f $OsLanguage)
+    }
+    switch ($Policy) {
+        'EnUsAndTargetOnly' {
+            return [string[]]@(@('en-us',$normalized) | Sort-Object -Unique)
+        }
+    }
+    throw ('Unsupported Setup DU language resource policy: {0}' -f $Policy)
+}
+
+function Remove-SetupDuPreviouslyAppliedExcludedLanguageResources {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][object[]]$SourceManifest,
+        [Parameter(Mandatory)][string]$KbId,
+        [Parameter(Mandatory)][string[]]$AllowedLanguageDirectories
+    )
+    $allowed = @($AllowedLanguageDirectories | ForEach-Object { ([string]$_).ToLowerInvariant() } | Sort-Object -Unique)
+    $priorPath = if ($Script:LogsDir) { Join-Path $Script:LogsDir 'setupdu_overlay_manifest.json' } else { '' }
+    $priorRecords = @()
+    if ($priorPath -and (Test-Path -LiteralPath $priorPath -PathType Leaf)) {
+        try {
+            $prior = Get-Content -LiteralPath $priorPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ([string]$prior.KbId -eq $KbId) { $priorRecords = @($prior.Records) }
+        } catch {
+            throw ('Existing Setup DU overlay evidence could not be parsed before language cleanup: {0}; {1}' -f $priorPath,$_.Exception.Message)
+        }
+    }
+
+    $records = [System.Collections.Generic.List[object]]::new()
+    $excludedRows = @($SourceManifest | Where-Object {
+        $lang = Get-SetupDuRelativeLanguageDirectory -RelativePath ([string]$_.RelativePath)
+        $lang -and ($allowed -notcontains $lang)
+    })
+    foreach ($row in $excludedRows) {
+        $rel = [string]$row.RelativePath
+        $lang = Get-SetupDuRelativeLanguageDirectory -RelativePath $rel
+        $dest = [string]$row.DestinationPath
+        $presentBefore = Test-Path -LiteralPath $dest -PathType Leaf
+        $hashBefore = if ($presentBefore) { (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' }
+        $removed = $false
+        $basis = 'NotPresent'
+        if ($presentBefore) {
+            $priorCandidates = @($priorRecords | Where-Object { [string]$_.RelativePath -ieq $rel -and [bool]$_.Copied })
+            $priorMatch = if ($priorCandidates.Count -eq 1) { $priorCandidates[0] } else { $null }
+            $priorExpected = ''
+            if ($priorMatch) {
+                if (-not [string]::IsNullOrWhiteSpace([string]$priorMatch.ExpectedSha256After)) {
+                    $priorExpected = ([string]$priorMatch.ExpectedSha256After).ToLowerInvariant()
+                } elseif (-not [string]::IsNullOrWhiteSpace([string]$priorMatch.DestinationSha256After)) {
+                    $priorExpected = ([string]$priorMatch.DestinationSha256After).ToLowerInvariant()
+                }
+            }
+            if (-not $priorMatch -or [string]::IsNullOrWhiteSpace($priorExpected) -or $hashBefore -ne $priorExpected) {
+                throw ('Disallowed Setup DU language resource already exists but cannot be safely attributed to the prior verified overlay: {0}; language={1}; currentSha256={2}; priorEvidence={3}' -f $dest,$lang,$hashBefore,$priorPath)
+            }
+            $item = Get-Item -LiteralPath $dest -ErrorAction Stop
+            if ($item.IsReadOnly) { $item.IsReadOnly = $false }
+            Remove-Item -LiteralPath $dest -Force -ErrorAction Stop
+            $removed = $true
+            $basis = 'PriorVerifiedSetupDuOverlay'
+        }
+        $records.Add([pscustomobject][ordered]@{
+            RelativePath=$rel
+            LanguageDirectory=$lang
+            Allowed=$false
+            PresentBefore=$presentBefore
+            Sha256Before=$hashBefore
+            Removed=$removed
+            RemovalBasis=$basis
+            PresentAfter=(Test-Path -LiteralPath $dest -PathType Leaf)
+        }) | Out-Null
+    }
+
+    # Remove only empty locale roots. Any remaining file under a prohibited
+    # locale is a hard failure; the script never recursively deletes unknown
+    # source-media content.
+    $sourcesRoot = Join-Path $Script:ExtractedDir 'sources'
+    $excludedLanguages = @($excludedRows | ForEach-Object {
+        Get-SetupDuRelativeLanguageDirectory -RelativePath ([string]$_.RelativePath)
+    } | Where-Object { $_ } | Sort-Object -Unique)
+    foreach ($lang in $excludedLanguages) {
+        $dir = Join-Path $sourcesRoot $lang
+        if (Test-Path -LiteralPath $dir -PathType Container) {
+            $remaining = @(Get-ChildItem -LiteralPath $dir -Force -ErrorAction Stop)
+            if ($remaining.Count -eq 0) {
+                Remove-Item -LiteralPath $dir -Force -ErrorAction Stop
+            } else {
+                throw ('Disallowed Setup DU language directory still contains unverified content after targeted cleanup: {0}; remaining={1}' -f $dir,$remaining.Count)
+            }
+        }
+    }
+
+    $evidencePath = if ($Script:LogsDir) { Join-Path $Script:LogsDir 'P09_setupdu_language_cleanup.json' } else { '' }
+    $result = [pscustomobject][ordered]@{
+        SchemaVersion='setupdu-language-cleanup/1.0'
+        CreatedAtUtc=[datetime]::UtcNow.ToString('o')
+        OsKey=[string]$Script:OsVersion
+        OsLanguage=[string]$Script:OsLanguage
+        KbId=$KbId
+        AllowedLanguageDirectories=@($allowed)
+        ExcludedLanguageDirectories=@($excludedLanguages)
+        PriorOverlayEvidencePath=$priorPath
+        RecordCount=$records.Count
+        RemovedCount=@($records.ToArray() | Where-Object { $_.Removed }).Count
+        Records=$records.ToArray()
+    }
+    if ($evidencePath) { Save-CanonicalJsonFile -InputObject $result -Path $evidencePath -Depth 12 }
+    return $result
+}
+
 
 function Get-SetupDuOverlayPolicy {
     [CmdletBinding()]
@@ -12083,6 +12225,7 @@ function Get-SetupDuOverlayPolicy {
     $sameVersionPolicy = 'ManualReviewRequired'
     $authorityPolicy = 'CatalogScopedIdentityAndLocalHash'
     $requireTrustedPackage = $false
+    $languageResourcePolicy = 'EnUsAndTargetOnly'
     if ($Contract -and $Contract.Setup) {
         if ($Contract.Setup.PSObject.Properties['SameVersionDifferentContentPolicy']) {
             $sameVersionPolicy = [string]$Contract.Setup.SameVersionDifferentContentPolicy
@@ -12093,6 +12236,9 @@ function Get-SetupDuOverlayPolicy {
         if ($Contract.Setup.PSObject.Properties['RequireTrustedPackage']) {
             $requireTrustedPackage = [bool]$Contract.Setup.RequireTrustedPackage
         }
+        if ($Contract.Setup.PSObject.Properties['LanguageResourcePolicy']) {
+            $languageResourcePolicy = [string]$Contract.Setup.LanguageResourcePolicy
+        }
     }
 
     if ($sameVersionPolicy -notin @('ManualReviewRequired','ApplyTrustedPackagePayload')) {
@@ -12101,11 +12247,17 @@ function Get-SetupDuOverlayPolicy {
     if ($authorityPolicy -ne 'CatalogScopedIdentityAndLocalHash') {
         throw ('Unsupported Setup DU PackageAuthorityPolicy: {0}' -f $authorityPolicy)
     }
+    if ($languageResourcePolicy -ne 'EnUsAndTargetOnly') {
+        throw ('Unsupported Setup DU LanguageResourcePolicy: {0}' -f $languageResourcePolicy)
+    }
+    $allowedLanguageDirectories = Get-SetupDuAllowedLanguageDirectories -Policy $languageResourcePolicy -OsLanguage ([string]$Script:OsLanguage)
 
     return [pscustomobject][ordered]@{
         SameVersionDifferentContentPolicy = $sameVersionPolicy
         PackageAuthorityPolicy = $authorityPolicy
         RequireTrustedPackage = $requireTrustedPackage
+        LanguageResourcePolicy = $languageResourcePolicy
+        AllowedLanguageDirectories = @($allowedLanguageDirectories)
     }
 }
 
@@ -12296,11 +12448,16 @@ function Get-SetupDuFileVersionDecision {
         [Parameter(Mandatory)][string]$KbId,
         [string]$BootWimSetupBinaryStash='',
         [AllowNull()]$PackageAuthority,
-        [ValidateSet('ManualReviewRequired','ApplyTrustedPackagePayload')][string]$SameVersionDifferentContentPolicy='ManualReviewRequired'
+        [ValidateSet('ManualReviewRequired','ApplyTrustedPackagePayload')][string]$SameVersionDifferentContentPolicy='ManualReviewRequired',
+        [string[]]$AllowedLanguageDirectories=@('en-us'),
+        [ValidateSet('EnUsAndTargetOnly')][string]$LanguageResourcePolicy='EnUsAndTargetOnly'
     )
     $sourcePath=[string]$ManifestRow.SourcePath
     $destinationPath=[string]$ManifestRow.DestinationPath
     $relativePath=[string]$ManifestRow.RelativePath
+    $languageDirectory=Get-SetupDuRelativeLanguageDirectory -RelativePath $relativePath
+    $normalizedAllowedLanguages=@($AllowedLanguageDirectories | ForEach-Object { ([string]$_).ToLowerInvariant() } | Sort-Object -Unique)
+    $languageAllowed=([string]::IsNullOrWhiteSpace($languageDirectory) -or ($normalizedAllowedLanguages -contains $languageDirectory))
     $sourceVersion=[string]$ManifestRow.FileVersion
     $sourceHash=[string]$ManifestRow.Sha256
     $extension=[System.IO.Path]::GetExtension($relativePath).ToLowerInvariant()
@@ -12321,7 +12478,17 @@ function Get-SetupDuFileVersionDecision {
     $decision='Apply'
     $reasonCode='NewFile'
     $reason='Destination file is absent.'
-    if($isBootWimOverride){
+    if(-not $languageAllowed){
+        if($destinationPresent){
+            $decision='ManualReviewRequired'
+            $reasonCode='DisallowedSetupDuLanguageResourceStillPresent'
+            $reason=('Setup DU language resource {0} is outside the allowed media languages [{1}] and remains present after cleanup.' -f $languageDirectory,($normalizedAllowedLanguages -join ','))
+        }else{
+            $decision='SkipLanguageResource'
+            $reasonCode='SetupDuLanguageResourceExcluded'
+            $reason=('Setup DU language resource {0} is outside the allowed media languages [{1}].' -f $languageDirectory,($normalizedAllowedLanguages -join ','))
+        }
+    }elseif($isBootWimOverride){
         $decision='SkipOverriddenByBootWim'
         $reasonCode='BootWimSetupBinaryWins'
         $reason='This Setup DU binary is intentionally replaced by the serviced boot.wim copy after overlay.'
@@ -12362,11 +12529,15 @@ function Get-SetupDuFileVersionDecision {
         }
     }
     return [pscustomobject][ordered]@{
-        SchemaVersion='setupdu-file-decision/1.1'
+        SchemaVersion='setupdu-file-decision/1.2'
         TimestampUtc=[datetime]::UtcNow.ToString('o')
         OsKey=[string]$Script:OsVersion
         KbId=$KbId
         RelativePath=$relativePath
+        LanguageDirectory=$languageDirectory
+        LanguageAllowed=$languageAllowed
+        LanguageResourcePolicy=$LanguageResourcePolicy
+        AllowedLanguageDirectories=@($normalizedAllowedLanguages)
         SourcePath=$sourcePath
         DestinationPath=$destinationPath
         Extension=$extension
@@ -12398,14 +12569,14 @@ function Write-SetupDuFileDecisionEvidence {
     $jsonPath=Join-Path $Script:VersionDecisionDir 'P09_setupdu_file_decisions.json'
     $csvPath=Join-Path $Script:VersionDecisionDir 'P09_setupdu_file_decisions.csv'
     Save-CanonicalJsonFile -InputObject ([pscustomobject][ordered]@{
-        SchemaVersion='setupdu-file-decision-set/1.1'
+        SchemaVersion='setupdu-file-decision-set/1.2'
         CreatedAtUtc=[datetime]::UtcNow.ToString('o')
         OsKey=[string]$Script:OsVersion
         Policy=$Policy
         PackageAuthority=$PackageAuthority
         Decisions=@($Decisions)
     }) -Path $jsonPath -Depth 12
-    @($Decisions)|Select-Object KbId,RelativePath,SourceFileVersion,DestinationFileVersionBefore,Decision,ReasonCode,SourceSha256,DestinationSha256Before,OverriddenByBootWim,SameVersionDifferentContentPolicy,PackageAuthorityTrusted,PackageAuthorityStatus,PackageUpdateId,PackageSha256,PackageSourceHost|Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
+    @($Decisions)|Select-Object KbId,RelativePath,LanguageDirectory,LanguageAllowed,LanguageResourcePolicy,SourceFileVersion,DestinationFileVersionBefore,Decision,ReasonCode,SourceSha256,DestinationSha256Before,OverriddenByBootWim,SameVersionDifferentContentPolicy,PackageAuthorityTrusted,PackageAuthorityStatus,PackageUpdateId,PackageSha256,PackageSourceHost|Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
     return [pscustomobject]@{JsonPath=$jsonPath;CsvPath=$csvPath}
 }
 
@@ -12424,9 +12595,14 @@ function Invoke-SetupDuVersionAwareOverlay {
         throw ('Setup DU package authority validation failed before overlay: {0}/{1}; status={2}; catalogEvidence={3}' -f $KbId,[string]$Patch.FileName,[string]$packageAuthority.Status,[string]$packageAuthority.CatalogEvidencePath)
     }
     Write-Step ('Setup DU package authority: trusted={0}; status={1}; sha256={2}' -f [bool]$packageAuthority.Trusted,[string]$packageAuthority.Status,[string]$packageAuthority.ActualSha256)
+    Write-Step ('Setup DU language policy: {0}; allowed=[{1}]' -f [string]$policy.LanguageResourcePolicy,(@($policy.AllowedLanguageDirectories) -join ','))
+    $languageCleanup=Remove-SetupDuPreviouslyAppliedExcludedLanguageResources -SourceManifest $SourceManifest -KbId $KbId -AllowedLanguageDirectories @($policy.AllowedLanguageDirectories)
+    if([int]$languageCleanup.RemovedCount -gt 0){
+        Write-Ok ('Removed {0} previously overlaid non-target Setup DU language file(s) before rebuilding P09.' -f [int]$languageCleanup.RemovedCount)
+    }
     $decisions=@()
     foreach($row in @($SourceManifest)){
-        $decisions+=,(Get-SetupDuFileVersionDecision -ManifestRow $row -KbId $KbId -BootWimSetupBinaryStash $stashDir -PackageAuthority $packageAuthority -SameVersionDifferentContentPolicy ([string]$policy.SameVersionDifferentContentPolicy))
+        $decisions+=,(Get-SetupDuFileVersionDecision -ManifestRow $row -KbId $KbId -BootWimSetupBinaryStash $stashDir -PackageAuthority $packageAuthority -SameVersionDifferentContentPolicy ([string]$policy.SameVersionDifferentContentPolicy) -AllowedLanguageDirectories @($policy.AllowedLanguageDirectories) -LanguageResourcePolicy ([string]$policy.LanguageResourcePolicy))
     }
     $evidence=Write-SetupDuFileDecisionEvidence -Decisions $decisions -PackageAuthority $packageAuthority -Policy $policy
     $blocking=@($decisions|Where-Object{$_.Decision -in @('RejectDowngrade','ManualReviewRequired')})
@@ -12449,11 +12625,21 @@ function Invoke-SetupDuVersionAwareOverlay {
         }
         $afterPresent=Test-Path -LiteralPath $d.DestinationPath -PathType Leaf
         $afterHash=if($afterPresent){(Get-FileHash -LiteralPath $d.DestinationPath -Algorithm SHA256).Hash.ToLowerInvariant()}else{''}
-        $expectedHash=if($d.Decision -eq 'Apply'){$d.SourceSha256}else{$d.DestinationSha256Before}
+        $expectedPresent=$true
+        $expectedHash=''
+        if($d.Decision -eq 'Apply'){
+            $expectedHash=[string]$d.SourceSha256
+        }elseif($d.Decision -eq 'SkipLanguageResource'){
+            $expectedPresent=$false
+        }else{
+            $expectedHash=[string]$d.DestinationSha256Before
+        }
+        $matchAfter=if(-not $expectedPresent){-not $afterPresent}else{$afterPresent -and -not [string]::IsNullOrWhiteSpace($expectedHash) -and $afterHash -eq $expectedHash}
         $records.Add([pscustomobject][ordered]@{
-            KbId=$KbId;RelativePath=$d.RelativePath;Decision=$d.Decision;ReasonCode=$d.ReasonCode
-            Copied=$copied;DestinationPresentAfter=$afterPresent;DestinationSha256After=$afterHash
-            ExpectedSha256After=$expectedHash;MatchAfter=($afterPresent -and $afterHash -eq $expectedHash)
+            KbId=$KbId;RelativePath=$d.RelativePath;LanguageDirectory=$d.LanguageDirectory;LanguageAllowed=$d.LanguageAllowed
+            Decision=$d.Decision;ReasonCode=$d.ReasonCode
+            Copied=$copied;ExpectedPresentAfter=$expectedPresent;DestinationPresentAfter=$afterPresent;DestinationSha256After=$afterHash
+            ExpectedSha256After=$expectedHash;MatchAfter=$matchAfter
             SourceFileVersion=$d.SourceFileVersion;DestinationFileVersionBefore=$d.DestinationFileVersionBefore
             OverriddenByBootWim=$d.OverriddenByBootWim
         })|Out-Null
@@ -12461,8 +12647,8 @@ function Invoke-SetupDuVersionAwareOverlay {
     $failed=@($records|Where-Object{-not $_.MatchAfter})
     $overlayPath=Join-Path $Script:LogsDir 'setupdu_overlay_manifest.json'
     Save-CanonicalJsonFile -InputObject ([pscustomobject][ordered]@{
-        SchemaVersion='setupdu-overlay/2.1';CreatedAtUtc=[datetime]::UtcNow.ToString('o');OsKey=[string]$Script:OsVersion;KbId=$KbId
-        Policy=$policy;PackageAuthority=$packageAuthority;DecisionEvidence=$evidence;Records=$records.ToArray()
+        SchemaVersion='setupdu-overlay/2.2';CreatedAtUtc=[datetime]::UtcNow.ToString('o');OsKey=[string]$Script:OsVersion;KbId=$KbId
+        Policy=$policy;PackageAuthority=$packageAuthority;LanguageCleanup=$languageCleanup;DecisionEvidence=$evidence;Records=$records.ToArray()
     }) -Path $overlayPath -Depth 12
     if($failed.Count -gt 0){throw ('Setup DU overlay verification failed for {0} file(s); evidence={1}' -f $failed.Count,$overlayPath)}
     return $records.ToArray()
@@ -16235,7 +16421,7 @@ function New-Server2016ServicingContract {
     param()
     return [pscustomobject][ordered]@{
         SchemaVersion='servicing-contract/2.1'
-        ContractRevision='Server2016-r4'
+        ContractRevision='Server2016-r5'
         OsKey='Server2016'
         PatchModel='separate-ssu'
         VersionDecisionPolicy='StrictFailClosed'
@@ -16245,7 +16431,7 @@ function New-Server2016ServicingContract {
         Ssu=[pscustomobject][ordered]@{StateResolver='InstalledPackageThenComponentDirectory';Monotonic=$true}
         Discovery=[pscustomobject][ordered]@{ResolveStandaloneSsuMonthly=$true}
         DotNet=[pscustomobject][ordered]@{SupportedRuntimeSelectors=@('4.8')}
-        Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After'}
+        Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After';LanguageResourcePolicy='EnUsAndTargetOnly'}
         RoleTargets=[pscustomobject][ordered]@{
             SourcePrerequisite=@('Install','Boot','WinRE')
             ServicingStackCarrier=@('Install','Boot','WinRE')
@@ -16286,7 +16472,7 @@ function New-Server2019ServicingContract {
     param()
     return [pscustomobject][ordered]@{
         SchemaVersion='servicing-contract/2.1'
-        ContractRevision='Server2019-r4'
+        ContractRevision='Server2019-r5'
         OsKey='Server2019'
         PatchModel='embedded-ssu'
         VersionDecisionPolicy='StrictFailClosed'
@@ -16296,7 +16482,7 @@ function New-Server2019ServicingContract {
         Ssu=[pscustomobject][ordered]@{StateResolver='InstalledPackageIdentity';Monotonic=$true;LegacyPrerequisitePolicy='SkipWhenActiveSsuIsNewer'}
         Discovery=[pscustomobject][ordered]@{ResolveStandaloneSsuMonthly=$false}
         DotNet=[pscustomobject][ordered]@{SupportedRuntimeSelectors=@('4.7.2','4.8')}
-        Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After'}
+        Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After';LanguageResourcePolicy='EnUsAndTargetOnly'}
         RoleTargets=[pscustomobject][ordered]@{
             SourcePrerequisite=@('Install','WinRE')
             ServicingStackCarrier=@('Install','WinRE')
@@ -16337,7 +16523,7 @@ function New-Server2022ServicingContract {
     param()
     return [pscustomobject][ordered]@{
         SchemaVersion='servicing-contract/2.1'
-        ContractRevision='Server2022-r5'
+        ContractRevision='Server2022-r6'
         OsKey='Server2022'
         PatchModel='embedded-ssu-du'
         VersionDecisionPolicy='StrictFailClosed'
@@ -16347,7 +16533,7 @@ function New-Server2022ServicingContract {
         Ssu=[pscustomobject][ordered]@{StateResolver='InstalledPackageIdentity';Monotonic=$true;BridgePolicy='CompareImageAndSsuFloors'}
         Discovery=[pscustomobject][ordered]@{ResolveStandaloneSsuMonthly=$false}
         DotNet=[pscustomobject][ordered]@{SupportedRuntimeSelectors=@('4.8','4.8.1')}
-        Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After';SameVersionDifferentContentPolicy='ApplyTrustedPackagePayload';PackageAuthorityPolicy='CatalogScopedIdentityAndLocalHash';RequireTrustedPackage=$true}
+        Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After';SameVersionDifferentContentPolicy='ApplyTrustedPackagePayload';PackageAuthorityPolicy='CatalogScopedIdentityAndLocalHash';RequireTrustedPackage=$true;LanguageResourcePolicy='EnUsAndTargetOnly'}
         RoleTargets=[pscustomobject][ordered]@{
             SourcePrerequisite=@('Install','Boot','WinRE')
             ServicingStackCarrier=@('Install','Boot','WinRE')
@@ -16388,7 +16574,7 @@ function New-Server2025ServicingContract {
     param()
     return [pscustomobject][ordered]@{
         SchemaVersion='servicing-contract/2.1'
-        ContractRevision='Server2025-r4'
+        ContractRevision='Server2025-r5'
         OsKey='Server2025'
         PatchModel='uup-checkpoint'
         VersionDecisionPolicy='StrictFailClosed'
@@ -16398,7 +16584,7 @@ function New-Server2025ServicingContract {
         Ssu=[pscustomobject][ordered]@{StateResolver='InstalledPackageIdentity';Monotonic=$true;CheckpointPolicy='ValidateOrderedCoLocatedChain'}
         Discovery=[pscustomobject][ordered]@{ResolveStandaloneSsuMonthly=$false}
         DotNet=[pscustomobject][ordered]@{SupportedRuntimeSelectors=@('4.8.1')}
-        Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After'}
+        Setup=[pscustomobject][ordered]@{UpdateModel='SetupDUFileOverlay';VerificationMode='ExpectedSha256After';LanguageResourcePolicy='EnUsAndTargetOnly'}
         RoleTargets=[pscustomobject][ordered]@{
             SourcePrerequisite=@('Install','Boot','WinRE')
             ServicingStackCarrier=@('Install','Boot','WinRE')
@@ -19893,12 +20079,17 @@ function Invoke-VerifyPhase11_StaticVerify {
             $setupManifestPath = Join-Path $Script:LogsDir 'setupdu_overlay_manifest.json'
             if (Test-Path -LiteralPath $setupManifestPath) {
                 $setupManifest = Get-Content -LiteralPath $setupManifestPath -Raw | ConvertFrom-Json
-                $setupFailures=0; $setupChecked=0
+                $setupFailures=0; $setupChecked=0; $setupExcludedChecked=0
                 foreach ($mrec in @($setupManifest.Records)) {
+                    $isoDest=Join-Path $mountedDrive ('sources\' + ([string]$mrec.RelativePath))
+                    if ([string]$mrec.Decision -eq 'SkipLanguageResource') {
+                        $setupExcludedChecked++
+                        if (Test-Path -LiteralPath $isoDest -PathType Leaf) { $setupFailures++ }
+                        continue
+                    }
                     if ($mrec.OverriddenByBootWim) { continue }
                     $setupChecked++
-                    $isoDest=Join-Path $mountedDrive ('sources\' + ([string]$mrec.RelativePath))
-                    if (-not (Test-Path -LiteralPath $isoDest)) { $setupFailures++; continue }
+                    if (-not (Test-Path -LiteralPath $isoDest -PathType Leaf)) { $setupFailures++; continue }
                     $isoHash=(Get-FileHash -LiteralPath $isoDest -Algorithm SHA256).Hash.ToLower()
                     $expectedHash = if (-not [string]::IsNullOrWhiteSpace([string]$mrec.ExpectedSha256After)) {
                         ([string]$mrec.ExpectedSha256After).ToLowerInvariant()
@@ -19910,7 +20101,18 @@ function Invoke-VerifyPhase11_StaticVerify {
                     }
                     if ([string]::IsNullOrWhiteSpace($expectedHash) -or $isoHash -ne $expectedHash) { $setupFailures++ }
                 }
-                Add-VRow -Check 'SetupDuFinalManifest' -Expected ('all ' + $setupChecked + ' non-overridden files present and matching') -Actual $(if ($setupFailures -eq 0) { 'match' } else { ($setupFailures.ToString() + ' mismatch/missing') }) -Status $(if ($setupFailures -eq 0) { 'Pass' } else { 'Fail' }) -Notes $setupManifestPath
+                Add-VRow -Check 'SetupDuFinalManifest' -Expected ('all ' + $setupChecked + ' included files matching and ' + $setupExcludedChecked + ' excluded language files absent') -Actual $(if ($setupFailures -eq 0) { 'match' } else { ($setupFailures.ToString() + ' mismatch/missing/unexpected') }) -Status $(if ($setupFailures -eq 0) { 'Pass' } else { 'Fail' }) -Notes $setupManifestPath
+
+                $allowedSetupLanguages=@()
+                if($setupManifest.Policy -and $setupManifest.Policy.PSObject.Properties['AllowedLanguageDirectories']){
+                    $allowedSetupLanguages=@($setupManifest.Policy.AllowedLanguageDirectories | ForEach-Object { ([string]$_).ToLowerInvariant() } | Sort-Object -Unique)
+                }else{
+                    $allowedSetupLanguages=@(Get-SetupDuAllowedLanguageDirectories -Policy 'EnUsAndTargetOnly' -OsLanguage ([string]$Script:OsLanguage))
+                }
+                $isoSourcesRoot=Join-Path $mountedDrive 'sources'
+                $observedLocaleDirs=@(Get-ChildItem -LiteralPath $isoSourcesRoot -Directory -ErrorAction Stop | Where-Object { Test-SetupDuLanguageDirectoryName -Name $_.Name } | ForEach-Object { $_.Name.ToLowerInvariant() } | Sort-Object -Unique)
+                $disallowedLocaleDirs=@($observedLocaleDirs | Where-Object { $allowedSetupLanguages -notcontains $_ })
+                Add-VRow -Check 'SetupDuLanguageResourceAllowlist' -Expected ('only ' + ($allowedSetupLanguages -join ',')) -Actual $(if($disallowedLocaleDirs.Count -eq 0){'only allowed locale directories present'}else{'disallowed=' + ($disallowedLocaleDirs -join ',')}) -Status $(if($disallowedLocaleDirs.Count -eq 0){'Pass'}else{'Fail'}) -Notes ('observed=' + ($observedLocaleDirs -join ','))
             } elseif (@($Script:ResolvedPatches | Where-Object { $_.PatchType -eq 'SetupDU' }).Count -gt 0) {
                 Add-VRow -Check 'SetupDuFinalManifest' -Expected 'evidence present' -Actual 'missing' -Status 'Fail' -Notes $setupManifestPath
             }
@@ -21743,6 +21945,7 @@ function Get-ResumeCriticalEvidenceRelativePaths {
         'logs\setup_binaries_sync.json',
         'logs\resolved_patch_manifest.json',
         'logs\setupdu_overlay_manifest.json',
+        'logs\P09_setupdu_language_cleanup.json',
         'logs\P11_verification.csv',
         'logs\P11_static_verification.json',
         'logs\inspection_post.json',
