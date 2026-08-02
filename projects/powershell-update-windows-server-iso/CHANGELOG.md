@@ -22,6 +22,39 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.07.24-r12.29] - 2026-08-02
+
+Tag: `rawxml-creationtime-integrity-integration` (the tag advances;
+the version date component moves 07.21 → 07.24). The display-date
+write moves off WIMGAPI onto a raw XML-resource strategy with
+integrity-table recalculation.
+
+### Changed
+
+- **Raw XML CREATIONTIME strategy**: measured runs showed WIMGAPI
+  write calls returning success without persisting the requested
+  value, so the display-date transition now edits the WIM's raw XML
+  resource directly — a 21-helper layer parses the WIM header and
+  resource descriptors, rewrites CREATIONTIME values while preserving
+  layout (byte length, encoding, BOM, terminators, descriptors and
+  LASTMODIFICATIONTIME untouched), always recalculates an existing
+  integrity table (`New-WimIntegrityTableBytes` over the changed byte
+  ranges), and then verifies the reopened WIM through WIMGAPI, DISM
+  and a read-only mount preflight. Fail-closed guards refuse
+  multi-part WIMs, `WRITE_IN_PROGRESS` headers and malformed
+  integrity structures. WIMGAPI remains for reread verification only.
+  Script-only change (+1,149 net lines).
+- **T40**: release pin advanced to `update-wsi-2026.07.24-r12.29`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **5E/72W/8I** on
+the committed tree — sixteen warnings join the debt with the raw-WIM
+byte layer; committed verbatim per the no-fix-forward rule, draining
+post-series.
+
 ## [update-wsi-2026.07.21-r12.28] - 2026-08-02
 
 Tag: `wimgapi-utf16le-creationtime-displaydate-fix` (the tag advances;
