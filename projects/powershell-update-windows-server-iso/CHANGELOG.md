@@ -122,6 +122,53 @@ the script and follows the
   re-authored; the R1264 collection-shape rows are deferred to the
   T51 binder guard per the ledger. Offline suite is now 27 PASS + the
   declared T30 red.
+- **T52 `media_authority_test.py` added** (phase C, first half):
+  behavioral coverage of the P09/P10/P11 final-writer authority model.
+  The functions under test are extracted from the script's own AST and
+  exercised against measured fixtures, with the DISM boundary mocked
+  for the WinPE media-sync runtime group: the retained r12.62
+  media-sync surface (sync/identity/export functions, their schema
+  versions, the P08/P09/P11 evidence artifact names, the cleanup defer
+  wiring, and the r12.72 explicit creation of the standard EFI boot
+  manager and root bootmgr.efi), the r12.62 WinPE media-sync runtime
+  (boot.wim index 2 mocked at build 26100: zero-failure sync,
+  setuphost.exe required, all seven semantic media targets
+  byte-matched to their WinPE source, authority categories correct,
+  and the separator-normalized standard boot-manager target set
+  exactly the four Microsoft alias paths — pinned in platform-
+  invariant form because the Windows case-insensitive alias de-dup
+  collapses the raw record list to 4 rows while Linux pwsh keeps both
+  separator forms of one alias, raw 5), the r12.72 P10 write-set
+  authority binding (a byte-changed firmware boot manager binds to
+  P10Pca2023Overlay, an unchanged root bootmgr.efi retains
+  P09WinPeSyncRetained, boot.stl always binds to P10BootStlSync,
+  exactly two override authorities), the P11 final-identity evidence
+  gating (valid explicit P10 evidence consumed with both overrides;
+  absent, required-but-missing, tampered-ISO and stale-evidence states
+  all rejected), the measured Server 2022 reviewed-pinned Catalog
+  identity shape (Verified in PinnedReviewedIdentity mode with the
+  ExactConfiguredFileNameDigest binding; a digest-less filename stays
+  fail-closed; the P04 selector emits the explicit
+  ConfiguredSha1OrFileNameDigest token; the full Setup-DU package
+  authority gate reaches Trusted with the pinned-identity success
+  status), the measured Server 2019 final Setup-binary authority
+  (P09 WinPE authority governs setup binaries over the earlier DU
+  hash with the three authority classes counted; byte tampering after
+  P09 rejected; a boot.wim override claim without matching successful
+  P09 evidence rejected), and the Setup-DU final manifest validation
+  guards (unsupported P09 evidence schema and traversal RelativePath
+  both rejected). 50 assertions; fault detection verified by mutation
+  on a disposable copy (a corrupted P10 authority label, a weakened
+  stale-evidence guard and a weakened filename-digest binding all
+  fail closed). Specification source: distribution axes
+  R1262/R1271/R1272, re-authored; the P11 chain is exercised through
+  explicitly authored P09 evidence because the distribution's
+  chain-through of raw sync output relies on the Windows alias de-dup
+  (the Windows-side chain remains covered by the user-side G2 gate);
+  the R1262/R1271/R1272 revision-floor rows are DROP (T40 pins the
+  exact ScriptVersion); dispositions tracked in the out-of-repo
+  re-implementation ledger. Offline suite is now 28 PASS + the
+  declared T30 red.
 
 ## [update-wsi-2026.08.07-r12.75] - 2026-08-07
 
