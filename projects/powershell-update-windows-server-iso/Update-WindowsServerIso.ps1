@@ -718,7 +718,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.05-r12.71'
+$Script:ScriptVersion = 'update-wsi-2026.08.05-r12.72'
+# Validation marker: r12.72 horizontally hardens final-writer authority. P08S plans setup.exe and setuphost.exe for every supported OS, P09 explicitly creates/verifies required standard boot-manager targets, P10 emits an identity-bound media write-set, and P11 accepts later P10 bytes only through that successful evidence. Setup DU final verification now validates schema, path safety, uniqueness, and source/after hash-size binding. Collector r9/schema 1.7 remains unchanged.
 # Validation marker: r12.71 fixes the four-OS clean-E2E failures observed on Server 2019 and Server 2022. P11 now verifies Setup DU records against the authoritative final P09 WinPE setup-binary synchronization, and reviewed pinned Catalog identity accepts an exact digest-bearing configured filename as the SHA-1 binding while remaining fail-closed on UpdateId, filename, architecture, metadata and review-basis checks. Collector r9/schema 1.7 remains unchanged.
 # Validation marker: r12.69 gives the supported installed-OS evidence collector a purpose-based, project-neutral artifact contract: Collect-WindowsServerPostInstallEvidence.ps1, post-install evidence schema/output names, and WindowsServerEvidence default output root. ISO servicing behavior is unchanged from r12.67/r12.68.
 # Validation marker: r12.68 finalizes the clean-E2E distribution layout without changing ISO servicing behavior: the supported post-install collector is shipped as a stable top-level artifact, and the oscdimg qualification lab is retained under tests/.
@@ -20862,15 +20863,20 @@ function Invoke-BuildPhase08_PatchBootWim {
 # logs\setup_binaries_sync.json -- never an implicit side effect.
 # This sync remains mandatory even when a Setup Dynamic Update is
 # available: the serviced boot.wim index 2 is the authoritative source
-# for matching setup.exe (and setuphost.exe on build 26100+).
+# for matching setup.exe and setuphost.exe. setuphost.exe is optional only
+# when that specific boot.wim image does not contain the file.
 
 function Get-SetupBinarySyncPlan {
     <#
     .SYNOPSIS
-        Pure: which Setup binaries must be synced for a given boot.wim
-        idx2 build number. setup.exe always; setuphost.exe on
-        10.0.26100+ (Windows Server 2025 / 24H2 era), per the MS
-        media-dynamic-update procedure.
+        Pure: returns the complete Microsoft final Setup-binary sync set.
+    .DESCRIPTION
+        Microsoft media Dynamic Update copies both setup.exe and
+        setuphost.exe from serviced WinPE after the Setup DU overlay.  The
+        file set is therefore independent of the OS build number. setup.exe
+        is mandatory; setuphost.exe is planned for every supported OS and is
+        treated as optional only when it is genuinely absent from boot.wim
+        index 2.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -20881,21 +20887,10 @@ function Get-SetupBinarySyncPlan {
     if ($null -ne $BuildNumber) {
         try { $n = [int]$BuildNumber } catch { $n = $null }
     }
-    if ($null -eq $n) {
-        return [pscustomobject]@{
-            Files  = @('setup.exe')
-            Reason = 'boot.wim idx2 build unknown; syncing setup.exe only (setuphost.exe is a 26100+ requirement)'
-        }
-    }
-    if ($n -ge 26100) {
-        return [pscustomobject]@{
-            Files  = @('setup.exe', 'setuphost.exe')
-            Reason = ('build {0} >= 26100: setup.exe + setuphost.exe (MS: required starting with 24H2/Server 2025)' -f $n)
-        }
-    }
+    $buildText = if ($null -eq $n) { 'unknown' } else { [string]$n }
     return [pscustomobject]@{
-        Files  = @('setup.exe')
-        Reason = ('build {0} < 26100: setup.exe only' -f $n)
+        Files  = @('setup.exe', 'setuphost.exe')
+        Reason = ('build {0}: final media sync always plans setup.exe + setuphost.exe; setuphost.exe is optional only when absent from boot.wim index 2' -f $buildText)
     }
 }
 
@@ -21188,7 +21183,7 @@ function Sync-ServicedWinPeMediaFiles {
         Mounts the final serviced boot.wim index 2 read-only and treats it as
         the authority for:
           * sources\setup.exe
-          * sources\setuphost.exe on image build 26100+
+          * sources\setuphost.exe whenever present (mandatory on image build 26100+)
           * Windows\Boot\EFI\bootmgfw.efi
           * Windows\Boot\EFI\bootmgr.efi
           * Windows\Boot\EFI\boot.stl
@@ -21296,6 +21291,26 @@ function Sync-ServicedWinPeMediaFiles {
                 Required = [bool]$result.SetupHostRequired
             }) | Out-Null
         }
+
+        # Task 28 requires the serviced WinPE boot-manager family to be
+        # reflected on the new media. Do not rely only on recursive
+        # discovery of files that already exist: canonical root bootmgr.efi
+        # and EFI\Microsoft\Boot\bootmgfw.efi must be recreated from the
+        # serviced WinPE source and verified when missing.
+        $targets.Add([pscustomobject]@{
+            RelativePath = 'EFI\Microsoft\Boot\bootmgfw.efi'
+            Category = 'StandardBootManager'
+            SourceRole = 'boot.wim index 2 Windows\Boot\EFI\bootmgfw.efi'
+            Source = $sources.BootMgfw
+            Required = $true
+        }) | Out-Null
+        $targets.Add([pscustomobject]@{
+            RelativePath = 'bootmgr.efi'
+            Category = 'StandardBootManager'
+            SourceRole = 'boot.wim index 2 Windows\Boot\EFI\bootmgr.efi'
+            Source = $sources.BootMgr
+            Required = $true
+        }) | Out-Null
 
         $mediaBootFiles = @(Get-ChildItem -LiteralPath $ExtractedMediaPath -Force -Recurse -File -Filter 'b*.efi' -ErrorAction Stop |
             Sort-Object FullName)
@@ -21409,37 +21424,216 @@ function Sync-ServicedWinPeMediaFiles {
     return $result
 }
 
+
+function Resolve-SafeMediaRelativePath {
+    <#
+    .SYNOPSIS
+        Converts an evidence relative path to a canonical media-relative path
+        and a platform-native full path, rejecting rooted and traversal input.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$RootPath,
+        [Parameter(Mandatory)][string]$RelativePath
+    )
+
+    $raw = ([string]$RelativePath).Trim()
+    if ([string]::IsNullOrWhiteSpace($raw)) { throw 'Media relative path is empty.' }
+    if ($raw -match '^[A-Za-z]:' -or $raw.StartsWith('\') -or $raw.StartsWith('/')) {
+        throw ('Rooted media path is not allowed in evidence: {0}' -f $RelativePath)
+    }
+    $parts = @($raw -split '[\\/]+')
+    if ($parts.Count -eq 0 -or @($parts | Where-Object { $_ -eq '.' -or $_ -eq '..' -or [string]::IsNullOrWhiteSpace($_) }).Count -gt 0) {
+        throw ('Unsafe media relative path component: {0}' -f $RelativePath)
+    }
+    foreach ($part in $parts) {
+        if ($part.Contains(':')) { throw ('Invalid media relative path component: {0}' -f $RelativePath) }
+    }
+
+    $rootFull = [System.IO.Path]::GetFullPath($RootPath).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    )
+    $platformRelative = [string]::Join([System.IO.Path]::DirectorySeparatorChar, [string[]]$parts)
+    $fullPath = [System.IO.Path]::GetFullPath((Join-Path $rootFull $platformRelative))
+    $rootPrefix = $rootFull + [System.IO.Path]::DirectorySeparatorChar
+    if (-not $fullPath.StartsWith($rootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw ('Media relative path escapes its root: {0}' -f $RelativePath)
+    }
+    return [pscustomobject][ordered]@{
+        RelativePath = ([string]::Join('\', [string[]]$parts))
+        PlatformRelativePath = $platformRelative
+        FullPath = $fullPath
+    }
+}
+
+function Get-P10MediaWriteSnapshot {
+    <#
+    .SYNOPSIS
+        Captures the P09-final identities of every media path P10 may replace.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)][string]$ExtractedMediaPath)
+
+    $records = [System.Collections.Generic.List[object]]::new()
+    foreach ($relative in @(
+        'EFI\Boot\bootx64.efi',
+        'EFI\Boot\bootaa64.efi',
+        'bootmgr.efi',
+        'EFI\Microsoft\Boot\boot.stl'
+    )) {
+        $resolved = Resolve-SafeMediaRelativePath -RootPath $ExtractedMediaPath -RelativePath $relative
+        $before = Get-SetupBinaryFileEvidence -Path $resolved.FullPath
+        if (-not $before.Present -and $relative -notlike '*boot.stl') { continue }
+        $records.Add([pscustomobject][ordered]@{
+            RelativePath = $resolved.RelativePath
+            BeforePresent = [bool]$before.Present
+            BeforeSizeBytes = $before.SizeBytes
+            BeforeSha256 = $before.Sha256
+        }) | Out-Null
+    }
+    return [pscustomobject][ordered]@{
+        SchemaVersion = 'p10-media-write-snapshot/1.0'
+        GeneratedAtUtc = [datetime]::UtcNow.ToString('o')
+        ExtractedMediaPath = $ExtractedMediaPath
+        Records = $records.ToArray()
+    }
+}
+
+function New-P10MediaWriteSetEvidence {
+    <#
+    .SYNOPSIS
+        Records the explicit P10 last-writer set used by P11.
+    .DESCRIPTION
+        Byte changes to the firmware boot manager and root bootmgr.efi are
+        attributed to the PCA2023 conversion. boot.stl is always attributed
+        to the separately verified P10 boot.stl synchronization transaction.
+        Paths not changed by P10 explicitly retain P09 as their authority.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$ExtractedMediaPath,
+        [Parameter(Mandatory)]$BeforeSnapshot,
+        [Parameter(Mandatory)]$BootStlSyncEvidence
+    )
+
+    $result = [pscustomobject][ordered]@{
+        SchemaVersion = 'p10-media-write-set/1.0'
+        GeneratedAtUtc = [datetime]::UtcNow.ToString('o')
+        Success = $false
+        ErrorMessage = ''
+        RecordCount = 0
+        OverrideCount = 0
+        FailureCount = 0
+        Records = @()
+    }
+    $rows = [System.Collections.Generic.List[object]]::new()
+    try {
+        if (-not $BeforeSnapshot -or [string]$BeforeSnapshot.SchemaVersion -ne 'p10-media-write-snapshot/1.0') {
+            throw 'P10 pre-write snapshot is missing or has an unsupported schema.'
+        }
+        if (-not $BootStlSyncEvidence -or [string]$BootStlSyncEvidence.SchemaVersion -ne 'pca2023-boot-stl-sync/1.0' -or
+            -not $BootStlSyncEvidence.Success -or -not $BootStlSyncEvidence.MatchesSource) {
+            throw 'P10 boot.stl synchronization evidence is missing or unsuccessful.'
+        }
+
+        $seen = @{}
+        foreach ($beforeRecord in @($BeforeSnapshot.Records)) {
+            $resolved = Resolve-SafeMediaRelativePath -RootPath $ExtractedMediaPath -RelativePath ([string]$beforeRecord.RelativePath)
+            $key = $resolved.RelativePath.ToLowerInvariant()
+            if ($seen.ContainsKey($key)) { throw ('Duplicate P10 pre-write path: {0}' -f $resolved.RelativePath) }
+            $seen[$key] = $true
+            $after = Get-SetupBinaryFileEvidence -Path $resolved.FullPath
+            $beforeHash = ([string]$beforeRecord.BeforeSha256).ToLowerInvariant()
+            $afterHash = ([string]$after.Sha256).ToLowerInvariant()
+            $changed = [bool](
+                [bool]$beforeRecord.BeforePresent -ne [bool]$after.Present -or
+                [int64]$(if($null -eq $beforeRecord.BeforeSizeBytes){-1}else{$beforeRecord.BeforeSizeBytes}) -ne [int64]$(if($null -eq $after.SizeBytes){-1}else{$after.SizeBytes}) -or
+                $beforeHash -ne $afterHash
+            )
+            $isBootStl = $key -eq 'efi\microsoft\boot\boot.stl'
+            $authority = if ($isBootStl) { 'P10BootStlSync' } elseif ($changed) { 'P10Pca2023Overlay' } else { 'P09WinPeSyncRetained' }
+            $failure = ''
+            if (-not $after.Present -or $afterHash -notmatch '^[0-9a-f]{64}$') {
+                $failure = 'P10 tracked destination is missing or has no valid SHA-256.'
+            } elseif ($isBootStl) {
+                $sourceHash = ([string]$BootStlSyncEvidence.SourceSha256).ToLowerInvariant()
+                $destinationHash = ([string]$BootStlSyncEvidence.DestinationSha256After).ToLowerInvariant()
+                if ($sourceHash -notmatch '^[0-9a-f]{64}$' -or $destinationHash -ne $sourceHash -or $afterHash -ne $sourceHash) {
+                    $failure = 'P10 boot.stl destination does not match its serviced-image source evidence.'
+                }
+            }
+            $matches = [string]::IsNullOrWhiteSpace($failure)
+            if (-not $matches) { $result.FailureCount++ }
+            if ($authority -ne 'P09WinPeSyncRetained') { $result.OverrideCount++ }
+            $rows.Add([pscustomobject][ordered]@{
+                RelativePath = $resolved.RelativePath
+                FinalAuthority = $authority
+                BeforePresent = [bool]$beforeRecord.BeforePresent
+                BeforeSizeBytes = $beforeRecord.BeforeSizeBytes
+                BeforeSha256 = $beforeHash
+                AfterPresent = [bool]$after.Present
+                AfterSizeBytes = $after.SizeBytes
+                AfterSha256 = $afterHash
+                ExpectedSizeBytes = $after.SizeBytes
+                ExpectedSha256 = $afterHash
+                Changed = $changed
+                MatchesExpected = $matches
+                Status = $(if($matches){'Pass'}else{'Fail'})
+                FailureReason = $failure
+            }) | Out-Null
+        }
+        $result.Records = $rows.ToArray()
+        $result.RecordCount = $result.Records.Count
+        if (@($result.Records | Where-Object { $_.RelativePath -match '^EFI\\Boot\\boot(x64|aa64)\.efi$' }).Count -ne 1) {
+            throw 'P10 write-set evidence must contain exactly one firmware boot-manager path.'
+        }
+        if (@($result.Records | Where-Object { $_.RelativePath -ieq 'EFI\Microsoft\Boot\boot.stl' }).Count -ne 1) {
+            throw 'P10 write-set evidence must contain boot.stl.'
+        }
+        if ($result.FailureCount -gt 0) { throw ('{0} P10 write-set record(s) failed.' -f $result.FailureCount) }
+        $result.Success = $true
+    } catch {
+        $result.ErrorMessage = [string]$_.Exception.Message
+        $result.Records = $rows.ToArray()
+        $result.RecordCount = $result.Records.Count
+        if ($result.FailureCount -eq 0) { $result.FailureCount = 1 }
+    }
+    return $result
+}
+
 function Test-FinalWinPeMediaIdentity {
     <#
     .SYNOPSIS
-        Proves that every file covered by the P09 Microsoft WinPE-to-media
-        synchronization contract is byte-identical in the final ISO.
-
-    .DESCRIPTION
-        P10 intentionally overlays two paths after P09:
-          * EFI\Boot\bootx64.efi
-          * root bootmgr.efi, when bootmgr_EX.efi exists
-        For those paths the post-P10 extracted-media copy is the expected
-        authority. All other files retain the boot.wim index 2 authority
-        recorded in P09_winpe_media_sync.json.
+        Proves that every P09 WinPE-to-media record remains byte-identical in
+        the final ISO, except where explicit successful P10 write evidence
+        establishes a later authority.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)] [string]$MountedIsoRoot,
         [Parameter(Mandatory)] [string]$ExtractedMediaPath,
-        [Parameter(Mandatory)] [string]$SyncEvidencePath
+        [Parameter(Mandatory)] [string]$SyncEvidencePath,
+        [string]$P10WriteEvidencePath = '',
+        [switch]$RequireP10WriteEvidence
     )
 
     $result = [pscustomobject][ordered]@{
-        SchemaVersion = 'winpe-media-final-identity/1.0'
+        SchemaVersion = 'winpe-media-final-identity/1.1'
         GeneratedAtUtc = [datetime]::UtcNow.ToString('o')
         Available = $false
         Status = 'Fail'
         ErrorMessage = $null
         SyncEvidencePath = $SyncEvidencePath
         SyncEvidenceSha256 = (Get-FileSha256OrEmpty -Path $SyncEvidencePath)
+        P10WriteEvidencePath = $P10WriteEvidencePath
+        P10WriteEvidenceSha256 = (Get-FileSha256OrEmpty -Path $P10WriteEvidencePath)
         RecordCount = 0
+        P10OverrideCount = 0
         FailureCount = 0
         MatchesExpected = $false
         Records = @()
@@ -21454,34 +21648,75 @@ function Test-FinalWinPeMediaIdentity {
         if (-not ($sync.PSObject.Properties['Success'] -and $sync.Success)) {
             throw ('P09 WinPE media synchronization evidence is not successful: {0}' -f $sync.ErrorMessage)
         }
+
+        $p10ByPath = @{}
+        $p10Evidence = $null
+        if (-not [string]::IsNullOrWhiteSpace($P10WriteEvidencePath) -and (Test-Path -LiteralPath $P10WriteEvidencePath -PathType Leaf)) {
+            $p10Evidence = Read-ReleaseJsonFile -Path $P10WriteEvidencePath
+            if (-not $p10Evidence -or [string]$p10Evidence.SchemaVersion -ne 'p10-media-write-set/1.0') {
+                throw 'P10 media write-set evidence is unreadable or has an unsupported schema.'
+            }
+            if (-not ($p10Evidence.PSObject.Properties['Success'] -and $p10Evidence.Success)) {
+                throw ('P10 media write-set evidence is not successful: {0}' -f $p10Evidence.ErrorMessage)
+            }
+            foreach ($p10Record in @($p10Evidence.Records)) {
+                $resolvedP10 = Resolve-SafeMediaRelativePath -RootPath $ExtractedMediaPath -RelativePath ([string]$p10Record.RelativePath)
+                $key = $resolvedP10.RelativePath.ToLowerInvariant()
+                if ($p10ByPath.ContainsKey($key)) { throw ('Duplicate P10 write-set record: {0}' -f $resolvedP10.RelativePath) }
+                $authority = [string]$p10Record.FinalAuthority
+                if ($authority -eq 'P09WinPeSyncRetained') { continue }
+                if ($authority -notin @('P10Pca2023Overlay','P10BootStlSync')) {
+                    throw ('Unsupported P10 final authority for {0}: {1}' -f $resolvedP10.RelativePath,$authority)
+                }
+                $expectedHash = ([string]$p10Record.ExpectedSha256).ToLowerInvariant()
+                if (-not $p10Record.MatchesExpected -or $expectedHash -notmatch '^[0-9a-f]{64}$') {
+                    throw ('Invalid P10 write-set identity record: {0}' -f $resolvedP10.RelativePath)
+                }
+                $current = Get-SetupBinaryFileEvidence -Path $resolvedP10.FullPath
+                if (-not $current.Present -or [string]$current.Sha256 -ne $expectedHash -or [int64]$current.SizeBytes -ne [int64]$p10Record.ExpectedSizeBytes) {
+                    throw ('P10 write-set evidence is stale or does not match the extracted media: {0}' -f $resolvedP10.RelativePath)
+                }
+                $p10ByPath[$key] = [pscustomobject]@{
+                    Record = $p10Record
+                    Resolved = $resolvedP10
+                    Consumed = $false
+                }
+            }
+        } elseif ($RequireP10WriteEvidence) {
+            throw ('P10 completed, but its media write-set evidence is missing: {0}' -f $P10WriteEvidencePath)
+        }
+
+        $seenP09 = @{}
         foreach ($record in @($sync.Records)) {
-            $relative = [string]$record.RelativePath
+            $resolved = Resolve-SafeMediaRelativePath -RootPath $MountedIsoRoot -RelativePath ([string]$record.RelativePath)
+            $key = $resolved.RelativePath.ToLowerInvariant()
+            if ($seenP09.ContainsKey($key)) { throw ('Duplicate P09 media synchronization record: {0}' -f $resolved.RelativePath) }
+            $seenP09[$key] = $true
             $expectedPath = [string]$record.SourcePath
             $expectedRole = [string]$record.SourceRole
             $expectedSize = [int64]$record.SourceSizeBytes
             $expectedHash = ([string]$record.SourceSha256).ToLowerInvariant()
-            $normalized = $relative.Replace('/','\').TrimStart('\')
-            if ($normalized -ieq 'EFI\Boot\bootx64.efi' -or $normalized -ieq 'bootmgr.efi') {
-                $postOverlay = Join-Path $ExtractedMediaPath $normalized
-                $postEvidence = Get-SetupBinaryFileEvidence -Path $postOverlay
-                if (-not $postEvidence.Present) {
-                    throw ('Post-P10 authoritative media path is missing: {0}' -f $postOverlay)
-                }
-                $expectedPath = $postEvidence.Path
-                $expectedRole = 'post-P10 extracted-media overlay'
-                $expectedSize = [int64]$postEvidence.SizeBytes
-                $expectedHash = ([string]$postEvidence.Sha256).ToLowerInvariant()
+            if ($expectedHash -notmatch '^[0-9a-f]{64}$' -or $expectedSize -lt 0) {
+                throw ('Invalid P09 source identity record: {0}' -f $resolved.RelativePath)
+            }
+            if ($p10ByPath.ContainsKey($key)) {
+                $binding = $p10ByPath[$key]
+                $binding.Consumed = $true
+                $expectedPath = $binding.Resolved.FullPath
+                $expectedRole = [string]$binding.Record.FinalAuthority
+                $expectedSize = [int64]$binding.Record.ExpectedSizeBytes
+                $expectedHash = ([string]$binding.Record.ExpectedSha256).ToLowerInvariant()
+                $result.P10OverrideCount++
             }
 
-            $observedPath = Join-Path $MountedIsoRoot $normalized
-            $observed = Get-SetupBinaryFileEvidence -Path $observedPath
+            $observed = Get-SetupBinaryFileEvidence -Path $resolved.FullPath
             $match = [bool](
                 $observed.Present -and
                 [int64]$observed.SizeBytes -eq $expectedSize -and
                 [string]$observed.Sha256 -eq [string]$expectedHash
             )
             $rows.Add([pscustomobject][ordered]@{
-                RelativePath = $relative
+                RelativePath = $resolved.RelativePath
                 Category = [string]$record.Category
                 ExpectedRole = $expectedRole
                 ExpectedPath = $expectedPath
@@ -21495,6 +21730,11 @@ function Test-FinalWinPeMediaIdentity {
                 Status = $(if($match){'Pass'}else{'Fail'})
             }) | Out-Null
         }
+        $unconsumed = @($p10ByPath.GetEnumerator() | Where-Object { -not $_.Value.Consumed })
+        if ($unconsumed.Count -gt 0) {
+            throw ('P10 write-set contains {0} override path(s) absent from the P09 contract: {1}' -f $unconsumed.Count, (($unconsumed | ForEach-Object { $_.Value.Resolved.RelativePath }) -join ', '))
+        }
+
         $result.Records = $rows.ToArray()
         $result.RecordCount = $result.Records.Count
         $result.FailureCount = @($result.Records | Where-Object { -not $_.MatchesExpected }).Count
@@ -21512,6 +21752,7 @@ function Test-FinalWinPeMediaIdentity {
         $result.Records = $rows.ToArray()
         $result.RecordCount = $result.Records.Count
         $result.FailureCount = @($result.Records | Where-Object { -not $_.MatchesExpected }).Count
+        if ($result.FailureCount -eq 0) { $result.FailureCount = 1 }
     }
     return $result
 }
@@ -21539,7 +21780,7 @@ function Test-SetupDuFinalMediaManifest {
     )
 
     $result = [pscustomobject][ordered]@{
-        SchemaVersion = 'setupdu-final-media-identity/1.0'
+        SchemaVersion = 'setupdu-final-media-identity/1.1'
         GeneratedAtUtc = [datetime]::UtcNow.ToString('o')
         Status = 'Fail'
         ErrorMessage = ''
@@ -21558,26 +21799,47 @@ function Test-SetupDuFinalMediaManifest {
         }
 
         $syncByPath = @{}
-        if ($WinPeSyncEvidence -and $WinPeSyncEvidence.PSObject.Properties['Records']) {
+        if ($WinPeSyncEvidence) {
+            if ([string]$WinPeSyncEvidence.SchemaVersion -ne 'winpe-media-final-sync/1.0') {
+                throw ('Unsupported P09 WinPE media synchronization schema for Setup DU verification: {0}' -f $WinPeSyncEvidence.SchemaVersion)
+            }
+            if (-not ($WinPeSyncEvidence.PSObject.Properties['Success'] -and $WinPeSyncEvidence.Success)) {
+                throw ('P09 WinPE media synchronization evidence is not successful: {0}' -f $WinPeSyncEvidence.ErrorMessage)
+            }
+            if (-not $WinPeSyncEvidence.PSObject.Properties['Records']) {
+                throw 'P09 WinPE media synchronization evidence has no Records.'
+            }
             foreach ($syncRecord in @($WinPeSyncEvidence.Records)) {
                 $category = if ($syncRecord.PSObject.Properties['Category']) { [string]$syncRecord.Category } else { '' }
-                $success = [bool]($syncRecord.PSObject.Properties['Success'] -and $syncRecord.Success)
-                $matchesSource = [bool]($syncRecord.PSObject.Properties['MatchesSource'] -and $syncRecord.MatchesSource)
-                if ($category -ne 'SetupBinary' -or -not $success -or -not $matchesSource) { continue }
-                $key = ([string]$syncRecord.RelativePath).Replace('/','\').TrimStart('\').ToLowerInvariant()
-                if ([string]::IsNullOrWhiteSpace($key)) { continue }
+                if ($category -ne 'SetupBinary') { continue }
+                $resolvedSync = Resolve-SafeMediaRelativePath -RootPath $MountedIsoRoot -RelativePath ([string]$syncRecord.RelativePath)
+                $key = $resolvedSync.RelativePath.ToLowerInvariant()
                 if ($syncByPath.ContainsKey($key)) {
-                    throw ('Duplicate successful P09 SetupBinary authority record: {0}' -f $key)
+                    throw ('Duplicate P09 SetupBinary authority record: {0}' -f $resolvedSync.RelativePath)
                 }
+                $sourceHash = ([string]$syncRecord.SourceSha256).ToLowerInvariant()
+                $afterHash = ([string]$syncRecord.AfterSha256).ToLowerInvariant()
+                $valid = [bool](
+                    $syncRecord.Success -and $syncRecord.MatchesSource -and
+                    $sourceHash -match '^[0-9a-f]{64}$' -and
+                    $afterHash -eq $sourceHash -and
+                    [int64]$syncRecord.AfterSizeBytes -eq [int64]$syncRecord.SourceSizeBytes
+                )
+                if (-not $valid) { throw ('Invalid P09 SetupBinary authority record: {0}' -f $resolvedSync.RelativePath) }
                 $syncByPath[$key] = $syncRecord
             }
         }
 
+        $manifestSeen = @{}
         foreach ($manifestRecord in @($SetupManifest.Records)) {
-            $relative = ([string]$manifestRecord.RelativePath).Replace('/','\').TrimStart('\')
-            $mediaRelative = ('sources\' + $relative).Replace('/','\').TrimStart('\')
-            $platformRelative = $mediaRelative.Replace('\',[System.IO.Path]::DirectorySeparatorChar).Replace('/',[System.IO.Path]::DirectorySeparatorChar)
-            $observedPath = Join-Path $MountedIsoRoot $platformRelative
+            $relativeResolved = Resolve-SafeMediaRelativePath -RootPath (Join-Path $MountedIsoRoot 'sources') -RelativePath ([string]$manifestRecord.RelativePath)
+            $relative = $relativeResolved.RelativePath
+            $mediaResolved = Resolve-SafeMediaRelativePath -RootPath $MountedIsoRoot -RelativePath ('sources\' + $relative)
+            $mediaRelative = $mediaResolved.RelativePath
+            $observedPath = $mediaResolved.FullPath
+            $manifestKey = $mediaRelative.ToLowerInvariant()
+            if ($manifestSeen.ContainsKey($manifestKey)) { throw ('Duplicate Setup DU manifest record: {0}' -f $mediaRelative) }
+            $manifestSeen[$manifestKey] = $true
             $observedPresent = Test-Path -LiteralPath $observedPath -PathType Leaf
             $observedHash = if ($observedPresent) { (Get-FileHash -LiteralPath $observedPath -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' }
             $syncKey = $mediaRelative.ToLowerInvariant()
@@ -21975,6 +22237,12 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
             Write-Step ('Pre-flight OK: Health={0}. Proceeding with PCA2023 payload conversion.' -f $pre.Health)
         }
 
+        # Capture the P09-final bytes before any P10 writer runs. P11 may
+        # accept a later authority only when the matching post-write evidence
+        # proves exactly which tracked path changed.
+        $p10BeforeSnapshot = Get-P10MediaWriteSnapshot -ExtractedMediaPath $extractedPath
+        Save-CanonicalJsonFile -InputObject $p10BeforeSnapshot -Path (Join-Path $Script:LogsDir 'P10_media_write_snapshot_before.json') -Depth 12
+
         # ---- Step 3: Run the conversion ----
         Write-SubSection 'Step 3: Convert boot manager to PCA2023 signing'
         Set-DebugStep -Step 'conversion'
@@ -22052,6 +22320,17 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
         Write-Step ('boot.stl synchronized: source={0} index={1}; changed={2}; size={3}; sha256={4}' -f `
             $bootStlSync.SourceWim, $bootStlSync.SourceIndex, $bootStlSync.Changed, `
             $bootStlSync.SourceSizeBytes, $bootStlSync.SourceSha256)
+
+        $p10WriteSet = New-P10MediaWriteSetEvidence `
+            -ExtractedMediaPath $extractedPath `
+            -BeforeSnapshot $p10BeforeSnapshot `
+            -BootStlSyncEvidence $bootStlSync
+        $p10WriteSetPath = Join-Path $Script:LogsDir 'P10_media_write_set.json'
+        Save-CanonicalJsonFile -InputObject $p10WriteSet -Path $p10WriteSetPath -Depth 16
+        if (-not $p10WriteSet.Success) {
+            throw ('P10 media write-set evidence failed: {0}' -f $p10WriteSet.ErrorMessage)
+        }
+        Write-Step ('P10 final-writer evidence: tracked={0}; overrides={1}; path={2}' -f $p10WriteSet.RecordCount,$p10WriteSet.OverrideCount,$p10WriteSetPath)
 
         $mediaRequiresRebuild = [bool](
             -not $loosePca2023AlreadyHealthy -or
@@ -22782,13 +23061,17 @@ function Invoke-VerifyPhase11_StaticVerify {
                 $winPeMediaIdentityRowAdded = $true
             } else {
                 $p09MediaSyncEvidencePath = Join-Path $Script:LogsDir 'P09_winpe_media_sync.json'
+                $p10MediaWriteEvidencePath = Join-Path $Script:LogsDir 'P10_media_write_set.json'
+                $p10Completed = Test-Path -LiteralPath (Join-Path $Script:MarkersDir 'P10.ok') -PathType Leaf
                 $winPeMediaIdentity = Test-FinalWinPeMediaIdentity `
                     -MountedIsoRoot $mountedDrive `
                     -ExtractedMediaPath $Script:ExtractedDir `
-                    -SyncEvidencePath $p09MediaSyncEvidencePath
+                    -SyncEvidencePath $p09MediaSyncEvidencePath `
+                    -P10WriteEvidencePath $p10MediaWriteEvidencePath `
+                    -RequireP10WriteEvidence:$p10Completed
                 Save-CanonicalJsonFile -InputObject $winPeMediaIdentity -Path $winPeMediaIdentityEvidencePath -Depth 16
                 Add-VRow -Check 'WinPeMediaIdentity' `
-                    -Expected 'all P09 Setup/boot-manager/boot.stl records match the final ISO, with P10 _EX overlays applied only to their defined paths' `
+                    -Expected 'all P09 Setup/boot-manager/boot.stl records match the final ISO, with only explicitly evidenced P10 last-writer overrides' `
                     -Actual ('records={0}; failures={1}' -f $winPeMediaIdentity.RecordCount,$winPeMediaIdentity.FailureCount) `
                     -Status $(if($winPeMediaIdentity.MatchesExpected){'Pass'}else{'Fail'}) `
                     -Notes $(if($winPeMediaIdentity.MatchesExpected){'Final ISO satisfies the Microsoft WinPE-to-media synchronization contract.'}else{$winPeMediaIdentity.ErrorMessage})
@@ -23017,7 +23300,7 @@ function Invoke-VerifyPhase11_StaticVerify {
         if (-not $winPeMediaIdentityRowAdded) {
             Add-VRow -Check 'WinPeMediaIdentity' -Expected 'final ISO mounted and complete WinPE media contract verified' -Actual 'ISO mount unavailable' -Status 'Fail' -Notes 'The final ISO could not be mounted for WinPE media identity verification.'
             $winPeMediaIdentity = [pscustomobject][ordered]@{
-                SchemaVersion = 'winpe-media-final-identity/1.0'
+                SchemaVersion = 'winpe-media-final-identity/1.1'
                 GeneratedAtUtc = [datetime]::UtcNow.ToString('o')
                 Available = $false
                 Status = 'Fail'
@@ -24851,6 +25134,12 @@ function Get-ResumeCriticalEvidenceRelativePaths {
         'logs\resolved_patch_manifest.json',
         'logs\setupdu_overlay_manifest.json',
         'logs\P09_setupdu_language_cleanup.json',
+        'logs\P09_winpe_media_sync.json',
+        'logs\P10_boot_stl_sync.json',
+        'logs\P10_media_write_snapshot_before.json',
+        'logs\P10_media_write_set.json',
+        'logs\P11_setupdu_final_identity.json',
+        'logs\P11_winpe_media_identity.json',
         'logs\P11_verification.csv',
         'logs\P11_static_verification.json',
         'logs\inspection_post.json',

@@ -22,6 +22,51 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.05-r12.72] - 2026-08-07
+
+Tag retained: `post-install-evidence-collector-r9-merge`.
+
+### Changed
+
+- **Final-writer authority is hardened horizontally**: the r12.58+
+  lesson (the file firmware actually consumes must be proven, not
+  inferred) is applied across the final-media pipeline. P08S plans
+  `setup.exe` AND `setuphost.exe` for every supported OS (the sync
+  SET is build-independent; the 26100 threshold now lives in the
+  REQUIREMENT — a missing `setuphost.exe` throws on 26100+ and is
+  tolerated below only when genuinely absent from `boot.wim` index
+  2), P09 explicitly creates and verifies the required standard
+  boot-manager targets, P10 emits an identity-bound media
+  write-set (`Get-P10MediaWriteSnapshot` /
+  `New-P10MediaWriteSetEvidence` with safe relative-path
+  resolution), and P11 accepts later P10 bytes only through that
+  successful evidence. Setup DU final verification validates
+  schema, path safety, uniqueness, and source/after hash-size
+  binding. The collector is unchanged (r9, schema 1.7).
+  Script-only change (+289 lines net); `data/*` and `schema/*` are
+  byte-identical to r12.71.
+
+### Tests
+
+- **T39-style pin relocation on T40** (reserved at the session-7
+  terminal evaluation; verified green at the r12.72 frame and
+  re-verified at the r12.75 terminal frame, 17/17): the
+  "26100+ only" plan pin and the "unknown build → setup.exe only"
+  pin are replaced by the measured successor surface — every build
+  (including unknown) plans both files, and a NEW row pins the
+  relocated threshold (`SetupHostRequired` at 10.0.26100.0 with the
+  required-but-missing failure text).
+- **T40**: release pin advanced to `update-wsi-2026.08.05-r12.72`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 6E/228W/27I (raw sweep
+  6E/229W/27I: +1W is the PSA7002 LF artefact; +8W on the new
+  evidence code, declared series debt). Snapshot form: BOM + LF
+  (main script); committed checkout form BOM+CRLF.
+
 ## [update-wsi-2026.08.05-r12.71] - 2026-08-07
 
 Tag retained: `post-install-evidence-collector-r9-merge`.

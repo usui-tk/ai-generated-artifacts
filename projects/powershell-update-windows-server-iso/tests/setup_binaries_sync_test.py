@@ -60,12 +60,20 @@ def main() -> int:
 
     with PSSession(SCRIPT_PATH) as ps:
         print("=== 1. Get-SetupBinarySyncPlan build gates ===")
+        # r12.72 T39 revision: the sync SET became build-independent BY
+        # DESIGN — Microsoft final media Dynamic Update copies setup.exe
+        # AND setuphost.exe from serviced WinPE for every supported OS;
+        # the 26100 threshold moved from the plan to the REQUIREMENT
+        # (SetupHostRequired: missing setuphost.exe throws on 26100+,
+        # tolerated below when genuinely absent from boot.wim index 2).
+        # Pins re-derived from the measured r12.72 surface and verified
+        # byte-identical at the r12.75 terminal frame.
         cases = [
             (26100, ["setup.exe", "setuphost.exe"]),
             (27000, ["setup.exe", "setuphost.exe"]),
-            (20348, ["setup.exe"]),
-            (17763, ["setup.exe"]),
-            (14393, ["setup.exe"]),
+            (20348, ["setup.exe", "setuphost.exe"]),
+            (17763, ["setup.exe", "setuphost.exe"]),
+            (14393, ["setup.exe", "setuphost.exe"]),
         ]
         ok = True
         detail = ""
@@ -77,12 +85,18 @@ def main() -> int:
                 detail = f"build {build}: {files!r} != {expect!r}"
                 break
         passed, failed = check(
-            "setuphost.exe joins the plan at 26100+ only", ok, detail, passed, failed)
+            "every build plans setup.exe + setuphost.exe (build-independent set)",
+            ok, detail, passed, failed)
+        passed, failed = check(
+            "the 26100 threshold lives in SetupHostRequired, and a required-but-missing setuphost fails",
+            "$result.SetupHostRequired = [bool]($imageVersion -ge [version]'10.0.26100.0')" in code
+            and "requires sources\\setuphost.exe, but it is missing." in code,
+            "requirement gate pinned", passed, failed)
         plan = ps.invoke("Get-SetupBinarySyncPlan", BuildNumber=None)
         files = plan["Files"] if isinstance(plan["Files"], list) else [plan["Files"]]
         passed, failed = check(
-            "unknown build -> setup.exe only, with a stated reason",
-            files == ["setup.exe"] and "unknown" in str(plan["Reason"]),
+            "unknown build -> both files planned, with a stated reason",
+            files == ["setup.exe", "setuphost.exe"] and "unknown" in str(plan["Reason"]),
             f"got={plan!r}", passed, failed)
 
         print("=== 2. Get-SetupBinaryFileEvidence ===")
@@ -182,8 +196,8 @@ def main() -> int:
         "SetupBinarySync_" in code and "-Actual 'MISMATCH' -Status 'Fail'" in code,
         "P11 pin failed", passed, failed)
     passed, failed = check(
-        "version bumped to r12.71 (tag retained: post-install-evidence-collector-r9-merge)",
-        "update-wsi-2026.08.05-r12.71" in code and "'post-install-evidence-collector-r9-merge'" in code,
+        "version bumped to r12.72 (tag retained: post-install-evidence-collector-r9-merge)",
+        "update-wsi-2026.08.05-r12.72" in code and "'post-install-evidence-collector-r9-merge'" in code,
         "bump pin failed", passed, failed)
 
     print(f"\n  Summary: {passed} passed, {failed} failed, {passed + failed} total")
