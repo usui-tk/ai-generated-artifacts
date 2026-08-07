@@ -339,6 +339,44 @@ the script and follows the
   the refactoring plan begins only after those items complete, per
   the standing work order.
 
+### Fixed
+
+- **P14 BootTest answer-ISO oscdimg resolution** (PSA error-debt
+  drain, batch 1): the Hyper-V answer-ISO creation step called
+  `Resolve-OscdimgPath`, a function that has never existed in any
+  revision — the call was authored dangling at r12.04 and survived to
+  the series terminal because the path is only reached by
+  `-Action BootTest` on a Windows/Hyper-V host, outside the
+  real-environment validation runs. When reached it raised
+  CommandNotFoundException before the site's own guard could fire.
+  Corrected to the plain `Resolve-OscdimgExe` form (the P01 preflight
+  pattern): the answer ISO is data-only, so the
+  T49-pinned functional-qualification form (which needs BIOS/EFI boot
+  images) does not apply; the resolver returns the selected path and
+  throws with full candidate reasons on failure, so the retained
+  null-guard is defensive only. ScriptVersion
+  `update-wsi-2026.08.08-r12.76`, tag `psa-error-debt-drain`; the T40
+  release pin advances in the same change set.
+
+### Static analysis
+
+- **PSA error debt drained to zero on both deliverables** (batch 1 of
+  the standing consolidation drain). Main script: the undefined
+  `$osversion` finding (PSA2001) is resolved by referencing the
+  script parameter explicitly as `$Script:OsVersion` in the debug
+  trace header (behavior-preserving clarification of the dynamic-scope
+  read); the four PSA2012 findings on `Save-CanonicalJsonFile` call
+  sites are measured analyzer false positives — every site passes
+  `-Path` and `-Depth` after the multi-line `-InputObject` argument —
+  and carry line-local `# psa-disable-line` justifications per the
+  suppression policy. Collector: the PSA2010 finding on
+  `Get-WindowsFeature` (a ServerManager in-box cmdlet used by the
+  role/feature census) is resolved by adding it to
+  `psa2010_known_cmdlets` in `.psa.config.json` with the module noted
+  in the config rationale — no code change. Declared debt is now
+  main 0E/229W/27I and collector 0E/13W/44I; the warning/info drain
+  continues in subsequent reviewed batches.
+
 ## [update-wsi-2026.08.07-r12.75] - 2026-08-07
 
 Tag retained: `post-install-evidence-collector-r9-merge`.

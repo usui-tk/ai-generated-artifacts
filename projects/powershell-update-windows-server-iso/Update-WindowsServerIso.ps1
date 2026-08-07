@@ -718,7 +718,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.07-r12.75'
+$Script:ScriptVersion = 'update-wsi-2026.08.08-r12.76'
 # Validation marker: r12.75 retains the r12.72 ISO servicing pipeline unchanged and hardens only Collector r12/schema 1.10 Secure Boot evidence semantics: current/latest rollout state is authoritative, historical event 1808 cannot override newer state, WinCS is deployment-configuration evidence only, and WindowsUEFICA2023Capable/Authenticode signer observations are explicitly scoped diagnostics.
 # Validation marker: r12.72 horizontally hardens final-writer authority. P08S plans setup.exe and setuphost.exe for every supported OS, P09 explicitly creates/verifies required standard boot-manager targets, P10 emits an identity-bound media write-set, and P11 accepts later P10 bytes only through that successful evidence. Setup DU final verification now validates schema, path safety, uniqueness, and source/after hash-size binding. Collector r9/schema 1.7 remains unchanged.
 # Validation marker: r12.71 fixes the four-OS clean-E2E failures observed on Server 2019 and Server 2022. P11 now verifies Setup DU records against the authoritative final P09 WinPE setup-binary synchronization, and reviewed pinned Catalog identity accepts an exact digest-bearing configured filename as the SHA-1 binding while remaining fail-closed on UpdateId, filename, architecture, metadata and review-basis checks. Collector r9/schema 1.7 remains unchanged.
@@ -732,7 +732,7 @@ $Script:ScriptVersion = 'update-wsi-2026.08.07-r12.75'
 # r12.58 selected efisys_ex.bin correctly but its verification parser bound Math.Min to Int32 on an 8.91-GiB ISO and returned a false failure.
 # r12.57 proved only loose-file presence/signatures and could therefore accept a non-bootable mixed PCA2011/PCA2023 ISO.
 # Validation marker retained: r12.55 Setup DU baseline-language preservation and P11 no-new-locale verification.
-$Script:ScriptTag     = 'post-install-evidence-collector-r9-merge'
+$Script:ScriptTag     = 'psa-error-debt-drain'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -1459,7 +1459,7 @@ function Enable-DebugTraceFileOutput {
             scriptVer      = $Script:ScriptVersion
             scriptSha      = $Script:ScriptHash
             action         = [string]$Action
-            osKey          = [string]$OsVersion
+            osKey          = [string]$Script:OsVersion
             osLanguage     = [string]$OsLanguage
             transcriptPath = [string]$Script:LogFile
             procId         = $PID
@@ -14217,7 +14217,7 @@ function Write-SetupDuFileDecisionEvidence {
     Initialize-RuntimeDirectories -Directory @($Script:VersionDecisionDir)
     $jsonPath=Join-Path $Script:VersionDecisionDir 'P09_setupdu_file_decisions.json'
     $csvPath=Join-Path $Script:VersionDecisionDir 'P09_setupdu_file_decisions.csv'
-    Save-CanonicalJsonFile -InputObject ([pscustomobject][ordered]@{
+    Save-CanonicalJsonFile -InputObject ([pscustomobject][ordered]@{ # psa-disable-line PSA2012 -- -Path and -Depth are passed after the multi-line -InputObject argument; false positive
         SchemaVersion='setupdu-file-decision-set/1.2'
         CreatedAtUtc=[datetime]::UtcNow.ToString('o')
         OsKey=[string]$Script:OsVersion
@@ -14299,7 +14299,7 @@ function Invoke-SetupDuVersionAwareOverlay {
     }
     $failed=@($records|Where-Object{-not $_.MatchAfter})
     $overlayPath=Join-Path $Script:LogsDir 'setupdu_overlay_manifest.json'
-    Save-CanonicalJsonFile -InputObject ([pscustomobject][ordered]@{
+    Save-CanonicalJsonFile -InputObject ([pscustomobject][ordered]@{ # psa-disable-line PSA2012 -- -Path and -Depth are passed after the multi-line -InputObject argument; false positive
         SchemaVersion='setupdu-overlay/2.3';CreatedAtUtc=[datetime]::UtcNow.ToString('o');OsKey=[string]$Script:OsVersion;KbId=$KbId
         Policy=$policy;PackageAuthority=$packageAuthority;LanguageCleanup=$languageCleanup;DecisionEvidence=$evidence;Records=$records.ToArray()
     }) -Path $overlayPath -Depth 12
@@ -18281,7 +18281,7 @@ function Invoke-SetupPhase01_Initialize {
                         New-Item -ItemType Directory -Path $failureDir -Force | Out-Null
                     }
                     $failurePath = Join-Path $failureDir 'oscdimg-resolution-failure.json'
-                    Save-CanonicalJsonFile -InputObject ([pscustomobject][ordered]@{
+                    Save-CanonicalJsonFile -InputObject ([pscustomobject][ordered]@{ # psa-disable-line PSA2012 -- -Path and -Depth are passed after the multi-line -InputObject argument; false positive
                         SchemaVersion = 'oscdimg-resolution-failure/1.0'
                         GeneratedAtUtc = [datetime]::UtcNow.ToString('o')
                         ScriptVersion = [string]$Script:ScriptVersion
@@ -26508,7 +26508,7 @@ function Invoke-VerifyPhase14_HyperVValidation {
             $approval = Test-BootEvidenceApproval -ApprovalPath $approvalPath -EvidencePath $path -Identity $identity
             if (-not $approval.Valid) { throw ('Boot evidence approval rejected: {0}' -f $approval.Reason) }
             $approvalEvidencePath = Join-Path $Script:LogsDir 'P14_boot_evidence_approval.json'
-            Save-CanonicalJsonFile -InputObject ([pscustomobject][ordered]@{
+            Save-CanonicalJsonFile -InputObject ([pscustomobject][ordered]@{ # psa-disable-line PSA2012 -- -Path and -Depth are passed after the multi-line -InputObject argument; false positive
                 SchemaVersion='P14-boot-approval/1.0'; Identity=$identity
                 Approval=$approval.Approval; ApprovedEvidencePath=$path
                 ApprovedEvidenceSha256=(Get-FileSha256OrEmpty -Path $path)
@@ -26696,7 +26696,7 @@ function Invoke-HyperVBootTest {
 "@
             Set-Content -LiteralPath $answerXml -Value $xml -Encoding UTF8
             $answerIso = Join-Path $vmDir 'answer.iso'
-            $p14Oscdimg = Resolve-OscdimgPath
+            $p14Oscdimg = Resolve-OscdimgExe
             if (-not $p14Oscdimg) { throw 'oscdimg.exe is required to create the P14 answer ISO.' }
             & $p14Oscdimg -n -m $answerDir $answerIso | Out-Null
             if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $answerIso)) { throw 'Could not create Hyper-V answer ISO.' }
