@@ -23,7 +23,7 @@ What this asserts:
 
   1. **Deliverable identity.** The supported artifact exists at the
      project root and the retired project-context filename does not.
-  2. **Exact version-pair pin.** `CollectorVersion` = 'r12' AND
+  2. **Exact version-pair pin.** `CollectorVersion` = 'r13' AND
      `SchemaVersion` = 'windows-server-post-install-evidence/1.10',
      pinned exactly (T40-style). The distribution's own suite used
      floor pins (">= r9" etc.); under this repository's governance the
@@ -64,7 +64,7 @@ RETIRED_PATH = SUBPROJECT_ROOT / "Collect-WindowsServerE2EEvidence.ps1"
 # values deliberately, in a reviewed commit, when a new Collector
 # revision lands (T40-style release pin; supersedes the distribution
 # suite's floor pins by governance decision, ledger rows R1270/R1275).
-EXPECTED_COLLECTOR_VERSION = "r12"
+EXPECTED_COLLECTOR_VERSION = "r13"
 EXPECTED_SCHEMA_VERSION = "windows-server-post-install-evidence/1.10"
 
 # Evidence-function inventory (r9 minimum contract, retained at r12).
@@ -193,13 +193,17 @@ def main() -> int:
 
     # 5. Collection posture --------------------------------------------------
     passed, failed = check(
-        "ESP inspection enabled by default",
-        "[switch]$InspectEsp = $true" in text,
-        "InspectEsp default-on missing", passed, failed)
+        "ESP inspection enabled by default (Skip-form opt-out)",
+        "[switch]$SkipEspInspection," in text
+        and "[switch]$InspectEsp" not in text,
+        "SkipEspInspection opt-out switch missing or legacy default-on"
+        " switch still present", passed, failed)
     passed, failed = check(
-        "MSInfo32 enabled by default",
-        "[switch]$IncludeMsInfo32 = $true" in text,
-        "IncludeMsInfo32 default-on missing", passed, failed)
+        "MSInfo32 enabled by default (Skip-form opt-out)",
+        "[switch]$SkipMsInfo32," in text
+        and "[switch]$IncludeMsInfo32" not in text,
+        "SkipMsInfo32 opt-out switch missing or legacy default-on"
+        " switch still present", passed, failed)
     passed, failed = check(
         "C:\\Temp output contract present",
         "Get-NormalizedDirectoryPath -Path 'C:\\Temp'" in text,

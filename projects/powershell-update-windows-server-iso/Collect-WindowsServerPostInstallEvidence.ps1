@@ -62,14 +62,14 @@
     The only permitted locations are the directory containing this script and
     C:\Temp. When omitted, the script directory is used.
 
-.PARAMETER InspectEsp
-    Temporarily mounts the EFI System Partition to inspect bootmgfw.efi,
-    bootmgr.efi, boot.stl, bootx64.efi and the BCD store. Enabled by default.
-    Specify -InspectEsp:$false only when ESP inspection must be disabled.
+.PARAMETER SkipEspInspection
+    ESP inspection (temporarily mounting the EFI System Partition to inspect
+    bootmgfw.efi, bootmgr.efi, boot.stl, bootx64.efi and the BCD store) is
+    enabled by default; specify -SkipEspInspection only to disable it.
 
-.PARAMETER IncludeMsInfo32
-    Runs msinfo32 /report and includes the text report. Enabled by default.
-    Specify -IncludeMsInfo32:$false only when collection must be disabled.
+.PARAMETER SkipMsInfo32
+    The msinfo32 /report text collection is enabled by default; specify
+    -SkipMsInfo32 only to disable it.
 
 .PARAMETER ConfirmPostInstallRestart
     Explicitly confirms, for non-interactive or automated execution, that the
@@ -91,10 +91,10 @@ param(
     [string]$OutputRoot,
 
     [Parameter(Mandatory = $false)]
-    [switch]$InspectEsp = $true,
+    [switch]$SkipEspInspection,
 
     [Parameter(Mandatory = $false)]
-    [switch]$IncludeMsInfo32 = $true,
+    [switch]$SkipMsInfo32,
 
     [Parameter(Mandatory = $false)]
     [switch]$ConfirmPostInstallRestart
@@ -104,10 +104,11 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $script:SchemaVersion = 'windows-server-post-install-evidence/1.10'
-$script:CollectorVersion = 'r12'
+$script:CollectorVersion = 'r13'
 
 function Get-UtcTimestamp {
     [CmdletBinding()]
+    [OutputType([string])]
     param()
     return [datetime]::UtcNow.ToString('o')
 }
@@ -136,6 +137,7 @@ function Write-PostInstallRestartPrerequisiteBanner {
 
 function Get-PostInstallRestartConfirmation {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $false)]
         [switch]$ConfirmedByParameter
@@ -200,6 +202,7 @@ function Get-PostInstallRestartConfirmation {
 
 function Get-BootHistoryEvidence {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $true)]
         [object]$OperatingSystem
@@ -286,6 +289,7 @@ function Get-BootHistoryEvidence {
 
 function Resolve-StartupPreflightDecision {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $true)] [object]$RestartConfirmation,
         [Parameter(Mandatory = $true)] [object]$PendingReboot,
@@ -324,6 +328,7 @@ function Resolve-StartupPreflightDecision {
 
 function Get-PropertyValue {
     [CmdletBinding()]
+    [OutputType([object])]
     param(
         [Parameter(Mandatory = $false)]
         [AllowNull()]
@@ -352,6 +357,7 @@ function Get-PropertyValue {
 
 function Get-FileEvidence {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -430,7 +436,7 @@ function Get-FileEvidence {
                 $result.OriginalFilename = [string]$versionInfo.OriginalFilename
             }
         }
-        catch {
+        catch { # psa-disable-line PSA3004 -- best-effort: version info is optional for data files
             # Version information is optional for data files such as BCD.
         }
 
@@ -499,6 +505,7 @@ function Get-FileEvidence {
 
 function Read-CapturedText {
     [CmdletBinding()]
+    [OutputType([string])]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -519,6 +526,7 @@ function Read-CapturedText {
 
 function Invoke-CapturedCommand {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -586,6 +594,7 @@ function Invoke-CapturedCommand {
 
 function Get-FreeDriveLetter {
     [CmdletBinding()]
+    [OutputType([string])]
     param()
 
     $used = @(
@@ -605,6 +614,7 @@ function Get-FreeDriveLetter {
 
 function Test-PendingFileRenameAdvisoryCleanup {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -623,7 +633,7 @@ function Test-PendingFileRenameAdvisoryCleanup {
     )
 
     foreach ($pattern in $patterns) {
-        if ($normalized -match $pattern) {
+        if ($normalized -match $pattern) { # psa-disable-line PSA2003 -- patterns are a literal non-null regex set
             return [pscustomobject][ordered]@{
                 IsAdvisory = $true
                 NormalizedSource = $normalized
@@ -641,6 +651,7 @@ function Test-PendingFileRenameAdvisoryCleanup {
 
 function Convert-PendingFileRenameOperationsEvidence {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $false)]
         [AllowNull()]
@@ -708,6 +719,7 @@ function Convert-PendingFileRenameOperationsEvidence {
 
 function Resolve-PendingRebootClassification {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $true)] [bool]$CbsPending,
         [Parameter(Mandatory = $true)] [bool]$WindowsUpdatePending,
@@ -749,6 +761,7 @@ function Resolve-PendingRebootClassification {
 
 function Get-PendingRebootEvidence {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param()
 
     $checks = @(
@@ -844,6 +857,7 @@ function Get-PendingRebootEvidence {
 
 function Get-RegistryKeySnapshot {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -891,6 +905,7 @@ function Get-RegistryKeySnapshot {
 
 function Get-NamedRegistryValue {
     [CmdletBinding()]
+    [OutputType([object])]
     param(
         [Parameter(Mandatory = $true)]
         [object]$Snapshot,
@@ -918,6 +933,7 @@ function Get-NamedRegistryValue {
 
 function Convert-RegistryFileTimeValue {
     [CmdletBinding()]
+    [OutputType([string])]
     param(
         [Parameter(Mandatory = $false)]
         [AllowNull()]
@@ -950,6 +966,7 @@ function Convert-RegistryFileTimeValue {
 
 function Get-Sha256HexFromBytes {
     [CmdletBinding()]
+    [OutputType([string])]
     param(
         [Parameter(Mandatory = $true)]
         [byte[]]$Bytes
@@ -966,6 +983,7 @@ function Get-Sha256HexFromBytes {
 
 function Copy-ByteRange {
     [CmdletBinding()]
+    [OutputType([byte[]])]
     param(
         [Parameter(Mandatory = $true)]
         [byte[]]$Bytes,
@@ -988,6 +1006,7 @@ function Copy-ByteRange {
 
 function Resolve-EfiSignatureTypeName {
     [CmdletBinding()]
+    [OutputType([string])]
     param(
         [Parameter(Mandatory = $true)]
         [guid]$SignatureType
@@ -1006,6 +1025,7 @@ function Resolve-EfiSignatureTypeName {
 
 function Convert-EfiSignatureDatabase {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $true)]
         [byte[]]$Bytes
@@ -1169,6 +1189,7 @@ function Convert-EfiSignatureDatabase {
 
 function Get-SecureBootVariableEvidence {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -1298,6 +1319,7 @@ function Get-SecureBootVariableEvidence {
 
 function Convert-EventDataToObject {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $true)]
         [object]$EventRecord
@@ -1358,6 +1380,7 @@ function Convert-EventDataToObject {
 
 function Get-SecureBootEventEvidence {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param()
 
     $eventIds = @(
@@ -1433,10 +1456,11 @@ function Get-SecureBootEventEvidence {
 
 function Get-SecureBootEventFieldValue {
     [CmdletBinding()]
+    [OutputType([string])]
     param(
         [Parameter(Mandatory = $false)]
         [AllowNull()]
-        [object]$Event,
+        [object]$EventRecord,
 
         [Parameter(Mandatory = $true)]
         [string[]]$Names,
@@ -1445,19 +1469,19 @@ function Get-SecureBootEventFieldValue {
         [string[]]$MessagePatterns = @()
     )
 
-    if ($null -eq $Event) { return $null }
+    if ($null -eq $EventRecord) { return $null }
 
     foreach ($name in $Names) {
-        $value = Get-PropertyValue -InputObject $Event.EventData -Name $name
+        $value = Get-PropertyValue -InputObject $EventRecord.EventData -Name $name
         if ($null -ne $value -and -not [string]::IsNullOrWhiteSpace([string]$value)) {
             return [string]$value
         }
     }
 
-    $message = [string](Get-PropertyValue -InputObject $Event -Name 'Message')
+    $message = [string](Get-PropertyValue -InputObject $EventRecord -Name 'Message')
     if (-not [string]::IsNullOrWhiteSpace($message)) {
         foreach ($pattern in $MessagePatterns) {
-            if ($message -match $pattern) {
+            if ($message -match $pattern) { # psa-disable-line PSA2003 -- callers pass literal non-empty pattern arrays
                 $candidate = if ($Matches.ContainsKey(1)) {
                     [string]$Matches[1]
                 }
@@ -1477,6 +1501,7 @@ function Get-SecureBootEventFieldValue {
 
 function Get-SecureBootRolloutStatus {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $true)]
         [object]$EventEvidence,
@@ -1500,16 +1525,16 @@ function Get-SecureBootRolloutStatus {
     )
     $bucketEvent = if ($bucketCandidates.Count -gt 0) { $bucketCandidates[0] } else { $null }
 
-    $bucketId = Get-SecureBootEventFieldValue -Event $bucketEvent `
+    $bucketId = Get-SecureBootEventFieldValue -EventRecord $bucketEvent `
         -Names @('BucketId', 'BucketID') `
         -MessagePatterns @('(?m)^BucketId:[ \t]*([^\r\n]*)[ \t]*$')
-    $confidence = Get-SecureBootEventFieldValue -Event $bucketEvent `
+    $confidence = Get-SecureBootEventFieldValue -EventRecord $bucketEvent `
         -Names @('BucketConfidenceLevel', 'Confidence') `
         -MessagePatterns @('(?m)^BucketConfidenceLevel:[ \t]*([^\r\n]*)[ \t]*$')
-    $updateType = Get-SecureBootEventFieldValue -Event $bucketEvent `
+    $updateType = Get-SecureBootEventFieldValue -EventRecord $bucketEvent `
         -Names @('UpdateType') `
         -MessagePatterns @('(?m)^UpdateType:[ \t]*([^\r\n]*)[ \t]*$')
-    $skipReason = Get-SecureBootEventFieldValue -Event $bucketEvent `
+    $skipReason = Get-SecureBootEventFieldValue -EventRecord $bucketEvent `
         -Names @('SkipReason') `
         -MessagePatterns @('(?m)^SkipReason:[ \t]*([^\r\n]*)[ \t]*$')
     $knownIssueFromSkipReason = $null
@@ -1525,13 +1550,13 @@ function Get-SecureBootRolloutStatus {
     $event1796 = if ($latest1796.Count -gt 0) { $latest1796[0] } else { $null }
     $event1802 = if ($latest1802.Count -gt 0) { $latest1802[0] } else { $null }
 
-    $event1795ErrorCode = Get-SecureBootEventFieldValue -Event $event1795 `
+    $event1795ErrorCode = Get-SecureBootEventFieldValue -EventRecord $event1795 `
         -Names @('ErrorCode', 'Status', 'NtStatus') `
         -MessagePatterns @('(?:error|code|status)[:\s]*(0x[0-9A-Fa-f]+|[0-9A-Fa-f]{8})')
-    $event1796ErrorCode = Get-SecureBootEventFieldValue -Event $event1796 `
+    $event1796ErrorCode = Get-SecureBootEventFieldValue -EventRecord $event1796 `
         -Names @('ErrorCode', 'Status', 'NtStatus') `
         -MessagePatterns @('(?:error|code|status)[:\s]*(0x[0-9A-Fa-f]+|[0-9A-Fa-f]{8})')
-    $knownIssueId = Get-SecureBootEventFieldValue -Event $event1802 `
+    $knownIssueId = Get-SecureBootEventFieldValue -EventRecord $event1802 `
         -Names @('SkipReason', 'KnownIssueId') `
         -MessagePatterns @('(KI_\d+)')
     if (-not [string]::IsNullOrWhiteSpace($knownIssueId) -and $knownIssueId -match '(KI_\d+)') {
@@ -1572,6 +1597,7 @@ function Get-SecureBootRolloutStatus {
 
 function Get-WindowsUefiCa2023CapableInterpretation {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $false)]
         [AllowNull()]
@@ -1619,6 +1645,7 @@ function Get-WindowsUefiCa2023CapableInterpretation {
 
 function Convert-WinCsSecureBootQueryOutput {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $false)]
         [AllowNull()]
@@ -1678,6 +1705,7 @@ function Convert-WinCsSecureBootQueryOutput {
 
 function Get-WinCsSecureBootInterpretation {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $false)]
         [AllowNull()]
@@ -1718,6 +1746,7 @@ function Get-WinCsSecureBootInterpretation {
 
 function Get-SecureBootScheduledTaskEvidence {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -1764,7 +1793,7 @@ function Get-SecureBootScheduledTaskEvidence {
                 $taskXml | Set-Content -LiteralPath (Join-Path $EvidenceDirectory $relativePath) -Encoding UTF8
                 $result.RelativeXmlPath = $relativePath
             }
-            catch {
+            catch { # psa-disable-line PSA3004 -- best-effort: task metadata is useful without XML export
                 # Task metadata is still useful when XML export is unavailable.
             }
         }
@@ -1796,6 +1825,7 @@ function Get-SecureBootScheduledTaskEvidence {
 
 function Get-WinCsSecureBootEvidence {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $false)]
         [AllowNull()]
@@ -1837,6 +1867,7 @@ function Get-WinCsSecureBootEvidence {
 
 function Get-SecureBootScriptInventory {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param()
 
     $directoryPaths = @(
@@ -1958,6 +1989,7 @@ function Get-SecureBootScriptInventory {
 
 function Get-SecureBootEvidence {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -2076,6 +2108,7 @@ function Get-SecureBootEvidence {
 
 function Get-InstalledPackageEvidence {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param()
 
     try {
@@ -2112,6 +2145,7 @@ function Get-InstalledPackageEvidence {
 
 function Get-WindowsFeatureEvidence {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param()
 
     $items = @()
@@ -2231,6 +2265,7 @@ function Get-WindowsFeatureEvidence {
 
 function Resolve-DotNetReleaseVersion {
     [CmdletBinding()]
+    [OutputType([string])]
     param(
         [Parameter(Mandatory = $false)]
         [AllowNull()]
@@ -2255,6 +2290,7 @@ function Resolve-DotNetReleaseVersion {
 
 function Get-DotNetFrameworkEvidence {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $true)]
         [object]$WindowsFeatures
@@ -2352,6 +2388,7 @@ function Get-DotNetFrameworkEvidence {
 
 function Get-SecureBootAssessment {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $true)]
         [object]$SecureBoot,
@@ -2543,6 +2580,7 @@ function Get-SecureBootAssessment {
 
 function Get-EspEvidence {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param()
 
     $driveLetter = Get-FreeDriveLetter
@@ -2659,6 +2697,7 @@ function Get-EspEvidence {
 
 function Get-NormalizedDirectoryPath {
     [CmdletBinding()]
+    [OutputType([string])]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -2676,6 +2715,7 @@ function Get-NormalizedDirectoryPath {
 
 function Resolve-OutputRoot {
     [CmdletBinding()]
+    [OutputType([string])]
     param(
         [Parameter(Mandatory = $false)]
         [AllowEmptyString()]
@@ -2719,6 +2759,7 @@ function Resolve-OutputRoot {
 
 function Resolve-WindowsServerIdentity {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $true)]
         [object]$CurrentVersion,
@@ -2754,7 +2795,7 @@ function Resolve-WindowsServerIdentity {
     $nameText = @($caption, $productName) -join ' | '
     $nameMappedVersion = $null
     foreach ($year in @('2016', '2019', '2022', '2025')) {
-        if ($nameText -match $year) {
+        if ($nameText -match $year) { # psa-disable-line PSA2003 -- year tokens are a literal array
             $nameMappedVersion = 'Server{0}' -f $year
             break
         }
@@ -2852,6 +2893,7 @@ function Resolve-WindowsServerIdentity {
 
 function New-AssessmentItem {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -2875,6 +2917,7 @@ function New-AssessmentItem {
 
 function Get-PostInstallAssessmentItems {
     [CmdletBinding()]
+    [OutputType([object[]])]
     param(
         [Parameter(Mandatory = $true)] [object]$OsIdentity,
         [Parameter(Mandatory = $true)] [string]$DetectedOsKey,
@@ -3155,6 +3198,7 @@ function Get-PostInstallAssessmentItems {
 
 function Get-AssessmentReportLines {
     [CmdletBinding()]
+    [OutputType([string[]])]
     param(
         [Parameter(Mandatory = $true)] [object[]]$AssessmentItems,
         [Parameter(Mandatory = $true)] [string]$OverallStatus,
@@ -3512,7 +3556,7 @@ try {
         $diskEvidence = @()
     }
 
-    $esp = if ($InspectEsp) {
+    $esp = if (-not $SkipEspInspection) {
         Get-EspEvidence
     }
     else {
@@ -3530,13 +3574,13 @@ try {
     $secureBoot.Assessment = Get-SecureBootAssessment -SecureBoot $secureBoot -Esp $esp
 
     $msInfo = [pscustomobject][ordered]@{
-        Requested = [bool]$IncludeMsInfo32
+        Requested = [bool](-not $SkipMsInfo32)
         Available = $false
         ExitCode = $null
         ErrorMessage = $null
         RelativePath = $null
     }
-    if ($IncludeMsInfo32) {
+    if (-not $SkipMsInfo32) {
         $msInfoPath = Join-Path $evidenceDir 'msinfo32.txt'
         $msInfo.RelativePath = 'msinfo32.txt'
         try {
@@ -3607,7 +3651,7 @@ try {
         )
     }
 
-    if ($InspectEsp -and $esp.CollectionComplete) {
+    if ((-not $SkipEspInspection) -and $esp.CollectionComplete) {
         $invalidEspSignatures = @(
             $esp.Files | Where-Object {
                 $_.Present -and
@@ -3680,7 +3724,7 @@ try {
     if ($diskEvidence.Count -eq 0) {
         $collectionFailures.Add('Disk evidence was not collected.')
     }
-    if ($InspectEsp -and (-not $esp.Available -or -not $esp.CollectionComplete)) {
+    if ((-not $SkipEspInspection) -and (-not $esp.Available -or -not $esp.CollectionComplete)) {
         $message = if ([string]::IsNullOrWhiteSpace($esp.ErrorMessage)) {
             'ESP evidence collection was incomplete.'
         }
@@ -3689,7 +3733,7 @@ try {
         }
         $collectionFailures.Add($message)
     }
-    if ($IncludeMsInfo32 -and (
+    if ((-not $SkipMsInfo32) -and (
         -not $msInfo.Available -or
         $null -eq $msInfo.ExitCode -or
         [int]$msInfo.ExitCode -ne 0
@@ -3742,8 +3786,8 @@ try {
             -Esp $esp `
             -SystemInfo $systemInfo `
             -MsInfo32 $msInfo `
-            -InspectEspRequested ([bool]$InspectEsp) `
-            -MsInfo32Requested ([bool]$IncludeMsInfo32) `
+            -InspectEspRequested ([bool](-not $SkipEspInspection)) `
+            -MsInfo32Requested ([bool](-not $SkipMsInfo32)) `
             -ValidationFailures $validationFailures.ToArray() `
             -CollectionFailures $collectionFailures.ToArray() `
             -ReviewFindings $reviewFindings.ToArray()
@@ -4004,7 +4048,7 @@ catch {
     Write-Error $_
 }
 finally {
-    try { Stop-Transcript | Out-Null } catch {}
+    try { Stop-Transcript | Out-Null } catch {} # psa-disable-line PSA3004 -- best-effort transcript shutdown
 
     # Create checksums only after the transcript is closed. Otherwise the
     # transcript changes after hashing and its recorded digest is invalid.

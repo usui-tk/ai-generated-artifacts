@@ -377,6 +377,35 @@ the script and follows the
   main 0E/229W/27I and collector 0E/13W/44I; the warning/info drain
   continues in subsequent reviewed batches.
 
+### Changed
+
+- **Collector r13 — PSA debt drain and the Skip-form opt-out
+  surface.** The Collector's PSA debt is drained to 0E/4W/0I in a
+  dedicated batch with a deliberate `CollectorVersion` advance
+  r12 → r13 (SchemaVersion unchanged at 1.10; evidence output is
+  identical). The two PSA6006 default-`$true` switches are inverted
+  to the Skip-form opt-outs established by the sister
+  Deploy-Drivers project — `-InspectEsp`/`-IncludeMsInfo32` become
+  `-SkipEspInspection`/`-SkipMsInfo32` — preserving the T47-pinned
+  default-on collection posture exactly (skip switches default to
+  `$false`, so ESP and MSInfo32 collection remain on by default);
+  the comment-based help is rewritten accordingly and T47's posture
+  pins are revised T39-style to assert the Skip-form declarations
+  and the absence of the legacy switches, with the exact
+  version-pair pin advanced to r13/1.10. The
+  `Get-SecureBootEventFieldValue` `$Event` parameter (PSA2007) is
+  renamed `$EventRecord` with all seven call sites updated. Three
+  PSA2003 null-pattern findings are measured
+  impossible-by-construction (literal regex sets, literal year
+  tokens, literal caller arrays) and suppressed with reasons; the
+  three PSA3004 empty catches already carried best-effort rationale
+  comments and are suppressed citing them. The 44 PSA6007 functions
+  gain `[OutputType]` attributes via the same AST return-expression
+  extraction used for the main script (evidence records as
+  pscustomobject; string/byte[]/object[] surfaces as measured). The
+  four remaining PSA6003 naming findings are declared debt deferred
+  to the refactoring campaign alongside the main script's.
+
 ### Static analysis
 
 - **PSA info-debt drain, batch 7 — [OutputType] declarations.** The
