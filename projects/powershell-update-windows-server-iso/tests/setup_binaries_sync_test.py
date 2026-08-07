@@ -27,6 +27,20 @@ boot.wim). What this test pins:
      images and MediaSetupBinaries for the media root; P11 emits
      SetupBinarySync_* rows and grades a mismatch Fail.
 
+O7 supersession [2026-08-07, re-impl phase C]: the P08S pipeline-wiring
+pin was originally a global token-count proxy
+(``code.count("'P08','P08S','P09'")``) whose expected value broke at
+r12.35 when the resume layer legitimately added a fifth wiring site
+(adjudicated option A: count 4 -> 5 with provenance). This file now
+carries the deferred option-B rework instead: a structural invariant
+(every quoted phase-ID list literal of three or more elements that
+contains both P08 and P09 must wire P08S strictly between them --
+two-element constructs such as parameter ValidateSets are exempt by
+the length discriminator) plus per-site pins for the five known
+pipeline lists. A legitimately added new pipeline list that wires
+P08S correctly no longer breaks the contract; a list that drops or
+misorders P08S fails with a specific diagnosis.
+
 Run:  python3 tests/setup_binaries_sync_test.py
 Deps: pwsh on PATH (same as T31/T37/T38).
 """
@@ -150,12 +164,47 @@ def main() -> int:
     passed, failed = check(
         "P08S registered between P08 and P09 (Build group)",
         bool(reg), "registry order pin failed", passed, failed)
-    lists_ok = (
-        code.count("'P08','P08S','P09'") == 5  # two standardFull variants + Build action + the r12.05 ResumeFromPhase list + the r12.35 resume downstream-cleanup prefix list
-    )
+    # O7 option-B rework [2026-08-07]: structural invariant + per-site
+    # pins replace the former global token-count proxy (see header).
+    bad_lists = []
+    for m in re.finditer(r"(?:'P\d{2}[A-Z]?'\s*,\s*)+'P\d{2}[A-Z]?'", code):
+        ids = re.findall(r"'(P\d{2}[A-Z]?)'", m.group(0))
+        if len(ids) < 3 or "P08" not in ids or "P09" not in ids:
+            continue
+        if ("P08S" not in ids
+                or not ids.index("P08") < ids.index("P08S") < ids.index("P09")):
+            line = code.count("\n", 0, m.start()) + 1
+            bad_lists.append(f"line {line}: {ids!r}")
     passed, failed = check(
-        "P08S wired into the standard pipelines, the Build action, the ResumeFromPhase list and the resume downstream-cleanup prefix list (5 lists, r12.05 + r12.35)",
-        lists_ok, f"count={code.count(chr(39) + 'P08' + chr(39) + ',' + chr(39) + 'P08S' + chr(39))}", passed, failed)
+        "every pipeline phase list containing P08 and P09 wires P08S strictly between them",
+        not bad_lists, "; ".join(bad_lists), passed, failed)
+
+    anchor = "$standardFull = if ($Script:SyntheticTestMode) {"
+    idx = code.find(anchor)
+    window = code[idx:idx + 400] if idx >= 0 else ""
+    passed, failed = check(
+        "P08S wired into both standardFull pipeline variants (synthetic + normal)",
+        idx >= 0 and window.count("'P08','P08S','P09'") == 2,
+        f"anchor found={idx >= 0}, wired variants={window.count(chr(39) + 'P08' + chr(39) + ',' + chr(39) + 'P08S' + chr(39) + ',' + chr(39) + 'P09' + chr(39))}",
+        passed, failed)
+    passed, failed = check(
+        "P08S wired into the Build action list (P07..P10)",
+        bool(re.search(r"'Build'\s*\{\s*return \[string\[\]\]@\('P07','P08','P08S','P09','P10'\)\s*\}", code)),
+        "Build action list pin failed", passed, failed)
+    resume_idx = code.find("$Script:RequestedResumeFromPhase -eq 'P08'")
+    resume_window = code[resume_idx:resume_idx + 300] if resume_idx >= 0 else ""
+    passed, failed = check(
+        "P08S wired into the ResumeFromPhase P08 list (r12.05)",
+        resume_idx >= 0
+        and "@('P01','P02','P08','P08S','P09','P10','P11','P12','P13')" in resume_window,
+        "ResumeFromPhase list pin failed", passed, failed)
+    prefix_idx = code.find("function Reset-ResumeDownstreamState")
+    prefix_window = code[prefix_idx:prefix_idx + 400] if prefix_idx >= 0 else ""
+    passed, failed = check(
+        "P08S wired into the resume downstream-cleanup prefix list (r12.35)",
+        prefix_idx >= 0
+        and "@('P08','P08S','P09','P10','P11','P12','P13','P14')" in prefix_window,
+        "downstream-cleanup prefix list pin failed", passed, failed)
 
     print("=== 5. Structure pins: explicit-sync contract ===")
     fn = code[code.find("function Invoke-BuildPhase08S_SyncSetupBinaries"):]

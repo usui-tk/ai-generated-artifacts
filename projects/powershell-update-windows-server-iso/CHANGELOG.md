@@ -169,6 +169,32 @@ the script and follows the
   exact ScriptVersion); dispositions tracked in the out-of-repo
   re-implementation ledger. Offline suite is now 28 PASS + the
   declared T30 red.
+- **T40 `setup_binaries_sync_test.py` P08S wiring pin reworked**
+  (phase C, second half — the O7-deferred option B): the global
+  token-count proxy (`code.count("'P08','P08S','P09'") == 5`, whose
+  expected value broke at r12.35 when the resume layer legitimately
+  added a fifth wiring site) is replaced by a structural invariant
+  plus per-site pins. The invariant: every quoted phase-ID list
+  literal of three or more elements that contains both P08 and P09
+  must wire P08S strictly between them (two-element constructs such
+  as parameter ValidateSets are exempt by the length discriminator —
+  the measured code has seven such two-element constructs and five
+  conforming pipeline lists). The per-site pins name the five known
+  lists individually: both standardFull pipeline variants, the Build
+  action list, the r12.05 ResumeFromPhase P08 list, and the r12.35
+  resume downstream-cleanup prefix list. A legitimately added new
+  pipeline list that wires P08S correctly no longer breaks the
+  contract (verified by positive control), while a list that drops or
+  misorders P08S fails with a line-diagnosed message (verified by
+  mutation on a disposable copy at two sites, including the exact
+  r12.35 shape that triggered O7). The supersession is documented in
+  the test header; the release-pin row and the r12.72
+  build-independent Setup-binary plan rows (the R1272 plan contract,
+  which the r12.72 T39 revision had already landed in this test) are
+  unchanged. T40 is now 21 assertions (was 17). Note for the
+  re-implementation ledger: the R1272 "build-independent plan" rows
+  map to the pre-existing T40 section 1 rows; the option-B subject
+  drained here was the wiring proxy.
 
 ## [update-wsi-2026.08.07-r12.75] - 2026-08-07
 
