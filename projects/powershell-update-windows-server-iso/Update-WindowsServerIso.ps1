@@ -718,8 +718,10 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.02-r12.59'
-# Validation marker: r12.59 makes the El Torito parser Int64-safe for real ISO files larger than 2 GiB and fails P10 closed when the firmware-visible image cannot be proven.
+$Script:ScriptVersion = 'update-wsi-2026.08.02-r12.60'
+# Validation marker: r12.60 accepts the UEFI-defined El Torito Sector Count 0/1 end-of-media sentinel and proves efisys_ex.bin identity by hashing its expected byte length from the catalog Load RBA.
+# r12.59 incorrectly treated Sector Count 1 as a literal 512-byte extent and rejected standards-compliant oscdimg output before hashing the embedded EFI system partition.
+# r12.59 retained: Int64-safe parsing for ISO files larger than 2 GiB and P10 fail-closed post-flight verification.
 # r12.58 selected efisys_ex.bin correctly but its verification parser bound Math.Min to Int32 on an 8.91-GiB ISO and returned a false failure.
 # r12.57 proved only loose-file presence/signatures and could therefore accept a non-bootable mixed PCA2011/PCA2023 ISO.
 # Validation marker retained: r12.55 Setup DU baseline-language preservation and P11 no-new-locale verification.
@@ -9766,7 +9768,7 @@ function Get-IsoElToritoUefiBootImageEvidence {
     )
 
     $result = [pscustomobject][ordered]@{
-        SchemaVersion='iso-el-torito-uefi/1.0'
+        SchemaVersion='iso-el-torito-uefi/1.1'
         GeneratedAtUtc=([datetime]::UtcNow.ToString('o'))
         Available=$false
         Status='Unknown'
@@ -9784,6 +9786,9 @@ function Get-IsoElToritoUefiBootImageEvidence {
         UefiBootImageLba=$null
         UefiBootImageSectorCount=$null
         UefiBootImageCatalogBytes=$null
+        UefiBootImageUsesEndOfMediaSemantics=$false
+        UefiBootImageSectorCountInterpretation=''
+        UefiBootImageVerificationLengthBytes=0
         ObservedImageSha256=''
         MatchesExpected=$false
     }
@@ -9900,7 +9905,24 @@ function Get-IsoElToritoUefiBootImageEvidence {
 
         $imageOffset=[int64]$uefiEntry.LoadRba*$sectorSize
         $expectedLength=[int64]$result.ExpectedImageSizeBytes
-        if($result.UefiBootImageCatalogBytes -lt $expectedLength){throw 'The EFI El Torito catalog sector count is smaller than the expected efisys image.'}
+        $result.UefiBootImageVerificationLengthBytes=$expectedLength
+
+        # UEFI changes the meaning of the El Torito Sector Count for platform
+        # 0xEF no-emulation images.  A value of 0 or 1 is a standards-defined
+        # sentinel: firmware assumes the EFI System Partition consumes the
+        # space from the image Load RBA to the end of the optical medium.  It
+        # is therefore not a literal 0- or 512-byte image length.  oscdimg
+        # emits Sector Count 1 for Windows efisys.bin/efisys_ex.bin images.
+        # Prove identity by hashing the expected efisys image length from the
+        # firmware-visible Load RBA.  For explicit values greater than 1,
+        # retain the stronger catalog-extent lower-bound check.
+        if($uefiEntry.SectorCount -in @(0,1)) {
+            $result.UefiBootImageUsesEndOfMediaSemantics=$true
+            $result.UefiBootImageSectorCountInterpretation='UefiEndOfMediaSentinel'
+        } else {
+            $result.UefiBootImageSectorCountInterpretation='Explicit512ByteSectorCount'
+            if($result.UefiBootImageCatalogBytes -lt $expectedLength){throw 'The explicit EFI El Torito catalog sector count is smaller than the expected efisys image.'}
+        }
         if(($imageOffset+$expectedLength) -gt $stream.Length){throw 'The EFI El Torito image extends beyond the ISO when evaluated using the expected image length.'}
 
         $sha=[System.Security.Cryptography.SHA256]::Create()

@@ -22,6 +22,39 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.02-r12.60] - 2026-08-07
+
+Tag retained: `setupdu-baseline-language-preservation`.
+
+### Fixed
+
+- **El Torito Sector Count 0/1 is honored as the UEFI end-of-media
+  sentinel**: for platform-0xEF no-emulation entries, UEFI defines
+  Sector Count 0 or 1 as a sentinel meaning the EFI System Partition
+  extends from the image Load RBA toward the end of the medium — not
+  a literal 0- or 512-byte image, and `oscdimg` emits Sector Count 1
+  for Windows efisys images. r12.59 treated the field literally and
+  rejected standards-compliant media before hashing the embedded
+  image. Identity is now proven by hashing the expected efisys image
+  length from the firmware-visible Load RBA (evidence schema
+  `iso-el-torito-uefi/1.1` with explicit sentinel-interpretation
+  fields); explicit Sector Count values above 1 keep the stronger
+  catalog-extent lower-bound check. The r12.59 gains — Int64-safe
+  parsing and P10 fail-closed — are retained. Script-only change
+  (+22 lines); `data/*` and `schema/*` are byte-identical to r12.59.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.02-r12.60`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 5E/146W/12I (raw sweep
+  5E/147W/12I: +1W is the PSA7002 LF artefact; +6W on the revised
+  verification code, declared series debt). Snapshot form: BOM + LF; committed checkout form BOM+CRLF.
+
 ## [update-wsi-2026.08.02-r12.59] - 2026-08-07
 
 Tag retained: `setupdu-baseline-language-preservation`.
