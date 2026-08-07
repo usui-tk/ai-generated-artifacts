@@ -67,6 +67,34 @@ the script and follows the
   Specification source: distribution axes R1269/R1270/R1275,
   re-authored; dispositions tracked in the out-of-repo
   re-implementation ledger.
+- **T48 `collector_semantics_test.py` added** (phase A, second half):
+  behavioral coverage of the Collector's r10→r12 hardening arc. The
+  functions under test are extracted from the Collector's own AST and
+  exercised against fixtures whose values are measured post-install
+  facts from the four-OS ja-jp runs: pending-reboot discrimination
+  (measured Server 2022/2025 updater-cleanup PFRO shapes classify
+  Advisory; unknown operations, rename/move pairs and malformed data
+  stay Blocking; CBS / Windows Update always override; read errors
+  yield Unknown without asserting a pending reboot), Secure Boot
+  event-field parsing (blank 1801/1808 label fields stay null instead
+  of consuming the next label; populated fields retained), the r11
+  restart-preflight decision matrix (explicit confirmation with
+  provenance; Advisory/Blocking/Unknown startup states fail closed;
+  boot history corroborates but is never authoritative; pending state
+  captured at startup and rechecked; preflight precedes Secure Boot
+  collection), and the r12 Secure Boot evidence semantics
+  (WindowsUEFICA2023Capable reference-only; measured WinCS shape
+  parses and Disabled-under-Updated means not-required with
+  UEFICA2023Status as the status authority; a stale historical 1808
+  cannot override a newer 1801; the measured 2022/2025 Updated shape
+  confirms with its three evidence sources; the measured 2019
+  monitoring divergence stays conservative; Authenticode
+  primary-signer observations remain diagnostic-only). 42 assertions;
+  fault detection verified by mutation on a disposable copy (an
+  allow-list regression and a removed precondition banner both fail
+  closed). Specification source: distribution axes R1273/R1274/R1275,
+  re-authored. With T47 this closes the Collector coverage gap;
+  offline suite is now 26 PASS + the declared T30 red.
 
 ## [update-wsi-2026.08.07-r12.75] - 2026-08-07
 
