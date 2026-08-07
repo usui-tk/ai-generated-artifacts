@@ -22,6 +22,29 @@ the script and follows the
 
 ## [Unreleased]
 
+### Governance
+
+- **Series-end consolidation stream opened.** The r12 merge campaign
+  is complete (r12.00 through r12.75 landed verbatim; the series is
+  closed). From this commit onward, commits on this branch are
+  Claude-authored under the normal design-first governance: every
+  commit is individually proposed, approved and manifest-gated. The
+  campaign's verbatim-landing rules (including the pass-through
+  pre-approval) no longer apply.
+- **Test re-implementation campaign opened.** The external
+  implementation's test corpus — including its terminal required
+  regression suite — remains input-only and is not adopted verbatim
+  (user ruling, 2026-08-07). Its specifications are absorbed by
+  re-authoring repository-governed contracts in the existing test
+  idiom, declaration-derived where a declared surface exists, with
+  every source assertion group tracked to an explicit disposition in
+  an out-of-repo re-implementation ledger. The real-environment-
+  validated r12.75 code is the specification baseline: test authoring
+  does not drive code changes, and any clearly-improving code change
+  is raised as a separate proposal with its own version bump.
+  Re-examination of the refactoring plan is deferred until this
+  campaign completes.
+
 ## [update-wsi-2026.08.07-r12.75] - 2026-08-07
 
 Tag retained: `post-install-evidence-collector-r9-merge`.
