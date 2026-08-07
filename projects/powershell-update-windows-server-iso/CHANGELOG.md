@@ -45,6 +45,29 @@ the script and follows the
   Re-examination of the refactoring plan is deferred until this
   campaign completes.
 
+### Tests
+
+- **T47 `collector_artifact_test.py` added** (test re-implementation
+  campaign, phase A, first half): the Collector's first
+  repository-side regression coverage. Pins the deliverable identity
+  (supported filename present, retired project-context filename
+  absent), the exact CollectorVersion/SchemaVersion pair
+  (`r12` / `windows-server-post-install-evidence/1.10`, advanced
+  deliberately per Collector release in place of the external suite's
+  floor pins), the project-neutral evidence contract (error schema,
+  artifact prefix, OS-tokenized naming, no E2E terminology), the
+  pre-r9 retirement guards with cross-version baseline comparison
+  explicitly disabled, the collection posture (ESP/MSInfo32
+  default-on, C:\Temp output contract, OutputRoot restriction,
+  mountvol-based read-only ESP access, the eight-function evidence
+  inventory), the no-network invariant, and a Collector parse gate
+  that extends the battery beyond the main script. 29 assertions;
+  fault-detection verified by mutation on a disposable copy
+  (schema drift and an injected network surface both fail closed).
+  Specification source: distribution axes R1269/R1270/R1275,
+  re-authored; dispositions tracked in the out-of-repo
+  re-implementation ledger.
+
 ## [update-wsi-2026.08.07-r12.75] - 2026-08-07
 
 Tag retained: `post-install-evidence-collector-r9-merge`.
