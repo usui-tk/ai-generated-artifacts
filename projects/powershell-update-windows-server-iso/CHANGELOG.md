@@ -195,6 +195,52 @@ the script and follows the
   re-implementation ledger: the R1272 "build-independent plan" rows
   map to the pre-existing T40 section 1 rows; the option-B subject
   drained here was the wiring proxy.
+- **T50 `catalog_semantics_test.py` added** (phase D, first part):
+  behavioral coverage of the r12.52 -> r12.67 Catalog hardening arc.
+  The functions under test are extracted from the script's own AST and
+  exercised against measured Catalog shapes (the user-observed Server
+  2016 four-row Setup DU query and the KB4132216 HTTP-200 page shape):
+  the merged R1252 + R1265 + R1267 catalog/collection function
+  inventory (48 functions exactly once — also the future input to the
+  refactoring plan's static duplicate-function check), the horizontal
+  static invariants (no GetNewClosure validator, no scriptblock
+  ContentValidator parameter or call site, no nested sorted return,
+  the three typed semantic modes plus ExactKbSearch declared,
+  transport evidence carrying the validation context, the unvalidated
+  POST cache helper gone, collision-resistant cache identity and flat
+  PatchBaseline contracts present), the typed validator wiring
+  (legacy search helper and Search-Catalog select the exact-KB
+  contract; cache and transport both flow through the centralized
+  semantic validator; CATALOG_VALIDATOR_EXECUTION_FAILED
+  distinguished and excluded from transient retries), the legacy
+  helper containment (no direct Invoke-WebRequest -Uri; supplied
+  validated HTML reused before networking), the Setup-DU scalar
+  identity pins (flat selector returns; UpdateId validated before
+  POST body construction; nested candidate rows rejected; selected
+  uid validated), and the runtime groups: semantic retry (invalid
+  HTTP-200 retried with Failure/transient/200 then Success transport
+  events; invalid cache discarded after exactly one revalidated
+  fetch; supplied HTML parsed with zero network requests), typed
+  endpoint semantics (each active mode accepts its measured shape and
+  rejects the mismatch; a malformed exact-KB context fails the
+  contract — the exact-KB row filter is pinned on a single-anchor
+  page because the measured filter is a context-window heuristic,
+  ±1800 chars), cache identity tags (distinct digest-bearing search
+  tags; full-UpdateId download/legacy/scoped tags), scalar boundaries
+  (arrays, Generic.List values and space-joined multi-GUID strings
+  rejected at the UpdateId/KbId/query boundaries), and flat
+  collection shapes (four flat candidates from the measured 2016
+  shape with the single KB5068794 row selected;
+  Select-SetupDuCandidate / Get-X64Rows / ConvertTo-ConfigLines flat;
+  language-pack template and WIM inventory materialized). 104
+  assertions; fault detection verified by mutation on a disposable
+  copy (a transient-reclassified validator failure, a weakened
+  UpdateId cardinality guard, and the reintroduced historical r12.65
+  nested-return bug all fail closed, the last at both the static and
+  runtime layers). Specification source: distribution axes
+  R1252/R1265/R1266/R1267, re-authored; the R1252 servicing-contract
+  component-hash rows are ADOPT-D in T45; revision-floor rows are
+  DROP. Offline suite is now 29 PASS + the declared T30 red.
 
 ## [update-wsi-2026.08.07-r12.75] - 2026-08-07
 
