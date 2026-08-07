@@ -718,8 +718,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.03-r12.63'
-# Validation marker: r12.63 replaces the hash-only oscdimg advisory with source-aware qualification: signed AMD64 ADK candidates, runtime-resolved secureboot_objects symbol references, WorkRoot-managed exact-hash fallback, cached behavioral ISO tests, and fail-closed candidate selection without modifying the host ADK.
+$Script:ScriptVersion = 'update-wsi-2026.08.03-r12.64'
+# Validation marker: r12.64 fixes the PowerShell 7.4+ Generic.List array-subexpression regression in the r12.63 oscdimg resolver. Repository records, errors, and local candidate paths are materialized with List<T>.ToArray(), and New-Object Generic.List construction is removed from the resolver.
 # Validation marker: r12.62 implements the Microsoft media Dynamic Update final WinPE-to-media contract after Setup DU, exports the serviced boot.wim, uses /ResetBase /Defer for WinPE/WinRE cleanup, and verifies the complete final ISO identity surface before release assessment.
 # Validation marker: r12.60 accepts the UEFI-defined El Torito Sector Count 0/1 end-of-media sentinel and proves efisys_ex.bin identity by hashing its expected byte length from the catalog Load RBA.
 # r12.59 incorrectly treated Sector Count 1 as a literal 512-byte extent and rejected standards-compliant oscdimg output before hashing the embedded EFI system partition.
@@ -727,7 +727,7 @@ $Script:ScriptVersion = 'update-wsi-2026.08.03-r12.63'
 # r12.58 selected efisys_ex.bin correctly but its verification parser bound Math.Min to Int32 on an 8.91-GiB ISO and returned a false failure.
 # r12.57 proved only loose-file presence/signatures and could therefore accept a non-bootable mixed PCA2011/PCA2023 ISO.
 # Validation marker retained: r12.55 Setup DU baseline-language preservation and P11 no-new-locale verification.
-$Script:ScriptTag     = 'oscdimg-qualified-resolution'
+$Script:ScriptTag     = 'oscdimg-resolver-collection-fix'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -10303,8 +10303,8 @@ function Resolve-OscdimgRepositoryReferences {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Configuration)
 
-    $records = New-Object System.Collections.Generic.List[object]
-    $errors = New-Object System.Collections.Generic.List[string]
+    $records = [System.Collections.Generic.List[object]]::new()
+    $errors = [System.Collections.Generic.List[string]]::new()
     $repo = $Script:OscdimgRepository
     $scriptPathEscaped = [uri]::EscapeDataString($Script:OscdimgRepositoryScriptPath)
 
@@ -10371,8 +10371,17 @@ function Resolve-OscdimgRepositoryReferences {
 
     # Deduplicate main/release when they resolve the same symbol identity while
     # preserving every repository reference as provenance.
+    #
+    # IMPORTANT: do not use @($records) for Generic.List[object]. PowerShell
+    # 7.4+ can throw "Argument types do not match" when an array subexpression
+    # materializes a List[object] containing PSCustomObject values. This was
+    # reintroduced by the r12.63 resolver even though the project had already
+    # fixed the same runtime defect in r12.17. List<T>.ToArray() is safe on
+    # both Windows PowerShell 5.1 and PowerShell 7.x.
+    $recordArray = [object[]]$records.ToArray()
+    $errorArray = [string[]]$errors.ToArray()
     $identities = @()
-    foreach ($group in @($records | Group-Object ExpectedSha256)) {
+    foreach ($group in @($recordArray | Group-Object ExpectedSha256)) {
         $first = $group.Group | Select-Object -First 1
         $identities += [pscustomobject][ordered]@{
             Architecture = 'AMD64'
@@ -10385,13 +10394,13 @@ function Resolve-OscdimgRepositoryReferences {
         }
     }
     return [pscustomobject][ordered]@{
-        SchemaVersion = 'secureboot-objects-oscdimg-resolution/1.0'
+        SchemaVersion = 'secureboot-objects-oscdimg-resolution/1.1'
         GeneratedAtUtc = [datetime]::UtcNow.ToString('o')
         ResolutionSource = $source
         Status = $(if ($identities.Count -gt 0) { 'Pass' } else { 'Fail' })
-        Records = @($records)
+        Records = $recordArray
         UniqueIdentities = $identities
-        Errors = @($errors)
+        Errors = $errorArray
     }
 }
 
@@ -10452,7 +10461,7 @@ function Get-OscdimgLocalCandidatePaths {
     [CmdletBinding()]
     param()
 
-    $list = New-Object System.Collections.Generic.List[string]
+    $list = [System.Collections.Generic.List[string]]::new()
     $seen = @{}
     foreach ($candidate in @(
         'C:\Program Files\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe',
@@ -10470,7 +10479,9 @@ function Get-OscdimgLocalCandidatePaths {
         $key = $full.ToLowerInvariant()
         if (-not $seen.ContainsKey($key)) { $seen[$key] = $true; $list.Add($full) | Out-Null }
     }
-    return @($list)
+    # Avoid array-subexpression materialization of Generic.List values.
+    # ToArray() is stable across Windows PowerShell 5.1 and PowerShell 7.x.
+    return [string[]]$list.ToArray()
 }
 
 function Get-OscdimgCandidateEvidence {
@@ -17934,12 +17945,40 @@ function Invoke-SetupPhase01_Initialize {
             $oscdimgPath = Resolve-OscdimgExe
             Write-Ok ('oscdimg.exe found: {0}' -f $oscdimgPath)
         } catch {
+            $resolverError = $_
             if ($Action -in @('ListPhases','GenerateManifest','Cleanup','Prepare') -or $Script:EnvironmentInfoOnly) {
                 Write-Caution ('oscdimg.exe not found, but -Action {0} does not need it; continuing.' -f $Action)
             } elseif ($Script:SyntheticTestMode) {
                 Write-Caution 'oscdimg.exe not found; -SyntheticTestMode will use a raw-copy fallback.'
             } else {
-                throw ('No metadata-qualified AMD64 oscdimg.exe is available. The resolver did not modify the host ADK. It attempted local Microsoft-signed candidates and the latest secureboot_objects exact-hash WorkRoot-managed Symbol Server fallback. Detail: {0}' -f $_.Exception.Message)
+                # Preserve a machine-readable resolver failure even when the
+                # exception occurs before the normal selection evidence can be
+                # written. This is evidence-only and does not weaken fail-closed
+                # tool selection.
+                try {
+                    $failureDir = Join-Path $Script:WorkRoot 'logs\tool-resolution'
+                    if (-not (Test-Path -LiteralPath $failureDir)) {
+                        New-Item -ItemType Directory -Path $failureDir -Force | Out-Null
+                    }
+                    $failurePath = Join-Path $failureDir 'oscdimg-resolution-failure.json'
+                    Save-CanonicalJsonFile -InputObject ([pscustomobject][ordered]@{
+                        SchemaVersion = 'oscdimg-resolution-failure/1.0'
+                        GeneratedAtUtc = [datetime]::UtcNow.ToString('o')
+                        ScriptVersion = [string]$Script:ScriptVersion
+                        PowerShellEdition = [string]$PSVersionTable.PSEdition
+                        PowerShellVersion = [string]$PSVersionTable.PSVersion
+                        Stage = 'P01MetadataQualification'
+                        ErrorType = $resolverError.Exception.GetType().FullName
+                        ErrorMessage = $resolverError.Exception.Message
+                        FullyQualifiedErrorId = $resolverError.FullyQualifiedErrorId
+                        ScriptStackTrace = $resolverError.ScriptStackTrace
+                        HostAdkModified = $false
+                        Result = 'Fail'
+                    }) -Path $failurePath -Depth 8
+                } catch {
+                    Write-Caution ('Unable to write oscdimg resolver failure evidence: {0}' -f $_.Exception.Message)
+                }
+                throw ('No metadata-qualified AMD64 oscdimg.exe is available. The resolver did not modify the host ADK. It attempted local Microsoft-signed candidates and the latest secureboot_objects exact-hash WorkRoot-managed Symbol Server fallback. Detail: {0}' -f $resolverError.Exception.Message)
             }
         }
         $gwi = Get-Command -Name 'Get-WindowsImage' -ErrorAction SilentlyContinue

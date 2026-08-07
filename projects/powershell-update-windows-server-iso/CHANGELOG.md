@@ -22,6 +22,38 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.03-r12.64] - 2026-08-07
+
+Tag: `oscdimg-resolver-collection-fix`.
+
+### Fixed
+
+- **The r12.63 resolver's `Generic.List` array-subexpression
+  regression on PowerShell 7.4+ is corrected**: repository records,
+  error collections, and local candidate paths in the oscdimg
+  resolver are now materialized with `List<T>.ToArray()`, and
+  `New-Object`-style generic-list construction is removed from the
+  resolver — the known engine behavior where wrapping a generic list
+  in an array subexpression throws on current PowerShell 7.4+/7.5+
+  runtimes. Script-only change (+39 lines net); `data/*` and
+  `schema/*` are byte-identical to r12.63.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.03-r12.64`
+  with the measured tag `oscdimg-resolver-collection-fix`. No
+  terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 6E/206W/27I (raw sweep
+  6E/207W/27I: +1W is the PSA7002 LF artefact). **A sixth PSA error
+  joins with the revised resolver code and is carried as declared
+  series debt per the no-fix-forward rule** (series PSA debt is now
+  6E). Snapshot form: BOM + LF; committed
+  checkout form BOM+CRLF.
+
 ## [update-wsi-2026.08.03-r12.63] - 2026-08-07
 
 Tag: `oscdimg-qualified-resolution`.
