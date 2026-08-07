@@ -22,6 +22,37 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.03-r12.66] - 2026-08-07
+
+Tag: `catalog-validator-scope-fix`.
+
+### Fixed
+
+- **Exact-KB Catalog validation works under PowerShell 7 scoping**:
+  validators created with `GetNewClosure()` were isolated from the
+  script-scope parser functions they call, so exact-KB semantic
+  validation could fail for scope reasons and be misread as a
+  Catalog transient. Exact-KB validation is now a typed in-process
+  contract shared by the cache and transport paths, closures no
+  longer sever the validators from script scope, and a validator
+  IMPLEMENTATION failure is fail-fast instead of being retried
+  against the Catalog. Script-only change (+87 lines net); `data/*`
+  and `schema/*` are byte-identical to r12.65.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.03-r12.66`
+  with the measured tag `catalog-validator-scope-fix`. No terminal
+  D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 6E/208W/27I (raw sweep
+  6E/209W/27I: +1W is the PSA7002 LF artefact; +2W declared series
+  debt). Snapshot form: BOM + LF; committed
+  checkout form BOM+CRLF.
+
 ## [update-wsi-2026.08.03-r12.65] - 2026-08-07
 
 Tag: `catalog-setupdu-scalar-updateid-fix`.

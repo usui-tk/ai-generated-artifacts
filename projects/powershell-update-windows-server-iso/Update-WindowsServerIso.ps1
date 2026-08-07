@@ -718,8 +718,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.03-r12.65'
-# Validation marker: r12.65 fixes Setup DU candidate collection nesting that could coerce multiple Catalog UpdateIds into one space-delimited string. Candidate selectors now emit flat rows, every DownloadDialog request validates exactly one GUID before transport, and malformed identity is fail-closed without retrying the Catalog.
+$Script:ScriptVersion = 'update-wsi-2026.08.03-r12.66'
+# Validation marker: r12.66 fixes exact-KB Catalog semantic validation under PowerShell 7. GetNewClosure no longer isolates validators from script-scope parser functions; exact-KB validation is a typed in-process contract shared by cache and transport paths, and validator implementation failures are fail-fast rather than retried as Catalog transients.
 # Validation marker: r12.62 implements the Microsoft media Dynamic Update final WinPE-to-media contract after Setup DU, exports the serviced boot.wim, uses /ResetBase /Defer for WinPE/WinRE cleanup, and verifies the complete final ISO identity surface before release assessment.
 # Validation marker: r12.60 accepts the UEFI-defined El Torito Sector Count 0/1 end-of-media sentinel and proves efisys_ex.bin identity by hashing its expected byte length from the catalog Load RBA.
 # r12.59 incorrectly treated Sector Count 1 as a literal 512-byte extent and rejected standards-compliant oscdimg output before hashing the embedded EFI system partition.
@@ -727,7 +727,7 @@ $Script:ScriptVersion = 'update-wsi-2026.08.03-r12.65'
 # r12.58 selected efisys_ex.bin correctly but its verification parser bound Math.Min to Int32 on an 8.91-GiB ISO and returned a false failure.
 # r12.57 proved only loose-file presence/signatures and could therefore accept a non-bootable mixed PCA2011/PCA2023 ISO.
 # Validation marker retained: r12.55 Setup DU baseline-language preservation and P11 no-new-locale verification.
-$Script:ScriptTag     = 'catalog-setupdu-scalar-updateid-fix'
+$Script:ScriptTag     = 'catalog-validator-scope-fix'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -4668,9 +4668,10 @@ function Get-UpdateIdFromCatalog {
     if($null -eq $content){
         $uri='https://www.catalog.update.microsoft.com/Search.aspx?q='+[uri]::EscapeDataString($KbId)
         $slug=[regex]::Replace($KbId,'[^A-Za-z0-9]+','_');if($slug.Length -gt 60){$slug=$slug.Substring(0,60)}
-        $expected=$KbId
-        $validator={param($c) return (@(Get-CatalogSearchCandidatesFromHtml -Html ([string]$c) -ExactKbId $expected).Count -gt 0)}.GetNewClosure()
-        $content=Get-CatalogText -Url $uri -Tag ("search.$slug.raw.r1253.html") -ContentValidator $validator -ContentValidationDescription ("a parseable exact-KB result row for $KbId")
+        $content=Get-CatalogText -Url $uri -Tag ("search.$slug.raw.r1253.html") `
+            -ContentValidationMode ExactKbSearch `
+            -ContentValidationExpectedKbId $KbId `
+            -ContentValidationDescription ("a parseable exact-KB result row for $KbId")
     }
     $out=[System.Collections.Generic.List[object]]::new()
     foreach($item in @(Get-CatalogSearchCandidatesFromHtml -Html $content -ExactKbId $KbId)){$out.Add([pscustomobject]@{UpdateId=[string]$item.UpdateId;Title=[string]$item.Title;KbId=$KbId;Parser=[string]$item.Parser})|Out-Null}
@@ -5030,6 +5031,50 @@ function Get-CatalogSearchCandidatesFromHtml {
     return @($items.Values)
 }
 
+function Test-CatalogContentSemantics {
+    <#
+    .SYNOPSIS
+        Applies one typed semantic contract to a Catalog response body.
+    .DESCRIPTION
+        r12.66 deliberately keeps exact-KB validation in the main script
+        session state. The previous GetNewClosure-based validator executed in
+        a dynamic module and could not resolve script-scope parser functions
+        under PowerShell 7.6.3. Cache and live transport paths both call this
+        function so they cannot diverge.
+    #>
+    [OutputType([bool])]
+    param(
+        [AllowNull()][string]$Content,
+        [ValidateSet('None','ExactKbSearch','Custom')]
+        [string]$Mode = 'None',
+        [AllowEmptyString()][string]$ExpectedKbId = '',
+        [AllowNull()][scriptblock]$CustomValidator
+    )
+
+    switch ($Mode) {
+        'None' { return $true }
+        'ExactKbSearch' {
+            if ($ExpectedKbId -notmatch '^KB\d{6,8}$') {
+                throw [ArgumentException]::new(
+                    ('CATALOG_VALIDATION_CONTRACT_INVALID: ExactKbSearch requires one canonical KB identifier; observed "{0}".' -f $ExpectedKbId)
+                )
+            }
+            return (@(
+                Get-CatalogSearchCandidatesFromHtml -Html ([string]$Content) -ExactKbId $ExpectedKbId
+            ).Count -gt 0)
+        }
+        'Custom' {
+            if ($null -eq $CustomValidator) {
+                throw [ArgumentException]::new(
+                    'CATALOG_VALIDATION_CONTRACT_INVALID: Custom mode requires ContentValidator.'
+                )
+            }
+            return [bool](& $CustomValidator ([string]$Content))
+        }
+    }
+    throw [ArgumentOutOfRangeException]::new('Mode', $Mode, 'Unsupported Catalog semantic validation mode.')
+}
+
 function ConvertFrom-CatalogJavaScriptEscapes {
     [OutputType([string])]
     param([AllowNull()][string]$Value)
@@ -5117,6 +5162,9 @@ function Test-CatalogTransientFailure {
         $ex = $ex.InnerException
     }
     $message = [string]$ErrorRecord
+    # A validator implementation/scope failure is local code failure, not a
+    # transient Catalog response. Never burn three network retries on it.
+    if ($message -match 'CATALOG_VALIDATOR_EXECUTION_FAILED|CATALOG_VALIDATION_CONTRACT_INVALID') { return $false }
     # Catalog can return HTTP 200 with a temporary landing/error/challenge page.
     # Treat an explicitly detected semantic-response mismatch as transient so the
     # same escalating timeout schedule applies before any invalid page is cached.
@@ -5168,6 +5216,9 @@ function Invoke-CatalogWebRequest {
         [AllowNull()][int[]]$TimeoutScheduleSec,
         [AllowNull()][int[]]$RetryDelayScheduleSec,
         [AllowNull()][scriptblock]$ContentValidator,
+        [ValidateSet('None','ExactKbSearch','Custom')]
+        [string]$ContentValidationMode = 'None',
+        [AllowEmptyString()][string]$ContentValidationExpectedKbId = '',
         [AllowEmptyString()][string]$ContentValidationDescription = ''
     )
     if (-not $TimeoutScheduleSec -or $TimeoutScheduleSec.Count -eq 0) { $TimeoutScheduleSec = $script:CatTimeoutScheduleSec }
@@ -5182,15 +5233,29 @@ function Invoke-CatalogWebRequest {
             # Persist the complete body before any parser/semantic validation.
             $rawMetadataPath=Write-CatalogRawEvidence -Method $Method -Url $Url -Tag $Tag -Attempt $attempt -TimeoutSec $timeout -Response $response -RequestBody $Body -Outcome 'TransportSuccess'
             if(-not $response -or [string]::IsNullOrWhiteSpace([string]$response.Content)){throw [IO.InvalidDataException]::new('Microsoft Update Catalog returned an empty response body.')}
-            if($ContentValidator){
+            $effectiveValidationMode = $ContentValidationMode
+            if ($effectiveValidationMode -eq 'None' -and $null -ne $ContentValidator) { $effectiveValidationMode = 'Custom' }
+            if ($effectiveValidationMode -ne 'None') {
                 $valid=$false
-                try{$valid=[bool](& $ContentValidator ([string]$response.Content))}catch{throw [IO.InvalidDataException]::new(('CATALOG_SEMANTIC_RESPONSE_INVALID: validator threw for {0}: {1}' -f $ContentValidationDescription,$_.Exception.Message),$_.Exception)}
+                try {
+                    $valid = Test-CatalogContentSemantics -Content ([string]$response.Content) `
+                        -Mode $effectiveValidationMode `
+                        -ExpectedKbId $ContentValidationExpectedKbId `
+                        -CustomValidator $ContentValidator
+                }
+                catch {
+                    throw [InvalidOperationException]::new(
+                        ('CATALOG_VALIDATOR_EXECUTION_FAILED: validator implementation failed for {0}: {1}' -f $ContentValidationDescription,$_.Exception.Message),
+                        $_.Exception
+                    )
+                }
                 if(-not $valid){$d=if([string]::IsNullOrWhiteSpace($ContentValidationDescription)){'required Catalog content markers'}else{$ContentValidationDescription};throw [IO.InvalidDataException]::new(('CATALOG_SEMANTIC_RESPONSE_INVALID: HTTP 200 response did not contain {0}.' -f $d))}
             }
             Write-CatalogTransportEvidence -Method $Method -Url $Url -Tag $Tag -Attempt $attempt -TimeoutSec $timeout -Outcome 'Success' -StatusCode 200 -RawEvidenceMetadataPath $rawMetadataPath
             return $response
         } catch {
             $lastError=$_; $status=Get-CatalogHttpStatusCodeFromError -ErrorRecord $_
+            if($status -eq 0 -and $response -and $response.PSObject.Properties['StatusCode']){try{$status=[int]$response.StatusCode}catch{}}
             if($status -eq 0 -and ([string]$_ -match 'CATALOG_SEMANTIC_RESPONSE_INVALID')){$status=200}
             if(-not $rawMetadataPath){$rawMetadataPath=Write-CatalogRawEvidence -Method $Method -Url $Url -Tag $Tag -Attempt $attempt -TimeoutSec $timeout -Response $response -RequestBody $Body -Outcome 'Failure' -ErrorMessage $_.Exception.Message}
             else { Update-CatalogRawEvidenceMetadata -MetadataPath $rawMetadataPath -FinalOutcome 'SemanticOrProcessingFailure' -ErrorMessage $_.Exception.Message }
@@ -5220,6 +5285,9 @@ function Get-CatalogText {
         [string]$Url,
         [string]$Tag,
         [AllowNull()][scriptblock]$ContentValidator,
+        [ValidateSet('None','ExactKbSearch','Custom')]
+        [string]$ContentValidationMode = 'None',
+        [AllowEmptyString()][string]$ContentValidationExpectedKbId = '',
         [AllowEmptyString()][string]$ContentValidationDescription = ''
     )
     if (-not (Test-Path -LiteralPath $script:CatCache)) { New-Item -ItemType Directory -Path $script:CatCache -Force | Out-Null }
@@ -5227,15 +5295,31 @@ function Get-CatalogText {
     if (Test-Path $p) {
         $cached = Get-Content -LiteralPath $p -Raw
         $cacheValid = $true
-        if ($ContentValidator) {
-            try { $cacheValid = [bool](& $ContentValidator ([string]$cached)) } catch { $cacheValid = $false }
+        $effectiveValidationMode = $ContentValidationMode
+        if ($effectiveValidationMode -eq 'None' -and $null -ne $ContentValidator) { $effectiveValidationMode = 'Custom' }
+        if ($effectiveValidationMode -ne 'None') {
+            try {
+                $cacheValid = Test-CatalogContentSemantics -Content ([string]$cached) `
+                    -Mode $effectiveValidationMode `
+                    -ExpectedKbId $ContentValidationExpectedKbId `
+                    -CustomValidator $ContentValidator
+            }
+            catch {
+                throw [InvalidOperationException]::new(
+                    ('CATALOG_VALIDATOR_EXECUTION_FAILED: cached response validator implementation failed for {0}: {1}' -f $ContentValidationDescription,$_.Exception.Message),
+                    $_.Exception
+                )
+            }
         }
         if ($cacheValid) { return $cached }
         Write-Caution ('Discarding semantically invalid Catalog cache entry before retry: {0}' -f $p)
         Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
     }
     $r = Invoke-CatalogWebRequest -Url $Url -Method GET -Tag $Tag `
-        -ContentValidator $ContentValidator -ContentValidationDescription $ContentValidationDescription
+        -ContentValidator $ContentValidator `
+        -ContentValidationMode $ContentValidationMode `
+        -ContentValidationExpectedKbId $ContentValidationExpectedKbId `
+        -ContentValidationDescription $ContentValidationDescription
     # Cache only a transport- and semantic-validated response.
     $r.Content | Set-Content -LiteralPath $p -Encoding UTF8 -NoNewline
     Start-Sleep -Milliseconds 600
@@ -5258,9 +5342,12 @@ function Search-Catalog {
     param([string]$Query,[switch]$RefreshCache)
     $slug=[regex]::Replace($Query,'[^A-Za-z0-9]+','_');if($slug.Length -gt 60){$slug=$slug.Substring(0,60)}
     $tag="search.$slug.raw.r1253.html";if($RefreshCache){Remove-Item -LiteralPath (Join-Path $script:CatCache $tag) -Force -ErrorAction SilentlyContinue}
-    $validator=$null;$desc=''
-    if($Query -match '^KB\d{6,8}$'){$expected=$Query;$validator={param($c)return(@(Get-CatalogSearchCandidatesFromHtml -Html ([string]$c) -ExactKbId $expected).Count -gt 0)}.GetNewClosure();$desc="a parseable exact-KB result row for $Query"}
-    $html=Get-CatalogText -Url ($script:CatSearchUrl+'?q='+[uri]::EscapeDataString($Query)) -Tag $tag -ContentValidator $validator -ContentValidationDescription $desc
+    $validationMode='None';$validationKb='';$desc=''
+    if($Query -match '^KB\d{6,8}$'){$validationMode='ExactKbSearch';$validationKb=$Query;$desc="a parseable exact-KB result row for $Query"}
+    $html=Get-CatalogText -Url ($script:CatSearchUrl+'?q='+[uri]::EscapeDataString($Query)) -Tag $tag `
+        -ContentValidationMode $validationMode `
+        -ContentValidationExpectedKbId $validationKb `
+        -ContentValidationDescription $desc
     $byUid=@{}
     foreach($item in @(Get-CatalogSearchCandidatesFromHtml -Html $html -ExactKbId $(if($Query -match '^KB\d{6,8}$'){$Query}else{''}))){
         $uid=[string]$item.UpdateId;$byUid[$uid]=[pscustomobject]@{uid=$uid;title=[string]$item.Title;products='';classification='';lastUpdated='';version='';sizeText='';sizeBytes=$null;parser=[string]$item.Parser}
