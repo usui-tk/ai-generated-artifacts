@@ -344,7 +344,7 @@ param(
     [switch]   $SkipPca2023BootManager,
 
     # Deprecated compatibility-only parameter. Server 2025 PCA2023
-    # conversion is required by default from r12.57, so this switch no longer
+    # conversion is required by default for every supported OS, so this switch no longer
     # changes execution. It remains accepted for one compatibility window to
     # avoid breaking existing automation; a warning is emitted when supplied.
     [switch]   $ForcePca2023OnServer2025,
@@ -718,21 +718,10 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.08-r12.78'
-# Validation marker: r12.75 retains the r12.72 ISO servicing pipeline unchanged and hardens only Collector r12/schema 1.10 Secure Boot evidence semantics: current/latest rollout state is authoritative, historical event 1808 cannot override newer state, WinCS is deployment-configuration evidence only, and WindowsUEFICA2023Capable/Authenticode signer observations are explicitly scoped diagnostics.
-# Validation marker: r12.72 horizontally hardens final-writer authority. P08S plans setup.exe and setuphost.exe for every supported OS, P09 explicitly creates/verifies required standard boot-manager targets, P10 emits an identity-bound media write-set, and P11 accepts later P10 bytes only through that successful evidence. Setup DU final verification now validates schema, path safety, uniqueness, and source/after hash-size binding. Collector r9/schema 1.7 remains unchanged.
-# Validation marker: r12.71 fixes the four-OS clean-E2E failures observed on Server 2019 and Server 2022. P11 now verifies Setup DU records against the authoritative final P09 WinPE setup-binary synchronization, and reviewed pinned Catalog identity accepts an exact digest-bearing configured filename as the SHA-1 binding while remaining fail-closed on UpdateId, filename, architecture, metadata and review-basis checks. Collector r9/schema 1.7 remains unchanged.
-# Validation marker: r12.69 gives the supported installed-OS evidence collector a purpose-based, project-neutral artifact contract: Collect-WindowsServerPostInstallEvidence.ps1, post-install evidence schema/output names, and WindowsServerEvidence default output root. ISO servicing behavior is unchanged from r12.67/r12.68.
-# Validation marker: r12.68 finalizes the clean-E2E distribution layout without changing ISO servicing behavior: the supported post-install collector is shipped as a stable top-level artifact, and the oscdimg qualification lab is retained under tests/.
-# Validation marker: r12.67 completes the horizontal Catalog/PowerShell collection-shape hardening: all active Catalog response contracts are typed in-process validators, internal scriptblock validators are removed, Search/DownloadDialog/ScopedView bodies are semantically validated before caching, cache keys are collision-resistant and identity-bound, Catalog identities are scalar-validated at every legacy/current download boundary, Generic.List values are materialized with ToArray(), and collection selectors return flat sequences.
-# Validation marker: r12.62 implements the Microsoft media Dynamic Update final WinPE-to-media contract after Setup DU, exports the serviced boot.wim, uses /ResetBase /Defer for WinPE/WinRE cleanup, and verifies the complete final ISO identity surface before release assessment.
-# Validation marker: r12.60 accepts the UEFI-defined El Torito Sector Count 0/1 end-of-media sentinel and proves efisys_ex.bin identity by hashing its expected byte length from the catalog Load RBA.
-# r12.59 incorrectly treated Sector Count 1 as a literal 512-byte extent and rejected standards-compliant oscdimg output before hashing the embedded EFI system partition.
-# r12.59 retained: Int64-safe parsing for ISO files larger than 2 GiB and P10 fail-closed post-flight verification.
-# r12.58 selected efisys_ex.bin correctly but its verification parser bound Math.Min to Int32 on an 8.91-GiB ISO and returned a false failure.
-# r12.57 proved only loose-file presence/signatures and could therefore accept a non-bootable mixed PCA2011/PCA2023 ISO.
-# Validation marker retained: r12.55 Setup DU baseline-language preservation and P11 no-new-locale verification.
-$Script:ScriptTag     = 'psa-shadowing-drain'
+$Script:ScriptVersion = 'update-wsi-2026.08.08-r12.79'
+# Validation history: the per-revision validation markers formerly kept
+# here live in CHANGELOG.md (chronological log) and SPEC.md Part D (rationale).
+$Script:ScriptTag     = 'psa-comment-drain'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -3493,7 +3482,7 @@ function Get-OsConfigPath {
 # oscdimg qualification and WorkRoot-managed acquisition
 # ============================================================
 #
-# oscdimg qualification policy (r12.63)
+# oscdimg qualification policy
 #
 # The host ADK is never installed, patched, or upgraded automatically.  The
 # resolver qualifies existing Microsoft-signed AMD64 ADK candidates and also
@@ -6341,7 +6330,7 @@ function Resolve-ResolvedPatchAssetFromCatalog {
         throw ('Catalog DownloadDialog returned no matching {0} x64 asset for {1}/{2}; row UpdateIds: {3}' -f
             $rule.ExpectedExtension, $type, $kb, $ids)
     }
-    # Decide mutability before candidate selection. r12.24 performed this
+    # Decide mutability before candidate selection. An earlier ordering did this
     # after Select-CatalogCandidateAsset, so a stale SHA-256 on a mutable
     # ResearchCandidate failed before the documented rehydration path ran.
     $baselineStatus = ''
@@ -7828,7 +7817,7 @@ function Get-DismExportArgumentList {
 }
 
 # ============================================================
-# install.wim display-date metadata (r12.34 resume-manifest lifecycle fix; r12.33 final-WIM boundary retained)
+# install.wim display-date metadata (resume-manifest lifecycle + final-WIM boundary)
 # ============================================================
 # Measured Server 2016/2022 evidence proves that Windows Setup's edition-list
 # The "Modified" column (and its ja-localized label) maps to IMAGE/CREATIONTIME on the tested media.
@@ -10686,8 +10675,8 @@ function Resolve-OscdimgRepositoryReferences {
     # IMPORTANT: do not use @($records) for Generic.List[object]. PowerShell
     # 7.4+ can throw "Argument types do not match" when an array subexpression
     # materializes a List[object] containing PSCustomObject values. This was
-    # reintroduced by the r12.63 resolver even though the project had already
-    # fixed the same runtime defect in r12.17. List<T>.ToArray() is safe on
+    # reintroduced by a later resolver rework after the project had already
+    # fixed the same runtime defect once. List<T>.ToArray() is safe on
     # both Windows PowerShell 5.1 and PowerShell 7.x.
     $recordArray = [object[]]$records.ToArray()
     $errorArray = [string[]]$errors.ToArray()
@@ -12259,7 +12248,7 @@ function ConvertTo-ResolvedPatchFromBaselineLine {
         }
     }
     # Do not synthesize "KBxxxxxxx.msu" for metadata-only selectors.  It is
-    # a landing-path label, not a Catalog identity, and r12.19 incorrectly
+    # a landing-path label, not a Catalog identity, and an earlier revision incorrectly
     # enforced it as an exact filename during P04.
 
     $expectedHashes = @{}
@@ -19331,7 +19320,7 @@ function Update-MonthlyAuxiliaryResolvedPatchesAtFetch {
 
     # Use ordinary PowerShell arrays here.  Windows PowerShell 5.1 and pwsh
     # 7.6 bind Generic.List[object] differently inside @(...), which caused
-    # "Argument types do not match" at the conversion loop in r12.08.
+    # "Argument types do not match" at this conversion loop in an earlier revision.
     $freshConfigLines = @()
     if ([bool]$auxContract.Discovery.ResolveStandaloneSsuMonthly) {
         $rawSsu = Resolve-Ssu2016 -BaselineMonth $month
@@ -22003,7 +21992,7 @@ function Invoke-BuildPhase09_AssembleIso {
 
 
 
-        # P09 Resume compatibility: r12.61 and earlier workspaces completed
+        # P09 Resume compatibility: earlier workspace generations completed
         # boot.wim servicing without Microsoft's final all-index Export step.
         # Rehydrate that missing step here exactly once, unless the active OS
         # policy intentionally preserved the source boot.wim.
@@ -22393,8 +22382,8 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
 
         # P10 is the phase that constructs or repairs PCA2023 media.  It must
         # not write P10.ok when the firmware-visible El Torito payload is
-        # unavailable, unparsable, or different from efisys_ex.bin.  r12.58
-        # deferred this hard failure to P11 and therefore reported P10 DONE
+        # unavailable, unparsable, or different from efisys_ex.bin.  An earlier
+        # revision deferred this hard failure to P11 and therefore reported P10 DONE
         # even when its own post-flight OverallStatus was Fail.
         if(-not $Script:SyntheticTestMode -and $outputCheck.ElToritoVerificationRequired) {
             $postElTorito=$outputCheck.ElToritoUefiBootImageCheck
@@ -22973,7 +22962,7 @@ function Invoke-VerifyPhase11_StaticVerify {
             Write-Step ('setup.exe present  : {0}' -f $hasSetup)
 
             # boot.stl must be byte-identical to the authoritative serviced
-            # WIM source recorded by P10.  This closes the r12.60 gap where
+            # WIM source recorded by P10.  This closes the earlier gap where
             # presence-only verification accepted an original-media boot.stl
             # even though KB5099536 requires a version/architecture match.
             if ($Script:SyntheticTestMode) {
@@ -23109,7 +23098,7 @@ function Invoke-VerifyPhase11_StaticVerify {
                         throw ('Unexpected P07 display metadata write strategy: {0}' -f $displayEvidence.WriteStrategy)
                     }
 
-                    # Resume compatibility for a completed r12.32 P08 run:
+                    # Resume compatibility for a completed pre-final-boundary P08 run:
                     # create the missing final-boundary evidence from the
                     # current extracted install.wim, after independently
                     # recalculating its integrity table and proving P07
@@ -23585,7 +23574,7 @@ function Invoke-VerifyPhase11_StaticVerify {
         $p11EvidencePath = Join-Path $Script:LogsDir 'P11_static_verification.json'
         # Do not wrap Generic.List[object] in @(...). PowerShell issue #27558
         # throws 'Argument types do not match' for New-Object-created lists.
-        # r12.17 uses constructor-created lists globally and reads Count directly.
+        # The script uses constructor-created lists globally and reads Count directly.
         $p11Evidence = [pscustomobject][ordered]@{
             SchemaVersion='P11-static-verification/1.1'
             Status=$p11Status
@@ -25098,7 +25087,7 @@ function Restore-BootWimFromSourceIso {
 
 
 # ============================================================
-# Resume transaction / evidence hardening (r12.35)
+# Resume transaction / evidence hardening
 # ============================================================
 
 function Resolve-ResumeRelativePath {
@@ -25666,7 +25655,7 @@ function Get-VerifiedTransactionBackup {
         # Current manifest: validate below.
     } elseif($PhaseId -eq 'P08' -and $manifest -and
         $manifest.PSObject.Properties['BootWimSha256'] -and $manifest.PSObject.Properties['InstallWimSha256']){
-        # r12.34 and earlier compatibility. Normalize only after validating the
+        # Legacy flat-hash manifest compatibility. Normalize only after validating the
         # known files and their measured hashes; do not silently upgrade on disk.
         $legacyRows=[System.Collections.Generic.List[object]]::new()
         foreach($spec in @(
@@ -27073,7 +27062,7 @@ try {
         $phaseList = Get-PhaseListByAction -ActionName $Action
     }
 
-    # r12.33 fail-fast guard: exercise the explicit DateTime -> FILETIME path
+    # Fail-fast guard: exercise the explicit DateTime -> FILETIME path
     # before downloads, ISO extraction, or DISM inspection can consume time.
     $Script:InstallWimDisplayDateStartupPreflight = $null
     if (($phaseList -contains 'P07') -and -not [string]::IsNullOrWhiteSpace($Script:ImageDisplayDate)) {

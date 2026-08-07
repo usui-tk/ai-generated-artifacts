@@ -379,6 +379,34 @@ the script and follows the
 
 ### Static analysis
 
+- **PSA warning-debt drain, batches 5+6 — naming adjudication and
+  timeless comments.** Batch 5 (adjudication, no code change):
+  PSA6005 (10) is adjudicated as analyzer false positives — the
+  rule's regex spans parameter boundaries on a line, flagging any
+  param line where a Mandatory parameter merely PRECEDES an optional
+  parameter with a default (minimal-repro proven; a rigorous
+  adjacency re-scan confirmed no Mandatory parameter in the script
+  carries its own default); registered as the third central-reflux
+  candidate and retained as declared debt. PSA6003 (31 plural nouns)
+  and PSA6001 (2 non-approved verbs `Throw-`/`Ensure-`) are genuine
+  style findings whose fixes are public-surface renames; deferred by
+  the standing numbering adjudication to the r13.xx refactoring
+  campaign and retained as declared debt. Batch 6 (PSAP0005, 29):
+  the per-revision validation-marker block in the script header (13
+  lines) is relocated per the rule's own guidance — CHANGELOG.md
+  keeps the chronological record, SPEC.md Part D the rationale — and
+  replaced by a two-line pointer; the sixteen remaining
+  revision-anchored comments are reworded timelessly, replacing
+  revision numbers with the structural discriminator they stood for
+  (e.g. legacy flat-hash resume manifests, pre-final-boundary P08
+  runs, earlier workspace generations lacking the final all-index
+  Export) while preserving every engineering rule and incident
+  rationale. Main-script debt is now 0E/120W/26I, and every
+  remaining warning is a documented declared-debt class (77 PSA2009
+  + 10 PSA6005 analyzer false positives pending the central fixes;
+  33 naming findings pending r13). ScriptVersion
+  `update-wsi-2026.08.08-r12.79`, tag `psa-comment-drain`; the T40
+  release pin advances in the same change set.
 - **PSA warning-debt drain, batch 4 — shadowing renames** (reviewed
   batch; behavior-preserving local renames with every in-scope
   reference mapped by AST/function-bounds scan before editing).
