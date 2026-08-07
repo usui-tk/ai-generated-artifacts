@@ -22,6 +22,45 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.03-r12.63] - 2026-08-07
+
+Tag: `oscdimg-qualified-resolution`.
+
+### Added
+
+- **`oscdimg.exe` resolution becomes source-aware qualification**
+  (replacing the hash-only advisory and the ADK-install fallback):
+  candidates are gathered from signed AMD64 local ADK installs
+  (PE + Authenticode + ADK-registration evidence) and from
+  Microsoft `secureboot_objects` Symbol-Server references resolved
+  at runtime from the fetched `Make2023BootableMedia.ps1` script
+  text, with a WorkRoot-managed exact-SHA-256 fallback download —
+  the host ADK is never modified, selection fails CLOSED when no
+  candidate qualifies, and each candidate must pass a cached
+  behavioral ISO-assembly test before use. **A new declared dataset
+  `data/tool-references/oscdimg-reference.json`
+  (`oscdimg-reference/1.0`) enters the repository** (path adopted by
+  user adjudication this session): expected ADK family/servicing KB,
+  the selection policy, pinned repository references and qualified
+  identities that the resolver consumes. The former
+  `Install-WindowsAdkFallback` path is removed. Script delta +719
+  lines / −206; the remaining `data/*` and `schema/*` files are
+  byte-identical to r12.62.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.03-r12.63`
+  (date component moves to 08.03) with the measured tag
+  `oscdimg-qualified-resolution`. No terminal D-contract required an
+  edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 5E/204W/27I (raw sweep
+  5E/205W/27I: +1W is the PSA7002 LF artefact; +22W/+15I on the new
+  resolver code, declared series debt). Snapshot form: BOM + LF; committed checkout form BOM+CRLF.
+
 ## [update-wsi-2026.08.02-r12.62] - 2026-08-07
 
 Tag: `winpe-final-media-sync`.

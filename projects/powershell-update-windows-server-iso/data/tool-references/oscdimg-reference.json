@@ -1,0 +1,67 @@
+{
+  "SchemaVersion": "oscdimg-reference/1.0",
+  "GeneratedAtUtc": "2026-08-02T15:55:54Z",
+  "ExpectedAdkFamily": "10.1.26100.2454",
+  "ExpectedAdkServicingKb": "KB5101684",
+  "SelectionPolicy": {
+    "Local": "AMD64 PE plus valid Microsoft Authenticode; functional qualification required for ISO assembly.",
+    "RepositorySymbol": "Unsigned is expected; exact SHA-256 parsed from the same fetched microsoft/secureboot_objects script revision is mandatory.",
+    "Preference": "Qualified signed local ADK first; exact-hash repository Symbol Server identity as WorkRoot-managed fallback.",
+    "FileVersion": "Evidence only; not a greater-than acceptance rule.",
+    "PatchRegistration": "Evidence only; absence is inconclusive."
+  },
+  "RepositoryReferences": [
+    {
+      "ReferenceName": "LatestMainForMake2023BootableMedia",
+      "RepositoryRef": "cf2e7df3411cc4788683919e9359e3c60d3be997",
+      "CommitSha": "cf2e7df3411cc4788683919e9359e3c60d3be997",
+      "SourceUrl": "https://raw.githubusercontent.com/microsoft/secureboot_objects/cf2e7df3411cc4788683919e9359e3c60d3be997/scripts/windows/Make2023BootableMedia.ps1",
+      "ScriptVersion": "1.4",
+      "ScriptDate": "2026-03-13",
+      "Architecture": "AMD64",
+      "SymbolUrl": "https://msdl.microsoft.com/download/symbols/oscdimg.exe/9F01AFB765000/oscdimg.exe",
+      "SymbolStoreKey": "9F01AFB765000",
+      "ExpectedSha256": "abcd07318ebd8cdbe274b46c9de78820dca9709d558cdbc1f5d1730924264d07"
+    },
+    {
+      "ReferenceName": "LatestGitHubRelease",
+      "RepositoryRef": "v1.6.5",
+      "CommitSha": "",
+      "SourceUrl": "https://raw.githubusercontent.com/microsoft/secureboot_objects/v1.6.5/scripts/windows/Make2023BootableMedia.ps1",
+      "ScriptVersion": "1.4",
+      "ScriptDate": "2026-03-13",
+      "Architecture": "AMD64",
+      "SymbolUrl": "https://msdl.microsoft.com/download/symbols/oscdimg.exe/9F01AFB765000/oscdimg.exe",
+      "SymbolStoreKey": "9F01AFB765000",
+      "ExpectedSha256": "abcd07318ebd8cdbe274b46c9de78820dca9709d558cdbc1f5d1730924264d07"
+    }
+  ],
+  "QualifiedIdentities": [
+    {
+      "Label": "UserLab-r4-LocalAdk-AMD64",
+      "SourceType": "LocalAdk",
+      "Architecture": "AMD64",
+      "AdkFamily": "10.1.26100.2454",
+      "FileVersion": "2.56",
+      "Sha256": "801d8bc3ffa4c15b1740c3fae78612243315f35ed0683e28c22570a6f5a251a9",
+      "Authenticode": "Valid Microsoft",
+      "FunctionalQualification": "Pass: ascii repeat deterministic, spaces, Japanese path, El Torito identity, mount/read"
+    },
+    {
+      "Label": "secureboot_objects-v1.6.5-SymbolServer-AMD64",
+      "SourceType": "MicrosoftPublicSymbolServer",
+      "Architecture": "AMD64",
+      "FileVersion": "2.56",
+      "Sha256": "abcd07318ebd8cdbe274b46c9de78820dca9709d558cdbc1f5d1730924264d07",
+      "Authenticode": "NotSigned (expected by Microsoft reference)",
+      "FunctionalQualification": "Pass: ascii repeat deterministic, spaces, Japanese path, El Torito identity, mount/read"
+    }
+  ],
+  "OfficialSources": [
+    "https://learn.microsoft.com/en-us/windows-hardware/get-started/adk-install",
+    "https://learn.microsoft.com/en-us/windows-hardware/get-started/adk-servicing",
+    "https://learn.microsoft.com/en-us/windows-hardware/get-started/what-s-new-in-kits-and-tools",
+    "https://github.com/microsoft/secureboot_objects",
+    "https://github.com/microsoft/secureboot_objects/issues/333"
+  ]
+}

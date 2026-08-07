@@ -19,7 +19,7 @@
       - 64-bit process (forcibly checked in Phase P01)
       - Windows 10/11 Pro/Enterprise/Education or Windows Server 2016+
       - Administrator (DISM Mount requires elevation)
-      - Windows ADK Deployment Tools (for oscdimg.exe)
+      - Qualified AMD64 oscdimg.exe (signed ADK or exact-hash Microsoft Symbol Server WorkRoot cache)
       - 60 GB free disk space on the WorkRoot drive (30 GB minimum)
       - Internet access for ISO/patch downloads (offline runs: pass
         -IsoPath and pre-stage the baseline patch files under
@@ -718,7 +718,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.02-r12.62'
+$Script:ScriptVersion = 'update-wsi-2026.08.03-r12.63'
+# Validation marker: r12.63 replaces the hash-only oscdimg advisory with source-aware qualification: signed AMD64 ADK candidates, runtime-resolved secureboot_objects symbol references, WorkRoot-managed exact-hash fallback, cached behavioral ISO tests, and fail-closed candidate selection without modifying the host ADK.
 # Validation marker: r12.62 implements the Microsoft media Dynamic Update final WinPE-to-media contract after Setup DU, exports the serviced boot.wim, uses /ResetBase /Defer for WinPE/WinRE cleanup, and verifies the complete final ISO identity surface before release assessment.
 # Validation marker: r12.60 accepts the UEFI-defined El Torito Sector Count 0/1 end-of-media sentinel and proves efisys_ex.bin identity by hashing its expected byte length from the catalog Load RBA.
 # r12.59 incorrectly treated Sector Count 1 as a literal 512-byte extent and rejected standards-compliant oscdimg output before hashing the embedded EFI system partition.
@@ -726,7 +727,7 @@ $Script:ScriptVersion = 'update-wsi-2026.08.02-r12.62'
 # r12.58 selected efisys_ex.bin correctly but its verification parser bound Math.Min to Int32 on an 8.91-GiB ISO and returned a false failure.
 # r12.57 proved only loose-file presence/signatures and could therefore accept a non-bootable mixed PCA2011/PCA2023 ISO.
 # Validation marker retained: r12.55 Setup DU baseline-language preservation and P11 no-new-locale verification.
-$Script:ScriptTag     = 'winpe-final-media-sync'
+$Script:ScriptTag     = 'oscdimg-qualified-resolution'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -3484,36 +3485,27 @@ function Get-OsConfigPath {
 }
 
 # ============================================================
-# Windows ADK Deployment Tools installer (P01 auto-install path)
+# oscdimg qualification and WorkRoot-managed acquisition
 # ============================================================
 #
-# When P01 Step 3 finds oscdimg.exe missing, the script auto-installs the
-# Deployment Tools (no switch, mirroring the 7-Zip Install-SevenZipFallback
-# auto-acquire): it downloads adksetup.exe from the Microsoft Learn published
-# fwlink and runs it with /features OptionId.DeploymentTools to install
-# only the Deployment Tools feature (~50-80 MB), never the full ADK.
+# oscdimg qualification policy (r12.63)
 #
-# Version pinning rationale:
-#   ADK 10.1.26100.2454 (December 2024) is the version Microsoft Learn
-#   documents as supporting Windows Server 2025, Server 2022, and every
-#   earlier supported Windows 10/11 release. Newer Deployment Tools are
-#   forward-compatible: oscdimg.exe from this ADK build can assemble
-#   ISO images targeting Server 2016 / 2019 / 2022 / 2025 without
-#   needing per-OS ADK variants. The later ADK 10.1.28000.1 (November
-#   2025) is Windows 11 26H1 Arm64 only and is NOT appropriate for
-#   Server x64 work on the host.
-#
-# The fwlink URL is stable; Microsoft Learn republishes the same linkid
-# whenever it serves a new ADK servicing build. If Microsoft retires
-# this linkid, bump the constants below in one place.
-#
-# Reference:
-#   https://learn.microsoft.com/en-us/windows-hardware/get-started/adk-install
-#   "Download the ADK 10.1.26100.2454 (December 2024)"
-
-$Script:AdkInstallerUrl      = 'https://go.microsoft.com/fwlink/?linkid=2289980'
-$Script:AdkInstallerVersion  = '10.1.26100.2454'
-$Script:AdkInstallerOptionId = 'OptionId.DeploymentTools'
+# The host ADK is never installed, patched, or upgraded automatically.  The
+# resolver qualifies existing Microsoft-signed AMD64 ADK candidates and also
+# resolves the oscdimg identity currently referenced by Microsoft's
+# secureboot_objects implementation.  Repository-referenced binaries are
+# downloaded only to a WorkRoot-managed cache and must match the exact SHA-256
+# from the same fetched Microsoft script revision.  FileVersion and ADK/MSP
+# registry records are evidence, not standalone greater-than acceptance rules.
+$Script:OscdimgExpectedAdkFamily       = '10.1.26100.2454'
+$Script:OscdimgExpectedAdkPatchKb      = 'KB5101684'
+$Script:OscdimgReferenceRelativePath  = 'data\tool-references\oscdimg-reference.json'
+$Script:OscdimgGitHubApiBase          = 'https://api.github.com'
+$Script:OscdimgRepository             = 'microsoft/secureboot_objects'
+$Script:OscdimgRepositoryScriptPath   = 'scripts/windows/Make2023BootableMedia.ps1'
+$Script:OscdimgResolutionState        = $null
+$Script:OscdimgResolutionEvidence     = $null
+$Script:OscdimgResolutionMessageShown = $false
 
 # ============================================================
 # Windows SDK Signing Tools installer (signtool.exe acquisition)
@@ -3523,7 +3515,7 @@ $Script:AdkInstallerOptionId = 'OptionId.DeploymentTools'
 # Tools), under Windows Kits\10\bin\<ver>\<arch>\signtool.exe. It
 # is acquired with the SAME install-if-missing idiom this script
 # already uses for 7-Zip (Get-SevenZipPath / Install-SevenZipFallback)
-# and ADK/oscdimg (Resolve-OscdimgExe / Install-WindowsAdkFallback),
+# and qualified oscdimg resolution (Resolve-OscdimgExe),
 # mirroring the Install-WindowsSdkFallback pattern in
 # Deploy-AMDChipsetDriverOnWindowsServer.ps1.
 #
@@ -10111,213 +10103,736 @@ function Resolve-EfisysBin {
     throw ('No usable UEFI El Torito image was found for policy {0}.' -f $Policy)
 }
 
-function Install-WindowsAdkFallback {
-    <#
-    .SYNOPSIS
-        Download Microsoft's adksetup.exe and silently install the
-        Windows ADK Deployment Tools feature (oscdimg.exe).
-
-    .DESCRIPTION
-        Called from P01 Step 3 when the Resolve-OscdimgExe search
-        failed (oscdimg.exe missing). Mirrors the
-        Install-WindowsSdkFallback / Install-WindowsWdkFallback pattern
-        in Deploy-AMDChipsetDriverOnWindowsServer.ps1:
-
-          1) Download $Script:AdkInstallerUrl (fwlink, pinned in the
-             global-constants block) to <WorkRoot>\cache\adk\adksetup.exe.
-             Reuse cache if already present.
-          2) Run adksetup.exe with $Script:AdkInstallerOptionId
-             (OptionId.DeploymentTools), /quiet /norestart /ceip off,
-             and /log <WorkRoot>\logs\adksetup.log.
-          3) Defensive verify: a non-zero installer exit code with
-             oscdimg.exe present afterwards is treated as
-             "already installed" (warn-only). Only a missing oscdimg.exe
-             after install is a hard failure.
-
-        Returns the absolute path to the discovered oscdimg.exe so the
-        caller does not need to re-invoke Resolve-OscdimgExe (which
-        would emit the SHA-256 advisory line a second time).
-
-    .OUTPUTS
-        [string] - absolute path to oscdimg.exe
-
-    .NOTES
-        Network access is required. The Microsoft Learn page for the
-        ADK lists the canonical download URL; see the comment block
-        next to $Script:AdkInstallerUrl above.
-    #>
+function Get-OscdimgReferenceConfiguration {
     [CmdletBinding()]
-    [OutputType([string])]
     param()
 
-    $cacheDir = Join-Path $Script:WorkRoot 'cache\adk'
-    if (-not (Test-Path -LiteralPath $cacheDir)) {
-        New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
+    $path = Join-Path $Script:ScriptRoot $Script:OscdimgReferenceRelativePath
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw ('oscdimg reference configuration is missing: {0}' -f $path)
     }
-    $exePath = Join-Path $cacheDir 'adksetup.exe'
-    $logPath = Join-Path $Script:LogsDir 'adksetup.log'
-
-    Write-Step ('ADK installer version : {0} (pinned)' -f $Script:AdkInstallerVersion)
-    Write-Step ('ADK installer URL     : {0}' -f $Script:AdkInstallerUrl)
-    Write-Step ('Cache path            : {0}' -f $exePath)
-    Write-Step ('Install log           : {0}' -f $logPath)
-    Write-Step ('Feature               : {0}' -f $Script:AdkInstallerOptionId)
-
-    if (Test-Path -LiteralPath $exePath) {
-        $fi = Get-Item -LiteralPath $exePath
-        Write-Step ('Reusing cached adksetup.exe ({0:N0} bytes)' -f $fi.Length)
-    } else {
-        Write-Step 'Downloading adksetup.exe from Microsoft Learn fwlink...'
-        try {
-            # Force TLS 1.2 for compatibility with older Server hosts
-            $oldSp = [System.Net.ServicePointManager]::SecurityProtocol
-            [System.Net.ServicePointManager]::SecurityProtocol =
-                [System.Net.SecurityProtocolType]::Tls12
-            try {
-                Invoke-WebRequest -Uri $Script:AdkInstallerUrl `
-                                  -OutFile $exePath `
-                                  -UseBasicParsing
-            } finally {
-                [System.Net.ServicePointManager]::SecurityProtocol = $oldSp
-            }
-        } catch {
-            throw ('ADK installer download failed: {0}' -f $_.Exception.Message)
-        }
-        if (-not (Test-Path -LiteralPath $exePath)) {
-            throw 'ADK installer download appeared to succeed but adksetup.exe is not present.'
-        }
-        $fi = Get-Item -LiteralPath $exePath
-        Write-Ok ('adksetup.exe downloaded ({0:N0} bytes)' -f $fi.Length)
-    }
-
-    $installArgs = @(
-        '/features', $Script:AdkInstallerOptionId,
-        '/quiet',
-        '/norestart',
-        '/ceip', 'off',
-        '/log',   $logPath
-    )
-    Write-Step ('Running: adksetup.exe {0}' -f ($installArgs -join ' '))
-
-    # psa-disable-next-line PSA3001 -- Start-Process -ArgumentList is the
-    # canonical pattern for invoking installer EXEs with explicit args;
-    # matches Install-WindowsSdkFallback / Install-WindowsWdkFallback in
-    # the SDK/WDK reference implementation.
-    $proc = Start-Process -FilePath $exePath `
-                          -ArgumentList $installArgs `
-                          -Wait -PassThru
-
-    # Defensive verify by tool presence rather than trusting the exit
-    # code (matches the SDK/WDK reference behaviour for installer EXEs
-    # that exit non-zero when the kit is already on the machine).
-    $oscdimgPath = $null
     try {
-        $oscdimgPath = Resolve-OscdimgExe
+        $config = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
     } catch {
-        # Resolve-OscdimgExe throws when no oscdimg.exe is found anywhere.
-        # We translate that to a hard failure below.
-        $oscdimgPath = $null
+        throw ('oscdimg reference configuration is invalid: {0}: {1}' -f $path, $_.Exception.Message)
+    }
+    if ([string]$config.SchemaVersion -ne 'oscdimg-reference/1.0') {
+        throw ('Unsupported oscdimg reference schema: {0}' -f [string]$config.SchemaVersion)
+    }
+    return $config
+}
+
+function Get-OscdimgPeEvidence {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string]$Path)
+
+    $result = [pscustomobject][ordered]@{
+        IsPe = $false
+        MachineCode = $null
+        Machine = 'Unknown'
+        ErrorMessage = ''
+    }
+    $stream = $null
+    $reader = $null
+    try {
+        $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
+        $reader = New-Object System.IO.BinaryReader($stream)
+        if ($reader.ReadUInt16() -ne 0x5A4D) { throw 'DOS MZ signature not found.' }
+        $stream.Position = 0x3c
+        $peOffset = [int64]$reader.ReadUInt32()
+        if ($peOffset -lt 0 -or ($peOffset + 6) -gt $stream.Length) { throw 'Invalid PE header offset.' }
+        $stream.Position = $peOffset
+        if ($reader.ReadUInt32() -ne 0x00004550) { throw 'PE signature not found.' }
+        $machineCode = $reader.ReadUInt16()
+        $machine = switch ($machineCode) {
+            0x8664 { 'AMD64' }
+            0xAA64 { 'ARM64' }
+            0x014c { 'x86' }
+            default { ('0x{0:X4}' -f $machineCode) }
+        }
+        $result.IsPe = $true
+        $result.MachineCode = ('0x{0:X4}' -f $machineCode)
+        $result.Machine = $machine
+    } catch {
+        $result.ErrorMessage = $_.Exception.Message
+    } finally {
+        if ($reader) { $reader.Dispose() }
+        elseif ($stream) { $stream.Dispose() }
+    }
+    return $result
+}
+
+function Get-OscdimgAuthenticodeEvidence {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string]$Path)
+
+    $result = [pscustomobject][ordered]@{
+        Status = 'Unknown'
+        StatusMessage = ''
+        SignerSubject = ''
+        SignerIssuer = ''
+        Thumbprint = ''
+        IsMicrosoftSigner = $false
+        ErrorMessage = ''
+    }
+    try {
+        $sig = Get-AuthenticodeSignature -LiteralPath $Path -ErrorAction Stop
+        $result.Status = [string]$sig.Status
+        $result.StatusMessage = [string]$sig.StatusMessage
+        if ($sig.SignerCertificate) {
+            $result.SignerSubject = [string]$sig.SignerCertificate.Subject
+            $result.SignerIssuer = [string]$sig.SignerCertificate.Issuer
+            $result.Thumbprint = [string]$sig.SignerCertificate.Thumbprint
+            $result.IsMicrosoftSigner = ($result.SignerSubject -match '(?i)O=Microsoft Corporation|CN=Microsoft Corporation|CN=Microsoft Windows Kits Publisher')
+        }
+    } catch {
+        $result.Status = 'Error'
+        $result.ErrorMessage = $_.Exception.Message
+    }
+    return $result
+}
+
+function Get-OscdimgAdkRegistrationEvidence {
+    [CmdletBinding()]
+    param()
+
+    $products = @()
+    $patches = @()
+    $productBase = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData\S-1-5-18\Products'
+    if (Test-Path -LiteralPath $productBase) {
+        foreach ($productKey in Get-ChildItem -LiteralPath $productBase -ErrorAction SilentlyContinue) {
+            $propsPath = $productKey.PSPath + '\InstallProperties'
+            if (-not (Test-Path -LiteralPath $propsPath)) { continue }
+            try {
+                $p = Get-ItemProperty -LiteralPath $propsPath -ErrorAction Stop
+                $name = [string]$p.DisplayName
+                if ($name -notmatch '(?i)Assessment and Deployment Kit|Windows ADK|Deployment Tools|Oscdimg') { continue }
+                $products += [pscustomobject][ordered]@{
+                    ProductRegistryKey = $productKey.PSChildName
+                    DisplayName = $name
+                    DisplayVersion = [string]$p.DisplayVersion
+                    Publisher = [string]$p.Publisher
+                    InstallDate = [string]$p.InstallDate
+                    LocalPackage = [string]$p.LocalPackage
+                }
+                $patchPath = $productKey.PSPath + '\Patches'
+                if (Test-Path -LiteralPath $patchPath) {
+                    foreach ($patchKey in Get-ChildItem -LiteralPath $patchPath -ErrorAction SilentlyContinue) {
+                        try {
+                            $pp = Get-ItemProperty -LiteralPath $patchKey.PSPath -ErrorAction Stop
+                            $combined = ([string]$pp.DisplayName + ' ' + [string]$pp.MoreInfoURL + ' ' + [string]$pp.LocalPackage)
+                            $patches += [pscustomobject][ordered]@{
+                                ProductDisplayName = $name
+                                ProductDisplayVersion = [string]$p.DisplayVersion
+                                PatchRegistryKey = $patchKey.PSChildName
+                                DisplayName = [string]$pp.DisplayName
+                                MoreInfoURL = [string]$pp.MoreInfoURL
+                                LocalPackage = [string]$pp.LocalPackage
+                                ExpectedKbMentioned = ($combined -match [regex]::Escape($Script:OscdimgExpectedAdkPatchKb))
+                            }
+                        } catch { }
+                    }
+                }
+            } catch { }
+        }
     }
 
-    if ($oscdimgPath) {
-        if ($proc.ExitCode -ne 0) {
-            Write-Caution ('ADK installer exit code {0}; oscdimg.exe is present, treating as already installed.' -f $proc.ExitCode)
-        }
-        Write-Ok ('Windows ADK Deployment Tools installed: {0}' -f $oscdimgPath)
-        return $oscdimgPath
+    $familyMatch = [bool](@($products | Where-Object { [string]$_.DisplayVersion -eq $Script:OscdimgExpectedAdkFamily }).Count -gt 0)
+    $patchText = ($patches | ConvertTo-Json -Depth 5)
+    $patchDetected = ($patchText -match [regex]::Escape($Script:OscdimgExpectedAdkPatchKb))
+    return [pscustomobject][ordered]@{
+        ExpectedAdkFamily = $Script:OscdimgExpectedAdkFamily
+        ExpectedAdkFamilyEvidenceMatch = $familyMatch
+        ExpectedPatchKb = $Script:OscdimgExpectedAdkPatchKb
+        ExpectedPatchRegistrationDetected = $patchDetected
+        Products = $products
+        Patches = $patches
+        DetectionCaveat = 'Registry evidence is informative. Absence of a KB string does not prove that a serviced binary is unpatched; behavioral qualification remains authoritative.'
     }
-    throw ('Windows ADK install failed (exit {0}); oscdimg.exe still not found. See {1} for installer diagnostics.' -f $proc.ExitCode, $logPath)
+}
+
+function Get-OscdimgReferenceFromMicrosoftScriptText {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$Text,
+        [Parameter(Mandatory)] [string]$ReferenceName,
+        [Parameter(Mandatory)] [string]$RepositoryRef,
+        [string]$CommitSha = '',
+        [string]$SourceUrl = ''
+    )
+
+    $urlMatch = [regex]::Match($Text, '(?im)^\s*"AMD64"\s*=\s*"(?<url>https://msdl\.microsoft\.com/download/symbols/oscdimg\.exe/(?<key>[^/\"]+)/oscdimg\.exe)"')
+    $hashBlock = [regex]::Match($Text, '(?is)\$global:oscdimg_known_hashes\s*=\s*@\{(?<body>.*?)\}')
+    $hashMatch = $null
+    if ($hashBlock.Success) {
+        $hashMatch = [regex]::Match($hashBlock.Groups['body'].Value, '(?im)^\s*"AMD64"\s*=\s*"(?<hash>[A-Fa-f0-9]{64})"')
+    }
+    if (-not $urlMatch.Success -or $null -eq $hashMatch -or -not $hashMatch.Success) {
+        throw ('Unable to parse AMD64 oscdimg reference from Microsoft script reference {0}.' -f $ReferenceName)
+    }
+    $versionMatch = [regex]::Match($Text, '(?im)^\s*Version\s*:\s*(?<value>[^\r\n]+)')
+    $dateMatch = [regex]::Match($Text, '(?im)^\s*Date\s*:\s*(?<value>\d{4}-\d{2}-\d{2})')
+    return [pscustomobject][ordered]@{
+        ReferenceName = $ReferenceName
+        RepositoryRef = $RepositoryRef
+        CommitSha = $CommitSha
+        SourceUrl = $SourceUrl
+        ScriptVersion = $(if ($versionMatch.Success) { $versionMatch.Groups['value'].Value.Trim() } else { '' })
+        ScriptDate = $(if ($dateMatch.Success) { $dateMatch.Groups['value'].Value.Trim() } else { '' })
+        Architecture = 'AMD64'
+        SymbolUrl = $urlMatch.Groups['url'].Value
+        SymbolStoreKey = $urlMatch.Groups['key'].Value
+        ExpectedSha256 = $hashMatch.Groups['hash'].Value.ToLowerInvariant()
+        ParseStatus = 'Pass'
+    }
+}
+
+function Invoke-OscdimgRepositoryRequest {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string]$Uri)
+
+    $headers = @{ 'User-Agent' = ('ISO-Patch-Project-OscdimgQualification/{0}' -f $Script:ScriptVersion) }
+    if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) {
+        $headers['Authorization'] = ('Bearer {0}' -f $env:GITHUB_TOKEN)
+        $headers['X-GitHub-Api-Version'] = '2022-11-28'
+    }
+    return Invoke-WebRequestWithRetry -Uri $Uri -Headers $headers -MaxRetries 3 -TimeoutSec 60
+}
+
+function Resolve-OscdimgRepositoryReferences {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Configuration)
+
+    $records = New-Object System.Collections.Generic.List[object]
+    $errors = New-Object System.Collections.Generic.List[string]
+    $repo = $Script:OscdimgRepository
+    $scriptPathEscaped = [uri]::EscapeDataString($Script:OscdimgRepositoryScriptPath)
+
+    try {
+        $commitUri = '{0}/repos/{1}/commits?path={2}&per_page=1' -f $Script:OscdimgGitHubApiBase, $repo, $scriptPathEscaped
+        $commitResponse = Invoke-OscdimgRepositoryRequest -Uri $commitUri
+        $commitRows = @($commitResponse.Content | ConvertFrom-Json)
+        if ($commitRows.Count -lt 1 -or [string]::IsNullOrWhiteSpace([string]$commitRows[0].sha)) { throw 'Latest file commit response was empty.' }
+        $sha = [string]$commitRows[0].sha
+        $rawUrl = 'https://raw.githubusercontent.com/{0}/{1}/{2}' -f $repo, $sha, $Script:OscdimgRepositoryScriptPath
+        $rawResponse = Invoke-OscdimgRepositoryRequest -Uri $rawUrl
+        $record = Get-OscdimgReferenceFromMicrosoftScriptText -Text ([string]$rawResponse.Content) `
+            -ReferenceName 'LatestMainForMake2023BootableMedia' -RepositoryRef $sha -CommitSha $sha -SourceUrl $rawUrl
+        $records.Add($record) | Out-Null
+    } catch {
+        $mainApiError = $_.Exception.Message
+        try {
+            $rawUrl = 'https://raw.githubusercontent.com/{0}/main/{1}' -f $repo, $Script:OscdimgRepositoryScriptPath
+            $rawResponse = Invoke-OscdimgRepositoryRequest -Uri $rawUrl
+            $record = Get-OscdimgReferenceFromMicrosoftScriptText -Text ([string]$rawResponse.Content) `
+                -ReferenceName 'LatestMainForMake2023BootableMedia' -RepositoryRef 'main' -SourceUrl $rawUrl
+            $records.Add($record) | Out-Null
+            $errors.Add(('Latest main commit API failed; raw main was resolved without a commit pin: {0}' -f $mainApiError)) | Out-Null
+        } catch {
+            $errors.Add(('Latest main resolution failed: {0}; raw-main fallback failed: {1}' -f $mainApiError, $_.Exception.Message)) | Out-Null
+        }
+    }
+
+    try {
+        $releaseUri = '{0}/repos/{1}/releases/latest' -f $Script:OscdimgGitHubApiBase, $repo
+        $releaseResponse = Invoke-OscdimgRepositoryRequest -Uri $releaseUri
+        $release = $releaseResponse.Content | ConvertFrom-Json
+        $tag = [string]$release.tag_name
+        if ([string]::IsNullOrWhiteSpace($tag)) { throw 'Latest release tag was empty.' }
+        $rawUrl = 'https://raw.githubusercontent.com/{0}/{1}/{2}' -f $repo, $tag, $Script:OscdimgRepositoryScriptPath
+        $rawResponse = Invoke-OscdimgRepositoryRequest -Uri $rawUrl
+        $record = Get-OscdimgReferenceFromMicrosoftScriptText -Text ([string]$rawResponse.Content) `
+            -ReferenceName 'LatestGitHubRelease' -RepositoryRef $tag -SourceUrl $rawUrl
+        $records.Add($record) | Out-Null
+    } catch {
+        $errors.Add(('Latest release resolution failed: {0}' -f $_.Exception.Message)) | Out-Null
+    }
+
+    $source = 'RuntimeRepository'
+    if ($records.Count -eq 0) {
+        $source = 'BundledFallback'
+        foreach ($ref in @($Configuration.RepositoryReferences)) {
+            if ([string]$ref.Architecture -ne 'AMD64') { continue }
+            $records.Add([pscustomobject][ordered]@{
+                ReferenceName = [string]$ref.ReferenceName
+                RepositoryRef = [string]$ref.RepositoryRef
+                CommitSha = [string]$ref.CommitSha
+                SourceUrl = [string]$ref.SourceUrl
+                ScriptVersion = [string]$ref.ScriptVersion
+                ScriptDate = [string]$ref.ScriptDate
+                Architecture = 'AMD64'
+                SymbolUrl = [string]$ref.SymbolUrl
+                SymbolStoreKey = [string]$ref.SymbolStoreKey
+                ExpectedSha256 = ([string]$ref.ExpectedSha256).ToLowerInvariant()
+                ParseStatus = 'Pass'
+            }) | Out-Null
+        }
+    }
+
+    # Deduplicate main/release when they resolve the same symbol identity while
+    # preserving every repository reference as provenance.
+    $identities = @()
+    foreach ($group in @($records | Group-Object ExpectedSha256)) {
+        $first = $group.Group | Select-Object -First 1
+        $identities += [pscustomobject][ordered]@{
+            Architecture = 'AMD64'
+            SymbolUrl = [string]$first.SymbolUrl
+            SymbolStoreKey = [string]$first.SymbolStoreKey
+            ExpectedSha256 = ([string]$first.ExpectedSha256).ToLowerInvariant()
+            ReferenceNames = @($group.Group | ForEach-Object { [string]$_.ReferenceName })
+            RepositoryRefs = @($group.Group | ForEach-Object { [string]$_.RepositoryRef })
+            Sources = @($group.Group)
+        }
+    }
+    return [pscustomobject][ordered]@{
+        SchemaVersion = 'secureboot-objects-oscdimg-resolution/1.0'
+        GeneratedAtUtc = [datetime]::UtcNow.ToString('o')
+        ResolutionSource = $source
+        Status = $(if ($identities.Count -gt 0) { 'Pass' } else { 'Fail' })
+        Records = @($records)
+        UniqueIdentities = $identities
+        Errors = @($errors)
+    }
+}
+
+function Get-OscdimgManagedRepositoryCandidates {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $RepositoryResolution)
+
+    $results = @()
+    foreach ($identity in @($RepositoryResolution.UniqueIdentities)) {
+        $expected = ([string]$identity.ExpectedSha256).ToLowerInvariant()
+        if ($expected -notmatch '^[0-9a-f]{64}$') { continue }
+        $cacheDir = Join-Path $Script:WorkRoot ('cache\tools\oscdimg\AMD64\{0}' -f $expected)
+        if (-not (Test-Path -LiteralPath $cacheDir)) { New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null }
+        $path = Join-Path $cacheDir 'oscdimg.exe'
+        $downloaded = $false
+        $status = 'Fail'
+        $errorMessage = ''
+        try {
+            $reuse = $false
+            if (Test-Path -LiteralPath $path -PathType Leaf) {
+                $cachedHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+                if ($cachedHash -eq $expected) { $reuse = $true }
+                else { Remove-Item -LiteralPath $path -Force -ErrorAction Stop }
+            }
+            if (-not $reuse) {
+                $temp = $path + '.download'
+                if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue }
+                Invoke-WebRequestWithRetry -Uri ([string]$identity.SymbolUrl) -OutFile $temp -MaxRetries 3 -TimeoutSec 180 | Out-Null
+                $actual = (Get-FileHash -LiteralPath $temp -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+                if ($actual -ne $expected) {
+                    Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+                    throw ('Repository oscdimg SHA-256 mismatch. Expected {0}; observed {1}.' -f $expected, $actual)
+                }
+                Move-Item -LiteralPath $temp -Destination $path -Force
+                $downloaded = $true
+            }
+            $status = 'Pass'
+        } catch {
+            $errorMessage = $_.Exception.Message
+        }
+        $results += [pscustomobject][ordered]@{
+            Path = $path
+            SourceType = 'MicrosoftPublicSymbolServer'
+            ExpectedSha256 = $expected
+            SymbolUrl = [string]$identity.SymbolUrl
+            SymbolStoreKey = [string]$identity.SymbolStoreKey
+            ReferenceNames = @($identity.ReferenceNames)
+            RepositoryRefs = @($identity.RepositoryRefs)
+            DownloadedThisRun = $downloaded
+            Status = $status
+            ErrorMessage = $errorMessage
+        }
+    }
+    return $results
+}
+
+function Get-OscdimgLocalCandidatePaths {
+    [CmdletBinding()]
+    param()
+
+    $list = New-Object System.Collections.Generic.List[string]
+    $seen = @{}
+    foreach ($candidate in @(
+        'C:\Program Files\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe',
+        'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe'
+    )) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            $full = (Get-Item -LiteralPath $candidate).FullName
+            $key = $full.ToLowerInvariant()
+            if (-not $seen.ContainsKey($key)) { $seen[$key] = $true; $list.Add($full) | Out-Null }
+        }
+    }
+    $cmd = Get-Command -Name 'oscdimg.exe' -ErrorAction SilentlyContinue
+    if ($cmd -and (Test-Path -LiteralPath $cmd.Source -PathType Leaf)) {
+        $full = (Get-Item -LiteralPath $cmd.Source).FullName
+        $key = $full.ToLowerInvariant()
+        if (-not $seen.ContainsKey($key)) { $seen[$key] = $true; $list.Add($full) | Out-Null }
+    }
+    return @($list)
+}
+
+function Get-OscdimgCandidateEvidence {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$Path,
+        [Parameter(Mandatory)] [string]$SourceType,
+        [string]$ExpectedRepositorySha256 = '',
+        $ReferenceMetadata = $null,
+        [Parameter(Mandatory)] $Configuration,
+        [Parameter(Mandatory)] $AdkEvidence
+    )
+
+    $file = Get-Item -LiteralPath $Path -ErrorAction Stop
+    $sha = (Get-FileHash -LiteralPath $Path -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+    $pe = Get-OscdimgPeEvidence -Path $Path
+    $sig = Get-OscdimgAuthenticodeEvidence -Path $Path
+    $known = @($Configuration.QualifiedIdentities | Where-Object { ([string]$_.Sha256).ToLowerInvariant() -eq $sha })
+    $repositoryHashMatch = (-not [string]::IsNullOrWhiteSpace($ExpectedRepositorySha256) -and $sha -eq $ExpectedRepositorySha256.ToLowerInvariant())
+    $signedMicrosoft = ([string]$sig.Status -eq 'Valid' -and [bool]$sig.IsMicrosoftSigner)
+    $metadataStatus = 'Fail'
+    $reason = ''
+    if (-not $pe.IsPe) { $reason = 'Not a valid PE image.' }
+    elseif ([string]$pe.Machine -ne 'AMD64') { $reason = ('Wrong architecture: {0}' -f [string]$pe.Machine) }
+    elseif ($SourceType -eq 'MicrosoftPublicSymbolServer') {
+        if ($repositoryHashMatch) { $metadataStatus = 'Pass'; $reason = 'Exact SHA-256 from the same Microsoft repository reference revision.' }
+        else { $reason = 'Repository candidate does not match its source-revision SHA-256.' }
+    }
+    elseif ($signedMicrosoft) {
+        $metadataStatus = 'Pass'
+        $reason = 'Valid Microsoft Authenticode signature; behavioral qualification is still required.'
+    }
+    else { $reason = 'Local candidate is not a valid Microsoft-signed AMD64 binary.' }
+
+    $sourceRank = if ($SourceType -eq 'LocalAdkOrPath') { 10 } else { 20 }
+    return [pscustomobject][ordered]@{
+        Path = $file.FullName
+        SourceType = $SourceType
+        PreferenceRank = $sourceRank
+        SizeBytes = [int64]$file.Length
+        FileVersion = [string]$file.VersionInfo.FileVersion
+        ProductVersion = [string]$file.VersionInfo.ProductVersion
+        CompanyName = [string]$file.VersionInfo.CompanyName
+        Sha256 = $sha
+        Pe = $pe
+        Authenticode = $sig
+        SignedMicrosoft = $signedMicrosoft
+        ExpectedAdkFamily = $Script:OscdimgExpectedAdkFamily
+        ExpectedAdkFamilyEvidenceMatch = [bool]$AdkEvidence.ExpectedAdkFamilyEvidenceMatch
+        ExpectedAdkPatchKb = $Script:OscdimgExpectedAdkPatchKb
+        ExpectedPatchRegistrationDetected = [bool]$AdkEvidence.ExpectedPatchRegistrationDetected
+        KnownQualifiedIdentity = [bool]($known.Count -gt 0)
+        KnownIdentityLabels = @($known | ForEach-Object { [string]$_.Label })
+        ExpectedRepositorySha256 = $ExpectedRepositorySha256
+        RepositoryReferenceHashMatch = $repositoryHashMatch
+        ReferenceMetadata = $ReferenceMetadata
+        MetadataStatus = $metadataStatus
+        MetadataReason = $reason
+        FunctionalStatus = 'NotPerformed'
+        FunctionalEvidencePath = ''
+    }
+}
+
+function Mount-OscdimgQualificationIsoMarker {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$IsoPath,
+        [Parameter(Mandatory)] [string]$ExpectedText
+    )
+
+    $result = [pscustomobject][ordered]@{ Mounted=$false; MarkerPresent=$false; MarkerContentMatches=$false; ErrorMessage='' }
+    $mounted = $false
+    try {
+        $disk = Mount-DiskImage -ImagePath $IsoPath -PassThru -ErrorAction Stop
+        $mounted = $true
+        $volume = $disk | Get-Volume | Where-Object DriveLetter | Select-Object -First 1
+        if (-not $volume) { throw 'Mounted qualification ISO has no drive letter.' }
+        $result.Mounted = $true
+        $marker = ('{0}:\qualification-marker.txt' -f $volume.DriveLetter)
+        $result.MarkerPresent = Test-Path -LiteralPath $marker -PathType Leaf
+        if ($result.MarkerPresent) {
+            $actual = [System.IO.File]::ReadAllText($marker, [System.Text.Encoding]::UTF8)
+            $result.MarkerContentMatches = ($actual -eq $ExpectedText)
+        }
+    } catch {
+        $result.ErrorMessage = $_.Exception.Message
+    } finally {
+        if ($mounted) { $null = Dismount-DiskImage -ImagePath $IsoPath -ErrorAction SilentlyContinue }
+    }
+    return $result
+}
+
+function Invoke-OscdimgQualificationBuild {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string]$OscdimgPath,
+        [Parameter(Mandatory)] [string]$SourceRoot,
+        [Parameter(Mandatory)] [string]$OutputIso,
+        [Parameter(Mandatory)] [string]$BiosImage,
+        [Parameter(Mandatory)] [string]$EfiImage,
+        [Parameter(Mandatory)] [string]$LogPath
+    )
+
+    if (Test-Path -LiteralPath $OutputIso) { Remove-Item -LiteralPath $OutputIso -Force -ErrorAction SilentlyContinue }
+    $args = @('-m','-o','-u2','-udfver102',('-bootdata:2#p0,e,b{0}#pEF,e,b{1}' -f $BiosImage,$EfiImage),'-lOSCDIMG_QUAL',$SourceRoot,$OutputIso)
+    $lines = @(& $OscdimgPath @args 2>&1 | ForEach-Object { [string]$_ })
+    $exitCode = $LASTEXITCODE
+    $lines | Set-Content -LiteralPath $LogPath -Encoding UTF8
+    return [pscustomobject][ordered]@{
+        ExitCode = $exitCode
+        OutputExists = (Test-Path -LiteralPath $OutputIso -PathType Leaf)
+        OutputSha256 = $(if (Test-Path -LiteralPath $OutputIso -PathType Leaf) { (Get-FileHash -LiteralPath $OutputIso -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' })
+        LogPath = $LogPath
+    }
+}
+
+function Invoke-OscdimgFunctionalQualification {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $Candidate,
+        [Parameter(Mandatory)] [string]$BiosImage,
+        [Parameter(Mandatory)] [string]$EfiImage
+    )
+
+    $biosHash = (Get-FileHash -LiteralPath $BiosImage -Algorithm SHA256).Hash.ToLowerInvariant()
+    $efiHash = (Get-FileHash -LiteralPath $EfiImage -Algorithm SHA256).Hash.ToLowerInvariant()
+    $key = ('{0}-{1}-{2}' -f $Candidate.Sha256.Substring(0,16),$biosHash.Substring(0,12),$efiHash.Substring(0,12))
+    $cacheDir = Join-Path $Script:WorkRoot ('cache\tools\oscdimg\qualification\{0}' -f $key)
+    $cachePath = Join-Path $cacheDir 'qualification.json'
+    if (Test-Path -LiteralPath $cachePath -PathType Leaf) {
+        try {
+            $cached = Get-Content -LiteralPath $cachePath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ([string]$cached.CandidateSha256 -eq [string]$Candidate.Sha256 -and
+                [string]$cached.BiosImageSha256 -eq $biosHash -and [string]$cached.EfiImageSha256 -eq $efiHash -and
+                [string]$cached.Status -eq 'Pass') {
+                return $cached
+            }
+        } catch { }
+    }
+    if (-not (Test-Path -LiteralPath $cacheDir)) { New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null }
+    $work = Join-Path $Script:WorkRoot ('work\oscdimg-functional-qualification\{0}' -f $key)
+    if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
+    New-Item -ItemType Directory -Path $work -Force | Out-Null
+    $caseResults = @()
+    try {
+        foreach ($case in @(
+            [pscustomobject]@{Name='ascii';Folder='ascii';Repeat=$true},
+            [pscustomobject]@{Name='path-with-spaces';Folder='folder with spaces';Repeat=$false},
+            [pscustomobject]@{Name='japanese-path';Folder='日本語_資格確認';Repeat=$false}
+        )) {
+            $caseRoot = Join-Path $work $case.Folder
+            $source = Join-Path $caseRoot 'source tree'
+            New-Item -ItemType Directory -Path $source -Force | Out-Null
+            $markerText = ('oscdimg qualification marker / 日本語 / {0}' -f $case.Name)
+            $marker = Join-Path $source 'qualification-marker.txt'
+            [System.IO.File]::WriteAllText($marker,$markerText,(New-Object System.Text.UTF8Encoding($false)))
+            $fixed = [datetime]::SpecifyKind([datetime]'2026-01-01T12:00:00',[System.DateTimeKind]::Utc)
+            (Get-Item -LiteralPath $marker).CreationTimeUtc = $fixed
+            (Get-Item -LiteralPath $marker).LastWriteTimeUtc = $fixed
+            $output1 = Join-Path $caseRoot 'output image.iso'
+            $build1 = Invoke-OscdimgQualificationBuild -OscdimgPath $Candidate.Path -SourceRoot $source -OutputIso $output1 `
+                -BiosImage $BiosImage -EfiImage $EfiImage -LogPath (Join-Path $cacheDir ($case.Name + '-build1.log'))
+            $el = $null
+            $mount = $null
+            if ($build1.OutputExists) {
+                $el = Get-IsoElToritoUefiBootImageEvidence -IsoPath $output1 -ExpectedImagePath $EfiImage
+                $mount = Mount-OscdimgQualificationIsoMarker -IsoPath $output1 -ExpectedText $markerText
+            }
+            $repeatHashMatch = $null
+            $build2 = $null
+            if ($case.Repeat) {
+                $output2 = Join-Path $caseRoot 'output image repeat.iso'
+                $build2 = Invoke-OscdimgQualificationBuild -OscdimgPath $Candidate.Path -SourceRoot $source -OutputIso $output2 `
+                    -BiosImage $BiosImage -EfiImage $EfiImage -LogPath (Join-Path $cacheDir ($case.Name + '-build2.log'))
+                if ($build1.OutputExists -and $build2.OutputExists) { $repeatHashMatch = ($build1.OutputSha256 -eq $build2.OutputSha256) }
+            }
+            $status = 'Fail'
+            if ($build1.ExitCode -eq 0 -and $build1.OutputExists -and $el -and [string]$el.Status -eq 'Pass' -and
+                $mount -and $mount.MarkerPresent -and $mount.MarkerContentMatches -and
+                (-not $case.Repeat -or ($build2.ExitCode -eq 0 -and $repeatHashMatch))) { $status = 'Pass' }
+            $caseResults += [pscustomobject][ordered]@{
+                CaseName=$case.Name; Status=$status; Build1=$build1; ElTorito=$el; MountVerification=$mount;
+                Build2=$build2; RepeatIsoHashIdentical=$repeatHashMatch
+            }
+        }
+        $status = $(if (@($caseResults | Where-Object Status -ne 'Pass').Count -eq 0) { 'Pass' } else { 'Fail' })
+        $result = [pscustomobject][ordered]@{
+            SchemaVersion='oscdimg-functional-qualification/1.0'
+            GeneratedAtUtc=[datetime]::UtcNow.ToString('o')
+            Status=$status
+            CandidatePath=[string]$Candidate.Path
+            CandidateSha256=[string]$Candidate.Sha256
+            CandidateSourceType=[string]$Candidate.SourceType
+            BiosImagePath=$BiosImage
+            BiosImageSha256=$biosHash
+            EfiImagePath=$EfiImage
+            EfiImageSha256=$efiHash
+            Cases=$caseResults
+        }
+        Save-CanonicalJsonFile -InputObject $result -Path $cachePath -Depth 14
+        return $result
+    } finally {
+        Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Save-OscdimgResolutionEvidence {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Evidence)
+
+    $dir = Join-Path $Script:WorkRoot 'logs\tool-resolution'
+    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    $path = Join-Path $dir 'oscdimg-resolution.json'
+    Save-CanonicalJsonFile -InputObject $Evidence -Path $path -Depth 16
+    return $path
 }
 
 function Resolve-OscdimgExe {
     <#
     .SYNOPSIS
-        Locate oscdimg.exe under the ADK Deployment Tools and verify
-        the binary against Microsoft's official Make2023BootableMedia.ps1
-        symbol-server-distributed reference hashes.
-
+        Select a qualified AMD64 oscdimg.exe without modifying the host ADK.
     .DESCRIPTION
-        Returns the absolute path to a usable oscdimg.exe. Also emits an
-        advisory message indicating whether the located binary matches
-        Microsoft's "ground-truth" SHA-256 for the current architecture.
+        Local ADK/PATH candidates require a valid Microsoft Authenticode
+        signature and AMD64 PE architecture.  The resolver also obtains the
+        latest oscdimg identity referenced by microsoft/secureboot_objects and
+        stores an exact-hash copy under WorkRoot.  When boot inputs are supplied,
+        each eligible local and repository candidate is behaviorally qualified
+        with deterministic dual-boot ISO builds, El Torito identity checks,
+        mount/read validation, space-containing paths, and Japanese paths.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [string]$BiosBootImagePath,
+        [string]$EfiBootImagePath,
+        [switch]$RequireFunctionalQualification,
+        [switch]$ForceRefresh
+    )
 
-        The reference hash table is lifted verbatim from Microsoft's
-        secureboot_objects repository
-        (scripts/windows/Make2023BootableMedia.ps1 v1.6.5 / v1.6.5-signed / commit 798cdc5,
-        $global:oscdimg_known_hashes). These hashes correspond to the
-        oscdimg.exe binaries distributed via Microsoft's public symbol
-        server (https://msdl.microsoft.com/download/symbols/).
+    $functionalKey = ''
+    if ($RequireFunctionalQualification) {
+        if (-not (Test-Path -LiteralPath $BiosBootImagePath -PathType Leaf)) { throw ('BIOS qualification image not found: {0}' -f $BiosBootImagePath) }
+        if (-not (Test-Path -LiteralPath $EfiBootImagePath -PathType Leaf)) { throw ('UEFI qualification image not found: {0}' -f $EfiBootImagePath) }
+        $functionalKey = ((Get-FileHash -LiteralPath $BiosBootImagePath -Algorithm SHA256).Hash.Substring(0,12) + ':' +
+                          (Get-FileHash -LiteralPath $EfiBootImagePath -Algorithm SHA256).Hash.Substring(0,12)).ToLowerInvariant()
+    }
+    if (-not $ForceRefresh -and $Script:OscdimgResolutionState) {
+        if (-not $RequireFunctionalQualification -or [string]$Script:OscdimgResolutionState.FunctionalKey -eq $functionalKey) {
+            if (Test-Path -LiteralPath ([string]$Script:OscdimgResolutionState.SelectedPath) -PathType Leaf) {
+                return [string]$Script:OscdimgResolutionState.SelectedPath
+            }
+        }
+    }
 
-        IMPORTANT: ADK-installed oscdimg.exe binaries may legitimately
-        have DIFFERENT hashes per ADK version. A hash mismatch is therefore
-        treated as ADVISORY (warning), NOT a hard failure. The check still
-        serves a critical purpose: detecting supply-chain attacks where
-        the oscdimg.exe binary has been swapped for a malicious version
-        on the host running this script.
+    $config = Get-OscdimgReferenceConfiguration
+    $adkEvidence = Get-OscdimgAdkRegistrationEvidence
+    $repository = Resolve-OscdimgRepositoryReferences -Configuration $config
+    $managedDownloads = @()
+    try { $managedDownloads = @(Get-OscdimgManagedRepositoryCandidates -RepositoryResolution $repository) }
+    catch { $managedDownloads = @([pscustomobject]@{Status='Fail';Path='';ErrorMessage=$_.Exception.Message}) }
 
-    .OUTPUTS
-        [string] - absolute path to oscdimg.exe
+    $candidates = @()
+    foreach ($path in @(Get-OscdimgLocalCandidatePaths)) {
+        try {
+            $candidates += Get-OscdimgCandidateEvidence -Path $path -SourceType 'LocalAdkOrPath' `
+                -Configuration $config -AdkEvidence $adkEvidence
+        } catch {
+            $candidates += [pscustomobject][ordered]@{Path=$path;SourceType='LocalAdkOrPath';PreferenceRank=10;MetadataStatus='Fail';MetadataReason=$_.Exception.Message;FunctionalStatus='NotPerformed'}
+        }
+    }
+    foreach ($download in @($managedDownloads | Where-Object Status -eq 'Pass')) {
+        try {
+            $candidates += Get-OscdimgCandidateEvidence -Path ([string]$download.Path) -SourceType 'MicrosoftPublicSymbolServer' `
+                -ExpectedRepositorySha256 ([string]$download.ExpectedSha256) -ReferenceMetadata $download `
+                -Configuration $config -AdkEvidence $adkEvidence
+        } catch {
+            $candidates += [pscustomobject][ordered]@{Path=[string]$download.Path;SourceType='MicrosoftPublicSymbolServer';PreferenceRank=20;MetadataStatus='Fail';MetadataReason=$_.Exception.Message;FunctionalStatus='NotPerformed'}
+        }
+    }
+
+    $eligible = @($candidates | Where-Object MetadataStatus -eq 'Pass')
+    if ($RequireFunctionalQualification) {
+        foreach ($candidate in $eligible) {
+            try {
+                $functional = Invoke-OscdimgFunctionalQualification -Candidate $candidate -BiosImage $BiosBootImagePath -EfiImage $EfiBootImagePath
+                $candidate.FunctionalStatus = [string]$functional.Status
+                $candidate.FunctionalEvidencePath = Join-Path $Script:WorkRoot ('cache\tools\oscdimg\qualification\{0}-{1}-{2}\qualification.json' -f `
+                    $candidate.Sha256.Substring(0,16),
+                    ((Get-FileHash -LiteralPath $BiosBootImagePath -Algorithm SHA256).Hash.ToLowerInvariant().Substring(0,12)),
+                    ((Get-FileHash -LiteralPath $EfiBootImagePath -Algorithm SHA256).Hash.ToLowerInvariant().Substring(0,12)))
+            } catch {
+                $candidate.FunctionalStatus = 'Fail'
+                $candidate.FunctionalEvidencePath = ''
+                $candidate.MetadataReason = ([string]$candidate.MetadataReason + ' Functional qualification error: ' + $_.Exception.Message)
+            }
+        }
+        $eligible = @($eligible | Where-Object FunctionalStatus -eq 'Pass')
+    }
+    if ($eligible.Count -eq 0) {
+        $reasons = @($candidates | ForEach-Object { '{0}: metadata={1}; functional={2}; reason={3}' -f $_.Path,$_.MetadataStatus,$_.FunctionalStatus,$_.MetadataReason })
+        throw ('No qualified AMD64 oscdimg.exe candidate is available. {0}' -f ($reasons -join ' | '))
+    }
+
+    $selected = $eligible | Sort-Object PreferenceRank, Path | Select-Object -First 1
+    $evidence = [pscustomobject][ordered]@{
+        SchemaVersion='oscdimg-resolution/2.0'
+        GeneratedAtUtc=[datetime]::UtcNow.ToString('o')
+        SelectionPolicy='Prefer valid Microsoft-signed AMD64 local candidate after behavioral qualification; use exact-hash latest secureboot_objects Symbol Server candidate as WorkRoot-managed fallback.'
+        ExpectedAdkFamily=$Script:OscdimgExpectedAdkFamily
+        ExpectedAdkPatchKb=$Script:OscdimgExpectedAdkPatchKb
+        AdkRegistrationEvidence=$adkEvidence
+        RepositoryResolution=$repository
+        ManagedRepositoryDownloads=$managedDownloads
+        FunctionalQualificationRequired=[bool]$RequireFunctionalQualification
+        FunctionalKey=$functionalKey
+        Candidates=$candidates
+        SelectedCandidate=$selected
+        SelectedPath=[string]$selected.Path
+        SelectedSourceType=[string]$selected.SourceType
+        SelectedSha256=[string]$selected.Sha256
+        SelectedFileVersion=[string]$selected.FileVersion
+        SelectedFunctionalStatus=[string]$selected.FunctionalStatus
+        Result='Pass'
+    }
+    $evidencePath = Save-OscdimgResolutionEvidence -Evidence $evidence
+    $Script:OscdimgResolutionEvidence = $evidence
+    $Script:OscdimgResolutionState = [pscustomobject]@{SelectedPath=[string]$selected.Path;FunctionalKey=$functionalKey;EvidencePath=$evidencePath}
+
+    if (-not $Script:OscdimgResolutionMessageShown -or $RequireFunctionalQualification) {
+        Write-Step ('oscdimg qualified: source={0}; version={1}; sha256={2}; functional={3}' -f `
+            [string]$selected.SourceType,[string]$selected.FileVersion,[string]$selected.Sha256,[string]$selected.FunctionalStatus)
+        if (-not $adkEvidence.ExpectedPatchRegistrationDetected) {
+            Write-Caution ('ADK servicing registration for {0} was not detected. This is evidence-only and not proof of absence; the selected oscdimg must pass behavioral qualification before ISO assembly.' -f $Script:OscdimgExpectedAdkPatchKb)
+        }
+        if ($repository.ResolutionSource -eq 'BundledFallback') {
+            Write-Caution 'Latest secureboot_objects reference could not be resolved online; the bundled Microsoft reference snapshot was used.'
+        }
+        foreach ($repositoryError in @($repository.Errors)) {
+            Write-Caution ('secureboot_objects reference resolution note: {0}' -f [string]$repositoryError)
+        }
+        foreach ($repositoryFailure in @($managedDownloads | Where-Object Status -ne 'Pass')) {
+            Write-Caution ('Repository-referenced oscdimg acquisition was not qualified: {0}' -f [string]$repositoryFailure.ErrorMessage)
+        }
+        foreach ($functionalFailure in @($candidates | Where-Object { $_.SourceType -eq 'MicrosoftPublicSymbolServer' -and $_.FunctionalStatus -eq 'Fail' })) {
+            Write-Caution ('Repository-referenced oscdimg functional qualification failed: {0}' -f [string]$functionalFailure.Path)
+        }
+        $Script:OscdimgResolutionMessageShown = $true
+    }
+    return [string]$selected.Path
+}
+
+function Install-WindowsAdkFallback {
+    <#
+    .SYNOPSIS
+        Legacy internal wrapper retained until the planned CLI/data-model
+        refactor.  It no longer installs or updates the host ADK.
     #>
     [CmdletBinding()]
     [OutputType([string])]
     param()
-
-    # Microsoft official oscdimg.exe SHA-256 hashes (from secureboot_objects
-    # Make2023BootableMedia.ps1 v1.6.5 / v1.6.5-signed / commit 798cdc5). These are the
-    # hashes of binaries downloaded from the Microsoft public symbol server.
-    $knownHashes = @{
-        'AMD64' = 'ABCD07318EBD8CDBE274B46C9DE78820DCA9709D558CDBC1F5D1730924264D07'
-        'ARM64' = 'CDAE3649F6A6DE45F50A0B5FB5E2BBC098503B9EEFB1AE6A398FC955B434F579'
-        'x86'   = '85AC2DDD96239D037560E5336727F9A8BE2B902734B9DD88264DD7DB5612EFB9'
-    }
-
-    $candidates = @(
-        'C:\Program Files\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe'
-        'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\oscdimg.exe'
-    )
-    $found = $null
-    foreach ($c in $candidates) {
-        if (Test-Path -LiteralPath $c) {
-            $found = $c
-            break
-        }
-    }
-    if (-not $found) {
-        # Try PATH lookup
-        $cmd = Get-Command -Name 'oscdimg.exe' -ErrorAction SilentlyContinue
-        if ($cmd) { $found = $cmd.Source }
-    }
-    if (-not $found) {
-        throw 'oscdimg.exe not found. Install the Windows ADK Deployment Tools.'
-    }
-
-    # Integrity check (advisory only)
-    try {
-        $arch = $env:PROCESSOR_ARCHITECTURE
-        if (-not $arch) { $arch = 'AMD64' }   # sensible default for x64 hosts
-        $expectedHash = $knownHashes[$arch]
-        if ($expectedHash) {
-            $actualHash = (Get-FileHash -LiteralPath $found -Algorithm SHA256 -ErrorAction Stop).Hash
-            if ($actualHash -ieq $expectedHash) {
-                Write-Step ('oscdimg.exe integrity verified (Microsoft reference hash for {0})' -f $arch)
-            } else {
-                Write-Caution ('oscdimg.exe SHA-256 differs from the Microsoft reference value for {0}.' -f $arch)
-                Write-Caution ('  Found    : {0}' -f $actualHash)
-                Write-Caution ('  Reference: {0}' -f $expectedHash)
-                Write-Caution '  This is ADVISORY: ADK-installed binaries may legitimately differ per ADK version.'
-                Write-Caution '  If you did NOT install oscdimg.exe via the Windows ADK or Microsoft symbol server,'
-                Write-Caution '  investigate the origin of this binary before proceeding (supply-chain integrity check).'
-            }
-        } else {
-            Write-Step ('oscdimg.exe integrity check skipped: no reference hash for architecture "{0}".' -f $arch)
-        }
-    } catch {
-        # Best-effort: if hash computation itself fails, that's surprising
-        # but not fatal; surface as a debug step rather than aborting.
-        Write-Caution ('oscdimg.exe integrity check could not be completed: {0}' -f $_.Exception.Message)
-    } # psa-disable-line PSA3004 -- intentional best-effort integrity-check warning; hash mismatch is advisory only
-
-    return $found
+    Write-Caution 'Install-WindowsAdkFallback no longer modifies the host. Resolving a WorkRoot-managed Microsoft Symbol Server candidate instead.'
+    return Resolve-OscdimgExe -ForceRefresh
 }
 
 function Resolve-SignToolExe {
@@ -10334,8 +10849,8 @@ function Resolve-SignToolExe {
           2) Windows Kits\10\bin under Program Files (x86) then Program
              Files, recursing for signtool.exe; prefer an \x64\ hit
              (newest by descending path sort), else any architecture.
-        No integrity hash check: unlike oscdimg.exe (which has Microsoft
-        symbol-server reference hashes), signtool.exe has no single fixed
+        No fixed identity table: oscdimg.exe uses source-aware qualification and
+        repository-revision hashes, while signtool.exe has no single fixed
         reference SHA-256 - it varies per SDK build - so presence is the
         only check (the SDK is acquired from the Microsoft fwlink).
 
@@ -10490,9 +11005,9 @@ function New-BootableIso {
         [ValidateSet('Auto','Pca2011','Pca2023')] [string]$UefiBootImagePolicy='Auto'
     )
     Set-DebugStep -Step 'oscdimg-resolve-tools'
-    $oscdimg  = Resolve-OscdimgExe
     $etfsboot = Resolve-EtfsbootCom -ExtractedIsoRoot $ExtractedIsoRoot
     $efisys   = Resolve-EfisysBin   -ExtractedIsoRoot $ExtractedIsoRoot -Policy $UefiBootImagePolicy
+    $oscdimg  = Resolve-OscdimgExe -BiosBootImagePath $etfsboot -EfiBootImagePath $efisys -RequireFunctionalQualification
     $resolvedUefiMode = $(if ([System.IO.Path]::GetFileName($efisys) -ieq 'efisys_ex.bin') { 'Pca2023' } else { 'Pca2011' })
     Write-Step ('UEFI El Torito boot image: mode={0}; path={1}' -f $resolvedUefiMode, $efisys)
 
@@ -10527,7 +11042,7 @@ function New-BootableIso {
     }
     if($Script:LogsDir -and (Test-Path -LiteralPath $Script:LogsDir -PathType Container)) {
         $assemblyEvidence=[pscustomobject][ordered]@{
-            SchemaVersion='iso-boot-assembly/1.0'
+            SchemaVersion='iso-boot-assembly/1.1'
             CreatedAtUtc=([datetime]::UtcNow.ToString('o'))
             OutputIsoPath=$OutputIsoPath
             UefiBootImagePolicy=$UefiBootImagePolicy
@@ -10536,6 +11051,12 @@ function New-BootableIso {
             SelectedUefiBootImageSizeBytes=[int64](Get-Item -LiteralPath $efisys).Length
             SelectedUefiBootImageSha256=((Get-FileHash -LiteralPath $efisys -Algorithm SHA256).Hash.ToLowerInvariant())
             BiosBootImagePath=$etfsboot
+            OscdimgPath=$oscdimg
+            OscdimgSourceType=$(if($Script:OscdimgResolutionEvidence){[string]$Script:OscdimgResolutionEvidence.SelectedSourceType}else{''})
+            OscdimgFileVersion=$(if($Script:OscdimgResolutionEvidence){[string]$Script:OscdimgResolutionEvidence.SelectedFileVersion}else{''})
+            OscdimgSha256=$(if($Script:OscdimgResolutionEvidence){[string]$Script:OscdimgResolutionEvidence.SelectedSha256}else{((Get-FileHash -LiteralPath $oscdimg -Algorithm SHA256).Hash.ToLowerInvariant())})
+            OscdimgFunctionalStatus=$(if($Script:OscdimgResolutionEvidence){[string]$Script:OscdimgResolutionEvidence.SelectedFunctionalStatus}else{'Unknown'})
+            OscdimgResolutionEvidencePath=(Join-Path $Script:WorkRoot 'logs\tool-resolution\oscdimg-resolution.json')
         }
         Save-CanonicalJsonFile -InputObject $assemblyEvidence -Path (Join-Path $Script:LogsDir 'iso_boot_assembly.json') -Depth 8
     }
@@ -17418,15 +17939,7 @@ function Invoke-SetupPhase01_Initialize {
             } elseif ($Script:SyntheticTestMode) {
                 Write-Caution 'oscdimg.exe not found; -SyntheticTestMode will use a raw-copy fallback.'
             } else {
-                # oscdimg.exe is required and missing -> auto-install the
-                # Windows ADK Deployment Tools (no switch; mirrors the 7-Zip
-                # Install-SevenZipFallback auto-acquire). Install-WindowsAdkFallback
-                # returns the discovered oscdimg.exe path and emits its own
-                # Write-Ok line, and throws an actionable error if the install
-                # fails or oscdimg.exe is still absent afterwards.
-                Write-Step 'oscdimg.exe not found; auto-installing the Windows ADK Deployment Tools (Install-WindowsAdkFallback)...'
-                $oscdimgPath = Install-WindowsAdkFallback
-                Write-Ok ('oscdimg.exe available: {0}' -f $oscdimgPath)
+                throw ('No metadata-qualified AMD64 oscdimg.exe is available. The resolver did not modify the host ADK. It attempted local Microsoft-signed candidates and the latest secureboot_objects exact-hash WorkRoot-managed Symbol Server fallback. Detail: {0}' -f $_.Exception.Message)
             }
         }
         $gwi = Get-Command -Name 'Get-WindowsImage' -ErrorAction SilentlyContinue
