@@ -6,65 +6,82 @@
 
 .DESCRIPTION
     Collects the installed OS identity, UBR, kernel versions, servicing stack,
-    installed update packages, Secure Boot state, firmware mode, WinRE status,
-    pending-reboot state, problematic PnP devices, BCD output, disk layout and
-    optional EFI System Partition boot-file evidence.
+    installed update packages, the complete Windows Server feature inventory,
+    .NET Framework feature and registry state, Secure Boot certificate rollout
+    state, firmware variables, TPM-WMI events, firmware mode, WinRE status,
+    pending-reboot state, problematic PnP devices, BCD output, disk layout,
+    EFI System Partition boot-file evidence and an MSInfo32 report.
 
     This stable top-level filename is a supported project artifact whose
     purpose is independent of any particular test campaign. The
     collector revision is recorded inside its evidence instead of in the
-    filename.
+    filename. At completion, the collector prints a color-coded assessment
+    report with PASS, FAIL, REVIEW and INFO results for important items, the
+    final result, exit code and evidence artifact paths.
 
     The script does not install updates or change the installed operating
-    system. When -InspectEsp is specified, it temporarily assigns an unused
-    drive letter to the EFI System Partition with mountvol, reads evidence,
-    and removes the drive letter in a finally block.
+    system. EFI System Partition inspection and MSInfo32 collection are
+    enabled by default. ESP inspection temporarily assigns an unused drive
+    letter with mountvol, reads evidence, and removes the drive letter in a
+    finally block. Secure Boot diagnostics are read-only: no registry value is
+    changed, no scheduled task is started and no firmware variable is written.
+    Microsoft Secure Boot rollout scripts are inventoried using observed file
+    metadata, SHA-256 and Authenticode information. No cross-version reference
+    hash is applied because Microsoft can distribute different script content
+    by Windows release and servicing level.
+
+    Exit code 0 means that collection and validation completed without a
+    detected issue. Exit code 2 means that evidence was created but at least
+    one validation item failed or one collection item requires review. Exit code 1 means a
+    fatal collector error.
+
+    The installed Windows Server release is detected automatically from the
+    running system by correlating Win32_OperatingSystem ProductType and Caption
+    with the CurrentVersion ProductName, InstallationType and CurrentBuild
+    registry values. The detected Server2016, Server2019, Server2022 or
+    Server2025 key is written to the evidence and included in the ZIP name.
 
     No ISO, WIM, ESD, VHD or VHDX file is included in the evidence ZIP.
 
 .PARAMETER OutputRoot
     Directory under which a timestamped evidence directory and ZIP are created.
-
-.PARAMETER ExpectedOsVersion
-    Optional expected Windows Server OS key. A mismatch is recorded as a
-    validation failure but evidence collection continues.
+    The only permitted locations are the directory containing this script and
+    C:\Temp. When omitted, the script directory is used.
 
 .PARAMETER InspectEsp
     Temporarily mounts the EFI System Partition to inspect bootmgfw.efi,
-    bootmgr.efi, boot.stl and the BCD store.
+    bootmgr.efi, boot.stl, bootx64.efi and the BCD store. Enabled by default.
+    Specify -InspectEsp:$false only when ESP inspection must be disabled.
 
 .PARAMETER IncludeMsInfo32
-    Runs msinfo32 /report and includes the text report.
+    Runs msinfo32 /report and includes the text report. Enabled by default.
+    Specify -IncludeMsInfo32:$false only when collection must be disabled.
+
+.EXAMPLE
+    .\Collect-WindowsServerPostInstallEvidence.ps1
 
 .EXAMPLE
     .\Collect-WindowsServerPostInstallEvidence.ps1 `
-        -OutputRoot 'C:\WindowsServerEvidence' `
-        -ExpectedOsVersion Server2025 `
-        -InspectEsp `
-        -IncludeMsInfo32
+        -OutputRoot 'C:\Temp'
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
-    [ValidateNotNullOrEmpty()]
-    [string]$OutputRoot = 'C:\WindowsServerEvidence',
+    [AllowEmptyString()]
+    [string]$OutputRoot,
 
     [Parameter(Mandatory = $false)]
-    [ValidateSet('Server2016', 'Server2019', 'Server2022', 'Server2025')]
-    [string]$ExpectedOsVersion,
+    [switch]$InspectEsp = $true,
 
     [Parameter(Mandatory = $false)]
-    [switch]$InspectEsp,
-
-    [Parameter(Mandatory = $false)]
-    [switch]$IncludeMsInfo32
+    [switch]$IncludeMsInfo32 = $true
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
-$script:SchemaVersion = 'windows-server-post-install-evidence/1.0'
-$script:CollectorVersion = 'r2'
+$script:SchemaVersion = 'windows-server-post-install-evidence/1.7'
+$script:CollectorVersion = 'r9'
 
 function Get-UtcTimestamp {
     [CmdletBinding()]
@@ -72,80 +89,261 @@ function Get-UtcTimestamp {
     return [datetime]::UtcNow.ToString('o')
 }
 
+function Get-PropertyValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [object]$InputObject,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Name,
+
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [object]$DefaultValue = $null
+    )
+
+    if ($null -eq $InputObject) {
+        return $DefaultValue
+    }
+
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $DefaultValue
+    }
+
+    return $property.Value
+}
+
 function Get-FileEvidence {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Path,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$SkipHash,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$SkipAuthenticode
+    )
+
+    $result = [pscustomobject][ordered]@{
+        Path = $Path
+        FileName = $null
+        Extension = $null
+        Present = $false
+        SizeBytes = $null
+        CreationTimeUtc = $null
+        LastWriteTimeUtc = $null
+        Attributes = $null
+        IsReadOnly = $null
+        FileVersion = $null
+        ProductVersion = $null
+        FileDescription = $null
+        CompanyName = $null
+        OriginalFilename = $null
+        Sha256 = $null
+        HashSkipped = [bool]$SkipHash
+        HashErrorMessage = $null
+        AuthenticodeStatus = $null
+        AuthenticodeStatusMessage = $null
+        SignatureType = $null
+        IsOsBinary = $null
+        SignerSubject = $null
+        SignerIssuer = $null
+        SignerThumbprint = $null
+        SignerNotBefore = $null
+        SignerNotAfter = $null
+        SignerIsMicrosoft = $null
+        SignerIndicatesWindowsUefiCa2023 = $null
+        SignerIndicatesWindowsProductionPca2011 = $null
+        TimeStamperSubject = $null
+        TimeStamperIssuer = $null
+        TimeStamperThumbprint = $null
+        TimeStamperNotBefore = $null
+        TimeStamperNotAfter = $null
+        AuthenticodeSkipped = [bool]$SkipAuthenticode
+        AuthenticodeErrorMessage = $null
+        ReadErrorMessage = $null
+    }
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $result
+    }
+
+    try {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        $result.Path = $item.FullName
+        $result.FileName = [string]$item.Name
+        $result.Extension = [string]$item.Extension
+        $result.Present = $true
+        $result.SizeBytes = [int64]$item.Length
+        $result.CreationTimeUtc = $item.CreationTimeUtc.ToString('o')
+        $result.LastWriteTimeUtc = $item.LastWriteTimeUtc.ToString('o')
+        $result.Attributes = [string]$item.Attributes
+        $result.IsReadOnly = [bool]$item.IsReadOnly
+
+        try {
+            $versionInfo = $item.VersionInfo
+            if ($null -ne $versionInfo) {
+                $result.FileVersion = [string]$versionInfo.FileVersion
+                $result.ProductVersion = [string]$versionInfo.ProductVersion
+                $result.FileDescription = [string]$versionInfo.FileDescription
+                $result.CompanyName = [string]$versionInfo.CompanyName
+                $result.OriginalFilename = [string]$versionInfo.OriginalFilename
+            }
+        }
+        catch {
+            # Version information is optional for data files such as BCD.
+        }
+
+        if (-not $SkipHash) {
+            try {
+                $result.Sha256 = (
+                    Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256 -ErrorAction Stop
+                ).Hash.ToLowerInvariant()
+            }
+            catch {
+                $result.HashErrorMessage = $_.Exception.Message
+            }
+        }
+
+        if (-not $SkipAuthenticode) {
+            try {
+                $signature = Get-AuthenticodeSignature -LiteralPath $item.FullName -ErrorAction Stop
+                $result.AuthenticodeStatus = [string]$signature.Status
+                $result.AuthenticodeStatusMessage = [string]$signature.StatusMessage
+                $result.SignatureType = [string](Get-PropertyValue -InputObject $signature -Name 'SignatureType')
+                $isOsBinaryValue = Get-PropertyValue -InputObject $signature -Name 'IsOSBinary'
+                if ($null -ne $isOsBinaryValue) {
+                    $result.IsOsBinary = [bool]$isOsBinaryValue
+                }
+                if ($null -ne $signature.SignerCertificate) {
+                    $result.SignerSubject = [string]$signature.SignerCertificate.Subject
+                    $result.SignerIssuer = [string]$signature.SignerCertificate.Issuer
+                    $result.SignerThumbprint = [string]$signature.SignerCertificate.Thumbprint
+                    $result.SignerNotBefore = $signature.SignerCertificate.NotBefore.ToString('o')
+                    $result.SignerNotAfter = $signature.SignerCertificate.NotAfter.ToString('o')
+                    $signerIdentity = (
+                        [string]$signature.SignerCertificate.Subject + ' | ' +
+                        [string]$signature.SignerCertificate.Issuer
+                    )
+                    $result.SignerIsMicrosoft = ($signerIdentity -match 'Microsoft')
+                    $result.SignerIndicatesWindowsUefiCa2023 = (
+                        $signerIdentity -match 'Windows UEFI CA 2023'
+                    )
+                    $result.SignerIndicatesWindowsProductionPca2011 = (
+                        $signerIdentity -match 'Windows Production PCA 2011'
+                    )
+                }
+
+                $timeStamperCertificate = Get-PropertyValue `
+                    -InputObject $signature `
+                    -Name 'TimeStamperCertificate'
+                if ($null -ne $timeStamperCertificate) {
+                    $result.TimeStamperSubject = [string]$timeStamperCertificate.Subject
+                    $result.TimeStamperIssuer = [string]$timeStamperCertificate.Issuer
+                    $result.TimeStamperThumbprint = [string]$timeStamperCertificate.Thumbprint
+                    $result.TimeStamperNotBefore = $timeStamperCertificate.NotBefore.ToString('o')
+                    $result.TimeStamperNotAfter = $timeStamperCertificate.NotAfter.ToString('o')
+                }
+            }
+            catch {
+                $result.AuthenticodeErrorMessage = $_.Exception.Message
+            }
+        }
+    }
+    catch {
+        $result.ReadErrorMessage = $_.Exception.Message
+    }
+
+    return $result
+}
+
+function Read-CapturedText {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
         [string]$Path
     )
 
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        return [pscustomobject][ordered]@{
-            Path = $Path
-            Present = $false
-            SizeBytes = $null
-            FileVersion = $null
-            ProductVersion = $null
-            Sha256 = $null
-            AuthenticodeStatus = $null
-            SignerSubject = $null
-        }
+        return [string]::Empty
     }
 
-    $item = Get-Item -LiteralPath $Path -Force
-    $versionInfo = $null
-    try { $versionInfo = $item.VersionInfo } catch { $versionInfo = $null }
-
-    $signature = $null
-    try { $signature = Get-AuthenticodeSignature -LiteralPath $item.FullName } catch { $signature = $null }
-
-    return [pscustomobject][ordered]@{
-        Path = $item.FullName
-        Present = $true
-        SizeBytes = [int64]$item.Length
-        FileVersion = if ($versionInfo) { [string]$versionInfo.FileVersion } else { $null }
-        ProductVersion = if ($versionInfo) { [string]$versionInfo.ProductVersion } else { $null }
-        Sha256 = (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-        AuthenticodeStatus = if ($signature) { [string]$signature.Status } else { $null }
-        SignerSubject = if ($signature -and $signature.SignerCertificate) {
-            [string]$signature.SignerCertificate.Subject
-        } else {
-            $null
-        }
+    $content = Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue
+    if ($null -eq $content) {
+        return [string]::Empty
     }
+
+    return [string]$content
 }
 
 function Invoke-CapturedCommand {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
         [string]$FilePath,
 
         [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [AllowEmptyCollection()]
         [string[]]$ArgumentList = @()
     )
+
+    $arguments = @()
+    if ($null -ne $ArgumentList) {
+        $arguments = @($ArgumentList)
+    }
 
     $stdout = [System.IO.Path]::GetTempFileName()
     $stderr = [System.IO.Path]::GetTempFileName()
     try {
-        $process = Start-Process -FilePath $FilePath `
-            -ArgumentList $ArgumentList `
-            -Wait `
-            -PassThru `
-            -NoNewWindow `
-            -RedirectStandardOutput $stdout `
-            -RedirectStandardError $stderr
+        $startParameters = @{
+            FilePath = $FilePath
+            Wait = $true
+            PassThru = $true
+            NoNewWindow = $true
+            RedirectStandardOutput = $stdout
+            RedirectStandardError = $stderr
+            ErrorAction = 'Stop'
+        }
+
+        # Windows PowerShell 5.1 rejects Start-Process -ArgumentList @().
+        # Omit the parameter completely when invoking an argument-less command.
+        if ($arguments.Count -gt 0) {
+            $startParameters['ArgumentList'] = $arguments
+        }
+
+        $process = Start-Process @startParameters
 
         return [pscustomobject][ordered]@{
             FilePath = $FilePath
-            Arguments = @($ArgumentList)
+            Arguments = @($arguments)
+            Started = $true
+            Succeeded = ([int]$process.ExitCode -eq 0)
             ExitCode = [int]$process.ExitCode
-            StdOut = if (Test-Path -LiteralPath $stdout) {
-                [string](Get-Content -LiteralPath $stdout -Raw -ErrorAction SilentlyContinue)
-            } else { '' }
-            StdErr = if (Test-Path -LiteralPath $stderr) {
-                [string](Get-Content -LiteralPath $stderr -Raw -ErrorAction SilentlyContinue)
-            } else { '' }
+            StdOut = Read-CapturedText -Path $stdout
+            StdErr = Read-CapturedText -Path $stderr
+            ErrorMessage = $null
+        }
+    }
+    catch {
+        return [pscustomobject][ordered]@{
+            FilePath = $FilePath
+            Arguments = @($arguments)
+            Started = $false
+            Succeeded = $false
+            ExitCode = $null
+            StdOut = Read-CapturedText -Path $stdout
+            StdErr = Read-CapturedText -Path $stderr
+            ErrorMessage = $_.Exception.Message
         }
     }
     finally {
@@ -197,15 +395,24 @@ function Get-PendingRebootEvidence {
     $results = foreach ($check in $checks) {
         $present = $false
         $value = $null
+        $errorMessage = $null
         if ($null -eq $check.ValueName) {
             $present = Test-Path -LiteralPath $check.Path
         }
         elseif (Test-Path -LiteralPath $check.Path) {
             try {
-                $value = (Get-ItemProperty -LiteralPath $check.Path -Name $check.ValueName -ErrorAction Stop).$($check.ValueName)
-                $present = ($null -ne $value)
+                # Read the registry key first and inspect the property bag. This
+                # avoids recording a terminating error when an optional value is
+                # absent, which is a normal "not pending" condition.
+                $propertyBag = Get-ItemProperty -LiteralPath $check.Path -ErrorAction Stop
+                $property = $propertyBag.PSObject.Properties[$check.ValueName]
+                if ($null -ne $property) {
+                    $value = $property.Value
+                    $present = ($null -ne $value)
+                }
             }
             catch {
+                $errorMessage = $_.Exception.Message
                 $present = $false
             }
         }
@@ -214,6 +421,7 @@ function Get-PendingRebootEvidence {
             Name = $check.Name
             Present = [bool]$present
             Value = $value
+            ErrorMessage = $errorMessage
         }
     }
 
@@ -223,25 +431,1065 @@ function Get-PendingRebootEvidence {
     }
 }
 
-function Get-SecureBootEvidence {
+function Get-RegistryKeySnapshot {
     [CmdletBinding()]
-    param()
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Path
+    )
 
     $result = [pscustomobject][ordered]@{
-        Supported = $false
-        Enabled = $null
+        Path = $Path
+        Present = $false
+        Available = $false
         ErrorMessage = $null
+        Values = [pscustomobject][ordered]@{}
+    }
+
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $result
     }
 
     try {
-        $result.Enabled = [bool](Confirm-SecureBootUEFI -ErrorAction Stop)
-        $result.Supported = $true
+        $key = Get-Item -LiteralPath $Path -ErrorAction Stop
+        $values = [ordered]@{}
+        foreach ($name in @($key.GetValueNames() | Sort-Object)) {
+            $value = $key.GetValue(
+                $name,
+                $null,
+                [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames
+            )
+            $values[$name] = [pscustomobject][ordered]@{
+                Type = [string]$key.GetValueKind($name)
+                Value = $value
+            }
+        }
+
+        $result.Present = $true
+        $result.Available = $true
+        $result.Values = [pscustomobject]$values
+    }
+    catch {
+        $result.Present = $true
+        $result.ErrorMessage = $_.Exception.Message
+    }
+
+    return $result
+}
+
+function Get-NamedRegistryValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Snapshot,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Name,
+
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [object]$DefaultValue = $null
+    )
+
+    if ($null -eq $Snapshot -or -not $Snapshot.Available) {
+        return $DefaultValue
+    }
+
+    $property = $Snapshot.Values.PSObject.Properties[$Name]
+    if ($null -eq $property -or $null -eq $property.Value) {
+        return $DefaultValue
+    }
+
+    return $property.Value.Value
+}
+
+function Convert-RegistryFileTimeValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [object]$Value
+    )
+
+    if ($null -eq $Value) {
+        return $null
+    }
+
+    try {
+        $fileTime = $null
+        if ($Value -is [byte[]] -and $Value.Length -ge 8) {
+            $fileTime = [BitConverter]::ToInt64($Value, 0)
+        }
+        elseif ($Value -is [long] -or $Value -is [int64]) {
+            $fileTime = [int64]$Value
+        }
+
+        if ($null -ne $fileTime -and $fileTime -gt 0) {
+            return [DateTime]::FromFileTimeUtc($fileTime).ToString('o')
+        }
+    }
+    catch {
+        return $null
+    }
+
+    return $null
+}
+
+function Get-Sha256HexFromBytes {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [byte[]]$Bytes
+    )
+
+    $algorithm = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString($algorithm.ComputeHash($Bytes))).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $algorithm.Dispose()
+    }
+}
+
+function Copy-ByteRange {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [byte[]]$Bytes,
+
+        [Parameter(Mandatory = $true)]
+        [int]$Offset,
+
+        [Parameter(Mandatory = $true)]
+        [int]$Count
+    )
+
+    if ($Offset -lt 0 -or $Count -lt 0 -or ($Offset + $Count) -gt $Bytes.Length) {
+        throw "Byte range is outside the source buffer. Offset=$Offset Count=$Count Length=$($Bytes.Length)"
+    }
+
+    $result = New-Object byte[] $Count
+    [Array]::Copy($Bytes, $Offset, $result, 0, $Count)
+    return ,$result
+}
+
+function Resolve-EfiSignatureTypeName {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [guid]$SignatureType
+    )
+
+    switch ($SignatureType.ToString().ToLowerInvariant()) {
+        'a5c059a1-94e4-4aa7-87b5-ab155c2bf072' { return 'X509' }
+        'c1c41626-504c-4092-aca9-41f936934328' { return 'SHA256' }
+        '826ca512-cf10-4ac9-b187-be01496631bd' { return 'SHA1' }
+        '0b6e5233-a65c-44c9-9407-d9ab83bfc8bd' { return 'SHA224' }
+        'ff3e5307-9fd0-48c9-85f1-8ad56c701e01' { return 'SHA384' }
+        '093e0fae-a6c4-4f50-9f1b-d41e2b89c19a' { return 'SHA512' }
+        default { return 'Unknown' }
+    }
+}
+
+function Convert-EfiSignatureDatabase {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [byte[]]$Bytes
+    )
+
+    $lists = New-Object 'System.Collections.Generic.List[object]'
+    $entries = New-Object 'System.Collections.Generic.List[object]'
+    $errors = New-Object 'System.Collections.Generic.List[string]'
+    $offset = 0
+    $listIndex = 0
+
+    while ($offset -lt $Bytes.Length) {
+        $remaining = $Bytes.Length - $offset
+        if ($remaining -lt 28) {
+            $tail = Copy-ByteRange -Bytes $Bytes -Offset $offset -Count $remaining
+            if (@($tail | Where-Object { $_ -ne 0 }).Count -gt 0) {
+                $errors.Add("Trailing data is shorter than an EFI_SIGNATURE_LIST header at offset $offset.")
+            }
+            break
+        }
+
+        try {
+            $typeBytes = Copy-ByteRange -Bytes $Bytes -Offset $offset -Count 16
+            $signatureType = New-Object -TypeName System.Guid -ArgumentList (,$typeBytes)
+            $signatureListSize = [BitConverter]::ToUInt32($Bytes, $offset + 16)
+            $signatureHeaderSize = [BitConverter]::ToUInt32($Bytes, $offset + 20)
+            $signatureSize = [BitConverter]::ToUInt32($Bytes, $offset + 24)
+
+            if ($signatureListSize -lt 28) {
+                throw "Invalid SignatureListSize $signatureListSize at offset $offset."
+            }
+            if (($offset + [int64]$signatureListSize) -gt $Bytes.Length) {
+                throw "Signature list at offset $offset exceeds the variable length."
+            }
+            if ($signatureSize -lt 16) {
+                throw "Invalid SignatureSize $signatureSize at offset $offset."
+            }
+
+            $listEnd = $offset + [int]$signatureListSize
+            $entryOffset = $offset + 28 + [int]$signatureHeaderSize
+            if ($entryOffset -gt $listEnd) {
+                throw "SignatureHeaderSize exceeds the signature list at offset $offset."
+            }
+
+            $entryCount = 0
+            while (($entryOffset + [int]$signatureSize) -le $listEnd) {
+                $ownerBytes = Copy-ByteRange -Bytes $Bytes -Offset $entryOffset -Count 16
+                $owner = New-Object -TypeName System.Guid -ArgumentList (,$ownerBytes)
+                $dataLength = [int]$signatureSize - 16
+                $signatureData = Copy-ByteRange -Bytes $Bytes -Offset ($entryOffset + 16) -Count $dataLength
+                $typeName = Resolve-EfiSignatureTypeName -SignatureType $signatureType
+
+                $certificateSubject = $null
+                $certificateIssuer = $null
+                $certificateThumbprint = $null
+                $certificateSha256 = $null
+                $certificateNotBefore = $null
+                $certificateNotAfter = $null
+                $certificateError = $null
+                $knownCertificateNames = New-Object 'System.Collections.Generic.List[string]'
+
+                if ($typeName -eq 'X509') {
+                    try {
+                        $certificate = New-Object `
+                            -TypeName System.Security.Cryptography.X509Certificates.X509Certificate2 `
+                            -ArgumentList (,$signatureData)
+                        try {
+                            $certificateSubject = [string]$certificate.Subject
+                            $certificateIssuer = [string]$certificate.Issuer
+                            $certificateThumbprint = [string]$certificate.Thumbprint
+                            $certificateSha256 = Get-Sha256HexFromBytes -Bytes $certificate.RawData
+                            $certificateNotBefore = $certificate.NotBefore.ToString('o')
+                            $certificateNotAfter = $certificate.NotAfter.ToString('o')
+
+                            $certificateIdentity = $certificateSubject + ' | ' + $certificateIssuer
+                            foreach ($knownName in @(
+                                'Windows UEFI CA 2023',
+                                'Microsoft Corporation UEFI CA 2011',
+                                'Microsoft UEFI CA 2023',
+                                'Microsoft Option ROM UEFI CA 2023',
+                                'Microsoft Corporation KEK 2K CA 2023',
+                                'Microsoft Corporation KEK CA 2011',
+                                'Microsoft Windows Production PCA 2011'
+                            )) {
+                                if ($certificateIdentity -match [regex]::Escape($knownName)) {
+                                    $knownCertificateNames.Add($knownName)
+                                }
+                            }
+                        }
+                        finally {
+                            $certificate.Dispose()
+                        }
+                    }
+                    catch {
+                        $certificateError = $_.Exception.Message
+                    }
+                }
+
+                $entries.Add(
+                    [pscustomobject][ordered]@{
+                        ListIndex = $listIndex
+                        EntryIndex = $entryCount
+                        SignatureType = $signatureType.ToString()
+                        SignatureTypeName = $typeName
+                        SignatureOwner = $owner.ToString()
+                        DataSizeBytes = $dataLength
+                        DataSha256 = Get-Sha256HexFromBytes -Bytes $signatureData
+                        HashValue = if ($typeName -match '^SHA') {
+                            ([BitConverter]::ToString($signatureData)).Replace('-', '').ToLowerInvariant()
+                        } else { $null }
+                        CertificateSubject = $certificateSubject
+                        CertificateIssuer = $certificateIssuer
+                        CertificateThumbprint = $certificateThumbprint
+                        CertificateSha256 = $certificateSha256
+                        CertificateNotBefore = $certificateNotBefore
+                        CertificateNotAfter = $certificateNotAfter
+                        KnownCertificateNames = $knownCertificateNames.ToArray()
+                        CertificateParseError = $certificateError
+                    }
+                )
+
+                $entryCount++
+                $entryOffset += [int]$signatureSize
+            }
+
+            if ($entryOffset -ne $listEnd) {
+                $errors.Add("Signature list $listIndex has $($listEnd - $entryOffset) unparsed byte(s).")
+            }
+
+            $lists.Add(
+                [pscustomobject][ordered]@{
+                    ListIndex = $listIndex
+                    Offset = $offset
+                    SignatureType = $signatureType.ToString()
+                    SignatureTypeName = Resolve-EfiSignatureTypeName -SignatureType $signatureType
+                    SignatureListSize = [uint32]$signatureListSize
+                    SignatureHeaderSize = [uint32]$signatureHeaderSize
+                    SignatureSize = [uint32]$signatureSize
+                    EntryCount = $entryCount
+                }
+            )
+
+            $offset = $listEnd
+            $listIndex++
+        }
+        catch {
+            $errors.Add($_.Exception.Message)
+            break
+        }
+    }
+
+    return [pscustomobject][ordered]@{
+        ParseComplete = ($errors.Count -eq 0)
+        ErrorMessages = $errors.ToArray()
+        ListCount = $lists.Count
+        EntryCount = $entries.Count
+        Lists = $lists.ToArray()
+        Entries = $entries.ToArray()
+    }
+}
+
+function Get-SecureBootVariableEvidence {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$EvidenceDirectory
+    )
+
+    $secureBootDirectory = Join-Path $EvidenceDirectory 'secureboot'
+    New-Item -ItemType Directory -Path $secureBootDirectory -Force | Out-Null
+
+    $variables = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($variableName in @('PK', 'KEK', 'db', 'dbx')) {
+        $variableResult = [pscustomobject][ordered]@{
+            Name = $variableName
+            Available = $false
+            ErrorMessage = $null
+            Attributes = $null
+            ByteLength = 0
+            Sha256 = $null
+            RelativeBinaryPath = $null
+            AsciiCertificateNameMatches = @()
+            SignatureDatabase = $null
+        }
+
+        try {
+            $uefiVariable = Get-SecureBootUEFI $variableName -ErrorAction Stop
+            $bytesValue = Get-PropertyValue -InputObject $uefiVariable -Name 'Bytes'
+            if ($null -eq $bytesValue) {
+                throw "Get-SecureBootUEFI returned no Bytes property for $variableName."
+            }
+
+            $bytes = [byte[]]$bytesValue
+            $relativePath = 'secureboot\uefi-{0}.bin' -f $variableName.ToLowerInvariant()
+            $binaryPath = Join-Path $EvidenceDirectory $relativePath
+            [System.IO.File]::WriteAllBytes($binaryPath, $bytes)
+
+            $asciiText = [System.Text.Encoding]::ASCII.GetString($bytes)
+            $asciiMatches = New-Object 'System.Collections.Generic.List[string]'
+            foreach ($knownName in @(
+                'Windows UEFI CA 2023',
+                'Microsoft Corporation UEFI CA 2011',
+                'Microsoft UEFI CA 2023',
+                'Microsoft Option ROM UEFI CA 2023',
+                'Microsoft Corporation KEK 2K CA 2023',
+                'Microsoft Corporation KEK CA 2011',
+                'Microsoft Windows Production PCA 2011'
+            )) {
+                if ($asciiText -match [regex]::Escape($knownName)) {
+                    $asciiMatches.Add($knownName)
+                }
+            }
+
+            $variableResult.Available = $true
+            $variableResult.Attributes = [string](Get-PropertyValue -InputObject $uefiVariable -Name 'Attributes')
+            $variableResult.ByteLength = $bytes.Length
+            $variableResult.Sha256 = Get-Sha256HexFromBytes -Bytes $bytes
+            $variableResult.RelativeBinaryPath = $relativePath
+            $variableResult.AsciiCertificateNameMatches = $asciiMatches.ToArray()
+            $variableResult.SignatureDatabase = Convert-EfiSignatureDatabase -Bytes $bytes
+        }
+        catch {
+            $variableResult.ErrorMessage = $_.Exception.Message
+        }
+
+        $variables.Add($variableResult)
+    }
+
+    $presenceDefinitions = @(
+        [pscustomobject]@{ Key = 'WindowsUefiCa2023InDb'; Variable = 'db'; Name = 'Windows UEFI CA 2023' },
+        [pscustomobject]@{ Key = 'MicrosoftCorporationUefiCa2011InDb'; Variable = 'db'; Name = 'Microsoft Corporation UEFI CA 2011' },
+        [pscustomobject]@{ Key = 'MicrosoftUefiCa2023InDb'; Variable = 'db'; Name = 'Microsoft UEFI CA 2023' },
+        [pscustomobject]@{ Key = 'MicrosoftOptionRomUefiCa2023InDb'; Variable = 'db'; Name = 'Microsoft Option ROM UEFI CA 2023' },
+        [pscustomobject]@{ Key = 'MicrosoftCorporationKek2KCa2023InKek'; Variable = 'KEK'; Name = 'Microsoft Corporation KEK 2K CA 2023' }
+    )
+
+    $presence = [ordered]@{}
+    foreach ($definition in $presenceDefinitions) {
+        $variable = @($variables | Where-Object { $_.Name -eq $definition.Variable } | Select-Object -First 1)
+        $presentByAscii = $false
+        $presentByCertificate = $false
+        if ($variable.Count -gt 0 -and $variable[0].Available) {
+            $presentByAscii = (@($variable[0].AsciiCertificateNameMatches) -contains $definition.Name)
+            if ($null -ne $variable[0].SignatureDatabase) {
+                $presentByCertificate = (@(
+                    $variable[0].SignatureDatabase.Entries | Where-Object {
+                        @($_.KnownCertificateNames) -contains $definition.Name
+                    }
+                ).Count -gt 0)
+            }
+        }
+
+        $presence[$definition.Key] = [pscustomobject][ordered]@{
+            Variable = $definition.Variable
+            CertificateName = $definition.Name
+            Present = [bool]($presentByAscii -or $presentByCertificate)
+            PresentByAsciiScan = [bool]$presentByAscii
+            PresentByParsedCertificate = [bool]$presentByCertificate
+        }
+    }
+
+    $thirdPartyRequired = [bool]$presence['MicrosoftCorporationUefiCa2011InDb'].Present
+    $directRequirementsSatisfied = (
+        $presence['WindowsUefiCa2023InDb'].Present -and
+        $presence['MicrosoftCorporationKek2KCa2023InKek'].Present -and
+        (
+            -not $thirdPartyRequired -or
+            (
+                $presence['MicrosoftUefiCa2023InDb'].Present -and
+                $presence['MicrosoftOptionRomUefiCa2023InDb'].Present
+            )
+        )
+    )
+
+    $db = @($variables | Where-Object Name -eq 'db' | Select-Object -First 1)
+    $kek = @($variables | Where-Object Name -eq 'KEK' | Select-Object -First 1)
+
+    return [pscustomobject][ordered]@{
+        Variables = $variables.ToArray()
+        CertificatePresence = [pscustomobject]$presence
+        ThirdParty2023CertificatesRequired = $thirdPartyRequired
+        DirectRequirementsSatisfied = [bool]$directRequirementsSatisfied
+        RequiredVariablesAvailable = [bool](
+            $db.Count -gt 0 -and $db[0].Available -and
+            $kek.Count -gt 0 -and $kek[0].Available
+        )
+    }
+}
+
+function Convert-EventDataToObject {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$EventRecord
+    )
+
+    $data = [ordered]@{}
+    try {
+        [xml]$eventXml = $EventRecord.ToXml()
+        $index = 0
+
+        # Some TPM-WMI events contain EventData/Data nodes, while simple
+        # informational events (for example event 1034) may contain no Data
+        # node at all. SelectNodes avoids StrictMode property errors when an
+        # optional XML element is absent.
+        $eventDataNodes = @(
+            $eventXml.SelectNodes(
+                "/*[local-name()='Event']/*[local-name()='EventData']/*[local-name()='Data']"
+            )
+        )
+        foreach ($node in $eventDataNodes) {
+            $nameAttribute = $node.Attributes['Name']
+            $name = if ($null -ne $nameAttribute) { [string]$nameAttribute.Value } else { $null }
+            if ([string]::IsNullOrWhiteSpace($name)) {
+                $name = 'Data{0}' -f $index
+            }
+            if ($data.Contains($name)) {
+                $name = '{0}_{1}' -f $name, $index
+            }
+            $data[$name] = [string]$node.InnerText
+            $index++
+        }
+
+        # A provider can use UserData instead of EventData. Preserve leaf
+        # values without treating the absence of EventData as a parse failure.
+        $userDataNodes = @(
+            $eventXml.SelectNodes(
+                "/*[local-name()='Event']/*[local-name()='UserData']//*[not(*)]"
+            )
+        )
+        foreach ($node in $userDataNodes) {
+            $name = [string]$node.LocalName
+            if ([string]::IsNullOrWhiteSpace($name)) {
+                $name = 'UserData{0}' -f $index
+            }
+            if ($data.Contains($name)) {
+                $name = '{0}_{1}' -f $name, $index
+            }
+            $data[$name] = [string]$node.InnerText
+            $index++
+        }
+    }
+    catch {
+        $data['ParseError'] = $_.Exception.Message
+    }
+
+    return [pscustomobject]$data
+}
+
+function Get-SecureBootEventEvidence {
+    [CmdletBinding()]
+    param()
+
+    $eventIds = @(
+        1032, 1033, 1034, 1036, 1037, 1042, 1043, 1044, 1045,
+        1795, 1796, 1797, 1798, 1799, 1800, 1801, 1802, 1803, 1808
+    )
+
+    $result = [pscustomobject][ordered]@{
+        Available = $false
+        ErrorMessage = $null
+        EventCount = 0
+        CountsById = @()
+        LatestEvent = $null
+        LatestRolloutEvent = $null
+        Events = @()
+    }
+
+    try {
+        $rawEvents = @()
+        try {
+            $rawEvents = @(
+                Get-WinEvent -FilterHashtable @{
+                    LogName = 'System'
+                    ProviderName = 'Microsoft-Windows-TPM-WMI'
+                    Id = $eventIds
+                } -MaxEvents 200 -ErrorAction Stop
+            )
+        }
+        catch {
+            if ($_.FullyQualifiedErrorId -notmatch 'NoMatchingEventsFound') {
+                throw
+            }
+        }
+
+        $events = @(
+            $rawEvents |
+                Sort-Object TimeCreated -Descending |
+                ForEach-Object {
+                    [pscustomobject][ordered]@{
+                        Id = [int]$_.Id
+                        TimeCreated = if ($_.TimeCreated) { $_.TimeCreated.ToString('o') } else { $null }
+                        ProviderName = [string]$_.ProviderName
+                        Level = [string]$_.LevelDisplayName
+                        RecordId = [long]$_.RecordId
+                        Message = [string]$_.Message
+                        EventData = Convert-EventDataToObject -EventRecord $_
+                    }
+                }
+        )
+
+        $result.Available = $true
+        $result.EventCount = $events.Count
+        $result.CountsById = @(
+            foreach ($id in $eventIds) {
+                [pscustomobject][ordered]@{
+                    Id = $id
+                    Count = @($events | Where-Object Id -eq $id).Count
+                }
+            }
+        )
+        $result.LatestEvent = @($events | Select-Object -First 1)
+        if ($result.LatestEvent.Count -eq 0) { $result.LatestEvent = $null } else { $result.LatestEvent = $result.LatestEvent[0] }
+        $latestRollout = @($events | Where-Object { $_.Id -in @(1801, 1808) } | Select-Object -First 1)
+        $result.LatestRolloutEvent = if ($latestRollout.Count -gt 0) { $latestRollout[0] } else { $null }
+        $result.Events = @($events)
     }
     catch {
         $result.ErrorMessage = $_.Exception.Message
     }
 
     return $result
+}
+
+function Get-SecureBootEventFieldValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [object]$Event,
+
+        [Parameter(Mandatory = $true)]
+        [string[]]$Names,
+
+        [Parameter(Mandatory = $false)]
+        [string[]]$MessagePatterns = @()
+    )
+
+    if ($null -eq $Event) { return $null }
+
+    foreach ($name in $Names) {
+        $value = Get-PropertyValue -InputObject $Event.EventData -Name $name
+        if ($null -ne $value -and -not [string]::IsNullOrWhiteSpace([string]$value)) {
+            return [string]$value
+        }
+    }
+
+    $message = [string](Get-PropertyValue -InputObject $Event -Name 'Message')
+    if (-not [string]::IsNullOrWhiteSpace($message)) {
+        foreach ($pattern in $MessagePatterns) {
+            if ($message -match $pattern) {
+                if ($Matches.ContainsKey(1)) {
+                    return [string]$Matches[1].Trim()
+                }
+                return [string]$Matches[0].Trim()
+            }
+        }
+    }
+
+    return $null
+}
+
+function Get-SecureBootRolloutStatus {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$EventEvidence,
+
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [string]$UefiCa2023Status
+    )
+
+    $events = @($EventEvidence.Events)
+    $rolloutIds = @(1795, 1796, 1800, 1801, 1802, 1803, 1808)
+    $rolloutEvents = @(
+        $events | Where-Object { $_.Id -in $rolloutIds } |
+            Sort-Object TimeCreated -Descending
+    )
+    $latest = @($rolloutEvents | Select-Object -First 1)
+    $latestEvent = if ($latest.Count -gt 0) { $latest[0] } else { $null }
+    $bucketCandidates = @(
+        $rolloutEvents | Where-Object { $_.Id -in @(1801, 1808) } |
+            Sort-Object TimeCreated -Descending
+    )
+    $bucketEvent = if ($bucketCandidates.Count -gt 0) { $bucketCandidates[0] } else { $null }
+
+    $bucketId = Get-SecureBootEventFieldValue -Event $bucketEvent `
+        -Names @('BucketId', 'BucketID') `
+        -MessagePatterns @('BucketId:\s*([^\r\n]+)')
+    $confidence = Get-SecureBootEventFieldValue -Event $bucketEvent `
+        -Names @('BucketConfidenceLevel', 'Confidence') `
+        -MessagePatterns @('BucketConfidenceLevel:\s*([^\r\n]+)')
+    $skipReason = Get-SecureBootEventFieldValue -Event $bucketEvent `
+        -Names @('SkipReason') `
+        -MessagePatterns @('SkipReason:\s*([^\r\n]+)')
+    $knownIssueFromSkipReason = $null
+    if (-not [string]::IsNullOrWhiteSpace($skipReason) -and $skipReason -match '(KI_\d+)') {
+        $knownIssueFromSkipReason = $Matches[1]
+    }
+
+    $latest1795 = @($rolloutEvents | Where-Object Id -eq 1795 | Select-Object -First 1)
+    $latest1796 = @($rolloutEvents | Where-Object Id -eq 1796 | Select-Object -First 1)
+    $latest1802 = @($rolloutEvents | Where-Object Id -eq 1802 | Select-Object -First 1)
+
+    $event1795 = if ($latest1795.Count -gt 0) { $latest1795[0] } else { $null }
+    $event1796 = if ($latest1796.Count -gt 0) { $latest1796[0] } else { $null }
+    $event1802 = if ($latest1802.Count -gt 0) { $latest1802[0] } else { $null }
+
+    $event1795ErrorCode = Get-SecureBootEventFieldValue -Event $event1795 `
+        -Names @('ErrorCode', 'Status', 'NtStatus') `
+        -MessagePatterns @('(?:error|code|status)[:\s]*(0x[0-9A-Fa-f]+|[0-9A-Fa-f]{8})')
+    $event1796ErrorCode = Get-SecureBootEventFieldValue -Event $event1796 `
+        -Names @('ErrorCode', 'Status', 'NtStatus') `
+        -MessagePatterns @('(?:error|code|status)[:\s]*(0x[0-9A-Fa-f]+|[0-9A-Fa-f]{8})')
+    $knownIssueId = Get-SecureBootEventFieldValue -Event $event1802 `
+        -Names @('SkipReason', 'KnownIssueId') `
+        -MessagePatterns @('(KI_\d+)')
+    if (-not [string]::IsNullOrWhiteSpace($knownIssueId) -and $knownIssueId -match '(KI_\d+)') {
+        $knownIssueId = $Matches[1]
+    }
+
+    $latestEventId = if ($null -ne $latestEvent) { [int]$latestEvent.Id } else { $null }
+    $updateComplete = (
+        $latestEventId -eq 1808 -or
+        $UefiCa2023Status -eq 'Updated'
+    )
+
+    $count = [ordered]@{}
+    foreach ($id in $rolloutIds) {
+        $count[[string]$id] = @($rolloutEvents | Where-Object Id -eq $id).Count
+    }
+
+    return [pscustomobject][ordered]@{
+        Available = [bool]$EventEvidence.Available
+        LatestEventId = $latestEventId
+        LatestEventTime = if ($null -ne $latestEvent) { $latestEvent.TimeCreated } else { $null }
+        LatestCompletionOrPendingEventId = if ($null -ne $bucketEvent) { [int]$bucketEvent.Id } else { $null }
+        LatestCompletionOrPendingEventTime = if ($null -ne $bucketEvent) { $bucketEvent.TimeCreated } else { $null }
+        BucketId = $bucketId
+        Confidence = $confidence
+        SkipReason = $skipReason
+        SkipReasonKnownIssue = $knownIssueFromSkipReason
+        EventCounts = [pscustomobject]$count
+        Event1795ErrorCode = $event1795ErrorCode
+        Event1796ErrorCode = $event1796ErrorCode
+        KnownIssueId = $knownIssueId
+        RebootPending = [bool](-not $updateComplete -and $count['1800'] -gt 0)
+        MissingKek = [bool](-not $updateComplete -and $count['1803'] -gt 0)
+        UpdateCompleteByRegistryOrLatestEvent = [bool]$updateComplete
+    }
+}
+
+function Get-SecureBootScheduledTaskEvidence {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$EvidenceDirectory
+    )
+
+    $result = [pscustomobject][ordered]@{
+        QueryAvailable = $false
+        Found = $false
+        Enabled = $null
+        State = $null
+        LastRunTime = $null
+        LastTaskResult = $null
+        NextRunTime = $null
+        RelativeXmlPath = $null
+        Source = $null
+        ErrorMessage = $null
+    }
+
+    try {
+        Import-Module ScheduledTasks -ErrorAction Stop
+        $task = Get-ScheduledTask `
+            -TaskPath '\Microsoft\Windows\PI\' `
+            -TaskName 'Secure-Boot-Update' `
+            -ErrorAction SilentlyContinue
+        $result.QueryAvailable = $true
+        $result.Source = 'ScheduledTasks'
+
+        if ($null -ne $task) {
+            $result.Found = $true
+            $result.Enabled = [bool](Get-PropertyValue -InputObject $task.Settings -Name 'Enabled' -DefaultValue $false)
+            $result.State = [string](Get-PropertyValue -InputObject $task -Name 'State')
+
+            $taskInfo = Get-ScheduledTaskInfo -InputObject $task -ErrorAction SilentlyContinue
+            if ($null -ne $taskInfo) {
+                $result.LastRunTime = if ($taskInfo.LastRunTime) { $taskInfo.LastRunTime.ToString('o') } else { $null }
+                $result.LastTaskResult = Get-PropertyValue -InputObject $taskInfo -Name 'LastTaskResult'
+                $result.NextRunTime = if ($taskInfo.NextRunTime) { $taskInfo.NextRunTime.ToString('o') } else { $null }
+            }
+
+            try {
+                $taskXml = Export-ScheduledTask -InputObject $task -ErrorAction Stop
+                $relativePath = 'secureboot\secure-boot-update-task.xml'
+                $taskXml | Set-Content -LiteralPath (Join-Path $EvidenceDirectory $relativePath) -Encoding UTF8
+                $result.RelativeXmlPath = $relativePath
+            }
+            catch {
+                # Task metadata is still useful when XML export is unavailable.
+            }
+        }
+    }
+    catch {
+        try {
+            $query = Invoke-CapturedCommand `
+                -FilePath "$env:SystemRoot\System32\schtasks.exe" `
+                -ArgumentList @('/Query', '/TN', '\Microsoft\Windows\PI\Secure-Boot-Update', '/XML')
+            $result.QueryAvailable = $query.Started
+            $result.Source = 'schtasks.exe'
+            if ($query.Started -and $query.ExitCode -eq 0) {
+                $result.Found = $true
+                $relativePath = 'secureboot\secure-boot-update-task.xml'
+                $query.StdOut | Set-Content -LiteralPath (Join-Path $EvidenceDirectory $relativePath) -Encoding UTF8
+                $result.RelativeXmlPath = $relativePath
+            }
+            else {
+                $result.ErrorMessage = $query.ErrorMessage
+            }
+        }
+        catch {
+            $result.ErrorMessage = $_.Exception.Message
+        }
+    }
+
+    return $result
+}
+
+function Get-WinCsSecureBootEvidence {
+    [CmdletBinding()]
+    param()
+
+    $paths = @(
+        (Join-Path $env:SystemRoot 'System32\WinCsFlags.exe'),
+        (Join-Path $env:SystemRoot 'SysWOW64\WinCsFlags.exe')
+    )
+    $path = @($paths | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1)
+
+    if ($path.Count -eq 0) {
+        return [pscustomobject][ordered]@{
+            Available = $false
+            Path = $null
+            Key = 'F33E0C8E002'
+            Query = $null
+        }
+    }
+
+    return [pscustomobject][ordered]@{
+        Available = $true
+        Path = $path[0]
+        Key = 'F33E0C8E002'
+        Query = Invoke-CapturedCommand `
+            -FilePath $path[0] `
+            -ArgumentList @('/query', '--key', 'F33E0C8E002')
+    }
+}
+
+function Get-SecureBootScriptInventory {
+    [CmdletBinding()]
+    param()
+
+    $directoryPaths = @(
+        (Join-Path $env:SystemRoot 'SecureBoot\Scripts'),
+        (Join-Path $env:SystemRoot 'SecureBoot\ExampleRolloutScripts')
+    )
+
+    $directories = New-Object 'System.Collections.Generic.List[object]'
+    $files = New-Object 'System.Collections.Generic.List[object]'
+
+    foreach ($directoryPath in $directoryPaths) {
+        $present = Test-Path -LiteralPath $directoryPath -PathType Container
+        $directoryRecord = [pscustomobject][ordered]@{
+            Path = $directoryPath
+            Present = [bool]$present
+            EnumerationSucceeded = $null
+            FileCount = 0
+            ErrorMessage = $null
+        }
+        $directories.Add($directoryRecord)
+
+        if (-not $present) {
+            continue
+        }
+
+        $directoryFiles = @()
+        try {
+            $directoryFiles = @(
+                Get-ChildItem -LiteralPath $directoryPath -Recurse -File -ErrorAction Stop |
+                    Sort-Object FullName
+            )
+            $directoryRecord.EnumerationSucceeded = $true
+            $directoryRecord.FileCount = $directoryFiles.Count
+        }
+        catch {
+            $directoryRecord.EnumerationSucceeded = $false
+            $directoryRecord.ErrorMessage = $_.Exception.Message
+            continue
+        }
+
+        foreach ($file in $directoryFiles) {
+            $skipAuthenticode = ($file.Extension -notin @('.ps1', '.psm1', '.psd1', '.exe', '.dll', '.sys', '.efi'))
+            $evidence = Get-FileEvidence -Path $file.FullName -SkipAuthenticode:$skipAuthenticode
+            $files.Add(
+                [pscustomobject][ordered]@{
+                    RootDirectory = $directoryPath
+                    RelativePath = $file.FullName.Substring($directoryPath.Length).TrimStart('\')
+                    File = $evidence
+                }
+            )
+        }
+    }
+
+    $directoryArray = $directories.ToArray()
+    $fileArray = $files.ToArray()
+    $signatureEligibleFiles = @(
+        $fileArray | Where-Object { -not $_.File.AuthenticodeSkipped }
+    )
+    $validMicrosoftSignedFiles = @(
+        $signatureEligibleFiles | Where-Object {
+            $_.File.AuthenticodeStatus -eq 'Valid' -and
+            $_.File.SignerIsMicrosoft -eq $true
+        }
+    )
+    $invalidSignatureFiles = @(
+        $signatureEligibleFiles | Where-Object {
+            -not [string]::IsNullOrWhiteSpace($_.File.AuthenticodeStatus) -and
+            $_.File.AuthenticodeStatus -ne 'Valid'
+        }
+    )
+    $unexpectedSignerFiles = @(
+        $signatureEligibleFiles | Where-Object {
+            $_.File.AuthenticodeStatus -eq 'Valid' -and
+            $_.File.SignerIsMicrosoft -ne $true
+        }
+    )
+    $directoryEnumerationIssues = @(
+        $directoryArray | Where-Object {
+            $_.Present -and $_.EnumerationSucceeded -ne $true
+        }
+    )
+    $collectionIssueFiles = @(
+        $fileArray | Where-Object {
+            -not [string]::IsNullOrWhiteSpace($_.File.ReadErrorMessage) -or
+            -not [string]::IsNullOrWhiteSpace($_.File.HashErrorMessage) -or
+            -not [string]::IsNullOrWhiteSpace($_.File.AuthenticodeErrorMessage) -or
+            [string]::IsNullOrWhiteSpace($_.File.Sha256) -or
+            (-not $_.File.AuthenticodeSkipped -and
+                [string]::IsNullOrWhiteSpace($_.File.AuthenticodeStatus))
+        }
+    )
+
+    return [pscustomobject][ordered]@{
+        InventoryPolicy = [pscustomobject][ordered]@{
+            Purpose = 'Record observed file metadata, SHA-256 and Authenticode information.'
+            BaselineHashComparisonEnabled = $false
+            CrossOperatingSystemHashComparisonPerformed = $false
+            HashInterpretation = 'SHA-256 identifies the observed file; it is not compared with a file collected from another Windows release or servicing level.'
+            MissingDirectoryIsValidationFailure = $false
+        }
+        Directories = $directoryArray
+        Files = $fileArray
+        Summary = [pscustomobject][ordered]@{
+            PresentDirectoryCount = @($directoryArray | Where-Object { $_.Present }).Count
+            FileCount = $fileArray.Count
+            SignatureEligibleFileCount = $signatureEligibleFiles.Count
+            ValidMicrosoftSignedFileCount = $validMicrosoftSignedFiles.Count
+            InvalidSignatureFileCount = $invalidSignatureFiles.Count
+            UnexpectedSignerFileCount = $unexpectedSignerFiles.Count
+            DirectoryEnumerationIssueCount = $directoryEnumerationIssues.Count
+            CollectionIssueFileCount = $collectionIssueFiles.Count
+            CollectionIssueCount = ($directoryEnumerationIssues.Count + $collectionIssueFiles.Count)
+        }
+        DetectScriptPresent = [bool](@(
+            $fileArray | Where-Object { $_.RelativePath -ieq 'Detect-SecureBootCertUpdateStatus.ps1' }
+        ).Count -gt 0)
+    }
+}
+
+function Get-SecureBootEvidence {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$EvidenceDirectory
+    )
+
+    $mainSnapshot = Get-RegistryKeySnapshot `
+        -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot'
+    $stateSnapshot = Get-RegistryKeySnapshot `
+        -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\State'
+    $servicingSnapshot = Get-RegistryKeySnapshot `
+        -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\Servicing'
+    $deviceAttributesSnapshot = Get-RegistryKeySnapshot `
+        -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\Servicing\DeviceAttributes'
+
+    $enabled = $null
+    $supported = $false
+    $stateSource = $null
+    $stateError = $null
+    try {
+        $enabled = [bool](Confirm-SecureBootUEFI -ErrorAction Stop)
+        $supported = $true
+        $stateSource = 'Confirm-SecureBootUEFI'
+    }
+    catch {
+        $stateError = $_.Exception.Message
+        $registryEnabled = Get-NamedRegistryValue `
+            -Snapshot $stateSnapshot `
+            -Name 'UEFISecureBootEnabled'
+        if ($null -ne $registryEnabled) {
+            $enabled = ([int]$registryEnabled -ne 0)
+            $supported = $true
+            $stateSource = 'RegistryFallback'
+        }
+    }
+
+    $registryEvidence = [pscustomobject][ordered]@{
+        Main = $mainSnapshot
+        State = $stateSnapshot
+        Servicing = $servicingSnapshot
+        DeviceAttributes = $deviceAttributesSnapshot
+        AvailableUpdates = Get-NamedRegistryValue -Snapshot $mainSnapshot -Name 'AvailableUpdates'
+        AvailableUpdatesHex = if ($null -ne (Get-NamedRegistryValue -Snapshot $mainSnapshot -Name 'AvailableUpdates')) {
+            '0x{0:X}' -f [uint32](Get-NamedRegistryValue -Snapshot $mainSnapshot -Name 'AvailableUpdates')
+        } else { $null }
+        AvailableUpdatesPolicy = Get-NamedRegistryValue -Snapshot $mainSnapshot -Name 'AvailableUpdatesPolicy'
+        AvailableUpdatesPolicyHex = if ($null -ne (Get-NamedRegistryValue -Snapshot $mainSnapshot -Name 'AvailableUpdatesPolicy')) {
+            '0x{0:X}' -f [uint32](Get-NamedRegistryValue -Snapshot $mainSnapshot -Name 'AvailableUpdatesPolicy')
+        } else { $null }
+        HighConfidenceOptOut = Get-NamedRegistryValue -Snapshot $mainSnapshot -Name 'HighConfidenceOptOut'
+        MicrosoftUpdateManagedOptIn = Get-NamedRegistryValue -Snapshot $mainSnapshot -Name 'MicrosoftUpdateManagedOptIn'
+        UEFICA2023Status = [string](Get-NamedRegistryValue -Snapshot $servicingSnapshot -Name 'UEFICA2023Status')
+        WindowsUEFICA2023Capable = Get-NamedRegistryValue -Snapshot $servicingSnapshot -Name 'WindowsUEFICA2023Capable'
+        UEFICA2023Error = Get-NamedRegistryValue -Snapshot $servicingSnapshot -Name 'UEFICA2023Error'
+        UEFICA2023ErrorEvent = Get-NamedRegistryValue -Snapshot $servicingSnapshot -Name 'UEFICA2023ErrorEvent'
+        OEMManufacturerName = [string](Get-NamedRegistryValue -Snapshot $deviceAttributesSnapshot -Name 'OEMManufacturerName')
+        OEMModelSystemFamily = [string](Get-NamedRegistryValue -Snapshot $deviceAttributesSnapshot -Name 'OEMModelSystemFamily')
+        OEMModelNumber = [string](Get-NamedRegistryValue -Snapshot $deviceAttributesSnapshot -Name 'OEMModelNumber')
+        FirmwareVersion = [string](Get-NamedRegistryValue -Snapshot $deviceAttributesSnapshot -Name 'FirmwareVersion')
+        FirmwareReleaseDate = [string](Get-NamedRegistryValue -Snapshot $deviceAttributesSnapshot -Name 'FirmwareReleaseDate')
+        OSArchitecture = [string](Get-NamedRegistryValue -Snapshot $deviceAttributesSnapshot -Name 'OSArchitecture')
+        CanAttemptUpdateAfterUtc = Convert-RegistryFileTimeValue -Value (
+            Get-NamedRegistryValue -Snapshot $deviceAttributesSnapshot -Name 'CanAttemptUpdateAfter'
+        )
+    }
+
+    $variables = Get-SecureBootVariableEvidence -EvidenceDirectory $EvidenceDirectory
+    $events = Get-SecureBootEventEvidence
+    $rolloutStatus = Get-SecureBootRolloutStatus `
+        -EventEvidence $events `
+        -UefiCa2023Status $registryEvidence.UEFICA2023Status
+    $task = Get-SecureBootScheduledTaskEvidence -EvidenceDirectory $EvidenceDirectory
+    $winCs = Get-WinCsSecureBootEvidence
+    $scriptInventory = Get-SecureBootScriptInventory
+
+    return [pscustomobject][ordered]@{
+        Supported = $supported
+        Enabled = $enabled
+        StateSource = $stateSource
+        StateErrorMessage = $stateError
+        Registry = $registryEvidence
+        FirmwareVariables = $variables
+        Events = $events
+        RolloutStatus = $rolloutStatus
+        ScheduledTask = $task
+        WinCs = $winCs
+        MicrosoftScriptInventory = $scriptInventory
+        Methodology = [pscustomobject][ordered]@{
+            Mode = 'ReadOnlyInventory'
+            MicrosoftSecureBootObjectsRepository = 'https://github.com/microsoft/secureboot_objects'
+            MicrosoftGuidanceKb = 'KB5062713'
+            DetectionScriptObserved = 'Detect-SecureBootCertUpdateStatus.ps1'
+            ScriptInventoryDirectories = @(
+                '%SystemRoot%\SecureBoot\Scripts',
+                '%SystemRoot%\SecureBoot\ExampleRolloutScripts'
+            )
+            FirmwareVariablesRead = @('PK', 'KEK', 'db', 'dbx')
+            FirmwareVariablesWritten = $false
+            RegistryValuesChanged = $false
+            ScheduledTasksStarted = $false
+        }
+        Assessment = $null
+        MicrosoftMonitoringStatus = if (
+            $enabled -eq $true -and
+            $registryEvidence.UEFICA2023Status -eq 'Updated'
+        ) { 'WithoutIssue' } elseif ($enabled -eq $false) {
+            'NotApplicableSecureBootDisabled'
+        } else {
+            'WithIssueOrIncomplete'
+        }
+    }
 }
 
 function Get-InstalledPackageEvidence {
@@ -280,6 +1528,383 @@ function Get-InstalledPackageEvidence {
     }
 }
 
+function Get-WindowsFeatureEvidence {
+    [CmdletBinding()]
+    param()
+
+    $items = @()
+    $source = $null
+    $errorMessage = $null
+
+    try {
+        Import-Module ServerManager -ErrorAction Stop
+        $source = 'Get-WindowsFeature'
+        $items = @(
+            Get-WindowsFeature -ErrorAction Stop |
+                Sort-Object Name |
+                ForEach-Object {
+                    [pscustomobject][ordered]@{
+                        Name = [string](Get-PropertyValue -InputObject $_ -Name 'Name')
+                        DisplayName = [string](Get-PropertyValue -InputObject $_ -Name 'DisplayName')
+                        Description = [string](Get-PropertyValue -InputObject $_ -Name 'Description')
+                        Installed = [bool](Get-PropertyValue -InputObject $_ -Name 'Installed' -DefaultValue $false)
+                        InstallState = [string](Get-PropertyValue -InputObject $_ -Name 'InstallState')
+                        FeatureType = [string](Get-PropertyValue -InputObject $_ -Name 'FeatureType')
+                        Parent = [string](Get-PropertyValue -InputObject $_ -Name 'Parent')
+                        Depth = Get-PropertyValue -InputObject $_ -Name 'Depth'
+                        Source = 'Get-WindowsFeature'
+                    }
+                }
+        )
+    }
+    catch {
+        $serverManagerError = $_.Exception.Message
+        try {
+            $source = 'Get-WindowsOptionalFeature'
+            $items = @(
+                Get-WindowsOptionalFeature -Online -ErrorAction Stop |
+                    Sort-Object FeatureName |
+                    ForEach-Object {
+                        $state = [string](Get-PropertyValue -InputObject $_ -Name 'State')
+                        [pscustomobject][ordered]@{
+                            Name = [string](Get-PropertyValue -InputObject $_ -Name 'FeatureName')
+                            DisplayName = [string](Get-PropertyValue -InputObject $_ -Name 'FeatureName')
+                            Description = $null
+                            Installed = ($state -eq 'Enabled')
+                            InstallState = $state
+                            FeatureType = 'OptionalFeature'
+                            Parent = $null
+                            Depth = $null
+                            Source = 'Get-WindowsOptionalFeature'
+                        }
+                    }
+            )
+        }
+        catch {
+            $errorMessage = (
+                "ServerManager query failed: $serverManagerError; " +
+                "DISM optional feature query failed: $($_.Exception.Message)"
+            )
+        }
+    }
+
+    $dotNetItems = @(
+        $items | Where-Object {
+            $_.Name -match '^(NET-|NetFx|WCF-|Web-Asp-Net)' -or
+            $_.DisplayName -match '\.NET Framework|ASP\.NET|Windows Communication Foundation|WCF'
+        }
+    )
+
+    $isInstalled = {
+        param([object]$Feature)
+        return (
+            $Feature.Installed -eq $true -or
+            $Feature.InstallState -in @('Installed', 'Enabled')
+        )
+    }
+
+    $netFx3Installed = @(
+        $dotNetItems | Where-Object {
+            $_.Name -in @('NET-Framework-Core', 'NetFx3') -and (& $isInstalled $_)
+        }
+    ).Count -gt 0
+    $netFx4Installed = @(
+        $dotNetItems | Where-Object {
+            (
+                $_.Name -match '^NET-Framework-45-(Core|Features)$' -or
+                $_.Name -match '^NetFx4'
+            ) -and (& $isInstalled $_)
+        }
+    ).Count -gt 0
+
+    return [pscustomobject][ordered]@{
+        Available = [bool]($null -eq $errorMessage)
+        Source = $source
+        ErrorMessage = $errorMessage
+        FeatureCount = $items.Count
+        InstalledFeatureCount = @($items | Where-Object { & $isInstalled $_ }).Count
+        Features = @($items)
+        DotNetFeatures = @($dotNetItems)
+        DotNetFeatureState = [pscustomobject][ordered]@{
+            FeatureInventoryAvailable = [bool]($null -eq $errorMessage)
+            NetFx3Installed = [bool]$netFx3Installed
+            NetFx4Installed = [bool]$netFx4Installed
+            NetFx3FeatureNames = @(
+                $dotNetItems | Where-Object { $_.Name -in @('NET-Framework-Core', 'NetFx3') } |
+                    Select-Object -ExpandProperty Name
+            )
+            NetFx4FeatureNames = @(
+                $dotNetItems | Where-Object {
+                    $_.Name -match '^NET-Framework-45-(Core|Features)$' -or
+                    $_.Name -match '^NetFx4'
+                } | Select-Object -ExpandProperty Name
+            )
+            InstalledDotNetFeatureNames = @(
+                $dotNetItems | Where-Object { & $isInstalled $_ } | Select-Object -ExpandProperty Name
+            )
+            DetectionBasis = 'Windows Server feature state; registry is used as a secondary version and consistency check.'
+        }
+    }
+}
+
+function Resolve-DotNetReleaseVersion {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [object]$Release
+    )
+
+    if ($null -eq $Release) { return $null }
+    $value = [int64]$Release
+    if ($value -ge 533320) { return '4.8.1 or later' }
+    if ($value -ge 528040) { return '4.8' }
+    if ($value -ge 461808) { return '4.7.2' }
+    if ($value -ge 461308) { return '4.7.1' }
+    if ($value -ge 460798) { return '4.7' }
+    if ($value -ge 394802) { return '4.6.2' }
+    if ($value -ge 394254) { return '4.6.1' }
+    if ($value -ge 393295) { return '4.6' }
+    if ($value -ge 379893) { return '4.5.2' }
+    if ($value -ge 378675) { return '4.5.1' }
+    if ($value -ge 378389) { return '4.5' }
+    return 'Unknown pre-4.5 release key'
+}
+
+function Get-DotNetFrameworkEvidence {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$WindowsFeatures
+    )
+
+    $paths = @(
+        'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v3.5',
+        'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Client',
+        'HKLM:\SOFTWARE\Microsoft\NET Framework Setup\NDP\v4\Full',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\NET Framework Setup\NDP\v3.5',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\NET Framework Setup\NDP\v4\Client',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\NET Framework Setup\NDP\v4\Full'
+    )
+
+    $entries = New-Object 'System.Collections.Generic.List[object]'
+    $errors = New-Object 'System.Collections.Generic.List[string]'
+
+    foreach ($path in $paths) {
+        if (-not (Test-Path -LiteralPath $path)) {
+            continue
+        }
+
+        try {
+            $properties = Get-ItemProperty -LiteralPath $path -ErrorAction Stop
+            $release = Get-PropertyValue -InputObject $properties -Name 'Release'
+            $entries.Add(
+                [pscustomobject][ordered]@{
+                    RegistryPath = $path
+                    Install = Get-PropertyValue -InputObject $properties -Name 'Install'
+                    Version = [string](Get-PropertyValue -InputObject $properties -Name 'Version')
+                    Release = $release
+                    ResolvedReleaseVersion = Resolve-DotNetReleaseVersion -Release $release
+                    ServicePack = Get-PropertyValue -InputObject $properties -Name 'SP'
+                    Servicing = Get-PropertyValue -InputObject $properties -Name 'Servicing'
+                    InstallPath = [string](Get-PropertyValue -InputObject $properties -Name 'InstallPath')
+                    TargetVersion = [string](Get-PropertyValue -InputObject $properties -Name 'TargetVersion')
+                }
+            )
+        }
+        catch {
+            $errors.Add("$path : $($_.Exception.Message)")
+        }
+    }
+
+    $netFx35RegistryInstalled = @(
+        $entries | Where-Object {
+            $_.RegistryPath -match '\\v3\.5$' -and
+            ($_.Install -eq 1 -or -not [string]::IsNullOrWhiteSpace($_.Version))
+        }
+    ).Count -gt 0
+    $netFx4FullEntries = @(
+        $entries | Where-Object {
+            $_.RegistryPath -match '\\v4\\Full$' -and
+            ($_.Install -eq 1 -or $null -ne $_.Release)
+        }
+    )
+    $netFx4RegistryInstalled = $netFx4FullEntries.Count -gt 0
+
+    $consistencyFindings = New-Object 'System.Collections.Generic.List[string]'
+    if ($WindowsFeatures.Available) {
+        if ($WindowsFeatures.DotNetFeatureState.NetFx3Installed -and -not $netFx35RegistryInstalled) {
+            $consistencyFindings.Add(
+                '.NET Framework 3.5 is enabled as a Windows feature but no matching installed registry entry was found.'
+            )
+        }
+        if ($WindowsFeatures.DotNetFeatureState.NetFx4Installed -and -not $netFx4RegistryInstalled) {
+            $consistencyFindings.Add(
+                '.NET Framework 4.x is enabled as a Windows feature but the v4 Full registry release key was not found.'
+            )
+        }
+    }
+
+    return [pscustomobject][ordered]@{
+        Available = ($errors.Count -eq 0)
+        ErrorMessages = $errors.ToArray()
+        WindowsFeatureState = $WindowsFeatures.DotNetFeatureState
+        RegistryState = [pscustomobject][ordered]@{
+            NetFx35RegistryCheckApplicable = [bool]$WindowsFeatures.DotNetFeatureState.NetFx3Installed
+            NetFx4RegistryCheckApplicable = [bool]$WindowsFeatures.DotNetFeatureState.NetFx4Installed
+            NetFx35Installed = [bool]$netFx35RegistryInstalled
+            NetFx4FullInstalled = [bool]$netFx4RegistryInstalled
+            NetFx4HighestRelease = if ($netFx4FullEntries.Count -gt 0) {
+                @($netFx4FullEntries | Measure-Object -Property Release -Maximum).Maximum
+            } else { $null }
+            NetFx4ResolvedVersion = if ($netFx4FullEntries.Count -gt 0) {
+                Resolve-DotNetReleaseVersion -Release (
+                    @($netFx4FullEntries | Measure-Object -Property Release -Maximum).Maximum
+                )
+            } else { $null }
+        }
+        ConsistencyFindings = $consistencyFindings.ToArray()
+        Entries = $entries.ToArray()
+    }
+}
+
+function Get-SecureBootAssessment {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$SecureBoot,
+
+        [Parameter(Mandatory = $true)]
+        [object]$Esp
+    )
+
+    $bootManager = @(
+        $Esp.Files | Where-Object { $_.Path -match '\\bootmgfw\.efi$' } | Select-Object -First 1
+    )
+    $bootManagerPresent = ($bootManager.Count -gt 0 -and $bootManager[0].Present)
+
+    # Get-AuthenticodeSignature exposes one selected signer certificate. It
+    # does not provide an authoritative inventory of every embedded signature
+    # in a multiply signed EFI image. Therefore these values are retained as
+    # useful observations, but they are not used as the primary completion
+    # criterion for the Microsoft Secure Boot certificate rollout.
+    $bootManagerPrimarySigner2023 = (
+        $bootManagerPresent -and
+        $bootManager[0].SignerIndicatesWindowsUefiCa2023 -eq $true
+    )
+    $bootManagerPrimarySigner2011 = (
+        $bootManagerPresent -and
+        $bootManager[0].SignerIndicatesWindowsProductionPca2011 -eq $true
+    )
+
+    $findings = New-Object 'System.Collections.Generic.List[string]'
+    $information = New-Object 'System.Collections.Generic.List[string]'
+    $statusUpdated = ($SecureBoot.Registry.UEFICA2023Status -eq 'Updated')
+    $event1808Count = @(
+        $SecureBoot.Events.Events | Where-Object { $_.Id -eq 1808 }
+    ).Count
+    $event1799Count = @(
+        $SecureBoot.Events.Events | Where-Object { $_.Id -eq 1799 }
+    ).Count
+    $completionEventPresent = ($event1808Count -gt 0)
+
+    if ($statusUpdated -and $SecureBoot.FirmwareVariables.RequiredVariablesAvailable -and -not $SecureBoot.FirmwareVariables.DirectRequirementsSatisfied) {
+        $findings.Add(
+            'UEFICA2023Status is Updated, but the directly inspected db/KEK certificate set does not satisfy the Microsoft 2023 requirements.'
+        )
+    }
+
+    if ($statusUpdated -and $completionEventPresent -and $bootManagerPresent -and -not $bootManagerPrimarySigner2023) {
+        $information.Add(
+            'The primary signer selected by Get-AuthenticodeSignature is not Windows UEFI CA 2023. This is informational because the cmdlet does not authoritatively enumerate every embedded EFI signature; UEFICA2023Status and event 1808 indicate rollout completion.'
+        )
+    }
+    if ($event1799Count -gt 0) {
+        $information.Add(
+            'TPM-WMI event 1799 confirms installation of a boot manager signed by Windows UEFI CA 2023.'
+        )
+    }
+
+    if ($null -ne $SecureBoot.Registry.UEFICA2023Error) {
+        $findings.Add("UEFICA2023Error is present: $($SecureBoot.Registry.UEFICA2023Error)")
+    }
+    if ($null -ne $SecureBoot.Registry.UEFICA2023ErrorEvent) {
+        $findings.Add("UEFICA2023ErrorEvent is present: $($SecureBoot.Registry.UEFICA2023ErrorEvent)")
+    }
+
+    $errorEventCount = @(
+        $SecureBoot.Events.Events | Where-Object {
+            $_.Id -in @(1033, 1795, 1796, 1797, 1798, 1802, 1803)
+        }
+    ).Count
+    if ($errorEventCount -gt 0 -and -not ($statusUpdated -or $completionEventPresent)) {
+        $findings.Add("$errorEventCount Secure Boot update error/block event(s) are present.")
+    }
+    if ($SecureBoot.RolloutStatus.RebootPending) {
+        $findings.Add('Secure Boot certificate rollout event 1800 indicates that a restart is still required.')
+    }
+    if ($SecureBoot.RolloutStatus.MissingKek) {
+        $findings.Add('Secure Boot certificate rollout event 1803 indicates that a matching KEK update was not found.')
+    }
+    if ($SecureBoot.RolloutStatus.LatestEventId -eq 1808 -and -not $statusUpdated) {
+        $information.Add('Event 1808 indicates certificate completion although UEFICA2023Status is not Updated.')
+    }
+
+    $microsoftCompletionConfirmed = [bool](
+        $SecureBoot.Enabled -eq $true -and
+        ($statusUpdated -or $completionEventPresent)
+    )
+    $directFirmwareCertificatesConfirmed = [bool](
+        $SecureBoot.FirmwareVariables.RequiredVariablesAvailable -and
+        $SecureBoot.FirmwareVariables.DirectRequirementsSatisfied
+    )
+
+    $state = if ($SecureBoot.Enabled -ne $true) {
+        'NotApplicableOrDisabled'
+    }
+    elseif ($microsoftCompletionConfirmed -and $directFirmwareCertificatesConfirmed -and $Esp.CollectionComplete) {
+        'UpdatedAndFirmwareCertificatesDirectlyVerified'
+    }
+    elseif ($microsoftCompletionConfirmed) {
+        'UpdatedByMicrosoftState'
+    }
+    elseif ($SecureBoot.Registry.UEFICA2023Status -eq 'InProgress') {
+        'InProgress'
+    }
+    elseif ([string]::IsNullOrWhiteSpace($SecureBoot.Registry.UEFICA2023Status) -or $SecureBoot.Registry.UEFICA2023Status -eq 'NotStarted') {
+        'NotStartedOrNoValue'
+    }
+    else {
+        'UnknownOrError'
+    }
+
+    return [pscustomobject][ordered]@{
+        State = $state
+        MicrosoftMonitoringStatus = $SecureBoot.MicrosoftMonitoringStatus
+        RegistryStatusUpdated = [bool]$statusUpdated
+        LatestRolloutEventId = $SecureBoot.RolloutStatus.LatestEventId
+        RolloutBucketId = $SecureBoot.RolloutStatus.BucketId
+        RolloutConfidence = $SecureBoot.RolloutStatus.Confidence
+        RolloutRebootPending = [bool]$SecureBoot.RolloutStatus.RebootPending
+        RolloutMissingKek = [bool]$SecureBoot.RolloutStatus.MissingKek
+        Event1808Count = [int]$event1808Count
+        Event1799Count = [int]$event1799Count
+        MicrosoftCompletionConfirmed = [bool]$microsoftCompletionConfirmed
+        DirectCertificateRequirementsSatisfied = [bool]$SecureBoot.FirmwareVariables.DirectRequirementsSatisfied
+        DirectFirmwareCertificatesConfirmed = [bool]$directFirmwareCertificatesConfirmed
+        BootManagerPresent = [bool]$bootManagerPresent
+        BootManagerPrimarySignerIndicatesWindowsUefiCa2023 = [bool]$bootManagerPrimarySigner2023
+        BootManagerPrimarySignerIndicatesWindowsProductionPca2011 = [bool]$bootManagerPrimarySigner2011
+        # Retain the r6 property names for consumers, but clarify their scope
+        # with the new PrimarySigner properties above.
+        BootManagerSignedByWindowsUefiCa2023 = [bool]$bootManagerPrimarySigner2023
+        BootManagerSignedByWindowsProductionPca2011 = [bool]$bootManagerPrimarySigner2011
+        BootManagerSignerAssessmentScope = 'PrimarySignerReturnedByGetAuthenticodeSignature'
+        ConsistencyFindings = $findings.ToArray()
+        InformationalFindings = $information.ToArray()
+    }
+}
+
 function Get-EspEvidence {
     [CmdletBinding()]
     param()
@@ -291,6 +1916,7 @@ function Get-EspEvidence {
     $result = [pscustomobject][ordered]@{
         Requested = $true
         Available = $false
+        CollectionComplete = $false
         DriveLetter = $driveLetter
         ErrorMessage = $null
         Files = @()
@@ -301,23 +1927,29 @@ function Get-EspEvidence {
         $mount = Invoke-CapturedCommand -FilePath "$env:SystemRoot\System32\mountvol.exe" `
             -ArgumentList @("$driveLetter`:", '/S')
 
-        if ($mount.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $root -PathType Container)) {
-            throw "mountvol /S failed. ExitCode=$($mount.ExitCode); $($mount.StdErr)"
+        if (-not $mount.Started -or $mount.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $root -PathType Container)) {
+            throw "mountvol /S failed. Started=$($mount.Started); ExitCode=$($mount.ExitCode); Error=$($mount.ErrorMessage); $($mount.StdErr)"
         }
         $mounted = $true
         $result.Available = $true
 
-        $relativePaths = @(
-            'EFI\Microsoft\Boot\bootmgfw.efi',
-            'EFI\Microsoft\Boot\bootmgr.efi',
-            'EFI\Microsoft\Boot\boot.stl',
-            'EFI\Microsoft\Boot\BCD',
-            'EFI\Boot\bootx64.efi'
+        $fileDefinitions = @(
+            [pscustomobject]@{ RelativePath = 'EFI\Microsoft\Boot\bootmgfw.efi'; SkipHash = $false; SkipAuthenticode = $false },
+            [pscustomobject]@{ RelativePath = 'EFI\Microsoft\Boot\bootmgr.efi'; SkipHash = $false; SkipAuthenticode = $false },
+            [pscustomobject]@{ RelativePath = 'EFI\Microsoft\Boot\boot.stl'; SkipHash = $false; SkipAuthenticode = $false },
+            # The active BCD hive can be locked by the operating system.
+            # Record its metadata and query it with bcdedit instead of trying
+            # to hash or Authenticode-validate a non-PE registry hive.
+            [pscustomobject]@{ RelativePath = 'EFI\Microsoft\Boot\BCD'; SkipHash = $true; SkipAuthenticode = $true },
+            [pscustomobject]@{ RelativePath = 'EFI\Boot\bootx64.efi'; SkipHash = $false; SkipAuthenticode = $false }
         )
 
         $result.Files = @(
-            foreach ($relativePath in $relativePaths) {
-                Get-FileEvidence -Path (Join-Path $root $relativePath)
+            foreach ($definition in $fileDefinitions) {
+                Get-FileEvidence `
+                    -Path (Join-Path $root $definition.RelativePath) `
+                    -SkipHash:$definition.SkipHash `
+                    -SkipAuthenticode:$definition.SkipAuthenticode
             }
         )
 
@@ -327,75 +1959,738 @@ function Get-EspEvidence {
                 -FilePath "$env:SystemRoot\System32\bcdedit.exe" `
                 -ArgumentList @('/store', $bcdPath, '/enum', 'all', '/v')
         }
+
+        $fileReadFailures = @(
+            $result.Files | Where-Object {
+                -not $_.Present -or
+                -not [string]::IsNullOrWhiteSpace($_.ReadErrorMessage) -or
+                (-not $_.HashSkipped -and (
+                    [string]::IsNullOrWhiteSpace($_.Sha256) -or
+                    -not [string]::IsNullOrWhiteSpace($_.HashErrorMessage)
+                )) -or
+                (-not $_.AuthenticodeSkipped -and (
+                    [string]::IsNullOrWhiteSpace($_.AuthenticodeStatus) -or
+                    -not [string]::IsNullOrWhiteSpace($_.AuthenticodeErrorMessage)
+                ))
+            }
+        )
+
+        $bcdQuerySucceeded = (
+            $null -ne $result.BcdStore -and
+            $result.BcdStore.Started -and
+            $result.BcdStore.Succeeded
+        )
+
+        $result.CollectionComplete = (
+            $fileReadFailures.Count -eq 0 -and
+            $bcdQuerySucceeded
+        )
+
+        if (-not $result.CollectionComplete) {
+            $details = New-Object 'System.Collections.Generic.List[string]'
+            if ($fileReadFailures.Count -gt 0) {
+                $details.Add("$($fileReadFailures.Count) ESP file evidence item(s) were incomplete.")
+            }
+            if (-not $bcdQuerySucceeded) {
+                $details.Add('The offline BCD store query did not complete successfully.')
+            }
+            $result.ErrorMessage = [string]::Join(' ', $details)
+        }
     }
     catch {
         $result.ErrorMessage = $_.Exception.Message
     }
     finally {
         if ($mounted) {
-            $null = Invoke-CapturedCommand -FilePath "$env:SystemRoot\System32\mountvol.exe" `
+            $unmount = Invoke-CapturedCommand -FilePath "$env:SystemRoot\System32\mountvol.exe" `
                 -ArgumentList @("$driveLetter`:", '/D')
+            if (-not $unmount.Started -or $unmount.ExitCode -ne 0) {
+                $cleanupMessage = "mountvol /D cleanup failed. Started=$($unmount.Started); ExitCode=$($unmount.ExitCode); Error=$($unmount.ErrorMessage); $($unmount.StdErr)"
+                $result.CollectionComplete = $false
+                if ([string]::IsNullOrWhiteSpace($result.ErrorMessage)) {
+                    $result.ErrorMessage = $cleanupMessage
+                }
+                else {
+                    $result.ErrorMessage = $result.ErrorMessage + ' ' + $cleanupMessage
+                }
+            }
         }
     }
 
     return $result
 }
 
-function Resolve-ProjectOsKey {
+
+function Get-NormalizedDirectoryPath {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Caption,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Build
+        [ValidateNotNullOrEmpty()]
+        [string]$Path
     )
 
-    if ($Caption -match '2016' -or $Build -eq '14393') { return 'Server2016' }
-    if ($Caption -match '2019' -or $Build -eq '17763') { return 'Server2019' }
-    if ($Caption -match '2022' -or $Build -eq '20348') { return 'Server2022' }
-    if ($Caption -match '2025' -or $Build -eq '26100') { return 'Server2025' }
-    return 'Unknown'
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $root = [System.IO.Path]::GetPathRoot($fullPath)
+    if (-not [string]::Equals($fullPath, $root, [System.StringComparison]::OrdinalIgnoreCase)) {
+        $fullPath = $fullPath.TrimEnd('\', '/')
+    }
+
+    return $fullPath
+}
+
+function Resolve-OutputRoot {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowEmptyString()]
+        [string]$RequestedPath,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ScriptDirectory
+    )
+
+    $normalizedScriptDirectory = Get-NormalizedDirectoryPath -Path $ScriptDirectory
+    $normalizedTempDirectory = Get-NormalizedDirectoryPath -Path 'C:\Temp'
+
+    $resolvedPath = if ([string]::IsNullOrWhiteSpace($RequestedPath)) {
+        $normalizedScriptDirectory
+    }
+    else {
+        Get-NormalizedDirectoryPath -Path $RequestedPath
+    }
+
+    $isScriptDirectory = [string]::Equals(
+        $resolvedPath,
+        $normalizedScriptDirectory,
+        [System.StringComparison]::OrdinalIgnoreCase
+    )
+    $isTempDirectory = [string]::Equals(
+        $resolvedPath,
+        $normalizedTempDirectory,
+        [System.StringComparison]::OrdinalIgnoreCase
+    )
+
+    if (-not $isScriptDirectory -and -not $isTempDirectory) {
+        throw (
+            "OutputRoot must be either the script directory '$normalizedScriptDirectory' " +
+            "or 'C:\Temp'. Requested: '$resolvedPath'."
+        )
+    }
+
+    return $resolvedPath
+}
+
+function Resolve-WindowsServerIdentity {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$CurrentVersion,
+
+        [Parameter(Mandatory = $true)]
+        [object]$OperatingSystem
+    )
+
+    $productName = [string](Get-PropertyValue -InputObject $CurrentVersion -Name 'ProductName')
+    $editionId = [string](Get-PropertyValue -InputObject $CurrentVersion -Name 'EditionID')
+    $installationType = [string](Get-PropertyValue -InputObject $CurrentVersion -Name 'InstallationType')
+    $caption = [string](Get-PropertyValue -InputObject $OperatingSystem -Name 'Caption')
+    $productTypeValue = Get-PropertyValue -InputObject $OperatingSystem -Name 'ProductType'
+    $productType = if ($null -ne $productTypeValue) { [int]$productTypeValue } else { $null }
+
+    $currentBuild = [string](Get-PropertyValue -InputObject $CurrentVersion -Name 'CurrentBuild')
+    if ([string]::IsNullOrWhiteSpace($currentBuild)) {
+        $currentBuild = [string](Get-PropertyValue -InputObject $CurrentVersion -Name 'CurrentBuildNumber')
+    }
+
+    $buildMap = @{
+        '14393' = 'Server2016'
+        '17763' = 'Server2019'
+        '20348' = 'Server2022'
+        '26100' = 'Server2025'
+    }
+
+    $buildMappedVersion = $null
+    if (-not [string]::IsNullOrWhiteSpace($currentBuild) -and $buildMap.ContainsKey($currentBuild)) {
+        $buildMappedVersion = [string]$buildMap[$currentBuild]
+    }
+
+    $nameText = @($caption, $productName) -join ' | '
+    $nameMappedVersion = $null
+    foreach ($year in @('2016', '2019', '2022', '2025')) {
+        if ($nameText -match $year) {
+            $nameMappedVersion = 'Server{0}' -f $year
+            break
+        }
+    }
+
+    # ProductType 2/3 are server OS values. ProductName/Caption and
+    # InstallationType are retained as independent corroborating signals.
+    $serverByProductType = ($productType -eq 2 -or $productType -eq 3)
+    $serverByName = ($caption -match 'Windows Server' -or $productName -match 'Windows Server')
+    $serverByInstallationType = ($installationType -match '^Server(?: Core)?$')
+    $isWindowsServer = ($serverByProductType -or $serverByName -or $serverByInstallationType)
+
+    $versionConflict = (
+        -not [string]::IsNullOrWhiteSpace($buildMappedVersion) -and
+        -not [string]::IsNullOrWhiteSpace($nameMappedVersion) -and
+        $buildMappedVersion -ne $nameMappedVersion
+    )
+
+    $resolvedVersion = 'Unknown'
+    $detectionMethod = 'None'
+    $confidence = 'None'
+
+    if ($isWindowsServer -and -not [string]::IsNullOrWhiteSpace($buildMappedVersion)) {
+        $resolvedVersion = $buildMappedVersion
+        $detectionMethod = if (-not [string]::IsNullOrWhiteSpace($nameMappedVersion)) {
+            'BuildNumberAndProductIdentity'
+        }
+        else {
+            'BuildNumberAndServerSignals'
+        }
+        $confidence = if ($versionConflict) { 'Conflict' } else { 'High' }
+    }
+    elseif ($isWindowsServer -and -not [string]::IsNullOrWhiteSpace($nameMappedVersion)) {
+        $resolvedVersion = $nameMappedVersion
+        $detectionMethod = 'ProductIdentityFallback'
+        $confidence = 'Medium'
+    }
+
+    $supportedVersions = @('Server2016', 'Server2019', 'Server2022', 'Server2025')
+    $isSupportedVersion = ($supportedVersions -contains $resolvedVersion)
+
+    $messages = New-Object 'System.Collections.Generic.List[string]'
+    if (-not $isWindowsServer) {
+        $messages.Add(
+            "The running operating system was not identified as Windows Server. " +
+            "Caption='$caption'; ProductName='$productName'; InstallationType='$installationType'; ProductType='$productType'."
+        )
+    }
+    if ([string]::IsNullOrWhiteSpace($currentBuild)) {
+        $messages.Add('The Windows CurrentBuild/CurrentBuildNumber value could not be obtained.')
+    }
+    elseif ([string]::IsNullOrWhiteSpace($buildMappedVersion)) {
+        $messages.Add("CurrentBuild '$currentBuild' is not mapped to a supported project Windows Server version.")
+    }
+    if ($versionConflict) {
+        $messages.Add(
+            "Windows Server version signals conflict: build '$currentBuild' maps to " +
+            "'$buildMappedVersion', while product identity maps to '$nameMappedVersion'."
+        )
+    }
+    if ($isWindowsServer -and -not $isSupportedVersion) {
+        $messages.Add("The detected Windows Server version '$resolvedVersion' is not supported by this collector revision.")
+    }
+
+    return [pscustomobject][ordered]@{
+        OsVersionKey = $resolvedVersion
+        IsWindowsServer = [bool]$isWindowsServer
+        IsSupportedVersion = [bool]$isSupportedVersion
+        DetectionComplete = [bool](
+            $isWindowsServer -and
+            $isSupportedVersion -and
+            -not [string]::IsNullOrWhiteSpace($currentBuild) -and
+            -not $versionConflict
+        )
+        DetectionMethod = $detectionMethod
+        Confidence = $confidence
+        VersionConflict = [bool]$versionConflict
+        CurrentBuild = $currentBuild
+        BuildMappedVersion = $buildMappedVersion
+        NameMappedVersion = $nameMappedVersion
+        Caption = $caption
+        ProductName = $productName
+        EditionId = $editionId
+        InstallationType = $installationType
+        ProductType = $productType
+        ServerSignals = [pscustomobject][ordered]@{
+            ProductType = [bool]$serverByProductType
+            ProductIdentity = [bool]$serverByName
+            InstallationType = [bool]$serverByInstallationType
+        }
+        ValidationMessages = $messages.ToArray()
+    }
+}
+
+
+function New-AssessmentItem {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Name,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('PASS', 'FAIL', 'REVIEW', 'INFO')]
+        [string]$Status,
+
+        [Parameter(Mandatory = $false)]
+        [AllowEmptyString()]
+        [string]$Detail = ''
+    )
+
+    return [pscustomobject][ordered]@{
+        Name = $Name
+        Status = $Status
+        Detail = $Detail
+    }
+}
+
+function Get-PostInstallAssessmentItems {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [object]$OsIdentity,
+        [Parameter(Mandatory = $true)] [string]$DetectedOsKey,
+        [Parameter(Mandatory = $true)] [string]$FullBuild,
+        [Parameter(Mandatory = $true)] [object]$Packages,
+        [Parameter(Mandatory = $true)] [object]$WindowsFeatures,
+        [Parameter(Mandatory = $true)] [object]$DotNetFramework,
+        [Parameter(Mandatory = $true)] [object]$SecureBoot,
+        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [object[]]$KernelFiles,
+        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [object[]]$ProblemDevices,
+        [Parameter(Mandatory = $true)] [object]$PendingReboot,
+        [Parameter(Mandatory = $true)] [object]$Reagent,
+        [Parameter(Mandatory = $true)] [object]$BcdCurrent,
+        [Parameter(Mandatory = $true)] [object]$BcdBootManager,
+        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [object[]]$DiskEvidence,
+        [Parameter(Mandatory = $true)] [object]$Esp,
+        [Parameter(Mandatory = $true)] [object]$SystemInfo,
+        [Parameter(Mandatory = $true)] [object]$MsInfo32,
+        [Parameter(Mandatory = $true)] [bool]$InspectEspRequested,
+        [Parameter(Mandatory = $true)] [bool]$MsInfo32Requested,
+        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [string[]]$ValidationFailures,
+        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [string[]]$CollectionFailures
+    )
+
+    $items = New-Object 'System.Collections.Generic.List[object]'
+
+    $osStatus = if ($OsIdentity.DetectionComplete) { 'PASS' } else { 'FAIL' }
+    $items.Add((New-AssessmentItem -Name 'Operating system identity' -Status $osStatus -Detail (
+        '{0}; build {1}; confidence {2}' -f $DetectedOsKey, $FullBuild, $OsIdentity.Confidence
+    )))
+
+    $packageStatus = if ($Packages.Available) { 'PASS' } else { 'REVIEW' }
+    $packageDetail = if ($Packages.Available) {
+        '{0} relevant servicing package(s) recorded' -f @($Packages.Packages).Count
+    }
+    else {
+        [string]$Packages.ErrorMessage
+    }
+    $items.Add((New-AssessmentItem -Name 'Servicing packages' -Status $packageStatus -Detail $packageDetail))
+
+    $featureStatus = if ($WindowsFeatures.Available) { 'PASS' } else { 'REVIEW' }
+    $featureDetail = if ($WindowsFeatures.Available) {
+        '{0}; installed {1} of {2}' -f $WindowsFeatures.Source, $WindowsFeatures.InstalledFeatureCount, $WindowsFeatures.FeatureCount
+    }
+    else {
+        [string]$WindowsFeatures.ErrorMessage
+    }
+    $items.Add((New-AssessmentItem -Name 'Windows Server features' -Status $featureStatus -Detail $featureDetail))
+
+    $dotNetFindings = @($DotNetFramework.ConsistencyFindings)
+    $dotNetStatus = if (-not $DotNetFramework.Available) {
+        'REVIEW'
+    }
+    elseif ($dotNetFindings.Count -gt 0) {
+        'FAIL'
+    }
+    else {
+        'PASS'
+    }
+    $netFx3State = if ($WindowsFeatures.DotNetFeatureState.NetFx3Installed) { 'Enabled' } else { 'Disabled' }
+    $netFx4State = if ($WindowsFeatures.DotNetFeatureState.NetFx4Installed) { 'Enabled' } else { 'Disabled' }
+    $netFx4Version = [string]$DotNetFramework.RegistryState.NetFx4ResolvedVersion
+    if ([string]::IsNullOrWhiteSpace($netFx4Version)) { $netFx4Version = 'not detected' }
+    $dotNetDetail = 'NetFx3={0}; NetFx4={1}; registry version={2}' -f $netFx3State, $netFx4State, $netFx4Version
+    if ($dotNetFindings.Count -gt 0) {
+        $dotNetDetail += '; ' + [string]::Join(' | ', $dotNetFindings)
+    }
+    $items.Add((New-AssessmentItem -Name '.NET Framework' -Status $dotNetStatus -Detail $dotNetDetail))
+
+    $secureBootStatus = if ($SecureBoot.Supported -and $SecureBoot.Enabled -eq $true) { 'PASS' } else { 'FAIL' }
+    $secureBootDetail = 'supported={0}; enabled={1}' -f $SecureBoot.Supported, $SecureBoot.Enabled
+    $items.Add((New-AssessmentItem -Name 'UEFI Secure Boot' -Status $secureBootStatus -Detail $secureBootDetail))
+
+    $secureBootFindings = @($SecureBoot.Assessment.ConsistencyFindings)
+    $rolloutStatus = if ($SecureBoot.Enabled -ne $true) {
+        'INFO'
+    }
+    elseif ($secureBootFindings.Count -gt 0) {
+        'FAIL'
+    }
+    elseif ($SecureBoot.Assessment.MicrosoftCompletionConfirmed) {
+        'PASS'
+    }
+    else {
+        'INFO'
+    }
+    $rolloutDetail = 'state={0}; registry={1}; latest event={2}; direct certificates={3}' -f `
+        $SecureBoot.Assessment.State,
+        $SecureBoot.Registry.UEFICA2023Status,
+        $SecureBoot.Assessment.LatestRolloutEventId,
+        $SecureBoot.Assessment.DirectFirmwareCertificatesConfirmed
+    if ($secureBootFindings.Count -gt 0) {
+        $rolloutDetail += '; ' + [string]::Join(' | ', $secureBootFindings)
+    }
+    $items.Add((New-AssessmentItem -Name 'Secure Boot 2023 rollout' -Status $rolloutStatus -Detail $rolloutDetail))
+
+    $firmwareVariableStatus = if ($SecureBoot.Enabled -ne $true) {
+        'INFO'
+    }
+    elseif ($SecureBoot.FirmwareVariables.RequiredVariablesAvailable) {
+        'PASS'
+    }
+    else {
+        'REVIEW'
+    }
+    $firmwareVariableDetail = 'db/KEK available={0}; direct requirements={1}' -f `
+        $SecureBoot.FirmwareVariables.RequiredVariablesAvailable,
+        $SecureBoot.FirmwareVariables.DirectRequirementsSatisfied
+    $items.Add((New-AssessmentItem -Name 'Secure Boot firmware variables' -Status $firmwareVariableStatus -Detail $firmwareVariableDetail))
+
+    $scriptInventory = $SecureBoot.MicrosoftScriptInventory
+    $scriptInventoryStatus = if ($scriptInventory.Summary.FileCount -eq 0) {
+        'INFO'
+    }
+    elseif ($scriptInventory.Summary.InvalidSignatureFileCount -gt 0 -or
+        $scriptInventory.Summary.UnexpectedSignerFileCount -gt 0) {
+        'FAIL'
+    }
+    elseif ($scriptInventory.Summary.CollectionIssueCount -gt 0) {
+        'REVIEW'
+    }
+    else {
+        'PASS'
+    }
+    $scriptInventoryDetail = if ($scriptInventory.Summary.FileCount -eq 0) {
+        'Microsoft rollout script directory not present; optional inventory item'
+    }
+    else {
+        'files={0}; valid Microsoft signatures={1}; invalid signatures={2}; unexpected signers={3}; collection issues={4}; baseline hash comparison=disabled' -f `
+            $scriptInventory.Summary.FileCount,
+            $scriptInventory.Summary.ValidMicrosoftSignedFileCount,
+            $scriptInventory.Summary.InvalidSignatureFileCount,
+            $scriptInventory.Summary.UnexpectedSignerFileCount,
+            $scriptInventory.Summary.CollectionIssueCount
+    }
+    $items.Add((New-AssessmentItem -Name 'Microsoft Secure Boot scripts' -Status $scriptInventoryStatus -Detail $scriptInventoryDetail))
+
+    $invalidKernelSignatures = @(
+        $KernelFiles | Where-Object { $_.Present -and $_.AuthenticodeStatus -ne 'Valid' }
+    )
+    $incompleteKernelEvidence = @(
+        $KernelFiles | Where-Object {
+            -not $_.Present -or
+            [string]::IsNullOrWhiteSpace($_.Sha256) -or
+            -not [string]::IsNullOrWhiteSpace($_.HashErrorMessage) -or
+            [string]::IsNullOrWhiteSpace($_.AuthenticodeStatus) -or
+            -not [string]::IsNullOrWhiteSpace($_.AuthenticodeErrorMessage)
+        }
+    )
+    $kernelStatus = if ($invalidKernelSignatures.Count -gt 0) {
+        'FAIL'
+    }
+    elseif ($incompleteKernelEvidence.Count -gt 0) {
+        'REVIEW'
+    }
+    else {
+        'PASS'
+    }
+    $kernelDetail = '{0} file(s); invalid signatures={1}; incomplete={2}' -f `
+        @($KernelFiles).Count, $invalidKernelSignatures.Count, $incompleteKernelEvidence.Count
+    $items.Add((New-AssessmentItem -Name 'Kernel and boot signatures' -Status $kernelStatus -Detail $kernelDetail))
+
+    $deviceStatus = if (@($ProblemDevices).Count -eq 0) { 'PASS' } else { 'FAIL' }
+    $items.Add((New-AssessmentItem -Name 'Problem devices' -Status $deviceStatus -Detail (
+        '{0} problematic device(s)' -f @($ProblemDevices).Count
+    )))
+
+    $rebootStatus = if ($PendingReboot.RebootPending) { 'FAIL' } else { 'PASS' }
+    $items.Add((New-AssessmentItem -Name 'Pending reboot' -Status $rebootStatus -Detail (
+        'pending={0}' -f $PendingReboot.RebootPending
+    )))
+
+    $winReStatus = if ($Reagent.Started -and $Reagent.Succeeded) { 'PASS' } else { 'REVIEW' }
+    $items.Add((New-AssessmentItem -Name 'Windows Recovery Environment' -Status $winReStatus -Detail (
+        'reagentc started={0}; exit code={1}' -f $Reagent.Started, $Reagent.ExitCode
+    )))
+
+    $bcdStatus = if (
+        $BcdCurrent.Started -and $BcdCurrent.Succeeded -and
+        $BcdBootManager.Started -and $BcdBootManager.Succeeded
+    ) { 'PASS' } else { 'REVIEW' }
+    $items.Add((New-AssessmentItem -Name 'Boot configuration data' -Status $bcdStatus -Detail (
+        'current exit={0}; bootmgr exit={1}' -f $BcdCurrent.ExitCode, $BcdBootManager.ExitCode
+    )))
+
+    $systemInfoStatus = if ($SystemInfo.Started -and $SystemInfo.Succeeded) { 'PASS' } else { 'REVIEW' }
+    $items.Add((New-AssessmentItem -Name 'System information command' -Status $systemInfoStatus -Detail (
+        'systeminfo started={0}; exit code={1}' -f $SystemInfo.Started, $SystemInfo.ExitCode
+    )))
+
+    $diskStatus = if (@($DiskEvidence).Count -gt 0) { 'PASS' } else { 'REVIEW' }
+    $diskDetail = if (@($DiskEvidence).Count -gt 0) {
+        '{0} disk(s) recorded' -f @($DiskEvidence).Count
+    }
+    else {
+        'No disk evidence was collected'
+    }
+    $items.Add((New-AssessmentItem -Name 'Disk layout' -Status $diskStatus -Detail $diskDetail))
+
+    $espStatus = if (-not $InspectEspRequested) {
+        'INFO'
+    }
+    elseif ($Esp.Available -and $Esp.CollectionComplete) {
+        'PASS'
+    }
+    else {
+        'REVIEW'
+    }
+    $espDetail = if (-not $InspectEspRequested) {
+        'Disabled by caller'
+    }
+    else {
+        'available={0}; complete={1}; files={2}' -f $Esp.Available, $Esp.CollectionComplete, @($Esp.Files).Count
+    }
+    $items.Add((New-AssessmentItem -Name 'EFI System Partition' -Status $espStatus -Detail $espDetail))
+
+    $msInfoStatus = if (-not $MsInfo32Requested) {
+        'INFO'
+    }
+    elseif ($MsInfo32.Available -and $null -ne $MsInfo32.ExitCode -and [int]$MsInfo32.ExitCode -eq 0) {
+        'PASS'
+    }
+    else {
+        'REVIEW'
+    }
+    $msInfoDetail = if (-not $MsInfo32Requested) {
+        'Disabled by caller'
+    }
+    else {
+        'available={0}; exit code={1}' -f $MsInfo32.Available, $MsInfo32.ExitCode
+    }
+    $items.Add((New-AssessmentItem -Name 'MSInfo32 report' -Status $msInfoStatus -Detail $msInfoDetail))
+
+    $validationStatus = if (@($ValidationFailures).Count -eq 0) { 'PASS' } else { 'FAIL' }
+    $validationDetail = if (@($ValidationFailures).Count -eq 0) {
+        'No validation failure was detected'
+    }
+    else {
+        '{0} validation failure(s)' -f @($ValidationFailures).Count
+    }
+    $items.Add((New-AssessmentItem -Name 'Validation checks' -Status $validationStatus -Detail $validationDetail))
+
+    $collectionStatus = if (@($CollectionFailures).Count -eq 0) { 'PASS' } else { 'REVIEW' }
+    $collectionDetail = if (@($CollectionFailures).Count -eq 0) {
+        'All required evidence collections completed'
+    }
+    else {
+        '{0} collection issue(s)' -f @($CollectionFailures).Count
+    }
+    $items.Add((New-AssessmentItem -Name 'Collection completeness' -Status $collectionStatus -Detail $collectionDetail))
+
+    return $items.ToArray()
+}
+
+function Get-AssessmentReportLines {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [object[]]$AssessmentItems,
+        [Parameter(Mandatory = $true)] [string]$OverallStatus,
+        [Parameter(Mandatory = $true)] [int]$ExitCode,
+        [Parameter(Mandatory = $true)] [string]$EvidenceDirectory,
+        [Parameter(Mandatory = $true)] [string]$ZipPath
+    )
+
+    $passCount = @($AssessmentItems | Where-Object { $_.Status -eq 'PASS' }).Count
+    $failCount = @($AssessmentItems | Where-Object { $_.Status -eq 'FAIL' }).Count
+    $reviewCount = @($AssessmentItems | Where-Object { $_.Status -eq 'REVIEW' }).Count
+    $infoCount = @($AssessmentItems | Where-Object { $_.Status -eq 'INFO' }).Count
+    $displayStatus = switch ($OverallStatus) {
+        'Pass' { 'PASS' }
+        'Fail' { 'FAIL' }
+        'ReviewRequired' { 'REVIEW REQUIRED' }
+        'FatalError' { 'FATAL ERROR' }
+        default { $OverallStatus.ToUpperInvariant() }
+    }
+
+    $lines = New-Object 'System.Collections.Generic.List[string]'
+    $lines.Add('')
+    $lines.Add('================================================================================================================')
+    $lines.Add(' WINDOWS SERVER POST-INSTALL VALIDATION REPORT')
+    $lines.Add('================================================================================================================')
+    foreach ($item in $AssessmentItems) {
+        $statusLabel = ('[{0}]' -f $item.Status).PadRight(9)
+        $lines.Add(('{0}{1,-34} {2}' -f $statusLabel, $item.Name, $item.Detail))
+    }
+    $lines.Add('----------------------------------------------------------------------------------------------------------------')
+    $lines.Add(('RESULT COUNTS : PASS={0}  FAIL={1}  REVIEW={2}  INFO={3}' -f $passCount, $failCount, $reviewCount, $infoCount))
+    $lines.Add(('FINAL RESULT  : {0}' -f $displayStatus))
+    $lines.Add(('EXIT CODE     : {0}' -f $ExitCode))
+    $lines.Add(('EVIDENCE DIR  : {0}' -f $EvidenceDirectory))
+    $lines.Add(('EVIDENCE ZIP  : {0}' -f $ZipPath))
+    $lines.Add('================================================================================================================')
+    return $lines.ToArray()
+}
+
+function Write-AssessmentConsoleReport {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [object[]]$AssessmentItems,
+        [Parameter(Mandatory = $true)] [string]$OverallStatus,
+        [Parameter(Mandatory = $true)] [int]$ExitCode,
+        [Parameter(Mandatory = $true)] [string]$EvidenceDirectory,
+        [Parameter(Mandatory = $true)] [string]$ZipPath
+    )
+
+    Write-Host ''
+    Write-Host '================================================================================================================' -ForegroundColor Cyan
+    Write-Host ' WINDOWS SERVER POST-INSTALL VALIDATION REPORT' -ForegroundColor Cyan
+    Write-Host '================================================================================================================' -ForegroundColor Cyan
+
+    foreach ($item in $AssessmentItems) {
+        $color = switch ($item.Status) {
+            'PASS' { 'Green' }
+            'FAIL' { 'Red' }
+            'REVIEW' { 'Yellow' }
+            default { 'Cyan' }
+        }
+        $statusLabel = ('[{0}]' -f $item.Status).PadRight(9)
+        Write-Host $statusLabel -NoNewline -ForegroundColor $color
+        Write-Host ('{0,-34} {1}' -f $item.Name, $item.Detail)
+    }
+
+    $passCount = @($AssessmentItems | Where-Object { $_.Status -eq 'PASS' }).Count
+    $failCount = @($AssessmentItems | Where-Object { $_.Status -eq 'FAIL' }).Count
+    $reviewCount = @($AssessmentItems | Where-Object { $_.Status -eq 'REVIEW' }).Count
+    $infoCount = @($AssessmentItems | Where-Object { $_.Status -eq 'INFO' }).Count
+    $displayStatus = switch ($OverallStatus) {
+        'Pass' { 'PASS' }
+        'Fail' { 'FAIL' }
+        'ReviewRequired' { 'REVIEW REQUIRED' }
+        'FatalError' { 'FATAL ERROR' }
+        default { $OverallStatus.ToUpperInvariant() }
+    }
+    $finalColor = switch ($OverallStatus) {
+        'Pass' { 'Green' }
+        'Fail' { 'Red' }
+        'FatalError' { 'Red' }
+        default { 'Yellow' }
+    }
+
+    Write-Host '----------------------------------------------------------------------------------------------------------------' -ForegroundColor DarkGray
+    Write-Host ('RESULT COUNTS : PASS={0}  FAIL={1}  REVIEW={2}  INFO={3}' -f $passCount, $failCount, $reviewCount, $infoCount)
+    Write-Host 'FINAL RESULT  : ' -NoNewline
+    Write-Host $displayStatus -ForegroundColor $finalColor
+    Write-Host ('EXIT CODE     : {0}' -f $ExitCode)
+    Write-Host ('EVIDENCE DIR  : {0}' -f $EvidenceDirectory)
+    Write-Host ('EVIDENCE ZIP  : {0}' -f $ZipPath)
+    Write-Host '================================================================================================================' -ForegroundColor Cyan
+}
+
+$scriptDirectory = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+    Get-NormalizedDirectoryPath -Path $PSScriptRoot
+}
+else {
+    Get-NormalizedDirectoryPath -Path (Get-Location).ProviderPath
+}
+$resolvedOutputRoot = Resolve-OutputRoot -RequestedPath $OutputRoot -ScriptDirectory $scriptDirectory
+New-Item -ItemType Directory -Path $resolvedOutputRoot -Force | Out-Null
+
+# Resolve the installed Windows Server version before naming the evidence
+# artifact. This replaces the former caller-supplied expected-version value.
+$identityPreflightError = $null
+$cvPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+$cv = $null
+$os = $null
+$osIdentity = $null
+try {
+    $cv = Get-ItemProperty -LiteralPath $cvPath -ErrorAction Stop
+    $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+    $osIdentity = Resolve-WindowsServerIdentity -CurrentVersion $cv -OperatingSystem $os
+}
+catch {
+    $identityPreflightError = $_.Exception.Message
+    $osIdentity = [pscustomobject][ordered]@{
+        OsVersionKey = 'Unknown'
+        IsWindowsServer = $false
+        IsSupportedVersion = $false
+        DetectionComplete = $false
+        DetectionMethod = 'PreflightFailure'
+        Confidence = 'None'
+        VersionConflict = $false
+        CurrentBuild = $null
+        BuildMappedVersion = $null
+        NameMappedVersion = $null
+        Caption = $null
+        ProductName = $null
+        EditionId = $null
+        InstallationType = $null
+        ProductType = $null
+        ServerSignals = [pscustomobject][ordered]@{
+            ProductType = $false
+            ProductIdentity = $false
+            InstallationType = $false
+        }
+        ValidationMessages = @("Operating system identity preflight failed: $identityPreflightError")
+    }
+}
+
+$detectedOsKey = [string]$osIdentity.OsVersionKey
+$artifactOsToken = if (
+    [string]::IsNullOrWhiteSpace($detectedOsKey) -or
+    $detectedOsKey -notmatch '^Server(?:2016|2019|2022|2025)$'
+) {
+    'UnknownWindowsServer'
+}
+else {
+    $detectedOsKey
 }
 
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$evidenceName = 'windows-server-post-install-evidence-{0}-{1}' -f $script:CollectorVersion, $timestamp
-$evidenceDir = Join-Path ([System.IO.Path]::GetFullPath($OutputRoot)) $evidenceName
-$zipPath = "$evidenceDir.zip"
+$evidenceName = 'windows-server-post-install-evidence-{0}-{1}-{2}' -f `
+    $artifactOsToken, $script:CollectorVersion, $timestamp
+$evidenceDir = Join-Path $resolvedOutputRoot $evidenceName
+$zipPath = Join-Path $resolvedOutputRoot ($evidenceName + '.zip')
 New-Item -ItemType Directory -Path $evidenceDir -Force | Out-Null
 
 $transcriptPath = Join-Path $evidenceDir 'transcript.log'
 Start-Transcript -LiteralPath $transcriptPath -Force | Out-Null
 
 $exitCode = 0
+$summary = $null
+$assessmentItems = @()
+$fatalErrorMessage = $null
 try {
     Write-Host '============================================================'
-    Write-Host ' Windows Server Post-Install Evidence Collector r2'
+    Write-Host (' Windows Server Post-Install Evidence Collector {0}' -f $script:CollectorVersion)
     Write-Host '============================================================'
+    Write-Host "Detected OS       : $detectedOsKey"
+    Write-Host "Detection method  : $($osIdentity.DetectionMethod)"
+    Write-Host "Detection confidence: $($osIdentity.Confidence)"
     Write-Host "Evidence directory: $evidenceDir"
 
-    $cvPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
-    $cv = Get-ItemProperty -LiteralPath $cvPath
-    $os = Get-CimInstance -ClassName Win32_OperatingSystem
+    if (-not [string]::IsNullOrWhiteSpace($identityPreflightError)) {
+        throw "Operating system identity preflight failed: $identityPreflightError"
+    }
+
     $computer = Get-CimInstance -ClassName Win32_ComputerSystem
     $bios = Get-CimInstance -ClassName Win32_BIOS
+    $baseBoard = Get-CimInstance -ClassName Win32_BaseBoard -ErrorAction SilentlyContinue
+    $computerProduct = Get-CimInstance -ClassName Win32_ComputerSystemProduct -ErrorAction SilentlyContinue
 
-    $currentBuild = [string]$cv.CurrentBuild
-    if ([string]::IsNullOrWhiteSpace($currentBuild)) {
-        $currentBuild = [string]$cv.CurrentBuildNumber
-    }
-    $ubr = if ($null -ne $cv.UBR) { [int]$cv.UBR } else { $null }
+    $currentBuild = [string]$osIdentity.CurrentBuild
+    $ubrValue = Get-PropertyValue -InputObject $cv -Name 'UBR'
+    $ubr = if ($null -ne $ubrValue) { [int]$ubrValue } else { $null }
     $fullBuild = if ($null -ne $ubr) { '{0}.{1}' -f $currentBuild, $ubr } else { $currentBuild }
-    $detectedOsKey = Resolve-ProjectOsKey -Caption ([string]$os.Caption) -Build $currentBuild
 
-    $osKeyMatches = $true
-    if (-not [string]::IsNullOrWhiteSpace($ExpectedOsVersion)) {
-        $osKeyMatches = ($ExpectedOsVersion -eq $detectedOsKey)
-    }
 
-    $secureBoot = Get-SecureBootEvidence
+    $secureBoot = Get-SecureBootEvidence -EvidenceDirectory $evidenceDir
     $pendingReboot = Get-PendingRebootEvidence
     $packages = Get-InstalledPackageEvidence
+    $windowsFeatures = Get-WindowsFeatureEvidence
+    $dotNetFramework = Get-DotNetFrameworkEvidence -WindowsFeatures $windowsFeatures
 
     $problemDevices = @(
         Get-CimInstance -ClassName Win32_PnPEntity -ErrorAction SilentlyContinue |
@@ -461,6 +2756,7 @@ try {
         [pscustomobject][ordered]@{
             Requested = $false
             Available = $false
+            CollectionComplete = $false
             DriveLetter = $null
             ErrorMessage = $null
             Files = @()
@@ -468,22 +2764,46 @@ try {
         }
     }
 
+    $secureBoot.Assessment = Get-SecureBootAssessment -SecureBoot $secureBoot -Esp $esp
+
+    $msInfo = [pscustomobject][ordered]@{
+        Requested = [bool]$IncludeMsInfo32
+        Available = $false
+        ExitCode = $null
+        ErrorMessage = $null
+        RelativePath = $null
+    }
     if ($IncludeMsInfo32) {
         $msInfoPath = Join-Path $evidenceDir 'msinfo32.txt'
-        $msInfoProcess = Start-Process -FilePath "$env:SystemRoot\System32\msinfo32.exe" `
-            -ArgumentList @('/report', $msInfoPath) `
-            -Wait `
-            -PassThru
-        if ($msInfoProcess.ExitCode -ne 0) {
-            Write-Warning "msinfo32 returned exit code $($msInfoProcess.ExitCode)."
+        $msInfo.RelativePath = 'msinfo32.txt'
+        try {
+            $msInfoProcess = Start-Process -FilePath "$env:SystemRoot\System32\msinfo32.exe" `
+                -ArgumentList @('/report', ('"{0}"' -f $msInfoPath)) `
+                -Wait `
+                -PassThru `
+                -ErrorAction Stop
+            $msInfo.ExitCode = [int]$msInfoProcess.ExitCode
+            $msInfo.Available = (Test-Path -LiteralPath $msInfoPath -PathType Leaf)
+            if ($msInfoProcess.ExitCode -ne 0) {
+                $msInfo.ErrorMessage = "msinfo32 returned exit code $($msInfoProcess.ExitCode)."
+                Write-Warning $msInfo.ErrorMessage
+            }
+            elseif (-not $msInfo.Available) {
+                $msInfo.ErrorMessage = 'msinfo32 completed without creating the requested report.'
+                Write-Warning $msInfo.ErrorMessage
+            }
+        }
+        catch {
+            $msInfo.ErrorMessage = $_.Exception.Message
+            Write-Warning "msinfo32 collection failed: $($msInfo.ErrorMessage)"
         }
     }
 
-    $validationFailures = [System.Collections.Generic.List[string]]::new()
-    if (-not $osKeyMatches) {
-        $validationFailures.Add(
-            "Expected OS key '$ExpectedOsVersion' but detected '$detectedOsKey'."
-        )
+    $validationFailures = New-Object 'System.Collections.Generic.List[string]'
+    $collectionFailures = New-Object 'System.Collections.Generic.List[string]'
+
+    foreach ($message in @($osIdentity.ValidationMessages)) {
+        $validationFailures.Add([string]$message)
     }
     if (-not $secureBoot.Supported -or $secureBoot.Enabled -ne $true) {
         $validationFailures.Add('UEFI Secure Boot is not confirmed as enabled.')
@@ -495,47 +2815,214 @@ try {
         $validationFailures.Add('A pending reboot condition was detected.')
     }
 
+    $invalidKernelSignatures = @(
+        $kernelFiles | Where-Object {
+            $_.Present -and $_.AuthenticodeStatus -ne 'Valid'
+        }
+    )
+    if ($invalidKernelSignatures.Count -gt 0) {
+        $validationFailures.Add(
+            "$($invalidKernelSignatures.Count) kernel/boot file signature(s) were not valid."
+        )
+    }
+
+    if ($InspectEsp -and $esp.CollectionComplete) {
+        $invalidEspSignatures = @(
+            $esp.Files | Where-Object {
+                $_.Present -and
+                -not $_.AuthenticodeSkipped -and
+                $_.Path -match '\.efi$' -and
+                $_.AuthenticodeStatus -ne 'Valid'
+            }
+        )
+        if ($invalidEspSignatures.Count -gt 0) {
+            $validationFailures.Add(
+                "$($invalidEspSignatures.Count) ESP EFI signature(s) were not valid."
+            )
+        }
+    }
+
+    foreach ($finding in @($dotNetFramework.ConsistencyFindings)) {
+        $validationFailures.Add($finding)
+    }
+    foreach ($finding in @($secureBoot.Assessment.ConsistencyFindings)) {
+        $validationFailures.Add($finding)
+    }
+
+    $secureBootScriptInventory = $secureBoot.MicrosoftScriptInventory
+    if ($secureBootScriptInventory.Summary.InvalidSignatureFileCount -gt 0) {
+        $validationFailures.Add(
+            "$($secureBootScriptInventory.Summary.InvalidSignatureFileCount) Microsoft Secure Boot rollout script signature(s) were not valid."
+        )
+    }
+    if ($secureBootScriptInventory.Summary.UnexpectedSignerFileCount -gt 0) {
+        $validationFailures.Add(
+            "$($secureBootScriptInventory.Summary.UnexpectedSignerFileCount) Secure Boot rollout script(s) had a valid signature from a non-Microsoft signer."
+        )
+    }
+    if ($secureBootScriptInventory.Summary.CollectionIssueCount -gt 0) {
+        $collectionFailures.Add(
+            "$($secureBootScriptInventory.Summary.CollectionIssueCount) Secure Boot rollout script inventory item(s) were incomplete."
+        )
+    }
+
+    if (-not $packages.Available) {
+        $collectionFailures.Add("Installed package collection failed: $($packages.ErrorMessage)")
+    }
+    if (-not $windowsFeatures.Available) {
+        $collectionFailures.Add("Windows feature collection failed: $($windowsFeatures.ErrorMessage)")
+    }
+    if (-not $dotNetFramework.Available) {
+        $collectionFailures.Add(
+            "One or more .NET Framework registry queries failed: " +
+            [string]::Join(' | ', $dotNetFramework.ErrorMessages)
+        )
+    }
+    if ($secureBoot.Enabled -eq $true -and -not $secureBoot.FirmwareVariables.RequiredVariablesAvailable) {
+        $collectionFailures.Add('Secure Boot db/KEK firmware variables were not fully collected.')
+    }
+    if (-not $secureBoot.Events.Available) {
+        $collectionFailures.Add("Secure Boot TPM-WMI event collection failed: $($secureBoot.Events.ErrorMessage)")
+    }
+    if (-not $reagent.Started -or -not $reagent.Succeeded) {
+        $collectionFailures.Add('reagentc /info did not complete successfully.')
+    }
+    if (-not $bcdCurrent.Started -or -not $bcdCurrent.Succeeded) {
+        $collectionFailures.Add('bcdedit for the current boot loader did not complete successfully.')
+    }
+    if (-not $bcdBootMgr.Started -or -not $bcdBootMgr.Succeeded) {
+        $collectionFailures.Add('bcdedit for Windows Boot Manager did not complete successfully.')
+    }
+    if (-not $systemInfo.Started -or -not $systemInfo.Succeeded) {
+        $collectionFailures.Add('systeminfo did not complete successfully.')
+    }
+    if ($diskEvidence.Count -eq 0) {
+        $collectionFailures.Add('Disk evidence was not collected.')
+    }
+    if ($InspectEsp -and (-not $esp.Available -or -not $esp.CollectionComplete)) {
+        $message = if ([string]::IsNullOrWhiteSpace($esp.ErrorMessage)) {
+            'ESP evidence collection was incomplete.'
+        }
+        else {
+            "ESP evidence collection was incomplete: $($esp.ErrorMessage)"
+        }
+        $collectionFailures.Add($message)
+    }
+    if ($IncludeMsInfo32 -and (
+        -not $msInfo.Available -or
+        $null -eq $msInfo.ExitCode -or
+        [int]$msInfo.ExitCode -ne 0
+    )) {
+        $message = if ([string]::IsNullOrWhiteSpace($msInfo.ErrorMessage)) {
+            'MSInfo32 report collection was incomplete.'
+        }
+        else {
+            "MSInfo32 report collection was incomplete: $($msInfo.ErrorMessage)"
+        }
+        $collectionFailures.Add($message)
+    }
+
+    $kernelCollectionFailures = @(
+        $kernelFiles | Where-Object {
+            -not $_.Present -or
+            [string]::IsNullOrWhiteSpace($_.Sha256) -or
+            -not [string]::IsNullOrWhiteSpace($_.HashErrorMessage) -or
+            [string]::IsNullOrWhiteSpace($_.AuthenticodeStatus) -or
+            -not [string]::IsNullOrWhiteSpace($_.AuthenticodeErrorMessage)
+        }
+    )
+    if ($kernelCollectionFailures.Count -gt 0) {
+        $collectionFailures.Add(
+            "$($kernelCollectionFailures.Count) kernel/boot file evidence item(s) were incomplete."
+        )
+    }
+
+    $assessmentItems = @(
+        Get-PostInstallAssessmentItems `
+            -OsIdentity $osIdentity `
+            -DetectedOsKey $detectedOsKey `
+            -FullBuild $fullBuild `
+            -Packages $packages `
+            -WindowsFeatures $windowsFeatures `
+            -DotNetFramework $dotNetFramework `
+            -SecureBoot $secureBoot `
+            -KernelFiles @($kernelFiles) `
+            -ProblemDevices @($problemDevices) `
+            -PendingReboot $pendingReboot `
+            -Reagent $reagent `
+            -BcdCurrent $bcdCurrent `
+            -BcdBootManager $bcdBootMgr `
+            -DiskEvidence @($diskEvidence) `
+            -Esp $esp `
+            -SystemInfo $systemInfo `
+            -MsInfo32 $msInfo `
+            -InspectEspRequested ([bool]$InspectEsp) `
+            -MsInfo32Requested ([bool]$IncludeMsInfo32) `
+            -ValidationFailures $validationFailures.ToArray() `
+            -CollectionFailures $collectionFailures.ToArray()
+    )
+
+    $overallStatus = if ($validationFailures.Count -gt 0) {
+        'Fail'
+    }
+    elseif ($collectionFailures.Count -gt 0) {
+        'ReviewRequired'
+    }
+    else {
+        'Pass'
+    }
+
     $summary = [pscustomobject][ordered]@{
         SchemaVersion = $script:SchemaVersion
         CollectorVersion = $script:CollectorVersion
         GeneratedAtUtc = Get-UtcTimestamp
-        ExpectedOsVersion = $ExpectedOsVersion
         DetectedOsVersion = $detectedOsKey
-        ExpectedOsVersionMatches = $osKeyMatches
-        OverallStatus = if ($validationFailures.Count -eq 0) { 'Pass' } else { 'ReviewRequired' }
-        ValidationFailures = @($validationFailures)
+        OperatingSystemDetection = $osIdentity
+        OverallStatus = $overallStatus
+        AssessmentItems = @($assessmentItems)
+        ValidationFailures = $validationFailures.ToArray()
+        CollectionFailures = $collectionFailures.ToArray()
         OperatingSystem = [pscustomobject][ordered]@{
             Caption = [string]$os.Caption
-            ProductName = [string]$cv.ProductName
-            EditionId = [string]$cv.EditionID
-            InstallationType = [string]$cv.InstallationType
-            DisplayVersion = [string]$cv.DisplayVersion
-            ReleaseId = [string]$cv.ReleaseId
+            ProductName = [string](Get-PropertyValue -InputObject $cv -Name 'ProductName')
+            EditionId = [string](Get-PropertyValue -InputObject $cv -Name 'EditionID')
+            InstallationType = [string](Get-PropertyValue -InputObject $cv -Name 'InstallationType')
+            DisplayVersion = [string](Get-PropertyValue -InputObject $cv -Name 'DisplayVersion')
+            ReleaseId = [string](Get-PropertyValue -InputObject $cv -Name 'ReleaseId')
             CurrentBuild = $currentBuild
             Ubr = $ubr
             FullBuild = $fullBuild
-            BuildLabEx = [string]$cv.BuildLabEx
+            BuildLabEx = [string](Get-PropertyValue -InputObject $cv -Name 'BuildLabEx')
             OsArchitecture = [string]$os.OSArchitecture
             SystemDirectory = [string]$os.SystemDirectory
             WindowsDirectory = [string]$os.WindowsDirectory
             LastBootUpTime = if ($os.LastBootUpTime) { $os.LastBootUpTime.ToString('o') } else { $null }
         }
         ComputerSystem = [pscustomobject][ordered]@{
-            Manufacturer = [string]$computer.Manufacturer
-            Model = [string]$computer.Model
-            SystemType = [string]$computer.SystemType
-            HypervisorPresent = [bool]$computer.HypervisorPresent
-            TotalPhysicalMemoryBytes = [uint64]$computer.TotalPhysicalMemory
+            Manufacturer = [string](Get-PropertyValue -InputObject $computer -Name 'Manufacturer')
+            Model = [string](Get-PropertyValue -InputObject $computer -Name 'Model')
+            SystemFamily = [string](Get-PropertyValue -InputObject $computer -Name 'SystemFamily')
+            SystemSkuNumber = [string](Get-PropertyValue -InputObject $computer -Name 'SystemSKUNumber')
+            SystemVersion = [string](Get-PropertyValue -InputObject $computerProduct -Name 'Version')
+            SystemUuid = [string](Get-PropertyValue -InputObject $computerProduct -Name 'UUID')
+            SystemType = [string](Get-PropertyValue -InputObject $computer -Name 'SystemType')
+            HypervisorPresent = [bool](Get-PropertyValue -InputObject $computer -Name 'HypervisorPresent' -DefaultValue $false)
+            TotalPhysicalMemoryBytes = [uint64](Get-PropertyValue -InputObject $computer -Name 'TotalPhysicalMemory' -DefaultValue 0)
         }
         Firmware = [pscustomobject][ordered]@{
-            Manufacturer = [string]$bios.Manufacturer
-            Name = [string]$bios.Name
-            Version = [string]$bios.SMBIOSBIOSVersion
-            ReleaseDate = if ($bios.ReleaseDate) { $bios.ReleaseDate.ToString('o') } else { $null }
+            Manufacturer = [string](Get-PropertyValue -InputObject $bios -Name 'Manufacturer')
+            Name = [string](Get-PropertyValue -InputObject $bios -Name 'Name')
+            Version = [string](Get-PropertyValue -InputObject $bios -Name 'SMBIOSBIOSVersion')
+            ReleaseDate = if (Get-PropertyValue -InputObject $bios -Name 'ReleaseDate') { (Get-PropertyValue -InputObject $bios -Name 'ReleaseDate').ToString('o') } else { $null }
+            BaseBoardManufacturer = [string](Get-PropertyValue -InputObject $baseBoard -Name 'Manufacturer')
+            BaseBoardProduct = [string](Get-PropertyValue -InputObject $baseBoard -Name 'Product')
+            BaseBoardVersion = [string](Get-PropertyValue -InputObject $baseBoard -Name 'Version')
             SecureBoot = $secureBoot
         }
         KernelFiles = @($kernelFiles)
         InstalledPackages = $packages
+        WindowsFeatures = $windowsFeatures
+        DotNetFramework = $dotNetFramework
         HotFixes = @($hotFixes)
         WinRe = $reagent
         PendingReboot = $pendingReboot
@@ -546,41 +3033,164 @@ try {
         Disks = @($diskEvidence)
         Esp = $esp
         SystemInfo = $systemInfo
+        MsInfo32 = $msInfo
     }
 
     $jsonPath = Join-Path $evidenceDir 'summary.json'
-    $summary | ConvertTo-Json -Depth 15 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
+    $summary | ConvertTo-Json -Depth 25 | Set-Content -LiteralPath $jsonPath -Encoding UTF8
 
     $textPath = Join-Path $evidenceDir 'summary.txt'
     @(
         "SchemaVersion: $($summary.SchemaVersion)"
         "GeneratedAtUtc: $($summary.GeneratedAtUtc)"
         "OverallStatus: $($summary.OverallStatus)"
-        "ExpectedOsVersion: $ExpectedOsVersion"
         "DetectedOsVersion: $detectedOsKey"
+        "OsDetectionMethod: $($osIdentity.DetectionMethod)"
+        "OsDetectionConfidence: $($osIdentity.Confidence)"
+        "OsDetectionComplete: $($osIdentity.DetectionComplete)"
         "OS: $($summary.OperatingSystem.Caption)"
         "Build: $fullBuild"
         "BuildLabEx: $($summary.OperatingSystem.BuildLabEx)"
+        "WindowsFeatureSource: $($windowsFeatures.Source)"
+        "InstalledWindowsFeatureCount: $($windowsFeatures.InstalledFeatureCount)"
+        "NetFx3FeatureInstalled: $($windowsFeatures.DotNetFeatureState.NetFx3Installed)"
+        "NetFx4FeatureInstalled: $($windowsFeatures.DotNetFeatureState.NetFx4Installed)"
+        "DotNetRegistryEntryCount: $($dotNetFramework.Entries.Count)"
+        "DotNet4ResolvedVersion: $($dotNetFramework.RegistryState.NetFx4ResolvedVersion)"
         "Firmware: $($summary.Firmware.Manufacturer) / $($summary.Firmware.Version)"
         "SecureBootSupported: $($secureBoot.Supported)"
         "SecureBootEnabled: $($secureBoot.Enabled)"
+        "UEFICA2023Status: $($secureBoot.Registry.UEFICA2023Status)"
+        "SecureBootLatestRolloutEventId: $($secureBoot.RolloutStatus.LatestEventId)"
+        "SecureBootRolloutBucketId: $($secureBoot.RolloutStatus.BucketId)"
+        "SecureBootRolloutConfidence: $($secureBoot.RolloutStatus.Confidence)"
+        "SecureBoot2023Assessment: $($secureBoot.Assessment.State)"
+        "SecureBootDirectCertificateRequirementsSatisfied: $($secureBoot.FirmwareVariables.DirectRequirementsSatisfied)"
+        "SecureBootMicrosoftCompletionConfirmed: $($secureBoot.Assessment.MicrosoftCompletionConfirmed)"
+        "SecureBootEvent1808Count: $($secureBoot.Assessment.Event1808Count)"
+        "SecureBootEvent1799Count: $($secureBoot.Assessment.Event1799Count)"
+        "SecureBootScriptInventoryFileCount: $($secureBoot.MicrosoftScriptInventory.Summary.FileCount)"
+        "SecureBootScriptInventoryValidMicrosoftSignedFileCount: $($secureBoot.MicrosoftScriptInventory.Summary.ValidMicrosoftSignedFileCount)"
+        "SecureBootScriptBaselineHashComparisonEnabled: $($secureBoot.MicrosoftScriptInventory.InventoryPolicy.BaselineHashComparisonEnabled)"
+        "BootManagerPrimarySignerIndicatesWindowsUefiCa2023: $($secureBoot.Assessment.BootManagerPrimarySignerIndicatesWindowsUefiCa2023)"
+        "BootManagerSignerAssessmentScope: $($secureBoot.Assessment.BootManagerSignerAssessmentScope)"
         "ProblemDeviceCount: $($problemDevices.Count)"
         "PendingReboot: $($pendingReboot.RebootPending)"
         "WinRE ExitCode: $($reagent.ExitCode)"
         "ESP Inspected: $($esp.Requested)"
         "ESP Available: $($esp.Available)"
+        "ESP CollectionComplete: $($esp.CollectionComplete)"
+        "MSInfo32 Requested: $($msInfo.Requested)"
+        "MSInfo32 Available: $($msInfo.Available)"
+        ""
+        "Assessment items:"
+        @($assessmentItems | ForEach-Object { "  [$($_.Status)] $($_.Name): $($_.Detail)" })
         ""
         "Validation failures:"
         $(if ($validationFailures.Count -eq 0) { '  none' } else {
             @($validationFailures | ForEach-Object { "  - $_" })
         })
+        ""
+        "Collection failures:"
+        $(if ($collectionFailures.Count -eq 0) { '  none' } else {
+            @($collectionFailures | ForEach-Object { "  - $_" })
+        })
+        ""
+        "Informational findings:"
+        $(if (@($secureBoot.Assessment.InformationalFindings).Count -eq 0) { '  none' } else {
+            @($secureBoot.Assessment.InformationalFindings | ForEach-Object { "  - $_" })
+        })
     ) | Set-Content -LiteralPath $textPath -Encoding UTF8
+
+    Get-AssessmentReportLines `
+        -AssessmentItems @($assessmentItems) `
+        -OverallStatus $summary.OverallStatus `
+        -ExitCode $(if ($validationFailures.Count -gt 0 -or $collectionFailures.Count -gt 0) { 2 } else { 0 }) `
+        -EvidenceDirectory $evidenceDir `
+        -ZipPath $zipPath |
+        Set-Content -LiteralPath (Join-Path $evidenceDir 'assessment-report.txt') -Encoding UTF8
 
     $problemDevices | Export-Csv -LiteralPath (Join-Path $evidenceDir 'problem-devices.csv') `
         -NoTypeInformation -Encoding UTF8
     $hotFixes | Export-Csv -LiteralPath (Join-Path $evidenceDir 'hotfixes.csv') `
         -NoTypeInformation -Encoding UTF8
+    $windowsFeatures.Features | Export-Csv `
+        -LiteralPath (Join-Path $evidenceDir 'windows-features.csv') `
+        -NoTypeInformation -Encoding UTF8
+    $windowsFeatures.DotNetFeatures | Export-Csv `
+        -LiteralPath (Join-Path $evidenceDir 'dotnet-windows-features.csv') `
+        -NoTypeInformation -Encoding UTF8
+    $secureBoot.Events | ConvertTo-Json -Depth 15 |
+        Set-Content -LiteralPath (Join-Path $evidenceDir 'secureboot-events.json') -Encoding UTF8
+    $secureBoot.RolloutStatus | ConvertTo-Json -Depth 10 |
+        Set-Content -LiteralPath (Join-Path $evidenceDir 'secureboot-rollout-status.json') -Encoding UTF8
+    $secureBoot.FirmwareVariables | ConvertTo-Json -Depth 20 |
+        Set-Content -LiteralPath (Join-Path $evidenceDir 'secureboot-variables.json') -Encoding UTF8
+    $secureBoot.MicrosoftScriptInventory.Files | ForEach-Object {
+        [pscustomobject][ordered]@{
+            RootDirectory = $_.RootDirectory
+            RelativePath = $_.RelativePath
+            FullPath = $_.File.Path
+            FileName = $_.File.FileName
+            Extension = $_.File.Extension
+            Present = $_.File.Present
+            SizeBytes = $_.File.SizeBytes
+            CreationTimeUtc = $_.File.CreationTimeUtc
+            LastWriteTimeUtc = $_.File.LastWriteTimeUtc
+            Attributes = $_.File.Attributes
+            IsReadOnly = $_.File.IsReadOnly
+            FileVersion = $_.File.FileVersion
+            ProductVersion = $_.File.ProductVersion
+            FileDescription = $_.File.FileDescription
+            CompanyName = $_.File.CompanyName
+            OriginalFilename = $_.File.OriginalFilename
+            Sha256 = $_.File.Sha256
+            HashErrorMessage = $_.File.HashErrorMessage
+            AuthenticodeStatus = $_.File.AuthenticodeStatus
+            AuthenticodeStatusMessage = $_.File.AuthenticodeStatusMessage
+            SignatureType = $_.File.SignatureType
+            IsOsBinary = $_.File.IsOsBinary
+            SignerSubject = $_.File.SignerSubject
+            SignerIssuer = $_.File.SignerIssuer
+            SignerThumbprint = $_.File.SignerThumbprint
+            SignerNotBefore = $_.File.SignerNotBefore
+            SignerNotAfter = $_.File.SignerNotAfter
+            SignerIsMicrosoft = $_.File.SignerIsMicrosoft
+            TimeStamperSubject = $_.File.TimeStamperSubject
+            TimeStamperIssuer = $_.File.TimeStamperIssuer
+            TimeStamperThumbprint = $_.File.TimeStamperThumbprint
+            TimeStamperNotBefore = $_.File.TimeStamperNotBefore
+            TimeStamperNotAfter = $_.File.TimeStamperNotAfter
+            AuthenticodeErrorMessage = $_.File.AuthenticodeErrorMessage
+            ReadErrorMessage = $_.File.ReadErrorMessage
+        }
+    } | Export-Csv `
+        -LiteralPath (Join-Path $evidenceDir 'secureboot-script-inventory.csv') `
+        -NoTypeInformation -Encoding UTF8
 
+    if ($validationFailures.Count -gt 0 -or $collectionFailures.Count -gt 0) {
+        $exitCode = 2
+    }
+}
+catch {
+    $exitCode = 1
+    $fatalErrorMessage = $_.Exception.Message
+    $errorRecord = [pscustomobject][ordered]@{
+        SchemaVersion = 'windows-server-post-install-evidence-error/1.0'
+        GeneratedAtUtc = Get-UtcTimestamp
+        Message = $_.Exception.Message
+        FullyQualifiedErrorId = $_.FullyQualifiedErrorId
+        ScriptStackTrace = $_.ScriptStackTrace
+    }
+    $errorRecord | ConvertTo-Json -Depth 8 |
+        Set-Content -LiteralPath (Join-Path $evidenceDir 'fatal-error.json') -Encoding UTF8
+    Write-Error $_
+}
+finally {
+    try { Stop-Transcript | Out-Null } catch {}
+
+    # Create checksums only after the transcript is closed. Otherwise the
+    # transcript changes after hashing and its recorded digest is invalid.
     $checksums = @(
         Get-ChildItem -LiteralPath $evidenceDir -Recurse -File |
             Where-Object { $_.Name -ne 'checksums.csv' } |
@@ -596,35 +3206,48 @@ try {
     $checksums | Export-Csv -LiteralPath (Join-Path $evidenceDir 'checksums.csv') `
         -NoTypeInformation -Encoding UTF8
 
-    if ($validationFailures.Count -gt 0) {
-        $exitCode = 2
-    }
-}
-catch {
-    $exitCode = 1
-    $errorRecord = [pscustomobject][ordered]@{
-        SchemaVersion = 'windows-server-post-install-evidence-error/1.0'
-        GeneratedAtUtc = Get-UtcTimestamp
-        Message = $_.Exception.Message
-        FullyQualifiedErrorId = $_.FullyQualifiedErrorId
-        ScriptStackTrace = $_.ScriptStackTrace
-    }
-    $errorRecord | ConvertTo-Json -Depth 8 |
-        Set-Content -LiteralPath (Join-Path $evidenceDir 'fatal-error.json') -Encoding UTF8
-    Write-Error $_
-}
-finally {
-    try { Stop-Transcript | Out-Null } catch {}
-
     if (Test-Path -LiteralPath $zipPath) {
         Remove-Item -LiteralPath $zipPath -Force -ErrorAction SilentlyContinue
     }
     Compress-Archive -LiteralPath $evidenceDir -DestinationPath $zipPath -CompressionLevel Optimal
 
-    Write-Host ''
-    Write-Host "Evidence directory: $evidenceDir"
-    Write-Host "Evidence ZIP      : $zipPath"
-    Write-Host "Exit code         : $exitCode"
+    if ($null -ne $summary) {
+        Write-AssessmentConsoleReport `
+            -AssessmentItems @($summary.AssessmentItems) `
+            -OverallStatus $summary.OverallStatus `
+            -ExitCode $exitCode `
+            -EvidenceDirectory $evidenceDir `
+            -ZipPath $zipPath
+
+        if (@($summary.ValidationFailures).Count -gt 0) {
+            Write-Host ''
+            Write-Host 'Validation failure details:' -ForegroundColor Red
+            foreach ($message in @($summary.ValidationFailures)) {
+                Write-Host "  - $message" -ForegroundColor Red
+            }
+        }
+        if (@($summary.CollectionFailures).Count -gt 0) {
+            Write-Host ''
+            Write-Host 'Collection review details:' -ForegroundColor Yellow
+            foreach ($message in @($summary.CollectionFailures)) {
+                Write-Host "  - $message" -ForegroundColor Yellow
+            }
+        }
+    }
+    else {
+        $fatalItems = @(
+            New-AssessmentItem `
+                -Name 'Collector execution' `
+                -Status 'FAIL' `
+                -Detail $(if ([string]::IsNullOrWhiteSpace($fatalErrorMessage)) { 'Fatal collector error' } else { $fatalErrorMessage })
+        )
+        Write-AssessmentConsoleReport `
+            -AssessmentItems $fatalItems `
+            -OverallStatus 'FatalError' `
+            -ExitCode $exitCode `
+            -EvidenceDirectory $evidenceDir `
+            -ZipPath $zipPath
+    }
 }
 
 exit $exitCode

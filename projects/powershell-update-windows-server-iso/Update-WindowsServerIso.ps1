@@ -718,7 +718,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.04-r12.69'
+$Script:ScriptVersion = 'update-wsi-2026.08.05-r12.70'
+# Validation marker: r12.70 merges the finalized Collect-WindowsServerPostInstallEvidence.ps1 collector r9 (schema 1.7), including automatic Server release detection, default read-only ESP/MSInfo32 collection, Windows feature and .NET evidence, Secure Boot rollout/firmware/script inventory, and console assessment reporting. ISO servicing behavior is unchanged from r12.67-r12.69.
 # Validation marker: r12.69 gives the supported installed-OS evidence collector a purpose-based, project-neutral artifact contract: Collect-WindowsServerPostInstallEvidence.ps1, post-install evidence schema/output names, and WindowsServerEvidence default output root. ISO servicing behavior is unchanged from r12.67/r12.68.
 # Validation marker: r12.68 finalizes the clean-E2E distribution layout without changing ISO servicing behavior: the supported post-install collector is shipped as a stable top-level artifact, and the oscdimg qualification lab is retained under tests/.
 # Validation marker: r12.67 completes the horizontal Catalog/PowerShell collection-shape hardening: all active Catalog response contracts are typed in-process validators, internal scriptblock validators are removed, Search/DownloadDialog/ScopedView bodies are semantically validated before caching, cache keys are collision-resistant and identity-bound, Catalog identities are scalar-validated at every legacy/current download boundary, Generic.List values are materialized with ToArray(), and collection selectors return flat sequences.
@@ -729,7 +730,7 @@ $Script:ScriptVersion = 'update-wsi-2026.08.04-r12.69'
 # r12.58 selected efisys_ex.bin correctly but its verification parser bound Math.Min to Int32 on an 8.91-GiB ISO and returned a false failure.
 # r12.57 proved only loose-file presence/signatures and could therefore accept a non-bootable mixed PCA2011/PCA2023 ISO.
 # Validation marker retained: r12.55 Setup DU baseline-language preservation and P11 no-new-locale verification.
-$Script:ScriptTag     = 'post-install-evidence-artifact-naming'
+$Script:ScriptTag     = 'post-install-evidence-collector-r9-merge'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'

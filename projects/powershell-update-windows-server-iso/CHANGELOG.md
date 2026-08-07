@@ -22,6 +22,50 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.05-r12.70] - 2026-08-07
+
+Tag: `post-install-evidence-collector-r9-merge`.
+
+### Changed
+
+- **Collector r9 is merged as the supported post-install evidence
+  collector**: `Collect-WindowsServerPostInstallEvidence.ps1` grows
+  from the r2 seed (630 lines) to the full r9 implementation (3,253
+  lines) — the read-only installed-OS evidence surface that the
+  distribution's four-VM validation runs use. On the main script the
+  delta is the identity and the validation-marker comment (+1 net
+  line); ISO servicing behavior is unchanged. `data/*` and
+  `schema/*` are byte-identical to r12.69.
+- **Collector snapshot form is CRLF (recorded)**: unlike every other
+  archive deliverable (pure BOM+LF), the r12.70 Collector snapshot
+  is pure BOM+CRLF, so Git's `*.ps1` check-in normalization stores
+  an LF blob whose SHA differs from the snapshot by design.
+  Round-trip identity was proven in both directions
+  (LF-normalized snapshot == staged blob; blob re-expanded to CRLF
+  == snapshot byte-for-byte), so the committed CHECKOUT canonical
+  form (BOM+CRLF) equals the snapshot exactly and verbatim landing
+  holds at the canonical level. This two-way check is the standing
+  blob-verification criterion for the collector from this revision
+  on.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.05-r12.70`
+  (date component moves to 08.05) with the measured tag
+  `post-install-evidence-collector-r9-merge`. No terminal D-contract
+  required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. Main script PSA committed 6E/210W/27I
+  (raw sweep 6E/211W/27I: +1W is the PSA7002 LF artefact) —
+  unchanged from r12.69. The collector r9 measures 1E/13W/35I
+  standalone as a reference figure, carried verbatim as declared
+  series debt. Snapshot form: main script BOM + LF; collector
+  BOM + CRLF (see above); committed checkout form BOM+CRLF for
+  both via `.gitattributes`.
+
 ## [update-wsi-2026.08.04-r12.69] - 2026-08-07
 
 Tag: `post-install-evidence-artifact-naming`.
