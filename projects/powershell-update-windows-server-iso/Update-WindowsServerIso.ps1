@@ -718,8 +718,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.03-r12.64'
-# Validation marker: r12.64 fixes the PowerShell 7.4+ Generic.List array-subexpression regression in the r12.63 oscdimg resolver. Repository records, errors, and local candidate paths are materialized with List<T>.ToArray(), and New-Object Generic.List construction is removed from the resolver.
+$Script:ScriptVersion = 'update-wsi-2026.08.03-r12.65'
+# Validation marker: r12.65 fixes Setup DU candidate collection nesting that could coerce multiple Catalog UpdateIds into one space-delimited string. Candidate selectors now emit flat rows, every DownloadDialog request validates exactly one GUID before transport, and malformed identity is fail-closed without retrying the Catalog.
 # Validation marker: r12.62 implements the Microsoft media Dynamic Update final WinPE-to-media contract after Setup DU, exports the serviced boot.wim, uses /ResetBase /Defer for WinPE/WinRE cleanup, and verifies the complete final ISO identity surface before release assessment.
 # Validation marker: r12.60 accepts the UEFI-defined El Torito Sector Count 0/1 end-of-media sentinel and proves efisys_ex.bin identity by hashing its expected byte length from the catalog Load RBA.
 # r12.59 incorrectly treated Sector Count 1 as a literal 512-byte extent and rejected standards-compliant oscdimg output before hashing the embedded EFI system partition.
@@ -727,7 +727,7 @@ $Script:ScriptVersion = 'update-wsi-2026.08.03-r12.64'
 # r12.58 selected efisys_ex.bin correctly but its verification parser bound Math.Min to Int32 on an 8.91-GiB ISO and returned a false failure.
 # r12.57 proved only loose-file presence/signatures and could therefore accept a non-bootable mixed PCA2011/PCA2023 ISO.
 # Validation marker retained: r12.55 Setup DU baseline-language preservation and P11 no-new-locale verification.
-$Script:ScriptTag     = 'oscdimg-resolver-collection-fix'
+$Script:ScriptTag     = 'catalog-setupdu-scalar-updateid-fix'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -5435,8 +5435,53 @@ function Test-CatalogScopedDetailAgainstRule {
     }
 }
 
+function Assert-CatalogScalarUpdateId {
+    <#
+    .SYNOPSIS
+        Validate that a Catalog transport request contains exactly one UpdateId.
+    .DESCRIPTION
+        PowerShell member-access enumeration can turn a nested row collection
+        into multiple UpdateIds. Binding that array to [string] produces a
+        space-delimited value, which the Catalog answers with HTTP 200 Error.aspx.
+        This guard operates on the untyped input before string coercion and
+        refuses all non-scalar or malformed identities without network retry.
+    #>
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)]
+        [AllowNull()]
+        $Value,
+
+        [AllowEmptyString()]
+        [string]$Context = 'Catalog request'
+    )
+
+    $values = @($Value)
+    if ($values.Count -ne 1) {
+        throw [System.IO.InvalidDataException]::new(
+            ('CATALOG_UPDATEID_CARDINALITY_INVALID: {0} requires exactly one UpdateId; observed={1}.' -f
+                $Context, $values.Count)
+        )
+    }
+
+    $uid = [string]$values[0]
+    $guidPattern = '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$'
+    if ([string]::IsNullOrWhiteSpace($uid) -or $uid -notmatch $guidPattern) {
+        throw [System.IO.InvalidDataException]::new(
+            ('CATALOG_UPDATEID_FORMAT_INVALID: {0} did not resolve to one GUID. Value="{1}"' -f
+                $Context, $uid)
+        )
+    }
+
+    return $uid.ToLowerInvariant()
+}
+
 function Resolve-CatalogDownload {
-    param([string]$Uid,[switch]$RefreshCache)
+    param(
+        [Parameter(Mandatory)]$Uid,
+        [switch]$RefreshCache
+    )
+    $Uid = Assert-CatalogScalarUpdateId -Value $Uid -Context 'Resolve-CatalogDownload'
     $body='updateIDs=[{"size":0,"languages":"","uidInfo":"'+$Uid+'","updateID":"'+$Uid+'"}]&updateIDsBlockedForImport=&wsusApiPresent=&contentImport=&sku=&serverName=&ssl=&portNumber=&version='
     $tag="dl.$($Uid.Substring(0,8)).raw.r1253.html"
     $cachePath=Join-Path $script:CatCache $tag
@@ -6417,8 +6462,8 @@ function Select-SetupDuCandidate {
         ($_.title -notmatch 'Cumulative Update')
     })
     $explicit = @($cands | Where-Object { $_.title.Contains('Setup Dynamic Update') })
-    if ($explicit.Count -gt 0) { return ,$explicit }
-    return ,$cands
+    if ($explicit.Count -gt 0) { return [object[]]$explicit }
+    return [object[]]$cands
 }
 
 function Resolve-SetupDu { # psa-disable-line PSA6003 -- dynamic-update abbreviation
@@ -6438,7 +6483,16 @@ function Resolve-SetupDu { # psa-disable-line PSA6003 -- dynamic-update abbrevia
     if ($normalizedExactKb) { $cands = @($cands | Where-Object { (Get-KbOf ([string]$_.title)) -eq $normalizedExactKb }) }
     $row = Get-NewestAtOrBeforeMonth -Rows $cands -BaselineMonth $BaselineMonth
     if ($normalizedExactKb -and -not $row) { throw ('Pinned Setup DU {0} was not found in the scoped Catalog result for Server{1}.' -f $normalizedExactKb,$OsKey) }
-    $files = if ($row) { Resolve-CatalogDownload $row.uid } else { @() }
+    if ($row -is [System.Array]) {
+        throw [System.IO.InvalidDataException]::new(
+            ('SETUPDU_CANDIDATE_SHAPE_INVALID: Server{0} selection returned a nested row collection; candidates={1}.' -f
+                $OsKey, @($row).Count)
+        )
+    }
+    $setupDuUid = if ($row) {
+        Assert-CatalogScalarUpdateId -Value $row.uid -Context ('Resolve-SetupDu Server{0}' -f $OsKey)
+    } else { '' }
+    $files = if ($row) { Resolve-CatalogDownload -Uid $setupDuUid } else { @() }
     $x64 = @($files | Where-Object { $_.fileName.ToLower().Contains('x64') -and $_.fileName.ToLower().EndsWith('.cab') })
     if ($normalizedExactKb -and $x64.Count -eq 0) { throw ('Pinned Setup DU {0} resolved no x64 CAB asset.' -f $normalizedExactKb) }
     $selection = if ($normalizedExactKb) { 'pinned-kb-exact-asset' } else { 'same-month-or-latest-prior' }

@@ -22,6 +22,36 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.03-r12.65] - 2026-08-07
+
+Tag: `catalog-setupdu-scalar-updateid-fix`.
+
+### Fixed
+
+- **Setup DU Catalog requests carry exactly one UpdateId**: nested
+  candidate collection in the Setup DU discovery path could coerce
+  multiple Update Catalog UpdateIds into a single space-delimited
+  string, producing a malformed DownloadDialog request. Candidate
+  selectors now emit flat rows, every DownloadDialog request
+  validates that its identity is exactly one GUID before transport,
+  and a malformed identity fails CLOSED without retrying the
+  Catalog. Script-only change (+54 lines net); `data/*` and
+  `schema/*` are byte-identical to r12.64.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.03-r12.65`
+  with the measured tag `catalog-setupdu-scalar-updateid-fix`. No
+  terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 6E/206W/27I (raw sweep
+  6E/207W/27I: +1W is the PSA7002 LF artefact) — unchanged from
+  r12.64. Snapshot form: BOM + LF; committed
+  checkout form BOM+CRLF.
+
 ## [update-wsi-2026.08.03-r12.64] - 2026-08-07
 
 Tag: `oscdimg-resolver-collection-fix`.
