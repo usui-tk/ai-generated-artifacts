@@ -22,6 +22,47 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.04-r12.69] - 2026-08-07
+
+Tag: `post-install-evidence-artifact-naming`.
+
+### Added
+
+- **The post-install evidence collector joins the repository as a
+  second committed deliverable** (path adopted by user adjudication
+  this session, option A):
+  `Collect-WindowsServerPostInstallEvidence.ps1` (Collector r2, 630
+  lines) lands verbatim at the project root and will track the
+  snapshot state revision-by-revision through the series terminal,
+  exactly like the main script. The revision gives the collector a
+  purpose-based, project-neutral artifact contract — the
+  `Collect-WindowsServerPostInstallEvidence.ps1` name itself,
+  post-install-evidence schema/output names, and a
+  `WindowsServerEvidence` default output root. Distribution
+  checksum companions (`*.sha256`, `checksums.sha256`) remain
+  input-only, consistent with existing practice for the main
+  script. On the main script the delta is the identity and the
+  validation-marker comment (+1 net line); ISO servicing behavior
+  is unchanged. `data/*` and `schema/*` are byte-identical to
+  r12.68.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.04-r12.69`
+  with the measured tag `post-install-evidence-artifact-naming`. No
+  terminal D-contract required an edit (the D-contracts target the
+  main script; the collector is outside their frame).
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. Main script PSA committed 6E/210W/27I
+  (raw sweep 6E/211W/27I: +1W is the PSA7002 LF artefact). The
+  collector measures 1E/2W/9I standalone as a reference figure —
+  carried verbatim as declared series debt per the no-fix-forward
+  rule. Snapshot form: BOM + LF on both scripts;
+  committed checkout form BOM+CRLF via `.gitattributes`.
+
 ## [update-wsi-2026.08.04-r12.68] - 2026-08-07
 
 Tag: `e2e-distribution-finalization`.
