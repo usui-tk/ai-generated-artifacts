@@ -182,8 +182,8 @@ def main() -> int:
         "SetupBinarySync_" in code and "-Actual 'MISMATCH' -Status 'Fail'" in code,
         "P11 pin failed", passed, failed)
     passed, failed = check(
-        "version bumped to r12.70 (tag changed: post-install-evidence-collector-r9-merge)",
-        "update-wsi-2026.08.05-r12.70" in code and "'post-install-evidence-collector-r9-merge'" in code,
+        "version bumped to r12.71 (tag retained: post-install-evidence-collector-r9-merge)",
+        "update-wsi-2026.08.05-r12.71" in code and "'post-install-evidence-collector-r9-merge'" in code,
         "bump pin failed", passed, failed)
 
     print(f"\n  Summary: {passed} passed, {failed} failed, {passed + failed} total")

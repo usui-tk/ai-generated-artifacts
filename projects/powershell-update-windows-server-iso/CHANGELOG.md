@@ -22,6 +22,36 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.05-r12.71] - 2026-08-07
+
+Tag retained: `post-install-evidence-collector-r9-merge`.
+
+### Fixed
+
+- **The four-OS clean-E2E failures on Server 2019 / Server 2022 are
+  corrected**: P11 now verifies the Setup DU records against the
+  authoritative FINAL P09 WinPE setup-binary synchronization state
+  (rather than an earlier intermediate), and the reviewed pinned
+  Catalog identity accepts an exact digest-bearing configured
+  filename as the SHA-1 binding while remaining fail-closed on the
+  UpdateId, filename, architecture, metadata and review-basis
+  checks. The collector is unchanged at this revision (r9, schema
+  1.7). Script-only change (+168 lines net); `data/*` and
+  `schema/*` are byte-identical to r12.70.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.05-r12.71`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 6E/220W/27I (raw sweep
+  6E/221W/27I: +1W is the PSA7002 LF artefact; +10W on the revised
+  verification code, declared series debt). Snapshot form: BOM + LF
+  (main script); committed checkout form BOM+CRLF.
+
 ## [update-wsi-2026.08.05-r12.70] - 2026-08-07
 
 Tag: `post-install-evidence-collector-r9-merge`.

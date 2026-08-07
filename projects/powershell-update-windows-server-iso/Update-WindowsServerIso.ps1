@@ -718,8 +718,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.05-r12.70'
-# Validation marker: r12.70 merges the finalized Collect-WindowsServerPostInstallEvidence.ps1 collector r9 (schema 1.7), including automatic Server release detection, default read-only ESP/MSInfo32 collection, Windows feature and .NET evidence, Secure Boot rollout/firmware/script inventory, and console assessment reporting. ISO servicing behavior is unchanged from r12.67-r12.69.
+$Script:ScriptVersion = 'update-wsi-2026.08.05-r12.71'
+# Validation marker: r12.71 fixes the four-OS clean-E2E failures observed on Server 2019 and Server 2022. P11 now verifies Setup DU records against the authoritative final P09 WinPE setup-binary synchronization, and reviewed pinned Catalog identity accepts an exact digest-bearing configured filename as the SHA-1 binding while remaining fail-closed on UpdateId, filename, architecture, metadata and review-basis checks. Collector r9/schema 1.7 remains unchanged.
 # Validation marker: r12.69 gives the supported installed-OS evidence collector a purpose-based, project-neutral artifact contract: Collect-WindowsServerPostInstallEvidence.ps1, post-install evidence schema/output names, and WindowsServerEvidence default output root. ISO servicing behavior is unchanged from r12.67/r12.68.
 # Validation marker: r12.68 finalizes the clean-E2E distribution layout without changing ISO servicing behavior: the supported post-install collector is shipped as a stable top-level artifact, and the oscdimg qualification lab is retained under tests/.
 # Validation marker: r12.67 completes the horizontal Catalog/PowerShell collection-shape hardening: all active Catalog response contracts are typed in-process validators, internal scriptblock validators are removed, Search/DownloadDialog/ScopedView bodies are semantically validated before caching, cache keys are collision-resistant and identity-bound, Catalog identities are scalar-validated at every legacy/current download boundary, Generic.List values are materialized with ToArray(), and collection selectors return flat sequences.
@@ -6192,6 +6192,18 @@ function Select-CatalogCandidateAsset {
         $m = @($pool | Where-Object { [string]::Equals([string]$_.File.fileName, $identity.FileName, [System.StringComparison]::OrdinalIgnoreCase) })
         if ($m.Count -eq 0) { throw ('Configured Catalog file name was not present in verified candidates: {0}' -f $identity.FileName) }
         $pool = $m; $basis.Add('ConfiguredFileName')
+
+        # Reviewed pinned baselines can bind SHA-1 through the exact Catalog
+        # payload filename itself ("_<40 hex>.cab/msu"). Older baseline rows
+        # did not duplicate that digest into ExpectedHashes, so record the
+        # same explicit digest-selection token that a configured SHA-1 emits.
+        # The downstream authority gate still requires exact UpdateId,
+        # filename, reviewed basis, x64 architecture and non-metadata payload.
+        $configuredFileNameDigestBound = ([System.IO.Path]::GetFileName([string]$identity.FileName) -ceq [string]$identity.FileName) -and
+            ([string]$identity.FileName -match '(?i)_[0-9a-f]{40}\.(?:msu|cab)$')
+        if ([string]::IsNullOrWhiteSpace([string]$identity.Sha1) -and $configuredFileNameDigestBound) {
+            $basis.Add('ConfiguredSha1OrFileNameDigest')
+        }
     }
     if (-not [string]::IsNullOrWhiteSpace($identity.Sha1)) {
         $m = @($pool | Where-Object {
@@ -6907,7 +6919,13 @@ function ConvertTo-ConfigLines { # psa-disable-line PSA6003 -- returns the Lines
         }
         $insc  = $L.inScope
         $files = @($L.files)
-        $inScopeFiles = if ($insc -and $insc.PSObject.Properties.Name -contains 'inScopeFiles') { @($insc.inScopeFiles) } else { @() }
+        # Do not assign an empty pipeline result from an if-expression: under
+        # PowerShell 7 + StrictMode that becomes $null and .Count is invalid.
+        # Keep the public collection shape deterministic across PS 5.1/7.x.
+        $inScopeFiles = @()
+        if ($insc -and $insc.PSObject.Properties.Name -contains 'inScopeFiles') {
+            $inScopeFiles = @($insc.inScopeFiles)
+        }
         if ($inScopeFiles.Count -gt 0) {                                     # (3) .NET leaf
             $files = @($files | Where-Object { $inScopeFiles -contains $_.fileName })
         }
@@ -13766,6 +13784,8 @@ function Get-CatalogIdentityEvidenceAssessment {
     $pinnedBasisValid = $false
     $pinnedSelectionValid = $false
     $reviewedPinnedBindingValid = $false
+    $selectionHasExplicitDigest = $false
+    $selectionHasFileNameDigest = $false
     $selectionBasis = ''
     $scopedBasis = ''
     $parseBasis = ''
@@ -13795,7 +13815,13 @@ function Get-CatalogIdentityEvidenceAssessment {
         $fileNameDigestBound = $safeLeaf -and ($fileName -match '(?i)_[0-9a-f]{40}\.(?:cab|msu)$')
         $selectionHasUpdateId = $selectionBasis -match '(?i)(^|\+)ConfiguredUpdateId(\+|$)'
         $selectionHasFileName = $selectionBasis -match '(?i)(^|\+)ConfiguredFileName(\+|$)'
-        $selectionHasDigest = $selectionBasis -match '(?i)(^|\+)(?:ConfiguredSha1OrFileNameDigest|ConfiguredSha256)(\+|$)'
+        $selectionHasExplicitDigest = $selectionBasis -match '(?i)(^|\+)(?:ConfiguredSha1OrFileNameDigest|ConfiguredSha256)(\+|$)'
+        # Compatibility for reviewed pinned rows generated before the selector
+        # emitted ConfiguredSha1OrFileNameDigest for an exact digest-bearing
+        # filename. This is not a filename-only trust path: all remaining
+        # reviewed-pinned constraints below are still mandatory.
+        $selectionHasFileNameDigest = $selectionHasFileName -and $fileNameDigestBound
+        $selectionHasDigest = $selectionHasExplicitDigest -or $selectionHasFileNameDigest
         $selectionHasPinnedReview = $selectionBasis -match '(?i)(^|\+)PinnedReviewedIdentity(\+|$)'
         $pinnedSelectionValid = $selectionHasUpdateId -and $selectionHasFileName -and $selectionHasDigest -and $selectionHasPinnedReview
         $pinnedBasisValid = [string]::Equals($pinnedBasis,'ReviewedUpdateId+ExactFileName+ConfiguredDigest',[System.StringComparison]::Ordinal)
@@ -13848,6 +13874,7 @@ function Get-CatalogIdentityEvidenceAssessment {
         PinnedIdentityDeclared = [bool]$pinnedDeclared
         PinnedIdentityBasisValid = [bool]$pinnedBasisValid
         PinnedIdentitySelectionValid = [bool]$pinnedSelectionValid
+        PinnedIdentityDigestBinding = $(if ($selectionHasExplicitDigest) { 'SelectionBasisToken' } elseif ($selectionHasFileNameDigest) { 'ExactConfiguredFileNameDigest' } else { 'None' })
         LegacyR1253PinnedIdentityRecovered = [bool]$legacyRecovered
         ExplicitPinnedPropertyPresent = [bool]$pinnedPropertyPresent
     }
@@ -21490,6 +21517,155 @@ function Test-FinalWinPeMediaIdentity {
 }
 
 
+function Test-SetupDuFinalMediaManifest {
+    <#
+    .SYNOPSIS
+        Verifies the final ISO Setup DU surface against the last authoritative
+        writer for each file.
+    .DESCRIPTION
+        Microsoft media Dynamic Update applies Setup DU first, then copies
+        setup.exe and setuphost.exe from serviced boot.wim to the new media.
+        Therefore a Setup DU manifest hash is not the final authority for a
+        setup binary that P09 subsequently synchronized from WinPE. This
+        helper consumes both evidence sets and verifies the final bytes against
+        the correct authority without weakening excluded-language checks.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)][string]$MountedIsoRoot,
+        [Parameter(Mandatory)]$SetupManifest,
+        [AllowNull()]$WinPeSyncEvidence
+    )
+
+    $result = [pscustomobject][ordered]@{
+        SchemaVersion = 'setupdu-final-media-identity/1.0'
+        GeneratedAtUtc = [datetime]::UtcNow.ToString('o')
+        Status = 'Fail'
+        ErrorMessage = ''
+        RecordCount = 0
+        SetupDuAuthorityCount = 0
+        WinPeFinalAuthorityCount = 0
+        ExcludedLanguageCount = 0
+        FailureCount = 0
+        MatchesExpected = $false
+        Records = @()
+    }
+    $rows = [System.Collections.Generic.List[object]]::new()
+    try {
+        if (-not $SetupManifest -or -not $SetupManifest.PSObject.Properties['Records']) {
+            throw 'Setup DU overlay manifest is missing Records.'
+        }
+
+        $syncByPath = @{}
+        if ($WinPeSyncEvidence -and $WinPeSyncEvidence.PSObject.Properties['Records']) {
+            foreach ($syncRecord in @($WinPeSyncEvidence.Records)) {
+                $category = if ($syncRecord.PSObject.Properties['Category']) { [string]$syncRecord.Category } else { '' }
+                $success = [bool]($syncRecord.PSObject.Properties['Success'] -and $syncRecord.Success)
+                $matchesSource = [bool]($syncRecord.PSObject.Properties['MatchesSource'] -and $syncRecord.MatchesSource)
+                if ($category -ne 'SetupBinary' -or -not $success -or -not $matchesSource) { continue }
+                $key = ([string]$syncRecord.RelativePath).Replace('/','\').TrimStart('\').ToLowerInvariant()
+                if ([string]::IsNullOrWhiteSpace($key)) { continue }
+                if ($syncByPath.ContainsKey($key)) {
+                    throw ('Duplicate successful P09 SetupBinary authority record: {0}' -f $key)
+                }
+                $syncByPath[$key] = $syncRecord
+            }
+        }
+
+        foreach ($manifestRecord in @($SetupManifest.Records)) {
+            $relative = ([string]$manifestRecord.RelativePath).Replace('/','\').TrimStart('\')
+            $mediaRelative = ('sources\' + $relative).Replace('/','\').TrimStart('\')
+            $platformRelative = $mediaRelative.Replace('\',[System.IO.Path]::DirectorySeparatorChar).Replace('/',[System.IO.Path]::DirectorySeparatorChar)
+            $observedPath = Join-Path $MountedIsoRoot $platformRelative
+            $observedPresent = Test-Path -LiteralPath $observedPath -PathType Leaf
+            $observedHash = if ($observedPresent) { (Get-FileHash -LiteralPath $observedPath -Algorithm SHA256).Hash.ToLowerInvariant() } else { '' }
+            $syncKey = $mediaRelative.ToLowerInvariant()
+            $decision = if ($manifestRecord.PSObject.Properties['Decision']) { [string]$manifestRecord.Decision } else { '' }
+            $isExcludedLanguageDecision = $decision -in @('SkipLanguageResource','PreserveExistingLanguageResource')
+            $authority = 'SetupDUOverlayManifest'
+            $expectedPresent = $true
+            $expectedHash = ''
+            $failureReason = ''
+
+            if ($syncByPath.ContainsKey($syncKey)) {
+                $syncRecord = $syncByPath[$syncKey]
+                $authority = 'P09WinPeSetupBinarySync'
+                $result.WinPeFinalAuthorityCount++
+                $expectedHash = ([string]$syncRecord.SourceSha256).ToLowerInvariant()
+                if ($expectedHash -notmatch '^[0-9a-f]{64}$') {
+                    $failureReason = 'P09 SetupBinary source SHA-256 is missing or invalid.'
+                } elseif (-not $observedPresent) {
+                    $failureReason = 'Final ISO file is missing.'
+                } elseif ($observedHash -ne $expectedHash) {
+                    $failureReason = 'Final ISO hash does not match the P09 WinPE source authority.'
+                }
+            } elseif ([bool]($manifestRecord.PSObject.Properties['OverriddenByBootWim'] -and $manifestRecord.OverriddenByBootWim)) {
+                # An override declaration without successful P09 final-sync
+                # evidence is not sufficient to prove the shipped bytes.
+                $authority = 'MissingP09WinPeSetupBinarySyncEvidence'
+                $result.WinPeFinalAuthorityCount++
+                $failureReason = 'Setup DU record declares a boot.wim override, but no successful matching P09 SetupBinary record exists.'
+            } else {
+                if ($isExcludedLanguageDecision) { $result.ExcludedLanguageCount++ } else { $result.SetupDuAuthorityCount++ }
+                $expectedPresent = if ($manifestRecord.PSObject.Properties['ExpectedPresentAfter']) {
+                    [bool]$manifestRecord.ExpectedPresentAfter
+                } else {
+                    $decision -ne 'SkipLanguageResource'
+                }
+                if ($expectedPresent) {
+                    if ($manifestRecord.PSObject.Properties['ExpectedSha256After'] -and -not [string]::IsNullOrWhiteSpace([string]$manifestRecord.ExpectedSha256After)) {
+                        $expectedHash = ([string]$manifestRecord.ExpectedSha256After).ToLowerInvariant()
+                    } elseif ($manifestRecord.PSObject.Properties['SourceSha256'] -and -not [string]::IsNullOrWhiteSpace([string]$manifestRecord.SourceSha256)) {
+                        $expectedHash = ([string]$manifestRecord.SourceSha256).ToLowerInvariant()
+                    }
+                    if (-not $observedPresent) {
+                        $failureReason = 'Final ISO file is missing.'
+                    } elseif ($expectedHash -notmatch '^[0-9a-f]{64}$') {
+                        $failureReason = 'Setup DU final expected SHA-256 is missing or invalid.'
+                    } elseif ($observedHash -ne $expectedHash) {
+                        $failureReason = 'Final ISO hash does not match the Setup DU manifest authority.'
+                    }
+                } elseif ($observedPresent) {
+                    $failureReason = 'A file expected to be absent is present in the final ISO.'
+                }
+            }
+
+            $matches = [string]::IsNullOrWhiteSpace($failureReason)
+            if (-not $matches) { $result.FailureCount++ }
+            $rows.Add([pscustomobject][ordered]@{
+                RelativePath = $relative
+                MediaRelativePath = $mediaRelative
+                Decision = $decision
+                FinalAuthority = $authority
+                ExpectedPresent = [bool]$expectedPresent
+                ExpectedSha256 = $expectedHash
+                ObservedPath = $observedPath
+                ObservedPresent = [bool]$observedPresent
+                ObservedSha256 = $observedHash
+                MatchesExpected = [bool]$matches
+                Status = $(if ($matches) { 'Pass' } else { 'Fail' })
+                FailureReason = $failureReason
+            }) | Out-Null
+        }
+
+        $result.Records = $rows.ToArray()
+        $result.RecordCount = $result.Records.Count
+        $result.MatchesExpected = [bool]($result.FailureCount -eq 0)
+        $result.Status = $(if ($result.MatchesExpected) { 'Pass' } else { 'Fail' })
+        if (-not $result.MatchesExpected) {
+            $result.ErrorMessage = ('{0} Setup DU final-media identity record(s) failed.' -f $result.FailureCount)
+        }
+    } catch {
+        $result.ErrorMessage = [string]$_.Exception.Message
+        $result.Records = $rows.ToArray()
+        $result.RecordCount = $result.Records.Count
+        if ($result.FailureCount -eq 0) { $result.FailureCount = 1 }
+    }
+    return $result
+}
+
+
 # Phase P09: Assemble updated ISO (Build group)
 # ============================================================
 
@@ -22723,35 +22899,27 @@ function Invoke-VerifyPhase11_StaticVerify {
             $setupManifestPath = Join-Path $Script:LogsDir 'setupdu_overlay_manifest.json'
             if (Test-Path -LiteralPath $setupManifestPath) {
                 $setupManifest = Get-Content -LiteralPath $setupManifestPath -Raw | ConvertFrom-Json
-                $setupFailures=0; $setupChecked=0; $setupExcludedChecked=0
-                foreach ($mrec in @($setupManifest.Records)) {
-                    $isoDest=Join-Path $mountedDrive ('sources\' + ([string]$mrec.RelativePath))
-                    if ($mrec.OverriddenByBootWim) { continue }
-                    $isExcludedLanguageDecision=([string]$mrec.Decision -in @('SkipLanguageResource','PreserveExistingLanguageResource'))
-                    if($isExcludedLanguageDecision){$setupExcludedChecked++}else{$setupChecked++}
-                    $expectedPresent = if ($mrec.PSObject.Properties['ExpectedPresentAfter']) {
-                        [bool]$mrec.ExpectedPresentAfter
-                    } else {
-                        ([string]$mrec.Decision -ne 'SkipLanguageResource')
-                    }
-                    $actualPresent=Test-Path -LiteralPath $isoDest -PathType Leaf
-                    if(-not $expectedPresent){
-                        if($actualPresent){$setupFailures++}
-                        continue
-                    }
-                    if(-not $actualPresent){$setupFailures++;continue}
-                    $isoHash=(Get-FileHash -LiteralPath $isoDest -Algorithm SHA256).Hash.ToLowerInvariant()
-                    $expectedHash = if (-not [string]::IsNullOrWhiteSpace([string]$mrec.ExpectedSha256After)) {
-                        ([string]$mrec.ExpectedSha256After).ToLowerInvariant()
-                    } elseif (-not [string]::IsNullOrWhiteSpace([string]$mrec.SourceSha256)) {
-                        # Backward compatibility with setupdu-overlay/1.x evidence.
-                        ([string]$mrec.SourceSha256).ToLowerInvariant()
-                    } else {
-                        ''
-                    }
-                    if ([string]::IsNullOrWhiteSpace($expectedHash) -or $isoHash -ne $expectedHash) { $setupFailures++ }
+                $p09SetupSyncPath = Join-Path $Script:LogsDir 'P09_winpe_media_sync.json'
+                $p09SetupSync = if (Test-Path -LiteralPath $p09SetupSyncPath -PathType Leaf) {
+                    Read-ReleaseJsonFile -Path $p09SetupSyncPath
+                } else {
+                    $null
                 }
-                Add-VRow -Check 'SetupDuFinalManifest' -Expected ('all ' + $setupChecked + ' included files matching and ' + $setupExcludedChecked + ' excluded-language files absent or preserved byte-identical') -Actual $(if ($setupFailures -eq 0) { 'match' } else { ($setupFailures.ToString() + ' mismatch/missing/unexpected') }) -Status $(if ($setupFailures -eq 0) { 'Pass' } else { 'Fail' }) -Notes $setupManifestPath
+                $setupFinalIdentity = Test-SetupDuFinalMediaManifest `
+                    -MountedIsoRoot $mountedDrive `
+                    -SetupManifest $setupManifest `
+                    -WinPeSyncEvidence $p09SetupSync
+                $setupFinalIdentityPath = Join-Path $Script:LogsDir 'P11_setupdu_final_identity.json'
+                Save-CanonicalJsonFile -InputObject $setupFinalIdentity -Path $setupFinalIdentityPath -Depth 16
+                $setupFailures = [int]$setupFinalIdentity.FailureCount
+                $setupChecked = [int]$setupFinalIdentity.SetupDuAuthorityCount
+                $setupExcludedChecked = [int]$setupFinalIdentity.ExcludedLanguageCount
+                $setupWinPeChecked = [int]$setupFinalIdentity.WinPeFinalAuthorityCount
+                Add-VRow -Check 'SetupDuFinalManifest' `
+                    -Expected ('all ' + $setupChecked + ' Setup DU-authoritative files, ' + $setupWinPeChecked + ' P09 WinPE-authoritative setup binaries, and ' + $setupExcludedChecked + ' excluded-language records match final policy') `
+                    -Actual $(if ($setupFailures -eq 0) { 'match' } else { ($setupFailures.ToString() + ' mismatch/missing/unexpected') }) `
+                    -Status $(if ($setupFailures -eq 0) { 'Pass' } else { 'Fail' }) `
+                    -Notes ($setupManifestPath + '; finalIdentity=' + $setupFinalIdentityPath + '; P09Sync=' + $p09SetupSyncPath)
 
                 $allowedSetupLanguages=@()
                 if($setupManifest.Policy -and $setupManifest.Policy.PSObject.Properties['AllowedLanguageDirectories']){
