@@ -267,6 +267,27 @@ the script and follows the
   axes R1217/R1264 plus the R1264 collection-shape rows deferred from
   T49, re-authored; oscdimg function uniqueness stays pinned in T49.
   Offline suite is now 30 PASS + the declared T30 red.
+- **T45 `servicing_contract_baseline_test.py` extended** (phase D,
+  third part): a script-computed component-hash cross-check closes
+  the loop the declaration-shape assertions leave open — that the
+  declared file matches itself is necessary but not sufficient; the
+  new pin is that the *script* still computes what the file declares.
+  The canonical-JSON contract constructors (14 functions) are
+  extracted from the script's own AST under the pinned pwsh,
+  `Get-ServicingContractComponentHashes` is evaluated for every OS,
+  and each of the eight component digests must equal the declared
+  baseline value (4 OS x 8 fields). T45 is now 26 assertions (was
+  21) and gains a pwsh dependency for the extension section (same
+  dependency class as T40/T47/T48/T50/T51/T52); the
+  declaration-shape sections remain pure Python. Fault detection
+  verified by mutation on a disposable copy: a single semantic line
+  changed inside the Server2016 contract definition
+  (Install.PendingPolicy) is detected as a Server2016
+  ContractSha256 divergence with every other OS and component still
+  green. Specification source: distribution axis R1252, ADOPT-D —
+  the assertion is anchored on the declared instrument
+  (`data/servicing-contract-baselines.json`), not on distribution
+  test code.
 
 ## [update-wsi-2026.08.07-r12.75] - 2026-08-07
 
