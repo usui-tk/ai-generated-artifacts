@@ -718,7 +718,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.08-r12.76'
+$Script:ScriptVersion = 'update-wsi-2026.08.08-r12.77'
 # Validation marker: r12.75 retains the r12.72 ISO servicing pipeline unchanged and hardens only Collector r12/schema 1.10 Secure Boot evidence semantics: current/latest rollout state is authoritative, historical event 1808 cannot override newer state, WinCS is deployment-configuration evidence only, and WindowsUEFICA2023Capable/Authenticode signer observations are explicitly scoped diagnostics.
 # Validation marker: r12.72 horizontally hardens final-writer authority. P08S plans setup.exe and setuphost.exe for every supported OS, P09 explicitly creates/verifies required standard boot-manager targets, P10 emits an identity-bound media write-set, and P11 accepts later P10 bytes only through that successful evidence. Setup DU final verification now validates schema, path safety, uniqueness, and source/after hash-size binding. Collector r9/schema 1.7 remains unchanged.
 # Validation marker: r12.71 fixes the four-OS clean-E2E failures observed on Server 2019 and Server 2022. P11 now verifies Setup DU records against the authoritative final P09 WinPE setup-binary synchronization, and reviewed pinned Catalog identity accepts an exact digest-bearing configured filename as the SHA-1 binding while remaining fail-closed on UpdateId, filename, architecture, metadata and review-basis checks. Collector r9/schema 1.7 remains unchanged.
@@ -732,7 +732,7 @@ $Script:ScriptVersion = 'update-wsi-2026.08.08-r12.76'
 # r12.58 selected efisys_ex.bin correctly but its verification parser bound Math.Min to Int32 on an 8.91-GiB ISO and returned a false failure.
 # r12.57 proved only loose-file presence/signatures and could therefore accept a non-bootable mixed PCA2011/PCA2023 ISO.
 # Validation marker retained: r12.55 Setup DU baseline-language preservation and P11 no-new-locale verification.
-$Script:ScriptTag     = 'psa-error-debt-drain'
+$Script:ScriptTag     = 'psa-warning-debt-drain'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -3410,7 +3410,7 @@ function Test-PatchBaselineFresh {
     # Also require at least one usable patch entry
     if (-not $Baseline.Lines -or $Baseline.Lines.Count -eq 0) { return $false }
     $usable = @($Baseline.Lines | Where-Object {
-        $hasIntegrity = ((Get-BaselineHashValue -Line $_ -Algorithm Sha256) -or (Get-BaselineHashValue -Line $_ -Algorithm Sha1))
+        $hasIntegrity = ((Get-BaselineHashValue -Line $_ -Algorithm Sha256) -or (Get-BaselineHashValue -Line $_ -Algorithm Sha1)) # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
         $_.KbId -and $_.DownloadUrl -and $hasIntegrity
     })
     return ($usable.Count -gt 0)
@@ -3427,7 +3427,7 @@ function Test-PatchBaselineUsable {
     param([Parameter(Mandatory)] [AllowNull()] $Baseline)
     if (-not $Baseline -or -not $Baseline.Lines) { return $false }
     $usable = @($Baseline.Lines | Where-Object {
-        $hasIntegrity = ((Get-BaselineHashValue -Line $_ -Algorithm Sha256) -or (Get-BaselineHashValue -Line $_ -Algorithm Sha1))
+        $hasIntegrity = ((Get-BaselineHashValue -Line $_ -Algorithm Sha256) -or (Get-BaselineHashValue -Line $_ -Algorithm Sha1)) # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
         $_.KbId -and $_.DownloadUrl -and $hasIntegrity
     })
     return ($usable.Count -gt 0)
@@ -4977,11 +4977,11 @@ function Write-CatalogRawEvidence {
         $headers = [ordered]@{}
         if ($Response) {
             if ($Response.PSObject.Properties['Content']) { $content = [string]$Response.Content }
-            if ($Response.PSObject.Properties['StatusCode']) { try { $statusCode = [int]$Response.StatusCode } catch {} }
+            if ($Response.PSObject.Properties['StatusCode']) { try { $statusCode = [int]$Response.StatusCode } catch {} } # psa-disable-line PSA3004 -- best-effort transport status probe; degradation is the contract
             if ($Response.PSObject.Properties['Headers'] -and $Response.Headers) {
                 try {
                     foreach ($key in @($Response.Headers.Keys)) { $headers[[string]$key] = [string]$Response.Headers[$key] }
-                } catch {}
+                } catch {} # psa-disable-line PSA3004 -- best-effort header capture; degradation is the contract
             }
         }
         [System.IO.File]::WriteAllText($bodyPath, $content, [System.Text.UTF8Encoding]::new($false))
@@ -5035,7 +5035,7 @@ function Update-CatalogRawEvidenceMetadata {
         $metadata | Add-Member -NotePropertyName ErrorMessage -NotePropertyValue $ErrorMessage -Force
         $metadata | Add-Member -NotePropertyName FinalizedUtc -NotePropertyValue ([datetime]::UtcNow.ToString('o')) -Force
         $metadata | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $MetadataPath -Encoding UTF8
-    } catch {}
+    } catch {} # psa-disable-line PSA3004 -- best-effort cache metadata side-file write; degradation is the contract
 }
 
 function Get-CatalogSearchCandidatesFromHtml {
@@ -5188,7 +5188,7 @@ function Get-CatalogDownloadFilesFromHtml {
         $f=$files[$i]; $url=if($f.ContainsKey('url')){[string]$f['url']}else{''}
         if (-not $url) { continue }
         $fileName=if($f.ContainsKey('fileName')){[string]$f['fileName']}else{''}
-        if (-not $fileName) { try{$fileName=[IO.Path]::GetFileName(([uri]$url).AbsolutePath)}catch{} }
+        if (-not $fileName) { try{$fileName=[IO.Path]::GetFileName(([uri]$url).AbsolutePath)}catch{} } # psa-disable-line PSA3004 -- best-effort filename derivation from URL; degradation is the contract
         $out.Add([pscustomobject]@{ idx=$i; fileName=$fileName; url=$url; digest=$(if($f.ContainsKey('digest')){$f['digest']}else{''}); sha256=$(if($f.ContainsKey('sha256')){$f['sha256']}else{''}); enTitle=$(if($f.ContainsKey('enTitle')){$f['enTitle']}else{''}); parser='javascript-assignment' })|Out-Null
     }
     # Catalog revisions can emit direct CDN URLs without the legacy assignment object.
@@ -5223,7 +5223,7 @@ function Get-CatalogHttpStatusCodeFromError {
         if ($response -and $response.PSObject.Properties['StatusCode']) {
             return [int]$response.StatusCode
         }
-    } catch {}
+    } catch {} # psa-disable-line PSA3004 -- best-effort HTTP status from error record; degradation is the contract
     return 0
 }
 
@@ -5291,7 +5291,7 @@ function Write-CatalogTransportEvidence {
         $line = $record | ConvertTo-Json -Depth 5 -Compress
         $path = Get-CatalogTransportEvidencePath
         [System.IO.File]::AppendAllText($path, $line + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
-    } catch {}
+    } catch {} # psa-disable-line PSA3004 -- best-effort transport evidence append; degradation is the contract
 }
 
 function Invoke-CatalogWebRequest {
@@ -5342,7 +5342,7 @@ function Invoke-CatalogWebRequest {
             return $response
         } catch {
             $lastError=$_; $status=Get-CatalogHttpStatusCodeFromError -ErrorRecord $_
-            if($status -eq 0 -and $response -and $response.PSObject.Properties['StatusCode']){try{$status=[int]$response.StatusCode}catch{}}
+            if($status -eq 0 -and $response -and $response.PSObject.Properties['StatusCode']){try{$status=[int]$response.StatusCode}catch{}} # psa-disable-line PSA3004 -- best-effort status extraction on the retry path; degradation is the contract
             if($status -eq 0 -and $response -and ([string]$_ -match 'CATALOG_(?:SEMANTIC_RESPONSE_INVALID|VALIDATOR_EXECUTION_FAILED|VALIDATION_CONTRACT_INVALID)')){$status=200}
             if(-not $rawMetadataPath){$rawMetadataPath=Write-CatalogRawEvidence -Method $Method -Url $Url -Tag $Tag -Attempt $attempt -TimeoutSec $timeout -Response $response -RequestBody $Body -Outcome 'Failure' -ErrorMessage $_.Exception.Message}
             else { Update-CatalogRawEvidenceMetadata -MetadataPath $rawMetadataPath -FinalOutcome 'SemanticOrProcessingFailure' -ErrorMessage $_.Exception.Message }
@@ -5896,7 +5896,7 @@ function Get-CatalogSemanticAliases {
 
     switch ($Token.Trim()) {
         'Cumulative Update' {
-            return [string[]]@('Cumulative Update','累積更新プログラム','累積更新')
+            return [string[]]@('Cumulative Update','累積更新プログラム','累積更新') # psa-disable-line PSA7003 -- Japanese Catalog display aliases / ja-path fixtures / reagentc output matching are functionally required string literals; the project convention is ASCII-only OUTSIDE literals (TESTING section 0); analyzer literal-exemption is a registered central-reflux candidate
         }
         'Servicing Stack Update' {
             return [string[]]@('Servicing Stack Update','サービス スタック更新プログラム','サービススタック更新プログラム')
@@ -6141,24 +6141,24 @@ function Get-PatchConfiguredCatalogIdentity {
             $fileName = $localLeaf
         }
     }
-    $sha1 = ''
+    $sha1 = '' # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
     $sha256 = ''
     if ($Patch.PSObject.Properties['ExpectedHashes'] -and $Patch.ExpectedHashes) {
         $h = $Patch.ExpectedHashes
         if ($h -is [System.Collections.IDictionary]) {
-            if ($h.Contains('sha-1')) { $sha1 = [string]$h['sha-1'] }
+            if ($h.Contains('sha-1')) { $sha1 = [string]$h['sha-1'] } # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
             if ($h.Contains('sha-256')) { $sha256 = [string]$h['sha-256'] }
         } else {
-            if ($h.PSObject.Properties['sha-1']) { $sha1 = [string]$h.'sha-1' }
+            if ($h.PSObject.Properties['sha-1']) { $sha1 = [string]$h.'sha-1' } # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
             if ($h.PSObject.Properties['sha-256']) { $sha256 = [string]$h.'sha-256' }
         }
     }
-    if ([string]::IsNullOrWhiteSpace($sha1) -and $Patch.PSObject.Properties['Digest']) { $sha1 = [string]$Patch.Digest }
+    if ([string]::IsNullOrWhiteSpace($sha1) -and $Patch.PSObject.Properties['Digest']) { $sha1 = [string]$Patch.Digest } # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
     if ([string]::IsNullOrWhiteSpace($sha256) -and $Patch.PSObject.Properties['Sha256']) { $sha256 = [string]$Patch.Sha256 }
     return [pscustomobject][ordered]@{
         UpdateId = $updateId
         FileName = $fileName
-        Sha1 = $sha1
+        Sha1 = $sha1 # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
         Sha256 = $sha256
     }
 }
@@ -6203,11 +6203,11 @@ function Select-CatalogCandidateAsset {
         # filename, reviewed basis, x64 architecture and non-metadata payload.
         $configuredFileNameDigestBound = ([System.IO.Path]::GetFileName([string]$identity.FileName) -ceq [string]$identity.FileName) -and
             ([string]$identity.FileName -match '(?i)_[0-9a-f]{40}\.(?:msu|cab)$')
-        if ([string]::IsNullOrWhiteSpace([string]$identity.Sha1) -and $configuredFileNameDigestBound) {
+        if ([string]::IsNullOrWhiteSpace([string]$identity.Sha1) -and $configuredFileNameDigestBound) { # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
             $basis.Add('ConfiguredSha1OrFileNameDigest')
         }
     }
-    if (-not [string]::IsNullOrWhiteSpace($identity.Sha1)) {
+    if (-not [string]::IsNullOrWhiteSpace($identity.Sha1)) { # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
         $m = @($pool | Where-Object {
             $candidateDigest = [string]$_.File.digest
             if ([string]::IsNullOrWhiteSpace($candidateDigest)) {
@@ -6216,9 +6216,9 @@ function Select-CatalogCandidateAsset {
                     try { $candidateDigest = Convert-CatalogSha1HexToBase64 -Hex $fileHashMatch.Groups[1].Value } catch { $candidateDigest = '' }
                 }
             }
-            [string]::Equals($candidateDigest, $identity.Sha1, [System.StringComparison]::OrdinalIgnoreCase)
+            [string]::Equals($candidateDigest, $identity.Sha1, [System.StringComparison]::OrdinalIgnoreCase) # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
         })
-        if ($m.Count -eq 0) { throw ('Configured Catalog SHA-1 was not present in the DownloadDialog digest or exact file-name identity: {0}' -f $identity.Sha1) }
+        if ($m.Count -eq 0) { throw ('Configured Catalog SHA-1 was not present in the DownloadDialog digest or exact file-name identity: {0}' -f $identity.Sha1) } # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
         $pool = $m; $basis.Add('ConfiguredSha1OrFileNameDigest')
     }
     if (-not [string]::IsNullOrWhiteSpace($identity.Sha256)) {
@@ -6852,11 +6852,11 @@ function Test-PatchModelConsistency {
     for ($i=0; $i -lt $Lines.Count; $i++) {
         $line = $Lines[$i]
         $state = if ($line.PSObject.Properties['State']) { [string]$line.State } else { 'LegacyResolved' }
-        $sha1 = Get-BaselineHashValue -Line $line -Algorithm Sha1
+        $sha1 = Get-BaselineHashValue -Line $line -Algorithm Sha1 # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
         $sha256 = Get-BaselineHashValue -Line $line -Algorithm Sha256
         if ($state -in @('Frozen','E3Validated','E4Validated','E5Validated','Approved') -and -not $sha256) {
             $errors.Add("Lines[$i] (Kind '$($line.Kind)') is state=$state but has no SHA-256")
-        } elseif ($state -eq 'LegacyResolved' -and -not $sha1 -and -not $sha256) {
+        } elseif ($state -eq 'LegacyResolved' -and -not $sha1 -and -not $sha256) { # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
             $errors.Add("Lines[$i] (Kind '$($line.Kind)') has no integrity key")
         }
     }
@@ -6979,7 +6979,7 @@ function ConvertTo-ConfigLines { # psa-disable-line PSA6003 -- returns the Lines
                 Applicability = [pscustomobject]@{ Mode = $(if ($kind -eq 'DotNet') { 'IfRuntimeDetectedPerInstallIndex' } elseif ($kind -in @('SafeOSDU','SetupDU')) { 'SameMonthOrLatestPrior' } else { 'Always' }) }
                 Dependencies = @()
                 Integrity = [pscustomobject]@{
-                    Sha1 = $(if ($f.digest) { [pscustomobject]@{ Encoding='base64'; Value=$f.digest; Hex=$null } } else { $null })
+                    Sha1 = $(if ($f.digest) { [pscustomobject]@{ Encoding='base64'; Value=$f.digest; Hex=$null } } else { $null }) # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
                     Sha256 = $(if ($sha256Value) { [pscustomobject]@{ Encoding='base64'; Value=$sha256Value; Hex=$null } } else { $null })
                     SizeBytes = $null
                     AuthenticodeStatus = 'NotTested'
@@ -7831,7 +7831,7 @@ function Get-DismExportArgumentList {
 # install.wim display-date metadata (r12.34 resume-manifest lifecycle fix; r12.33 final-WIM boundary retained)
 # ============================================================
 # Measured Server 2016/2022 evidence proves that Windows Setup's edition-list
-# "Modified" / "更新日" column maps to IMAGE/CREATIONTIME on the tested media.
+# The "Modified" column (and its ja-localized label) maps to IMAGE/CREATIONTIME on the tested media.
 # WIMGAPI write calls returned success without persisting the requested value
 # and changed LASTMODIFICATIONTIME, so production writes no longer use
 # WIMSetImageInformation. The validated path updates only equal-length
@@ -8718,7 +8718,7 @@ function ConvertTo-WimIntegrityTablePublicEvidence {
     }
 }
 
-function Get-WimFileRangeSha1 {
+function Get-WimFileRangeSha1 { # psa-disable-line PSA5003 -- WIM integrity table is SHA-1 by the format specification
     [CmdletBinding()]
     [OutputType([byte[]])]
     param(
@@ -8728,14 +8728,14 @@ function Get-WimFileRangeSha1 {
     )
 
     if ($Length -eq 0) {
-        $emptySha1 = [System.Security.Cryptography.SHA1]::Create()
-        try { return $emptySha1.ComputeHash([byte[]]::new(0)) }
-        finally { $emptySha1.Dispose() }
+        $emptySha1 = [System.Security.Cryptography.SHA1]::Create() # psa-disable-line PSA5003 -- WIM integrity table is SHA-1 by the format specification
+        try { return $emptySha1.ComputeHash([byte[]]::new(0)) } # psa-disable-line PSA5003 -- WIM integrity table is SHA-1 by the format specification
+        finally { $emptySha1.Dispose() } # psa-disable-line PSA5003 -- WIM integrity table is SHA-1 by the format specification
     }
     if ($Offset + $Length -gt [uint64]$Stream.Length) {
         throw 'SHA-1 file range extends beyond the end of the WIM file.'
     }
-    $sha1 = [System.Security.Cryptography.SHA1]::Create()
+    $sha1 = [System.Security.Cryptography.SHA1]::Create() # psa-disable-line PSA5003 -- WIM integrity table is SHA-1 by the format specification
     [byte[]]$buffer = [byte[]]::new(1048576)
     try {
         $Stream.Position = [int64]$Offset
@@ -8748,16 +8748,16 @@ function Get-WimFileRangeSha1 {
             }
             $remaining -= [uint64]$read
             if ($remaining -eq 0) {
-                $null = $sha1.TransformFinalBlock($buffer, 0, $read)
+                $null = $sha1.TransformFinalBlock($buffer, 0, $read) # psa-disable-line PSA5003 -- WIM integrity table is SHA-1 by the format specification
             }
             else {
-                $null = $sha1.TransformBlock($buffer, 0, $read, $buffer, 0)
+                $null = $sha1.TransformBlock($buffer, 0, $read, $buffer, 0) # psa-disable-line PSA5003 -- WIM integrity table is SHA-1 by the format specification
             }
         }
-        return [byte[]]$sha1.Hash.Clone()
+        return [byte[]]$sha1.Hash.Clone() # psa-disable-line PSA5003 -- WIM integrity table is SHA-1 by the format specification
     }
     finally {
-        $sha1.Dispose()
+        $sha1.Dispose() # psa-disable-line PSA5003 -- WIM integrity table is SHA-1 by the format specification
     }
 }
 
@@ -8805,7 +8805,7 @@ function New-WimIntegrityTableBytes {
         [uint64]$remaining = $checkedByteCount
         for ($i = 0; $i -lt [int]$numberOfEntries; $i++) {
             [uint64]$thisChunkSize = [math]::Min([uint64]$ChunkSize, $remaining)
-            [byte[]]$digest = Get-WimFileRangeSha1 -Stream $stream -Offset $offset -Length $thisChunkSize
+            [byte[]]$digest = Get-WimFileRangeSha1 -Stream $stream -Offset $offset -Length $thisChunkSize # psa-disable-line PSA5003 -- WIM integrity table is SHA-1 by the format specification
             [Array]::Copy($digest, 0, $tableBytes, 12 + ($i * 20), 20)
             $offset += $thisChunkSize
             $remaining -= $thisChunkSize
@@ -10541,10 +10541,10 @@ function Get-OscdimgAdkRegistrationEvidence {
                                 LocalPackage = [string]$pp.LocalPackage
                                 ExpectedKbMentioned = ($combined -match [regex]::Escape($Script:OscdimgExpectedAdkPatchKb))
                             }
-                        } catch { }
+                        } catch { } # psa-disable-line PSA3004 -- best-effort per-patch ADK registration row; degradation is the contract
                     }
                 }
-            } catch { }
+            } catch { } # psa-disable-line PSA3004 -- best-effort ADK registration enumeration; degradation is the contract
         }
     }
 
@@ -10930,7 +10930,7 @@ function Invoke-OscdimgFunctionalQualification {
                 [string]$cached.Status -eq 'Pass') {
                 return $cached
             }
-        } catch { }
+        } catch { } # psa-disable-line PSA3004 -- best-effort qualification cache read; degradation is the contract
     }
     if (-not (Test-Path -LiteralPath $cacheDir)) { New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null }
     $work = Join-Path $Script:WorkRoot ('work\oscdimg-functional-qualification\{0}' -f $key)
@@ -10974,7 +10974,7 @@ function Invoke-OscdimgFunctionalQualification {
                 $mount -and $mount.MarkerPresent -and $mount.MarkerContentMatches -and
                 (-not $case.Repeat -or ($build2.ExitCode -eq 0 -and $repeatHashMatch))) { $status = 'Pass' }
             $caseResults += [pscustomobject][ordered]@{
-                CaseName=$case.Name; Status=$status; Build1=$build1; ElTorito=$el; MountVerification=$mount;
+                CaseName=$case.Name; Status=$status; Build1=$build1; ElTorito=$el; MountVerification=$mount
                 Build2=$build2; RepeatIsoHashIdentical=$repeatHashMatch
             }
         }
@@ -12263,7 +12263,7 @@ function ConvertTo-ResolvedPatchFromBaselineLine {
     # enforced it as an exact filename during P04.
 
     $expectedHashes = @{}
-    $sha1 = Get-BaselineHashValue -Line $Line -Algorithm Sha1
+    $sha1 = Get-BaselineHashValue -Line $Line -Algorithm Sha1 # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
     $sha256 = Get-BaselineHashValue -Line $Line -Algorithm Sha256
     if ($sha1)   { $expectedHashes['sha-1'] = $sha1 } # psa-disable-line PSA5003 -- Catalog compatibility
     if ($sha256) { $expectedHashes['sha-256'] = $sha256 }
@@ -12333,7 +12333,7 @@ function ConvertTo-SourcePrerequisiteResolvedPatch {
     if ($asset) {
         if ($asset.PSObject.Properties['FileName']) { $fileName = [string]$asset.FileName }
         if ($asset.PSObject.Properties['DownloadUrl']) { $source = [string]$asset.DownloadUrl }
-        $sha1 = Get-BaselineHashValue -Line $asset -Algorithm Sha1
+        $sha1 = Get-BaselineHashValue -Line $asset -Algorithm Sha1 # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
         $sha256 = Get-BaselineHashValue -Line $asset -Algorithm Sha256
         if ($sha1) { $expectedHashes['sha-1'] = $sha1 } # psa-disable-line PSA5003 -- Catalog compatibility
         if ($sha256) { $expectedHashes['sha-256'] = $sha256 }
@@ -14377,7 +14377,7 @@ function Get-ExpandedMsuCabPlan {
                 $mums = @(Get-ChildItem -LiteralPath $mumRoot -File -Recurse -Filter '*.mum' -ErrorAction SilentlyContinue)
                 $mumNames = @($mums | ForEach-Object { $_.Name })
                 $mumContent = @($mums | ForEach-Object {
-                    try { Get-Content -LiteralPath $_.FullName -Raw -ErrorAction Stop } catch { '' }
+                    try { Get-Content -LiteralPath $_.FullName -Raw -ErrorAction Stop } catch { '' } # psa-disable-line PSA3004 -- best-effort MUM content read with empty-string fallback; degradation is the contract
                 }) -join "`n"
                 $joined = (($mumNames -join ';') + "`n" + $mumContent)
                 $role = 'Unknown'
@@ -14923,7 +14923,7 @@ function Get-OfflineServicingStackFilesystemState {
             if(-not $version){
                 $cbscore=Join-Path $item.FullName 'cbscore.dll'
                 if(Test-Path -LiteralPath $cbscore -PathType Leaf){
-                    try{$version=[string](Get-Item -LiteralPath $cbscore -ErrorAction Stop).VersionInfo.FileVersion}catch{}
+                    try{$version=[string](Get-Item -LiteralPath $cbscore -ErrorAction Stop).VersionInfo.FileVersion}catch{} # psa-disable-line PSA3004 -- best-effort cbscore version probe; degradation is the contract
                 }
             }
             $comparable=ConvertTo-ComparableVersion -Value $version
@@ -19160,7 +19160,7 @@ function Test-RemotePatchUrlStatus {
                 if ($_.Exception.Response -and $_.Exception.Response.StatusCode) {
                     $status = [int]$_.Exception.Response.StatusCode
                 }
-            } catch { }
+            } catch { } # psa-disable-line PSA3004 -- best-effort status extraction from the error response; degradation is the contract
             if ($status -in @(404, 410)) {
                 return [pscustomobject]@{ State = 'Missing'; StatusCode = $status; Message = $_.Exception.Message }
             }
@@ -19180,7 +19180,7 @@ function Get-ResearchCandidateBaselineMonth {
         if ($m.Success) { return $m.Groups[1].Value }
     }
     if ($pb.PSObject.Properties['PatchTuesdayOfBaseline'] -and $pb.PatchTuesdayOfBaseline) {
-        try { return ([datetime]$pb.PatchTuesdayOfBaseline).ToString('yyyy-MM') } catch { }
+        try { return ([datetime]$pb.PatchTuesdayOfBaseline).ToString('yyyy-MM') } catch { } # psa-disable-line PSA3004 -- best-effort baseline month parse; degradation is the contract
     }
     return ''
 }
@@ -19195,7 +19195,7 @@ function New-DotNetMonthlySelectorLine {
         $existing=@($Script:ResolvedPatches|Where-Object{(Get-PatchEntryType -Patch $_)-eq 'DotNet' -and [string]::Equals([string]$_.KbId,$KbId,[StringComparison]::OrdinalIgnoreCase)})|Select-Object -First 1
         if($existing){$updateId=[string]$existing.UpdateId;$fileName=[string]$existing.FileName;$downloadUrl=[string]$existing.Source;if($existing.ExpectedHashes){$digest=[string]$existing.ExpectedHashes['sha-1'];$sha256=[string]$existing.ExpectedHashes['sha-256']};$state='PinnedIdentityPreserved'}
     }
-    return [pscustomobject][ordered]@{PackageId=('{0}-{1}-x64' -f $OsVersion,$KbId);Kind='DotNet';KbId=$KbId;ParentKbId=$null;UpdateId=$updateId;Revision=$null;Title=('Monthly .NET Framework CU selector: {0}' -f $DotNetVersions);Products=$null;Classification=$null;Architecture='x64';ReleaseDate=$ReleaseDate;ReleaseType='B';State=$state;FileName=$fileName;DownloadUrl=$downloadUrl;Digest=$digest;Sha256=$sha256;SizeBytes=$null;ApplyOrder=60;InScope=[pscustomobject]@{DotNetVersions=$DotNetVersions};Note='Resolved from official .NET release notes; reviewed exact identity is preserved when the KB remains pinned.';Roles=@('DotNetLeaf');TargetsByRole=[pscustomobject]@{DotNetLeaf=@('Install')};RuntimeSelector=[pscustomobject]$selector;Applicability=[pscustomobject]@{Mode='IfRuntimeDetectedPerInstallIndex'};Dependencies=@();Integrity=[pscustomobject]@{Sha1=$(if($digest){[pscustomobject]@{Encoding='base64';Value=$digest}}else{$null});Sha256=$(if($sha256){[pscustomobject]@{Encoding='base64';Value=$sha256}}else{$null});SizeBytes=$null;AuthenticodeStatus='NotTested'};Evidence=[pscustomobject]@{Levels=@('E1');SourceUrls=@($SourceUrl);VerifiedAt=(Get-Date).ToUniversalTime().ToString('o');VerifiedBy='auto:DotNetReleaseNotes';Notes=@('Exact reviewed Catalog identity preserved under PinOs/PinAll when KB is unchanged.')}}
+    return [pscustomobject][ordered]@{PackageId=('{0}-{1}-x64' -f $OsVersion,$KbId);Kind='DotNet';KbId=$KbId;ParentKbId=$null;UpdateId=$updateId;Revision=$null;Title=('Monthly .NET Framework CU selector: {0}' -f $DotNetVersions);Products=$null;Classification=$null;Architecture='x64';ReleaseDate=$ReleaseDate;ReleaseType='B';State=$state;FileName=$fileName;DownloadUrl=$downloadUrl;Digest=$digest;Sha256=$sha256;SizeBytes=$null;ApplyOrder=60;InScope=[pscustomobject]@{DotNetVersions=$DotNetVersions};Note='Resolved from official .NET release notes; reviewed exact identity is preserved when the KB remains pinned.';Roles=@('DotNetLeaf');TargetsByRole=[pscustomobject]@{DotNetLeaf=@('Install')};RuntimeSelector=[pscustomobject]$selector;Applicability=[pscustomobject]@{Mode='IfRuntimeDetectedPerInstallIndex'};Dependencies=@();Integrity=[pscustomobject]@{Sha1=$(if($digest){[pscustomobject]@{Encoding='base64';Value=$digest}}else{$null});Sha256=$(if($sha256){[pscustomobject]@{Encoding='base64';Value=$sha256}}else{$null});SizeBytes=$null;AuthenticodeStatus='NotTested'};Evidence=[pscustomobject]@{Levels=@('E1');SourceUrls=@($SourceUrl);VerifiedAt=(Get-Date).ToUniversalTime().ToString('o');VerifiedBy='auto:DotNetReleaseNotes';Notes=@('Exact reviewed Catalog identity preserved under PinOs/PinAll when KB is unchanged.')}} # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
 }
 
 function Resolve-DotNetMonthlySelectorLines {
@@ -19207,7 +19207,7 @@ function Resolve-DotNetMonthlySelectorLines {
     )
     $cutoff = [datetime]::ParseExact(($BaselineMonth + '-28'), 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
     $cache = $null
-    try { $cache = Get-DotNetCuCache } catch { }
+    try { $cache = Get-DotNetCuCache } catch { } # psa-disable-line PSA3004 -- best-effort DotNet CU cache load; degradation is the contract
     $cacheLatest = ''
     if ($cache -and $cache.IndexSummary -and $cache.IndexSummary.LatestDate) { $cacheLatest = [string]$cache.IndexSummary.LatestDate }
     if (-not $cache -or -not $cacheLatest -or $cacheLatest.Substring(0,7) -lt $BaselineMonth) {
@@ -25848,8 +25848,8 @@ function Repair-ResolvedPatchManifestForResume {
         if ([string]::IsNullOrWhiteSpace($fileName) -or [System.IO.Path]::GetFileName($fileName) -ne $fileName) {
             throw ('Resume refused: unsafe or empty measured Catalog file name for {0}/{1}: "{2}".' -f $patchType,$kbId,$fileName)
         }
-        $catalogSha1 = Get-CatalogPayloadSha1FromFileName -FileName $fileName
-        if ($catalogSha1 -notmatch '^[0-9a-f]{40}$') {
+        $catalogSha1 = Get-CatalogPayloadSha1FromFileName -FileName $fileName # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
+        if ($catalogSha1 -notmatch '^[0-9a-f]{40}$') { # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
             throw ('Resume refused: measured Catalog file name has no recoverable SHA-1 digest for {0}/{1}: {2}' -f $patchType,$kbId,$fileName)
         }
         $source = [string]$catalog.Source
@@ -25878,16 +25878,16 @@ function Repair-ResolvedPatchManifestForResume {
         if (-not $localPath.StartsWith($osPatchRoot,[System.StringComparison]::OrdinalIgnoreCase)) {
             throw ('Resume refused: local payload escaped the OS patch workspace: {0}' -f $localPath)
         }
-        $actualSha1 = (Get-FileHash -LiteralPath $localPath -Algorithm SHA1).Hash.ToLowerInvariant()
-        if ($actualSha1 -ne $catalogSha1) {
-            throw ('Resume refused: retained payload SHA-1 does not match the measured Catalog file name for {0}/{1}. expected={2} actual={3}' -f $patchType,$kbId,$catalogSha1,$actualSha1)
+        $actualSha1 = (Get-FileHash -LiteralPath $localPath -Algorithm SHA1).Hash.ToLowerInvariant() # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
+        if ($actualSha1 -ne $catalogSha1) { # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
+            throw ('Resume refused: retained payload SHA-1 does not match the measured Catalog file name for {0}/{1}. expected={2} actual={3}' -f $patchType,$kbId,$catalogSha1,$actualSha1) # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
         }
         $actualSha256 = (Get-FileHash -LiteralPath $localPath -Algorithm SHA256).Hash.ToLowerInvariant()
         $hashes = @{}
         if ($patch.PSObject.Properties['ExpectedHashes'] -and $patch.ExpectedHashes) {
             foreach ($key in $patch.ExpectedHashes.Keys) { $hashes[$key] = $patch.ExpectedHashes[$key] }
         }
-        $hashes['sha-1'] = $actualSha1
+        $hashes['sha-1'] = $actualSha1 # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
         $hashes['sha-256'] = $actualSha256
         Test-PatchIntegrity -FilePath $localPath -ExpectedHashes $hashes | Out-Null
 
@@ -25909,7 +25909,7 @@ function Repair-ResolvedPatchManifestForResume {
         $repaired.Add([pscustomobject][ordered]@{
             PatchType=$patchType; KbId=$kbId; UpdateId=[string]$catalog.UpdateId
             FileName=$fileName; LocalPath=$localPath
-            CatalogFileNameSha1=$catalogSha1; LocalAssetSha1=$actualSha1; LocalAssetSha256=$actualSha256
+            CatalogFileNameSha1=$catalogSha1; LocalAssetSha1=$actualSha1; LocalAssetSha256=$actualSha256 # psa-disable-line PSA5003 -- Catalog-published SHA-1 digest handling (data-source format, not a crypto choice)
             CatalogIdentityMode=[string]$catalogIdentity.Mode;CatalogIdentityBasis=[string]$catalogIdentity.Basis
             CatalogScopedRawSha256=$(if($catalog.PSObject.Properties['CatalogScopedRawSha256']){[string]$catalog.CatalogScopedRawSha256}else{''})
         }) | Out-Null

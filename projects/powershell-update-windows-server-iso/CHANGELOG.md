@@ -377,6 +377,73 @@ the script and follows the
   main 0E/229W/27I and collector 0E/13W/44I; the warning/info drain
   continues in subsequent reviewed batches.
 
+### Static analysis
+
+- **PSA warning-debt drain, batch 2** (justified suppressions +
+  trivial fixes; every disposition measured, no behavior change).
+  PSA5003 (47 findings, 34 lines): all sites verified as legitimate
+  domain-required SHA-1 handling and suppressed line-locally with the
+  measured reason — the Microsoft Update Catalog publishes SHA-1
+  digests in its download metadata and embeds them in payload file
+  names (the resume path re-verifies retained payloads against them),
+  and the WIM integrity table is SHA-1 by the format specification
+  (`Get-WimFileRangeSha1`); the integrity model itself remains
+  SHA-256-first per the T29/T43 boundary. PSA3004 (15 findings): each
+  empty catch individually reviewed and confirmed as a deliberate
+  best-effort/degradation contract (transport probes, evidence
+  side-file writes, cache reads, version probes); suppressed with
+  per-site reasons. PSA7003 (1 aggregated finding, 116 characters):
+  nine of the ten non-ASCII lines are functionally required string
+  literals (Japanese Catalog display-string aliases, the
+  Japanese-path oscdimg qualification fixtures, reagentc ja output
+  matching) and conform to the project convention of ASCII-only
+  OUTSIDE literals; the single outside-literal case — a comment
+  quoting the ja-localized column label — is rewritten in ASCII, and
+  the aggregated finding is suppressed at its anchor line with the
+  limitation noted (the analyzer has no literal-context exemption, so
+  the suppression is file-wide in effect until the central analyzer
+  gains one). PSA4004: the one redundant trailing semicolon removed.
+  Main-script debt is now 0E/166W/26I. ScriptVersion
+  `update-wsi-2026.08.08-r12.77`, tag `psa-warning-debt-drain`; the
+  T40 release pin advances in the same change set. Collector
+  warnings are deliberately untouched in this batch: suppression
+  comments are code edits, and the Collector version-bump discipline
+  (the T47 exact pair pin) makes them a separate adjudicated batch.
+- **PSA2009 (77 warnings) adjudicated as analyzer false positives —
+  zero real defects.** Measured verdict: PowerShell throws on
+  assignment to an undeclared PSCustomObject property regardless of
+  strict mode, so genuine instances would be runtime crashes; an AST
+  sweep of all 77 sites proved every flagged property IS declared in
+  its governing initialiser. The false positives are caused by the
+  analyzer's initialiser regex recognising only the single-cast
+  `[pscustomobject]@{` form and missing the double-cast
+  `[pscustomobject][ordered]@{` form this script uses in 13 of its 16
+  `$result` initialisers (proven by minimal repro). The 77 findings
+  are retained as declared debt with this documented cause — not
+  suppressed — and clear automatically once the central analyzer fix
+  lands.
+- **Central-reflux candidates registered** (quality-tools changes are
+  out of scope for this maintenance stream and route through the
+  governance project): (1) PSA2009 initialiser recognition for the
+  `[pscustomobject][ordered]@{` double-cast form; (2) PSA7003
+  literal-context exemption so string-literal content is exempted per
+  the repository's stated ASCII-only-outside-literals convention.
+
+### Verification
+
+- **G3 evidence gate closed** (user adjudication, 2026-08-08):
+  Collector r12 / schema 1.10 real-machine evidence delivered from
+  all four Server VMs; every run Overall=Pass (21/21 items) with
+  checksum-complete artifact sets. Recorded in TESTING.md's evidence
+  tier; the archives stay input-only outside the repository. The
+  first three Server 2025 attempts stopped at the startup preflight
+  by design (`PreconditionNotMet`): a Microsoft EdgeUpdate cleanup
+  entry in PendingFileRenameOperations classified Advisory, and the
+  T48-pinned startup matrix fails closed on Advisory; one further
+  restart consumed the PFRO entry and an immediate re-run collected
+  cleanly — a live confirmation of the collector's preflight
+  semantics and of the measured updater-cleanup PFRO shape.
+
 ## [update-wsi-2026.08.07-r12.75] - 2026-08-07
 
 Tag retained: `post-install-evidence-collector-r9-merge`.

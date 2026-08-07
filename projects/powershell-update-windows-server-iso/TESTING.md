@@ -478,6 +478,14 @@ categorisation.
 | **2 — Live-network** | T1, T4 | Unrestricted egress to Microsoft endpoints | Stage 4 monthly + ad-hoc before releases. The design of an expanded live-network tier is a standing consolidation item |
 | **3 — Evidence (user-side)** | G2: the required regression set executed on real Windows PowerShell 5.1 against the distribution ZIP. G3: Collector r12 real-machine evidence from the four Server VMs. Plus every `_pending operator confirmation_` pipeline row in §0 | Real Windows hosts / real media; outside the sandbox by nature | At the user's cadence; results recorded in §0 when delivered |
 
+Evidence-tier status: **G3 delivered and closed 2026-08-08** (user
+adjudication) — Collector r12 / schema 1.10 evidence from all four
+Server VMs (2016/2019/2022/2025), every run Overall=Pass with 21/21
+assessment items and checksum-complete artifact sets; the Server 2019
+Secure Boot rollout monitoring divergence is graded INFO by design.
+The evidence archives themselves stay outside the repository
+(input-only). G2 remains open.
+
 ### Suite declaration (measured baseline)
 
 The tier-1 baseline at the r12.75 series terminal (2026-08-07):
