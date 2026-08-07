@@ -379,6 +379,32 @@ the script and follows the
 
 ### Static analysis
 
+- **PSA warning-debt drain, batch 4 — shadowing renames** (reviewed
+  batch; behavior-preserving local renames with every in-scope
+  reference mapped by AST/function-bounds scan before editing).
+  PSA2002 (13): nine local `$matches` variables shadowing the
+  automatic `$Matches` renamed to intent-revealing names
+  (`$regexMatches`/`$creationMatches`/`$updatedMatches` in the WIM
+  XML editors, `$versionMatches` in the identity parser, `$isMatch`
+  for the three boolean uses in the media-sync/P10/Setup-DU evidence
+  functions, `$matchedFiles`/`$matchedRows` in the resume layer);
+  three local `$args` variables renamed (`$dismArgs` in the two DISM
+  export wrappers, `$oscdimgArgs` incl. its `@args` splat in the
+  oscdimg qualification build). PSA2007/PSA2002 on parameters: the
+  `Write-DismRollbackEvidence` `$Error` parameter renamed
+  `$ErrorText` (JSON evidence field name unchanged) with both
+  `-Error` call sites updated; the
+  `Assert-ServicingContractProfileCompatibility` `$Profile` parameter
+  renamed `$OsProfile` with its call site updated — the analyzer's
+  PSA2012 caught the initially missed call site during the batch's
+  own gate run (a true positive; fixed before commit and recorded
+  here as the drain working as intended). PSA2003 (2): both `-match`
+  null-pattern findings measured as impossible-by-construction (a
+  literal pattern array; an explicit empty-pattern early return) and
+  suppressed with the measured reasons. Main-script debt is now
+  0E/149W/26I. ScriptVersion `update-wsi-2026.08.08-r12.78`, tag
+  `psa-shadowing-drain`; the T40 release pin advances in the same
+  change set.
 - **PSA warning-debt drain, batch 2** (justified suppressions +
   trivial fixes; every disposition measured, no behavior change).
   PSA5003 (47 findings, 34 lines): all sites verified as legitimate

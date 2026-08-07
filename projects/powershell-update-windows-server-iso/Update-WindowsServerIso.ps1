@@ -718,7 +718,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.08-r12.77'
+$Script:ScriptVersion = 'update-wsi-2026.08.08-r12.78'
 # Validation marker: r12.75 retains the r12.72 ISO servicing pipeline unchanged and hardens only Collector r12/schema 1.10 Secure Boot evidence semantics: current/latest rollout state is authoritative, historical event 1808 cannot override newer state, WinCS is deployment-configuration evidence only, and WindowsUEFICA2023Capable/Authenticode signer observations are explicitly scoped diagnostics.
 # Validation marker: r12.72 horizontally hardens final-writer authority. P08S plans setup.exe and setuphost.exe for every supported OS, P09 explicitly creates/verifies required standard boot-manager targets, P10 emits an identity-bound media write-set, and P11 accepts later P10 bytes only through that successful evidence. Setup DU final verification now validates schema, path safety, uniqueness, and source/after hash-size binding. Collector r9/schema 1.7 remains unchanged.
 # Validation marker: r12.71 fixes the four-OS clean-E2E failures observed on Server 2019 and Server 2022. P11 now verifies Setup DU records against the authoritative final P09 WinPE setup-binary synchronization, and reviewed pinned Catalog identity accepts an exact digest-bearing configured filename as the SHA-1 binding while remaining fail-closed on UpdateId, filename, architecture, metadata and review-basis checks. Collector r9/schema 1.7 remains unchanged.
@@ -732,7 +732,7 @@ $Script:ScriptVersion = 'update-wsi-2026.08.08-r12.77'
 # r12.58 selected efisys_ex.bin correctly but its verification parser bound Math.Min to Int32 on an 8.91-GiB ISO and returned a false failure.
 # r12.57 proved only loose-file presence/signatures and could therefore accept a non-bootable mixed PCA2011/PCA2023 ISO.
 # Validation marker retained: r12.55 Setup DU baseline-language preservation and P11 no-new-locale verification.
-$Script:ScriptTag     = 'psa-warning-debt-drain'
+$Script:ScriptTag     = 'psa-shadowing-drain'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -9044,11 +9044,11 @@ function Set-WimElementTextPreservingLayout {
 
     $pattern = '(?s)(<' + [regex]::Escape($ElementName) + '\b[^>]*>)([^<]*)(</' + [regex]::Escape($ElementName) + '>)'
     $regex = [regex]::new($pattern, [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)
-    $matches = $regex.Matches($XmlFragment)
-    if ($matches.Count -ne 1) {
-        throw "Expected exactly one $ElementName element in CREATIONTIME; found $($matches.Count)."
+    $regexMatches = $regex.Matches($XmlFragment)
+    if ($regexMatches.Count -ne 1) {
+        throw "Expected exactly one $ElementName element in CREATIONTIME; found $($regexMatches.Count)."
     }
-    $match = $matches[0]
+    $match = $regexMatches[0]
     $oldText = $match.Groups[2].Value
     $leading = [regex]::Match($oldText, '^\s*').Value
     $trailing = [regex]::Match($oldText, '\s*$').Value
@@ -9095,11 +9095,11 @@ function Set-WimImageCreationTimeValuesPreservingLayout {
     $creationRegex = [regex]::new(
         '(?s)<CREATIONTIME\b[^>]*>.*?</CREATIONTIME>',
         [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)
-    $matches = $creationRegex.Matches($ImageXml)
-    if ($matches.Count -ne 1) {
-        throw "Expected exactly one CREATIONTIME element for IMAGE index $ImageIndex; found $($matches.Count)."
+    $creationMatches = $creationRegex.Matches($ImageXml)
+    if ($creationMatches.Count -ne 1) {
+        throw "Expected exactly one CREATIONTIME element for IMAGE index $ImageIndex; found $($creationMatches.Count)."
     }
-    $creationMatch = $matches[0]
+    $creationMatch = $creationMatches[0]
     $creationBlock = Set-WimElementTextPreservingLayout -XmlFragment $creationMatch.Value -ElementName HIGHPART -Value $targetHigh
     $creationBlock = Set-WimElementTextPreservingLayout -XmlFragment $creationBlock -ElementName LOWPART -Value $targetLow
     $updatedXml = $ImageXml.Substring(0, $creationMatch.Index) + $creationBlock + $ImageXml.Substring($creationMatch.Index + $creationMatch.Length)
@@ -9155,11 +9155,11 @@ function Set-WimCreationTimesInRawXml {
         $escapedIndex = [regex]::Escape([string]$index)
         $pattern = '(?s)<IMAGE\b[^>]*\bINDEX\s*=\s*["'']' + $escapedIndex + '["''][^>]*>.*?</IMAGE>'
         $regex = [regex]::new($pattern, [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)
-        $matches = $regex.Matches($updatedXml)
-        if ($matches.Count -ne 1) {
-            throw "Expected exactly one IMAGE block for index $index in WIM XML; found $($matches.Count)."
+        $updatedMatches = $regex.Matches($updatedXml)
+        if ($updatedMatches.Count -ne 1) {
+            throw "Expected exactly one IMAGE block for index $index in WIM XML; found $($updatedMatches.Count)."
         }
-        $match = $matches[0]
+        $match = $updatedMatches[0]
         $edited = Set-WimImageCreationTimeValuesPreservingLayout -ImageXml $match.Value -ImageIndex $index -DateDecision $DateDecision
         $updatedXml = $updatedXml.Substring(0, $match.Index) + $edited.Xml + $updatedXml.Substring($match.Index + $match.Length)
         $records.Add([pscustomobject][ordered]@{
@@ -9754,11 +9754,11 @@ function Export-BootWimCompressed {
     try {
         foreach ($image in $before) {
             Set-DebugStep -Step ('export-boot-idx-' + $image.ImageIndex)
-            $args = Get-DismExportArgumentList -SourceWim $WimPath `
+            $dismArgs = Get-DismExportArgumentList -SourceWim $WimPath `
                 -SourceIndex ([int]$image.ImageIndex) `
                 -DestinationWim $exported `
                 -ScratchDir $Script:ScratchDir
-            $code = Invoke-DismCli -Arguments $args -Context ('export-boot-image-idx' + $image.ImageIndex)
+            $code = Invoke-DismCli -Arguments $dismArgs -Context ('export-boot-image-idx' + $image.ImageIndex)
             if ($code -ne 0) {
                 throw ('dism.exe /Export-Image failed for boot.wim index {0} with exit code {1}.' -f $image.ImageIndex,$code)
             }
@@ -9830,7 +9830,7 @@ function Export-WinReRecoveryCompressed {
     param([Parameter(Mandatory)][string]$WinRePath)
     $exported = $WinRePath + '.recovery.wim'
     if (Test-Path -LiteralPath $exported) { Remove-Item -LiteralPath $exported -Force }
-    $args = @(
+    $dismArgs = @(
         '/Export-Image',
         ("/SourceImageFile:$WinRePath"),
         '/SourceIndex:1',
@@ -9838,7 +9838,7 @@ function Export-WinReRecoveryCompressed {
         '/Compress:recovery',
         ("/ScratchDir:$Script:ScratchDir")
     )
-    $code = Invoke-DismCli -Arguments $args -Context 'export-winre-recovery'
+    $code = Invoke-DismCli -Arguments $dismArgs -Context 'export-winre-recovery'
     if ($code -ne 0) { throw ('WinRE /Export-Image /Compress:recovery failed with exit code {0}' -f $code) }
     Remove-Item -LiteralPath $WinRePath -Force
     Move-Item -LiteralPath $exported -Destination $WinRePath -Force
@@ -10897,8 +10897,8 @@ function Invoke-OscdimgQualificationBuild {
     )
 
     if (Test-Path -LiteralPath $OutputIso) { Remove-Item -LiteralPath $OutputIso -Force -ErrorAction SilentlyContinue }
-    $args = @('-m','-o','-u2','-udfver102',('-bootdata:2#p0,e,b{0}#pEF,e,b{1}' -f $BiosImage,$EfiImage),'-lOSCDIMG_QUAL',$SourceRoot,$OutputIso)
-    $lines = @(& $OscdimgPath @args 2>&1 | ForEach-Object { [string]$_ })
+    $oscdimgArgs = @('-m','-o','-u2','-udfver102',('-bootdata:2#p0,e,b{0}#pEF,e,b{1}' -f $BiosImage,$EfiImage),'-lOSCDIMG_QUAL',$SourceRoot,$OutputIso)
+    $lines = @(& $OscdimgPath @oscdimgArgs 2>&1 | ForEach-Object { [string]$_ })
     $exitCode = $LASTEXITCODE
     $lines | Set-Content -LiteralPath $LogPath -Encoding UTF8
     return [pscustomobject][ordered]@{
@@ -13441,12 +13441,12 @@ function Write-DismLogClassificationEvidence {
 
 function Write-DismRollbackEvidence {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Phase,[Parameter(Mandatory)][string]$Result,[string]$Context='',[AllowEmptyString()][string]$Error='')
+    param([Parameter(Mandatory)][string]$Phase,[Parameter(Mandatory)][string]$Result,[string]$Context='',[AllowEmptyString()][string]$ErrorText='')
     if(-not $Script:LogsDir){return}
     $path=Join-Path $Script:LogsDir 'dism_outcomes.jsonl'
     [pscustomobject][ordered]@{
         Timestamp=(Get-Date).ToString('o');Context=$Context;Phase=$Phase;Kind='Rollback'
-        RollbackResult=$Result;Error=$Error
+        RollbackResult=$Result;Error=$ErrorText
     }|ConvertTo-Json -Depth 5 -Compress|Add-Content -LiteralPath $path -Encoding UTF8
 }
 
@@ -14828,9 +14828,9 @@ function Get-PackageVersionFromIdentity {
     [OutputType([string])]
     param([AllowEmptyString()][string]$Identity='')
     if([string]::IsNullOrWhiteSpace($Identity)){return ''}
-    $matches=[regex]::Matches($Identity,'(?<!\d)(\d+\.\d+(?:\.\d+){0,2})(?!\d)')
-    if($matches.Count -eq 0){return ''}
-    return [string]$matches[$matches.Count-1].Groups[1].Value
+    $versionMatches=[regex]::Matches($Identity,'(?<!\d)(\d+\.\d+(?:\.\d+){0,2})(?!\d)')
+    if($versionMatches.Count -eq 0){return ''}
+    return [string]$versionMatches[$versionMatches.Count-1].Groups[1].Value
 }
 
 function Get-PackageFamilyFromIdentity {
@@ -14989,7 +14989,7 @@ function Get-PreferredPackageVersionFromIdentities {
     if($patterns.Count -gt 0){
         $preferred=@($pool|Where-Object{
             $name=[string]$_.Name
-            @($patterns|Where-Object{$name -match $_}).Count -gt 0
+            @($patterns|Where-Object{$name -match $_}).Count -gt 0 # psa-disable-line PSA2003 -- patterns are literal non-null arrays from the switch above
         })
         if($preferred.Count -gt 0){$pool=$preferred}
     }
@@ -15222,7 +15222,7 @@ function Test-PatchProductMatchesOs {
     }
     $pattern=[string]$patterns[[string]$Script:OsVersion]
     if(-not $pattern){return $true}
-    return (@($products|Where-Object{$_ -match $pattern}).Count -gt 0)
+    return (@($products|Where-Object{$_ -match $pattern}).Count -gt 0) # psa-disable-line PSA2003 -- null-guarded by the preceding line (empty pattern returns early)
 }
 
 function Get-MissingPatchDependencies {
@@ -18677,17 +18677,17 @@ function Get-ConfiguredBootWimUpdateModel {
 
 function Assert-ServicingContractProfileCompatibility {
     [CmdletBinding()]
-    param([Parameter(Mandatory)]$Contract,[Parameter(Mandatory)]$Profile)
+    param([Parameter(Mandatory)]$Contract,[Parameter(Mandatory)]$OsProfile)
     $issues=[System.Collections.Generic.List[string]]::new()
-    if([string]$Contract.OsKey -ne [string]$Profile.OsKey){$issues.Add(('OsKey contract={0}, profile={1}' -f $Contract.OsKey,$Profile.OsKey))|Out-Null}
-    if([string]$Contract.PatchModel -ne [string]$Profile.PatchModel){$issues.Add(('PatchModel contract={0}, profile={1}' -f $Contract.PatchModel,$Profile.PatchModel))|Out-Null}
-    $profileBoot=if($Profile.Common -and $Profile.Common.PSObject.Properties['BootWimUpdateModel']){[string]$Profile.Common.BootWimUpdateModel}else{'FullLCU'}
+    if([string]$Contract.OsKey -ne [string]$OsProfile.OsKey){$issues.Add(('OsKey contract={0}, profile={1}' -f $Contract.OsKey,$OsProfile.OsKey))|Out-Null}
+    if([string]$Contract.PatchModel -ne [string]$OsProfile.PatchModel){$issues.Add(('PatchModel contract={0}, profile={1}' -f $Contract.PatchModel,$OsProfile.PatchModel))|Out-Null}
+    $profileBoot=if($OsProfile.Common -and $OsProfile.Common.PSObject.Properties['BootWimUpdateModel']){[string]$OsProfile.Common.BootWimUpdateModel}else{'FullLCU'}
     if([string]$Contract.Boot.UpdateModel -ne $profileBoot){$issues.Add(('Boot.UpdateModel contract={0}, profile={1}' -f $Contract.Boot.UpdateModel,$profileBoot))|Out-Null}
-    $profilePackageMode=if($Profile.Common -and $Profile.Common.PSObject.Properties['BootWimPackageMode']){[string]$Profile.Common.BootWimPackageMode}else{'DirectMsu'}
+    $profilePackageMode=if($OsProfile.Common -and $OsProfile.Common.PSObject.Properties['BootWimPackageMode']){[string]$OsProfile.Common.BootWimPackageMode}else{'DirectMsu'}
     if([string]$Contract.Boot.PackageMode -ne $profilePackageMode){$issues.Add(('Boot.PackageMode contract={0}, profile={1}' -f $Contract.Boot.PackageMode,$profilePackageMode))|Out-Null}
-    $failurePolicy=if($Profile.Common -and $Profile.Common.PSObject.Properties['BootWimFailurePolicy']){[string]$Profile.Common.BootWimFailurePolicy}else{''}
+    $failurePolicy=if($OsProfile.Common -and $OsProfile.Common.PSObject.Properties['BootWimFailurePolicy']){[string]$OsProfile.Common.BootWimFailurePolicy}else{''}
     if($failurePolicy -and [string]$Contract.Boot.FailurePolicy -ne $failurePolicy){$issues.Add(('Boot.FailurePolicy contract={0}, profile={1}' -f $Contract.Boot.FailurePolicy,$failurePolicy))|Out-Null}
-    $versionPolicy=if($Profile.Common -and $Profile.Common.PSObject.Properties['VersionDecisionPolicy']){[string]$Profile.Common.VersionDecisionPolicy}else{''}
+    $versionPolicy=if($OsProfile.Common -and $OsProfile.Common.PSObject.Properties['VersionDecisionPolicy']){[string]$OsProfile.Common.VersionDecisionPolicy}else{''}
     if($versionPolicy -and [string]$Contract.VersionDecisionPolicy -ne $versionPolicy){$issues.Add(('VersionDecisionPolicy contract={0}, profile={1}' -f $Contract.VersionDecisionPolicy,$versionPolicy))|Out-Null}
     if($issues.Count -gt 0){throw ('Servicing contract/profile mismatch: {0}' -f ($issues -join '; '))}
 }
@@ -18745,7 +18745,7 @@ function Initialize-ServicingContract {
     [CmdletBinding()]
     param()
     $contract=Get-ServicingContract -OsKey $Script:OsVersion
-    Assert-ServicingContractProfileCompatibility -Contract $contract -Profile $Script:OsProfile
+    Assert-ServicingContractProfileCompatibility -Contract $contract -OsProfile $Script:OsProfile
     $baselineCheck=Assert-AllServicingContractBaselines
     $Script:ServicingContract=$contract
     if(Test-Path -LiteralPath $Script:LogsDir -PathType Container){
@@ -20504,7 +20504,7 @@ function Invoke-BuildPhase07_PatchInstallWim {
                 Restore-VerifiedTransactionBackupFile -BackupRecord $record -DestinationPath (Join-Path $Script:ExtractedDir 'sources\install.wim')
                 Write-DismRollbackEvidence -Phase 'P07' -Result 'RestoredAndVerified' -Context 'install.wim transaction backup manifest/2.0'
             } catch {
-                Write-DismRollbackEvidence -Phase 'P07' -Result 'Failed' -Context 'install.wim transaction backup manifest/2.0' -Error $_.Exception.Message
+                Write-DismRollbackEvidence -Phase 'P07' -Result 'Failed' -Context 'install.wim transaction backup manifest/2.0' -ErrorText $_.Exception.Message
                 throw
             }
             Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P07.ok') -Force -ErrorAction SilentlyContinue
@@ -20824,7 +20824,7 @@ function Invoke-BuildPhase08_PatchBootWim {
                 Restore-VerifiedTransactionBackupFile -BackupRecord $installRecord -DestinationPath (Join-Path $Script:ExtractedDir 'sources\install.wim')
                 Write-DismRollbackEvidence -Phase 'P08' -Result 'RestoredAndVerified' -Context 'boot.wim/install.wim transaction backup manifest/2.0'
             } catch {
-                Write-DismRollbackEvidence -Phase 'P08' -Result 'Failed' -Context 'boot.wim/install.wim transaction backup manifest/2.0' -Error $_.Exception.Message
+                Write-DismRollbackEvidence -Phase 'P08' -Result 'Failed' -Context 'boot.wim/install.wim transaction backup manifest/2.0' -ErrorText $_.Exception.Message
                 throw
             }
             Remove-Item -LiteralPath (Join-Path $Script:MarkersDir 'P08.ok') -Force -ErrorAction SilentlyContinue
@@ -21144,7 +21144,7 @@ function New-WinPeMediaSyncRecord {
         [Parameter(Mandatory)] [bool]$Required,
         [string]$ErrorMessage = ''
     )
-    $matches = [bool](
+    $isMatch = [bool](
         $Source.Present -and
         $After.Present -and
         [string]$Source.Sha256 -eq [string]$After.Sha256 -and
@@ -21156,7 +21156,7 @@ function New-WinPeMediaSyncRecord {
         SourceRole         = $SourceRole
         Required           = $Required
         Action             = $Action
-        Success            = [bool]($matches -or -not $Required)
+        Success            = [bool]($isMatch -or -not $Required)
         ErrorMessage       = $ErrorMessage
         SourcePath         = $Source.Path
         SourceSizeBytes    = $Source.SizeBytes
@@ -21170,7 +21170,7 @@ function New-WinPeMediaSyncRecord {
         AfterSizeBytes     = $After.SizeBytes
         AfterFileVersion   = $(if($After.PSObject.Properties['FileVersion']){[string]$After.FileVersion}else{''})
         AfterSha256        = $After.Sha256
-        MatchesSource      = $matches
+        MatchesSource      = $isMatch
     }
 }
 
@@ -21567,8 +21567,8 @@ function New-P10MediaWriteSetEvidence {
                     $failure = 'P10 boot.stl destination does not match its serviced-image source evidence.'
                 }
             }
-            $matches = [string]::IsNullOrWhiteSpace($failure)
-            if (-not $matches) { $result.FailureCount++ }
+            $isMatch = [string]::IsNullOrWhiteSpace($failure)
+            if (-not $isMatch) { $result.FailureCount++ }
             if ($authority -ne 'P09WinPeSyncRetained') { $result.OverrideCount++ }
             $rows.Add([pscustomobject][ordered]@{
                 RelativePath = $resolved.RelativePath
@@ -21582,8 +21582,8 @@ function New-P10MediaWriteSetEvidence {
                 ExpectedSizeBytes = $after.SizeBytes
                 ExpectedSha256 = $afterHash
                 Changed = $changed
-                MatchesExpected = $matches
-                Status = $(if($matches){'Pass'}else{'Fail'})
+                MatchesExpected = $isMatch
+                Status = $(if($isMatch){'Pass'}else{'Fail'})
                 FailureReason = $failure
             }) | Out-Null
         }
@@ -21894,8 +21894,8 @@ function Test-SetupDuFinalMediaManifest {
                 }
             }
 
-            $matches = [string]::IsNullOrWhiteSpace($failureReason)
-            if (-not $matches) { $result.FailureCount++ }
+            $isMatch = [string]::IsNullOrWhiteSpace($failureReason)
+            if (-not $isMatch) { $result.FailureCount++ }
             $rows.Add([pscustomobject][ordered]@{
                 RelativePath = $relative
                 MediaRelativePath = $mediaRelative
@@ -21906,8 +21906,8 @@ function Test-SetupDuFinalMediaManifest {
                 ObservedPath = $observedPath
                 ObservedPresent = [bool]$observedPresent
                 ObservedSha256 = $observedHash
-                MatchesExpected = [bool]$matches
-                Status = $(if ($matches) { 'Pass' } else { 'Fail' })
+                MatchesExpected = [bool]$isMatch
+                Status = $(if ($isMatch) { 'Pass' } else { 'Fail' })
                 FailureReason = $failureReason
             }) | Out-Null
         }
@@ -25709,9 +25709,9 @@ function Get-VerifiedTransactionBackup {
     }
 
     foreach($role in $RequiredRoles){
-        $matches=@($manifest.Files|Where-Object{[string]$_.Role -eq $role})
-        if($matches.Count -ne 1){throw ('{0} transaction backup requires exactly one {1} record; found {2}.' -f $PhaseId,$role,$matches.Count)}
-        $row=$matches[0]
+        $matchedFiles=@($manifest.Files|Where-Object{[string]$_.Role -eq $role})
+        if($matchedFiles.Count -ne 1){throw ('{0} transaction backup requires exactly one {1} record; found {2}.' -f $PhaseId,$role,$matchedFiles.Count)}
+        $row=$matchedFiles[0]
         if(-not(Test-Path -LiteralPath ([string]$row.BackupPath) -PathType Leaf)){throw ('{0} backup file is missing for {1}: {2}' -f $PhaseId,$role,$row.BackupPath)}
         $actual=Get-ResumeFileEvidence -Path ([string]$row.BackupPath)
         if([long]$row.LengthBytes -ne $actual.LengthBytes -or [string]$row.Sha256 -ne $actual.Sha256){
@@ -25824,15 +25824,15 @@ function Repair-ResolvedPatchManifestForResume {
         if (-not $patch -or [string]::IsNullOrWhiteSpace([string]$patch.KbId)) { continue }
         $kbId = [string]$patch.KbId
         $patchType = Get-PatchEntryType -Patch $patch
-        $matches = @($catalogRows | Where-Object {
+        $matchedRows = @($catalogRows | Where-Object {
             [string]$_.OsKey -eq [string]$Script:OsVersion -and
             [string]$_.Kind -eq $patchType -and
             [string]$_.KbId -eq $kbId
         })
-        if ($matches.Count -ne 1) {
-            throw ('Resume refused: cannot repair manifest; expected exactly one measured P04 row for {0}/{1}, found {2}.' -f $patchType,$kbId,$matches.Count)
+        if ($matchedRows.Count -ne 1) {
+            throw ('Resume refused: cannot repair manifest; expected exactly one measured P04 row for {0}/{1}, found {2}.' -f $patchType,$kbId,$matchedRows.Count)
         }
-        $catalog = $matches[0]
+        $catalog = $matchedRows[0]
         if ([bool]$catalog.MetadataOnly) {
             throw ('Resume refused: cannot repair manifest; P04 row is metadata-only for {0}/{1}.' -f $patchType,$kbId)
         }
