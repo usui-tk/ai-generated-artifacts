@@ -718,7 +718,7 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.02-r12.60'
+$Script:ScriptVersion = 'update-wsi-2026.08.02-r12.61'
 # Validation marker: r12.60 accepts the UEFI-defined El Torito Sector Count 0/1 end-of-media sentinel and proves efisys_ex.bin identity by hashing its expected byte length from the catalog Load RBA.
 # r12.59 incorrectly treated Sector Count 1 as a literal 512-byte extent and rejected standards-compliant oscdimg output before hashing the embedded EFI system partition.
 # r12.59 retained: Int64-safe parsing for ISO files larger than 2 GiB and P10 fail-closed post-flight verification.
@@ -16106,7 +16106,9 @@ function Test-OutputIsoPca2023Readiness {
           Target #4 (\efi\microsoft\boot\fonts\*.ttf)
               present -> Pass; missing or empty -> Warning
           Target #5 (\EFI\Microsoft\Boot\boot.stl)
-              present -> Pass; missing -> PassWithNotes
+              serviced-image identity match -> Pass
+              missing or mismatch -> Fail
+              presence without identity evidence -> Warning
 
         OverallStatus aggregation: any Fail -> Fail; else any Warning
         -> Warning; else any PassWithNotes -> PassWithNotes; else Pass.
@@ -16130,7 +16132,8 @@ function Test-OutputIsoPca2023Readiness {
     param(
         [Parameter(Mandatory)] [string]$ExtractedMediaPath,
         [AllowEmptyString()] [string]$ConversionSkipReason = '',
-        [AllowEmptyString()] [string]$OutputIsoPath = ''
+        [AllowEmptyString()] [string]$OutputIsoPath = '',
+        [AllowNull()] [object]$ExpectedBootStlEvidence = $null
     )
 
     $skippedByPolicy = $ConversionSkipReason.StartsWith('skipped-by-policy')
@@ -16336,29 +16339,65 @@ function Test-OutputIsoPca2023Readiness {
         $reasons.Add('Target #4 (fonts): directory missing or contains no *.ttf files.') | Out-Null
     }
 
-    # ---- Target #5: boot.stl (optional cert trust list) ----
-    if (Test-Path -LiteralPath $bootStlPath) {
+    # ---- Target #5: boot.stl (required serviced-image identity) ----
+    # KB5099536 documents error 0xc0430001 when refreshed installation
+    # media does not carry the matching boot.stl.  Presence alone is
+    # insufficient: an original-media file may remain while boot.wim and
+    # the PCA2023 boot payload have advanced to a newer build.
+    if (-not (Test-Path -LiteralPath $bootStlPath -PathType Leaf)) {
         $checks.Add([pscustomobject]@{
             Label             = 'Target #5 (\EFI\Microsoft\Boot\boot.stl)'
             Path              = $bootStlPath
-            ExpectedSignature = 'n/a (cert trust list)'
-            ActualSignature   = 'present'
+            ExpectedSignature = 'serviced-image boot.stl identity'
+            ActualSignature   = 'missing'
             IsPca2023         = $false
             IsPca2011         = $false
-            Status            = 'Pass'
-            Notes             = 'boot.stl (certificate trust list) is present.'
+            Status            = 'Fail'
+            Notes             = 'boot.stl is required for Secure Boot validation of refreshed installation media and is missing.'
         }) | Out-Null
+        $reasons.Add('Target #5 (boot.stl): required file not present.') | Out-Null
+    } elseif ($ExpectedBootStlEvidence -and
+              $ExpectedBootStlEvidence.PSObject.Properties['Success'] -and
+              $ExpectedBootStlEvidence.Success -and
+              $ExpectedBootStlEvidence.PSObject.Properties['SourceSha256'] -and
+              $ExpectedBootStlEvidence.SourceSha256) {
+        $actualBootStlItem = Get-Item -LiteralPath $bootStlPath -ErrorAction Stop
+        $actualBootStlHash = (Get-FileHash -LiteralPath $bootStlPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+        $expectedBootStlHash = ([string]$ExpectedBootStlEvidence.SourceSha256).ToLowerInvariant()
+        $expectedBootStlSize = [int64]$ExpectedBootStlEvidence.SourceSizeBytes
+        $bootStlMatches = [bool](
+            [int64]$actualBootStlItem.Length -eq $expectedBootStlSize -and
+            [string]$actualBootStlHash -eq [string]$expectedBootStlHash
+        )
+        $checks.Add([pscustomobject]@{
+            Label             = 'Target #5 (\EFI\Microsoft\Boot\boot.stl)'
+            Path              = $bootStlPath
+            ExpectedSignature = ('serviced {0} index {1}; size={2}; sha256={3}' -f $ExpectedBootStlEvidence.SourceWim, $ExpectedBootStlEvidence.SourceIndex, $expectedBootStlSize, $expectedBootStlHash)
+            ActualSignature   = ('size={0}; sha256={1}' -f $actualBootStlItem.Length, $actualBootStlHash)
+            IsPca2023         = $false
+            IsPca2011         = $false
+            Status            = $(if ($bootStlMatches) { 'Pass' } else { 'Fail' })
+            Notes             = $(if ($bootStlMatches) {
+                'boot.stl is byte-identical to the authoritative serviced-image source.'
+            } else {
+                'boot.stl exists but does not match the authoritative serviced-image source; media can fail with 0xc0430001.'
+            })
+        }) | Out-Null
+        if (-not $bootStlMatches) {
+            $reasons.Add('Target #5 (boot.stl): media file does not match the authoritative serviced-image source.') | Out-Null
+        }
     } else {
         $checks.Add([pscustomobject]@{
             Label             = 'Target #5 (\EFI\Microsoft\Boot\boot.stl)'
             Path              = $bootStlPath
-            ExpectedSignature = 'n/a (cert trust list)'
-            ActualSignature   = 'missing'
+            ExpectedSignature = 'serviced-image boot.stl identity'
+            ActualSignature   = 'present; identity evidence unavailable'
             IsPca2023         = $false
             IsPca2011         = $false
-            Status            = 'PassWithNotes'
-            Notes             = 'boot.stl is missing. Per Microsoft Make2023BootableMedia.ps1 (Copy-2023BootBins, boot.stl best-effort step) this file is optional and "Skipping" is acceptable when the source carries no boot.stl.'
+            Status            = 'Warning'
+            Notes             = 'boot.stl is present, but no P10 serviced-image identity evidence was supplied. Presence-only inspection cannot prove the file matches the refreshed media.'
         }) | Out-Null
+        $reasons.Add('Target #5 (boot.stl): identity evidence unavailable.') | Out-Null
     }
 
 
@@ -16763,6 +16802,247 @@ function Get-OrEnsurePca2023Snapshot {
     return $Script:Pca2023Snapshot
 }
 
+
+function Sync-Pca2023MediaBootStl {
+    <#
+    .SYNOPSIS
+        Refreshes EFI\Microsoft\Boot\boot.stl from the serviced image
+        that supplies the PCA2023 boot payload family.
+
+    .DESCRIPTION
+        Microsoft documents boot.stl as a required Secure Boot validation
+        asset for refreshed installation media.  When boot.wim carries a
+        complete EFI_EX/FONTS_EX/DVD_EX payload set, Windows Setup (boot.wim
+        index 2) is the authoritative source, followed by boot.wim index 1.
+        If boot.wim cannot be serviced and therefore has no complete _EX
+        payload (the measured Server 2019 preservation case), the first
+        serviced install.wim index with the complete payload set is used.
+
+        The destination is always overwritten.  Presence alone is not an
+        acceptable gate because an original-media boot.stl can remain present
+        while no longer matching the serviced boot environment.
+
+    .OUTPUTS
+        pscustomobject schema pca2023-boot-stl-sync/1.0.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$ExtractedMediaPath,
+        [Parameter(Mandatory)] [string]$WorkRoot
+    )
+
+    $result = [pscustomobject][ordered]@{
+        SchemaVersion              = 'pca2023-boot-stl-sync/1.0'
+        GeneratedAtUtc             = [datetime]::UtcNow.ToString('o')
+        Success                    = $false
+        ErrorMessage               = $null
+        SourceWim                  = $null
+        SourceWimPath              = $null
+        SourceIndex                = $null
+        SourceBootStlPath          = $null
+        SourceSelectionReason      = $null
+        SourceSizeBytes            = $null
+        SourceSha256               = $null
+        DestinationPath            = (Join-Path $ExtractedMediaPath 'EFI\Microsoft\Boot\boot.stl')
+        DestinationExistedBefore   = $false
+        DestinationSizeBytesBefore = $null
+        DestinationSha256Before    = $null
+        DestinationSizeBytesAfter  = $null
+        DestinationSha256After     = $null
+        Changed                    = $false
+        MatchesSource              = $false
+        CandidateAttempts          = @()
+    }
+
+    $bootWimPath = Join-Path $ExtractedMediaPath 'sources\boot.wim'
+    $installWimPath = Join-Path $ExtractedMediaPath 'sources\install.wim'
+    $candidates = [System.Collections.Generic.List[object]]::new()
+    $attempts = [System.Collections.Generic.List[object]]::new()
+
+    try {
+        if (Test-Path -LiteralPath $bootWimPath -PathType Leaf) {
+            $bootInventory = @(Get-WimIndexInventory -WimPath $bootWimPath)
+            $bootIndexes = [System.Collections.Generic.List[int]]::new()
+            if (@($bootInventory | Where-Object { [int]$_.ImageIndex -eq 2 }).Count -gt 0) {
+                $bootIndexes.Add(2) | Out-Null
+            }
+            if (@($bootInventory | Where-Object { [int]$_.ImageIndex -eq 1 }).Count -gt 0) {
+                $bootIndexes.Add(1) | Out-Null
+            }
+            foreach ($entry in @($bootInventory)) {
+                $idx = [int]$entry.ImageIndex
+                if (-not $bootIndexes.Contains($idx)) {
+                    $bootIndexes.Add($idx) | Out-Null
+                }
+            }
+            foreach ($idx in $bootIndexes) {
+                $reason = if ($idx -eq 2) {
+                    'Preferred Windows Setup image (boot.wim index 2), matching Microsoft media Dynamic Update workflow.'
+                } elseif ($idx -eq 1) {
+                    'Fallback WinPE image (boot.wim index 1).'
+                } else {
+                    'Additional boot.wim fallback index.'
+                }
+                $candidates.Add([pscustomobject]@{
+                    Label = 'boot.wim'
+                    Path = $bootWimPath
+                    Index = $idx
+                    SelectionReason = $reason
+                }) | Out-Null
+            }
+        }
+
+        if (Test-Path -LiteralPath $installWimPath -PathType Leaf) {
+            $installInventory = @(Get-WimIndexInventory -WimPath $installWimPath)
+            foreach ($entry in @($installInventory)) {
+                $candidates.Add([pscustomobject]@{
+                    Label = 'install.wim'
+                    Path = $installWimPath
+                    Index = [int]$entry.ImageIndex
+                    SelectionReason = 'Serviced install.wim fallback for media whose boot.wim cannot carry the PCA2023 _EX payload family.'
+                }) | Out-Null
+            }
+        }
+
+        if ($candidates.Count -eq 0) {
+            throw 'No boot.wim or install.wim source candidates are available for boot.stl synchronization.'
+        }
+
+        $tag = ('PCA2023STL{0}' -f ([System.Diagnostics.Process]::GetCurrentProcess().Id))
+        $mount = Join-Path $WorkRoot ('mnt_pca2023_bootstl_ro_{0}' -f $tag)
+        if (-not (Test-Path -LiteralPath $mount)) {
+            New-Item -ItemType Directory -Path $mount -Force | Out-Null
+        }
+
+        $selected = $null
+        $sourcePath = $null
+        foreach ($candidate in $candidates) {
+            $mounted = $false
+            try {
+                Write-Step ('Inspecting {0} idx {1} for authoritative boot.stl and complete PCA2023 staging...' -f $candidate.Label, $candidate.Index)
+                $null = Invoke-DismCmdlet -CommandName 'Mount-WindowsImage' -Parameters @{
+                    ImagePath = $candidate.Path
+                    Index = $candidate.Index
+                    Path = $mount
+                    ReadOnly = $true
+                    ErrorAction = 'Stop'
+                }
+                $mounted = $true
+
+                $efiEx = Join-Path $mount 'Windows\Boot\EFI_EX'
+                $fontsEx = Join-Path $mount 'Windows\Boot\FONTS_EX'
+                $dvdEx = Join-Path $mount 'Windows\Boot\DVD_EX'
+                $candidateBootStl = Join-Path $mount 'Windows\Boot\EFI\boot.stl'
+                $hasCompletePayload = (
+                    (Test-Path -LiteralPath $efiEx -PathType Container) -and
+                    (Test-Path -LiteralPath $fontsEx -PathType Container) -and
+                    (Test-Path -LiteralPath $dvdEx -PathType Container)
+                )
+                $hasBootStl = Test-Path -LiteralPath $candidateBootStl -PathType Leaf
+                $attempts.Add([pscustomobject][ordered]@{
+                    Wim = $candidate.Label
+                    WimPath = $candidate.Path
+                    Index = $candidate.Index
+                    HasCompletePca2023Payload = $hasCompletePayload
+                    HasBootStl = $hasBootStl
+                    Selected = [bool]($hasCompletePayload -and $hasBootStl)
+                }) | Out-Null
+
+                if ($hasCompletePayload -and $hasBootStl) {
+                    $selected = $candidate
+                    $sourcePath = $candidateBootStl
+
+                    $sourceItem = Get-Item -LiteralPath $sourcePath -ErrorAction Stop
+                    $sourceHash = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+                    $destination = $result.DestinationPath
+                    $destinationParent = Split-Path -Parent $destination
+                    if (-not (Test-Path -LiteralPath $destinationParent -PathType Container)) {
+                        New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
+                    }
+
+                    if (Test-Path -LiteralPath $destination -PathType Leaf) {
+                        $result.DestinationExistedBefore = $true
+                        $beforeItem = Get-Item -LiteralPath $destination -ErrorAction Stop
+                        $result.DestinationSizeBytesBefore = [int64]$beforeItem.Length
+                        $result.DestinationSha256Before = (Get-FileHash -LiteralPath $destination -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+                    }
+
+                    Copy-Item -LiteralPath $sourcePath -Destination $destination -Force -ErrorAction Stop
+
+                    $afterItem = Get-Item -LiteralPath $destination -ErrorAction Stop
+                    $afterHash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+
+                    $result.SourceWim = $candidate.Label
+                    $result.SourceWimPath = $candidate.Path
+                    $result.SourceIndex = [int]$candidate.Index
+                    $result.SourceBootStlPath = ('{0}::\Windows\Boot\EFI\boot.stl' -f $candidate.Path)
+                    $result.SourceSelectionReason = $candidate.SelectionReason
+                    $result.SourceSizeBytes = [int64]$sourceItem.Length
+                    $result.SourceSha256 = $sourceHash
+                    $result.DestinationSizeBytesAfter = [int64]$afterItem.Length
+                    $result.DestinationSha256After = $afterHash
+                    $result.Changed = [bool](
+                        -not $result.DestinationExistedBefore -or
+                        [int64]$result.DestinationSizeBytesBefore -ne [int64]$sourceItem.Length -or
+                        [string]$result.DestinationSha256Before -ne [string]$sourceHash
+                    )
+                    $result.MatchesSource = [bool](
+                        [int64]$afterItem.Length -eq [int64]$sourceItem.Length -and
+                        [string]$afterHash -eq [string]$sourceHash
+                    )
+                    if (-not $result.MatchesSource) {
+                        throw 'boot.stl destination identity does not match the selected serviced-image source after copy.'
+                    }
+
+                    $result.Success = $true
+                    break
+                }
+            } catch {
+                $attempts.Add([pscustomobject][ordered]@{
+                    Wim = $candidate.Label
+                    WimPath = $candidate.Path
+                    Index = $candidate.Index
+                    HasCompletePca2023Payload = $false
+                    HasBootStl = $false
+                    Selected = $false
+                    ErrorMessage = $_.Exception.Message
+                }) | Out-Null
+            } finally {
+                if ($mounted) {
+                    try {
+                        $null = Invoke-DismCmdlet -CommandName 'Dismount-WindowsImage' -Parameters @{
+                            Path = $mount
+                            Discard = $true
+                            ErrorAction = 'Stop'
+                        }
+                    } catch {
+                        $result.Success = $false
+                        $result.ErrorMessage = ('Failed to dismount boot.stl source candidate: {0}' -f $_.Exception.Message)
+                        $selected = $null
+                        throw
+                    }
+                }
+            }
+            if ($selected) { break }
+        }
+
+        if (-not $selected) {
+            throw 'No serviced WIM index contains both boot.stl and the complete EFI_EX/FONTS_EX/DVD_EX PCA2023 payload family.'
+        }
+    } catch {
+        $result.Success = $false
+        $result.ErrorMessage = $_.Exception.Message
+    } finally {
+        $result.CandidateAttempts = @($attempts.ToArray())
+        if ($mount -and (Test-Path -LiteralPath $mount)) {
+            try { Remove-Item -LiteralPath $mount -Recurse -Force -ErrorAction Stop } catch { $null = $_ }
+        }
+    }
+
+    return $result
+}
+
 function Convert-WimBootToPca2023Signed {
     <#
     .SYNOPSIS
@@ -16924,17 +17204,10 @@ function Convert-WimBootToPca2023Signed {
             $updated.Add($target) | Out-Null
         }
 
-        # --- 5. boot.stl (best-effort; not all SKUs include it) ---
-        $srcStl = Join-Path $mount 'Windows\Boot\EFI\boot.stl'
-        $dstStl = Join-Path $ExtractedMediaPath 'EFI\Microsoft\Boot\boot.stl'
-        if ((Test-Path -LiteralPath $srcStl) -and -not (Test-Path -LiteralPath $dstStl)) {
-            $dstStlDir = Split-Path -Parent $dstStl
-            if (-not (Test-Path -LiteralPath $dstStlDir)) {
-                New-Item -ItemType Directory -Path $dstStlDir -Force | Out-Null
-            }
-            Copy-Item -Path $srcStl -Destination $dstStl -Force -ErrorAction Stop
-            $updated.Add($dstStl) | Out-Null
-        }
+        # boot.stl is synchronized separately by
+        # Sync-Pca2023MediaBootStl after payload conversion.  That helper
+        # follows the serviced boot.wim index-2 media-update contract and
+        # always overwrites stale original-media content.
 
         $result.Success      = $true
         $result.FilesUpdated = @($updated)
@@ -20045,35 +20318,41 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
             Set-Content -LiteralPath (Join-Path $Script:MarkersDir 'P10.skipped') -Value 'prereq-critical: media below the 2024-4B floor; no conversion source' -Encoding UTF8
             return
         }
-        $repairIsoBootCatalog=$false
-        if ($pre.Health -eq 'Healthy') {
-            $expectedPcaBootImage=Join-Path $extractedPath 'efi\microsoft\boot\efisys_ex.bin'
-            if(-not $Script:SyntheticTestMode -and $Script:OutputIsoPath -and (Test-Path -LiteralPath $Script:OutputIsoPath -PathType Leaf)) {
-                $preCatalog=Get-IsoElToritoUefiBootImageEvidence -IsoPath $Script:OutputIsoPath -ExpectedImagePath $expectedPcaBootImage
+        $repairIsoBootCatalog = $false
+        $preCatalog = $null
+        $loosePca2023AlreadyHealthy = [bool]($pre.Health -eq 'Healthy')
+        if ($loosePca2023AlreadyHealthy) {
+            $expectedPcaBootImage = Join-Path $extractedPath 'efi\microsoft\boot\efisys_ex.bin'
+            if (-not $Script:SyntheticTestMode -and $Script:OutputIsoPath -and (Test-Path -LiteralPath $Script:OutputIsoPath -PathType Leaf)) {
+                $preCatalog = Get-IsoElToritoUefiBootImageEvidence -IsoPath $Script:OutputIsoPath -ExpectedImagePath $expectedPcaBootImage
                 Save-CanonicalJsonFile -InputObject $preCatalog -Path (Join-Path $Script:LogsDir 'P10_preexisting_el_torito_check.json') -Depth 12
-                if($preCatalog.Available -and $preCatalog.MatchesExpected) {
-                    Write-Step 'Skipped: extracted media and ISO El Torito UEFI entry are already PCA2023-consistent.'
-                    Set-Content -LiteralPath (Join-Path $Script:MarkersDir 'P10.skipped') -Value 'already-healthy: loose files and El Torito UEFI image are PCA2023-consistent' -Encoding UTF8
-                    return
+                if ($preCatalog.Available -and $preCatalog.MatchesExpected) {
+                    Write-Step 'Extracted media and the ISO El Torito UEFI entry are already PCA2023-consistent.'
+                } else {
+                    Write-Caution ('Extracted media is PCA2023-ready, but the output ISO boot catalog is stale or mismatched: {0}' -f $preCatalog.ErrorMessage)
+                    Write-Step 'P10 will rebuild the ISO with efisys_ex.bin as the El Torito UEFI boot image.'
+                    $repairIsoBootCatalog = $true
                 }
-                Write-Caution ('Extracted media is PCA2023-ready, but the output ISO boot catalog is stale or mismatched: {0}' -f $preCatalog.ErrorMessage)
-                Write-Step 'P10 will repair the ISO by rebuilding it with efisys_ex.bin as the El Torito UEFI boot image.'
-                $repairIsoBootCatalog=$true
             } else {
-                Write-Step 'Skipped: extracted media is already PCA2023-signed and there is no real output ISO requiring El Torito repair.'
-                Set-Content -LiteralPath (Join-Path $Script:MarkersDir 'P10.skipped') -Value 'already-healthy: bootx64.efi is already PCA2023-signed' -Encoding UTF8
-                return
+                Write-Step 'Extracted media is already PCA2023-signed; no real output ISO is available for pre-flight catalog comparison.'
             }
+            Write-Step 'PCA2023 loose-file conversion is not repeated, but boot.stl identity synchronization remains mandatory.'
+        } else {
+            Write-Step ('Pre-flight OK: Health={0}. Proceeding with PCA2023 payload conversion.' -f $pre.Health)
         }
-        if(-not $repairIsoBootCatalog){Write-Step ('Pre-flight OK: Health={0}. Proceeding with conversion.' -f $pre.Health)}
 
         # ---- Step 3: Run the conversion ----
         Write-SubSection 'Step 3: Convert boot manager to PCA2023 signing'
         Set-DebugStep -Step 'conversion'
         $convResult = $null
-        if($repairIsoBootCatalog) {
-            Write-Step 'PCA2023 file-copy conversion is not repeated; repairing only the ISO El Torito UEFI boot entry.'
-            $convResult=[pscustomobject]@{Success=$true;FilesUpdated=@();SourceWim='already-converted-tree';ErrorMessage=$null}
+        if ($loosePca2023AlreadyHealthy) {
+            Write-Step 'PCA2023 file-copy conversion is not repeated; the extracted tree already carries the PCA2023 payload family.'
+            $convResult = [pscustomobject]@{
+                Success = $true
+                FilesUpdated = @()
+                SourceWim = 'already-converted-tree'
+                ErrorMessage = $null
+            }
         } elseif ($Script:Pca2023ScriptPath) {
             Write-Step ('Using external script: {0}' -f $Script:Pca2023ScriptPath)
             if (-not (Test-Path -LiteralPath $Script:Pca2023ScriptPath)) {
@@ -20099,6 +20378,7 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
             $convResult = [pscustomobject]@{
                 Success      = $true
                 FilesUpdated = @('(handled by external script)')
+                SourceWim    = '(external script)'
                 ErrorMessage = $null
             }
         } else {
@@ -20119,6 +20399,31 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
         foreach ($f in $convResult.FilesUpdated) {
             Write-Step ('  - {0}' -f $f)
         }
+
+        # boot.stl is a version/architecture-bound Secure Boot validation
+        # asset.  Always synchronize it from the serviced image that carries
+        # the same PCA2023 payload family; never retain an original-media copy
+        # merely because the destination already exists.
+        Write-Step 'Synchronizing media boot.stl from the authoritative serviced-image source...'
+        Set-DebugStep -Step 'boot-stl-sync'
+        $bootStlSync = Sync-Pca2023MediaBootStl `
+            -ExtractedMediaPath $extractedPath `
+            -WorkRoot $Script:WorkRoot
+        $bootStlSyncPath = Join-Path $Script:LogsDir 'P10_boot_stl_sync.json'
+        Save-CanonicalJsonFile -InputObject $bootStlSync -Path $bootStlSyncPath -Depth 16
+        $Script:Pca2023BootStlSyncEvidence = $bootStlSync
+        if (-not ($bootStlSync.Success -and $bootStlSync.MatchesSource)) {
+            throw ('P10 boot.stl synchronization failed: {0}' -f $(if ($bootStlSync.ErrorMessage) { $bootStlSync.ErrorMessage } else { 'destination identity does not match the serviced-image source' }))
+        }
+        Write-Step ('boot.stl synchronized: source={0} index={1}; changed={2}; size={3}; sha256={4}' -f `
+            $bootStlSync.SourceWim, $bootStlSync.SourceIndex, $bootStlSync.Changed, `
+            $bootStlSync.SourceSizeBytes, $bootStlSync.SourceSha256)
+
+        $mediaRequiresRebuild = [bool](
+            -not $loosePca2023AlreadyHealthy -or
+            $repairIsoBootCatalog -or
+            $bootStlSync.Changed
+        )
 
         # ---- Step 4: Re-assemble ISO + post-flight verification ----
         Write-SubSection 'Step 4: Re-assemble ISO and post-flight verification'
@@ -20166,7 +20471,7 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
         Set-DebugStep -Step 'post-flight-output-check'
         Write-Step 'Running output-ISO PCA2023 readiness check (5 loose-file targets + El Torito UEFI image identity)...'
         $ocStart = Get-Date
-        $outputCheck = Test-OutputIsoPca2023Readiness -ExtractedMediaPath $extractedPath -ConversionSkipReason (Get-P10SkipReason) -OutputIsoPath $(if($Script:SyntheticTestMode){''}else{$Script:OutputIsoPath})
+        $outputCheck = Test-OutputIsoPca2023Readiness -ExtractedMediaPath $extractedPath -ConversionSkipReason (Get-P10SkipReason) -OutputIsoPath $(if($Script:SyntheticTestMode){''}else{$Script:OutputIsoPath}) -ExpectedBootStlEvidence $bootStlSync
         $ocElapsed = [int](New-TimeSpan -Start $ocStart -End (Get-Date)).TotalSeconds
         $post.OutputCheck = $outputCheck
         Write-Step ('Output ISO check OverallStatus = {0} (computed in {1}s)' -f $outputCheck.OverallStatus, $ocElapsed)
@@ -20714,6 +21019,8 @@ function Invoke-VerifyPhase11_StaticVerify {
         Set-DebugStep -Step 'iso-mount-verify'
         Write-SubSection 'Step 2: Mount output ISO and verify contents'
 
+        $bootStlIdentityEvidencePath = Join-Path $Script:LogsDir 'P11_boot_stl_identity.json'
+        $bootStlIdentityRowAdded = $false
         $img = $null
         $mountedDrive = $null
         try {
@@ -20748,6 +21055,87 @@ function Invoke-VerifyPhase11_StaticVerify {
             Write-Step ('install.wim present: {0}' -f $hasInst)
             Write-Step ('boot.wim present   : {0}' -f $hasBoot)
             Write-Step ('setup.exe present  : {0}' -f $hasSetup)
+
+            # boot.stl must be byte-identical to the authoritative serviced
+            # WIM source recorded by P10.  This closes the r12.60 gap where
+            # presence-only verification accepted an original-media boot.stl
+            # even though KB5099536 requires a version/architecture match.
+            if ($Script:SyntheticTestMode) {
+                Add-VRow -Check 'BootStlIdentity' -Expected 'real ISO only' -Actual 'SyntheticTestMode' -Status 'Pass' -Notes 'boot.stl binary identity verification is intentionally skipped for the synthetic CI ISO.'
+                $bootStlIdentityRowAdded = $true
+            } else {
+                $syncEvidencePath = Join-Path $Script:LogsDir 'P10_boot_stl_sync.json'
+                $syncEvidence = Read-ReleaseJsonFile -Path $syncEvidencePath
+                $isoBootStlPath = Join-Path $mountedDrive 'EFI\Microsoft\Boot\boot.stl'
+                $bootStlIdentity = [pscustomobject][ordered]@{
+                    SchemaVersion = 'pca2023-boot-stl-identity/1.0'
+                    GeneratedAtUtc = [datetime]::UtcNow.ToString('o')
+                    Available = $false
+                    Status = 'Fail'
+                    ErrorMessage = $null
+                    SyncEvidencePath = $syncEvidencePath
+                    SyncEvidenceSha256 = (Get-FileSha256OrEmpty -Path $syncEvidencePath)
+                    SourceWim = $null
+                    SourceIndex = $null
+                    ExpectedSizeBytes = $null
+                    ExpectedSha256 = $null
+                    IsoBootStlPath = $isoBootStlPath
+                    ObservedSizeBytes = $null
+                    ObservedSha256 = $null
+                    MatchesExpected = $false
+                }
+
+                if (-not $syncEvidence) {
+                    $bootStlIdentity.ErrorMessage = 'P10_boot_stl_sync.json is missing or unreadable.'
+                } elseif (-not ($syncEvidence.PSObject.Properties['Success'] -and $syncEvidence.Success -and $syncEvidence.PSObject.Properties['MatchesSource'] -and $syncEvidence.MatchesSource)) {
+                    $bootStlIdentity.ErrorMessage = 'P10 boot.stl synchronization evidence is not successful and identity-consistent.'
+                } elseif (-not (Test-Path -LiteralPath $isoBootStlPath -PathType Leaf)) {
+                    $bootStlIdentity.ErrorMessage = 'The final ISO does not contain EFI\Microsoft\Boot\boot.stl.'
+                } else {
+                    $isoBootStlItem = Get-Item -LiteralPath $isoBootStlPath -ErrorAction Stop
+                    $isoBootStlHash = (Get-FileHash -LiteralPath $isoBootStlPath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+                    $expectedBootStlHash = ([string]$syncEvidence.SourceSha256).ToLowerInvariant()
+                    $expectedBootStlSize = [int64]$syncEvidence.SourceSizeBytes
+
+                    $bootStlIdentity.SourceWim = $syncEvidence.SourceWim
+                    $bootStlIdentity.SourceIndex = [int]$syncEvidence.SourceIndex
+                    $bootStlIdentity.ExpectedSizeBytes = $expectedBootStlSize
+                    $bootStlIdentity.ExpectedSha256 = $expectedBootStlHash
+                    $bootStlIdentity.ObservedSizeBytes = [int64]$isoBootStlItem.Length
+                    $bootStlIdentity.ObservedSha256 = $isoBootStlHash
+                    $bootStlIdentity.Available = $true
+                    $bootStlIdentity.MatchesExpected = [bool](
+                        [int64]$isoBootStlItem.Length -eq $expectedBootStlSize -and
+                        [string]$isoBootStlHash -eq [string]$expectedBootStlHash
+                    )
+                    if ($bootStlIdentity.MatchesExpected) {
+                        $bootStlIdentity.Status = 'Pass'
+                    } else {
+                        $bootStlIdentity.ErrorMessage = 'The final ISO boot.stl does not match the authoritative serviced-image source.'
+                    }
+                }
+
+                Save-CanonicalJsonFile -InputObject $bootStlIdentity -Path $bootStlIdentityEvidencePath -Depth 12
+                $bootStlActual = if ($bootStlIdentity.Available) {
+                    ('size={0}; sha256={1}' -f $bootStlIdentity.ObservedSizeBytes, $bootStlIdentity.ObservedSha256)
+                } else {
+                    'unavailable'
+                }
+                $bootStlExpected = if ($syncEvidence -and $syncEvidence.SourceSha256) {
+                    ('{0} index {1}; size={2}; sha256={3}' -f $syncEvidence.SourceWim, $syncEvidence.SourceIndex, $syncEvidence.SourceSizeBytes, $syncEvidence.SourceSha256)
+                } else {
+                    'successful P10 serviced-image identity evidence'
+                }
+                Add-VRow -Check 'BootStlIdentity' -Expected $bootStlExpected -Actual $bootStlActual `
+                    -Status $(if ($bootStlIdentity.MatchesExpected) { 'Pass' } else { 'Fail' }) `
+                    -Notes $(if ($bootStlIdentity.MatchesExpected) { 'Final ISO boot.stl is byte-identical to the serviced-image source.' } else { $bootStlIdentity.ErrorMessage })
+                $bootStlIdentityRowAdded = $true
+                if ($bootStlIdentity.MatchesExpected) {
+                    Write-Ok 'Final ISO boot.stl is byte-identical to the authoritative serviced-image source.'
+                } else {
+                    Write-Fail ('Final ISO boot.stl identity verification failed: {0}' -f $bootStlIdentity.ErrorMessage)
+                }
+            }
 
             # install.wim edition-selection display metadata (CREATIONTIME).
             # P07 is the write-time transaction boundary. P08 subsequently
@@ -20956,6 +21344,19 @@ function Invoke-VerifyPhase11_StaticVerify {
                     Write-Step ('{0}.wim ISO/extracted SHA-256: {1}' -f $pair.Name, $(if ($hIso -eq $hExt) { 'match' } else { 'MISMATCH' }))
                 }
             }
+        }
+        if (-not $bootStlIdentityRowAdded) {
+            Add-VRow -Check 'BootStlIdentity' -Expected 'final ISO mounted and boot.stl matches serviced-image source' -Actual 'ISO mount unavailable' -Status 'Fail' -Notes 'The final ISO could not be mounted for boot.stl identity verification.'
+            $bootStlIdentity = [pscustomobject][ordered]@{
+                SchemaVersion = 'pca2023-boot-stl-identity/1.0'
+                GeneratedAtUtc = [datetime]::UtcNow.ToString('o')
+                Available = $false
+                Status = 'Fail'
+                ErrorMessage = 'The final ISO could not be mounted for boot.stl identity verification.'
+                IsoPath = $Script:OutputIsoPath
+                MatchesExpected = $false
+            }
+            Save-CanonicalJsonFile -InputObject $bootStlIdentity -Path $bootStlIdentityEvidencePath -Depth 12
         }
         if ($img) {
             try { Dismount-DiskImage -ImagePath $Script:OutputIsoPath -ErrorAction SilentlyContinue | Out-Null } catch { $null = $_ }
@@ -21242,6 +21643,8 @@ function Invoke-VerifyPhase11_StaticVerify {
             InstallWimDisplayMetadataSha256=(Get-FileSha256OrEmpty -Path (Join-Path $Script:LogsDir 'P07_installwim_display_metadata_after.json'))
             UefiElToritoEvidencePath=$(if($Script:SyntheticTestMode){''}else{$elToritoEvidencePath})
             UefiElToritoEvidenceSha256=$(if($Script:SyntheticTestMode){''}else{Get-FileSha256OrEmpty -Path $elToritoEvidencePath})
+            BootStlIdentityEvidencePath=$(if($Script:SyntheticTestMode){''}else{$bootStlIdentityEvidencePath})
+            BootStlIdentityEvidenceSha256=$(if($Script:SyntheticTestMode){''}else{Get-FileSha256OrEmpty -Path $bootStlIdentityEvidencePath})
             RowCount=$rows.Count
             FailureCount=0
             PolicyExceptionCount=$policyExceptionRows.Count
@@ -21318,8 +21721,12 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
         # block is idempotent regardless of whether P10 ran.
         Set-DebugStep -Step 'output-check'
         Write-Step 'Running output-ISO PCA2023 readiness check (5 loose-file targets + El Torito UEFI image identity)...'
+        $bootStlSyncEvidence = $Script:Pca2023BootStlSyncEvidence
+        if (-not $bootStlSyncEvidence) {
+            $bootStlSyncEvidence = Read-ReleaseJsonFile -Path (Join-Path $Script:LogsDir 'P10_boot_stl_sync.json')
+        }
         $ocStart = Get-Date
-        $outputCheck = Test-OutputIsoPca2023Readiness -ExtractedMediaPath $extractedPath -ConversionSkipReason (Get-P10SkipReason) -OutputIsoPath $(if($Script:SyntheticTestMode){''}else{$Script:OutputIsoPath})
+        $outputCheck = Test-OutputIsoPca2023Readiness -ExtractedMediaPath $extractedPath -ConversionSkipReason (Get-P10SkipReason) -OutputIsoPath $(if($Script:SyntheticTestMode){''}else{$Script:OutputIsoPath}) -ExpectedBootStlEvidence $bootStlSyncEvidence
         $ocElapsed = [int](New-TimeSpan -Start $ocStart -End (Get-Date)).TotalSeconds
         $snapshot.OutputCheck = $outputCheck  # psa-disable-line PSA2009 -- $snapshot is returned by Get-OrEnsurePca2023Snapshot, which initialises OutputCheck = $null in its [pscustomobject]@{...} return; flow-insensitive analysis cannot trace this.
         Write-Step ('Output ISO check OverallStatus = {0} (computed in {1}s; {2} targets inspected)' -f `

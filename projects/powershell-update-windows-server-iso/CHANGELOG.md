@@ -22,6 +22,37 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.02-r12.61] - 2026-08-07
+
+Tag retained: `setupdu-baseline-language-preservation`.
+
+### Added
+
+- **`boot.stl` becomes PCA2023 conversion target #5**: Microsoft
+  documents `EFI\Microsoft\Boot\boot.stl` as a required Secure Boot
+  validation input for refreshed installation media, and an
+  original-media copy left in place can still fail boot with
+  `0xc0430001` even after the four r12.5x targets are converted. A
+  new `Sync-Pca2023MediaBootStl` step refreshes the file from the
+  serviced image, and P11 gains Target #5 rows that prove
+  byte-identity against the authoritative serviced-image source —
+  presence alone is explicitly NOT an acceptable gate, and a present
+  file without identity evidence is reported as unproven rather than
+  passed. Script-only change (+407 lines); `data/*` and `schema/*`
+  are byte-identical to r12.60.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.02-r12.61`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 5E/161W/12I (raw sweep
+  5E/162W/12I: +1W is the PSA7002 LF artefact; +15W on the new sync
+  and verification code, declared series debt). Snapshot form: BOM + LF; committed checkout form BOM+CRLF.
+
 ## [update-wsi-2026.08.02-r12.60] - 2026-08-07
 
 Tag retained: `setupdu-baseline-language-preservation`.
