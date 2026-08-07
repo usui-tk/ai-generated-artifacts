@@ -22,6 +22,43 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.02-r12.62] - 2026-08-07
+
+Tag: `winpe-final-media-sync`.
+
+### Added
+
+- **The Microsoft final WinPE-to-media contract is implemented after
+  Setup DU**: once every `boot.wim` index has been serviced and
+  committed, the media Dynamic Update sequence requires the serviced
+  WinPE payload to be carried onto the final media — not only inside
+  the WIM. The revision adds `Export-BootWimCompressed` (rebuilds
+  `boot.wim` by exporting every index in original order to a fresh
+  `/Compress:max` WIM, with index-count and metadata comparison, the
+  original left untouched on any failure — the documented step-25
+  export), `Sync-ServicedWinPeMediaFiles` +
+  `New-WinPeMediaSyncRecord` (root-invariant final media sync with
+  per-file records), and `Test-FinalWinPeMediaIdentity` (the complete
+  final-ISO identity surface is verified before release assessment).
+  WinPE/WinRE component cleanup uses `/ResetBase /Defer` per the
+  media-servicing guidance. Script-only change (+663 lines);
+  `data/*` and `schema/*` are byte-identical to r12.61.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.02-r12.62`
+  with the measured tag `winpe-final-media-sync` (first tag change
+  since r12.55). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 5E/182W/12I (raw sweep
+  5E/183W/12I: +1W is the PSA7002 LF artefact; +21W on the new
+  export/sync/verification code, declared series debt). Snapshot
+  form: BOM + LF; committed checkout form
+  BOM+CRLF.
+
 ## [update-wsi-2026.08.02-r12.61] - 2026-08-07
 
 Tag retained: `setupdu-baseline-language-preservation`.

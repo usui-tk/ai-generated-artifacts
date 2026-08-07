@@ -718,14 +718,15 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.02-r12.61'
+$Script:ScriptVersion = 'update-wsi-2026.08.02-r12.62'
+# Validation marker: r12.62 implements the Microsoft media Dynamic Update final WinPE-to-media contract after Setup DU, exports the serviced boot.wim, uses /ResetBase /Defer for WinPE/WinRE cleanup, and verifies the complete final ISO identity surface before release assessment.
 # Validation marker: r12.60 accepts the UEFI-defined El Torito Sector Count 0/1 end-of-media sentinel and proves efisys_ex.bin identity by hashing its expected byte length from the catalog Load RBA.
 # r12.59 incorrectly treated Sector Count 1 as a literal 512-byte extent and rejected standards-compliant oscdimg output before hashing the embedded EFI system partition.
 # r12.59 retained: Int64-safe parsing for ISO files larger than 2 GiB and P10 fail-closed post-flight verification.
 # r12.58 selected efisys_ex.bin correctly but its verification parser bound Math.Min to Int32 on an 8.91-GiB ISO and returned a false failure.
 # r12.57 proved only loose-file presence/signatures and could therefore accept a non-bootable mixed PCA2011/PCA2023 ISO.
 # Validation marker retained: r12.55 Setup DU baseline-language preservation and P11 no-new-locale verification.
-$Script:ScriptTag     = 'setupdu-baseline-language-preservation'
+$Script:ScriptTag     = 'winpe-final-media-sync'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -7434,11 +7435,17 @@ function Get-DismCleanupArgumentList {
     param(
         [Parameter(Mandatory)] [string]$MountPath,
         [switch]$IncludeResetBase,
+        [switch]$IncludeDefer,
         [string]$ScratchDir
     )
     $vector = @("/Image:$MountPath", '/Cleanup-Image', '/StartComponentCleanup')
     if ($IncludeResetBase) {
         $vector += '/ResetBase'
+        if ($IncludeDefer) {
+            $vector += '/Defer'
+        }
+    } elseif ($IncludeDefer) {
+        throw '/Defer is valid only with /ResetBase in this media-refresh contract.'
     }
     if (-not [string]::IsNullOrEmpty($ScratchDir)) {
         $vector += "/ScratchDir:$ScratchDir"
@@ -7462,9 +7469,15 @@ function Invoke-DismCleanup {
         temp I/O under the work area.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory)] [string]$MountPath)
+    param(
+        [Parameter(Mandatory)] [string]$MountPath,
+        [switch]$Defer
+    )
     Set-DebugStep -Step 'dism-cleanup-image'
-    $dismArgs = Get-DismCleanupArgumentList -MountPath $MountPath -IncludeResetBase:$Script:ResetBaseOnCleanup -ScratchDir $Script:ScratchDir
+    $dismArgs = Get-DismCleanupArgumentList -MountPath $MountPath `
+        -IncludeResetBase:$Script:ResetBaseOnCleanup `
+        -IncludeDefer:($Defer -and $Script:ResetBaseOnCleanup) `
+        -ScratchDir $Script:ScratchDir
     $code = Invoke-DismCli -Arguments $dismArgs -Context 'cleanup-image'
     if ($code -ne 0) {
         throw ('dism.exe /Cleanup-Image failed with exit code {0}' -f $code)
@@ -9403,6 +9416,111 @@ function Export-InstallWimCompressed {
     $savedPct = if ($origBytes -gt 0) { [Math]::Round((1 - ($newBytes / $origBytes)) * 100, 1) } else { 0 }
     Write-Ok ('install.wim recompressed: {0:N0} -> {1:N0} bytes ({2}% smaller).' -f $origBytes, $newBytes, $savedPct)
 }
+
+
+function Export-BootWimCompressed {
+    <#
+    .SYNOPSIS
+        Rebuilds serviced boot.wim by exporting every index in original order.
+
+    .DESCRIPTION
+        Implements Microsoft media Dynamic Update step 25 after all boot.wim
+        indexes have been serviced and committed. The destination is built as
+        a fresh WIM with /Compress:max. Index count, index order, names,
+        descriptions, flags, and versions are compared before replacement.
+        The original boot.wim is left untouched on any failure.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$WimPath,
+        [string]$EvidenceOrigin = 'P08PostServicing'
+    )
+
+    $before = @(Get-WimIndexInventory -WimPath $WimPath | Sort-Object ImageIndex)
+    if ($before.Count -lt 1) {
+        throw ('boot.wim reports no indexes; cannot export: {0}' -f $WimPath)
+    }
+    $beforeHash = (Get-FileHash -LiteralPath $WimPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $beforeBytes = [int64](Get-Item -LiteralPath $WimPath).Length
+    $exported = $WimPath + '.exported.wim'
+    if (Test-Path -LiteralPath $exported) {
+        Remove-Item -LiteralPath $exported -Force
+    }
+
+    try {
+        foreach ($image in $before) {
+            Set-DebugStep -Step ('export-boot-idx-' + $image.ImageIndex)
+            $args = Get-DismExportArgumentList -SourceWim $WimPath `
+                -SourceIndex ([int]$image.ImageIndex) `
+                -DestinationWim $exported `
+                -ScratchDir $Script:ScratchDir
+            $code = Invoke-DismCli -Arguments $args -Context ('export-boot-image-idx' + $image.ImageIndex)
+            if ($code -ne 0) {
+                throw ('dism.exe /Export-Image failed for boot.wim index {0} with exit code {1}.' -f $image.ImageIndex,$code)
+            }
+        }
+
+        $after = @(Get-WimIndexInventory -WimPath $exported | Sort-Object ImageIndex)
+        if ($after.Count -ne $before.Count) {
+            throw ('boot.wim export index-count mismatch: source={0}; exported={1}.' -f $before.Count,$after.Count)
+        }
+
+        $comparisons = [System.Collections.Generic.List[object]]::new()
+        for ($i = 0; $i -lt $before.Count; $i++) {
+            $source = $before[$i]
+            $dest = $after[$i]
+            $issues = [System.Collections.Generic.List[string]]::new()
+            if ([int]$source.ImageIndex -ne [int]$dest.ImageIndex) {
+                $issues.Add('ImageIndex') | Out-Null
+            }
+            foreach ($field in @('ImageName','ImageDescription','ImageFlags','Version','Architecture')) {
+                if ($source.PSObject.Properties[$field] -and $dest.PSObject.Properties[$field]) {
+                    if ([string]$source.$field -ne [string]$dest.$field) {
+                        $issues.Add($field) | Out-Null
+                    }
+                }
+            }
+            $comparisons.Add([pscustomobject][ordered]@{
+                SourceIndex = [int]$source.ImageIndex
+                ExportedIndex = [int]$dest.ImageIndex
+                SourceName = $(if($source.PSObject.Properties['ImageName']){[string]$source.ImageName}else{''})
+                ExportedName = $(if($dest.PSObject.Properties['ImageName']){[string]$dest.ImageName}else{''})
+                SourceVersion = $(if($source.PSObject.Properties['Version']){[string]$source.Version}else{''})
+                ExportedVersion = $(if($dest.PSObject.Properties['Version']){[string]$dest.Version}else{''})
+                Matches = [bool]($issues.Count -eq 0)
+                Mismatches = $issues.ToArray()
+            }) | Out-Null
+        }
+        $failed = @($comparisons.ToArray() | Where-Object { -not $_.Matches })
+        if ($failed.Count -gt 0) {
+            throw ('boot.wim export metadata comparison failed for {0} index(es).' -f $failed.Count)
+        }
+
+        $afterHash = (Get-FileHash -LiteralPath $exported -Algorithm SHA256).Hash.ToLowerInvariant()
+        $afterBytes = [int64](Get-Item -LiteralPath $exported).Length
+        Remove-Item -LiteralPath $WimPath -Force
+        Move-Item -LiteralPath $exported -Destination $WimPath -Force
+
+        return [pscustomobject][ordered]@{
+            SchemaVersion = 'boot-wim-export/1.0'
+            GeneratedAtUtc = [datetime]::UtcNow.ToString('o')
+            Success = $true
+            EvidenceOrigin = $EvidenceOrigin
+            WimPath = $WimPath
+            IndexCount = $before.Count
+            SourceSizeBytes = $beforeBytes
+            SourceSha256 = $beforeHash
+            ExportedSizeBytes = $afterBytes
+            ExportedSha256 = $afterHash
+            IndexComparisons = $comparisons.ToArray()
+        }
+    } catch {
+        Remove-Item -LiteralPath $exported -Force -ErrorAction SilentlyContinue
+        throw
+    }
+}
+
 
 function Export-WinReRecoveryCompressed {
     [CmdletBinding()]
@@ -19663,7 +19781,7 @@ function Invoke-BuildPhase08_PatchBootWim {
 
                     foreach ($sp in $bootSequence) {
                         if ($sp.PSObject.Properties['IsCleanupMarker'] -and $sp.IsCleanupMarker) {
-                            Invoke-DismCleanup -MountPath $mountDir
+                            Invoke-DismCleanup -MountPath $mountDir -Defer
                             continue
                         }
                         Invoke-PatchSubPhase -SubPhase $sp -MountPath $mountDir -ImageLabel $imgLabel | Out-Null
@@ -19730,6 +19848,23 @@ function Invoke-BuildPhase08_PatchBootWim {
         }
         }
 
+
+        # Microsoft media Dynamic Update step 25: after all WinPE indexes
+        # have been serviced and committed, rebuild boot.wim by exporting
+        # every index into a fresh WIM. A source-preservation policy
+        # exception or BootWimLcuPolicy=disabled must keep the original WIM
+        # byte-for-byte and therefore bypass this export.
+        if ($Script:Execute -and -not $Script:SyntheticTestMode -and
+            $bootPolicy -ne 'disabled' -and -not $bootPolicyException) {
+            Set-DebugStep -Step 'export-boot-wim'
+            Write-Step 'Exporting all serviced boot.wim indexes to a fresh /Compress:max WIM.'
+            $bootExportEvidence = Export-BootWimCompressed -WimPath $bootWim -EvidenceOrigin 'P08PostServicing'
+            $bootExportEvidencePath = Join-Path $Script:LogsDir 'P08_bootwim_export.json'
+            Save-CanonicalJsonFile -InputObject $bootExportEvidence -Path $bootExportEvidencePath -Depth 16
+            Write-Ok ('boot.wim export completed: indexes={0}; size={1}->{2}; evidence={3}' -f `
+                $bootExportEvidence.IndexCount,$bootExportEvidence.SourceSizeBytes,$bootExportEvidence.ExportedSizeBytes,$bootExportEvidencePath)
+        }
+
         # winre.wim: service once, then copy the identical result to every
         # selected install.wim index. This prevents Standard/Datacenter or
         # Core/Desktop indexes from retaining the source-media WinRE.
@@ -19766,7 +19901,7 @@ function Invoke-BuildPhase08_PatchBootWim {
                     Test-PatchServicingReadinessOnMount -MountPath $Script:MountWinReDir -PatchesToApply $allWinRePatches -ImageLabel 'winre.wim' | Out-Null
                     foreach ($sp in $winReSequence) {
                         if ($sp.PSObject.Properties['IsCleanupMarker'] -and $sp.IsCleanupMarker) {
-                            Invoke-DismCleanup -MountPath $Script:MountWinReDir
+                            Invoke-DismCleanup -MountPath $Script:MountWinReDir -Defer
                             continue
                         }
                         Invoke-PatchSubPhase -SubPhase $sp -MountPath $Script:MountWinReDir -ImageLabel 'winre.wim' | Out-Null
@@ -20103,6 +20238,415 @@ function Invoke-BuildPhase08S_SyncSetupBinaries { # psa-disable-line PSA6003 -- 
     }
 }
 
+
+# ============================================================
+# Microsoft media Dynamic Update final WinPE-to-media synchronization
+# ============================================================
+
+function Get-PathRelativeToRootInvariant {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)] [string]$RootPath,
+        [Parameter(Mandatory)] [string]$FullPath
+    )
+    $root = [System.IO.Path]::GetFullPath($RootPath).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    ) + [System.IO.Path]::DirectorySeparatorChar
+    $full = [System.IO.Path]::GetFullPath($FullPath)
+    if (-not $full.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw ('Path is outside the requested root. Root={0}; Path={1}' -f $root,$full)
+    }
+    return $full.Substring($root.Length).Replace(
+        [System.IO.Path]::AltDirectorySeparatorChar,
+        [System.IO.Path]::DirectorySeparatorChar
+    )
+}
+
+function New-WinPeMediaSyncRecord {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$RelativePath,
+        [Parameter(Mandatory)] [string]$Category,
+        [Parameter(Mandatory)] [string]$SourceRole,
+        [Parameter(Mandatory)] [pscustomobject]$Source,
+        [Parameter(Mandatory)] [pscustomobject]$Before,
+        [Parameter(Mandatory)] [pscustomobject]$After,
+        [Parameter(Mandatory)] [string]$Action,
+        [Parameter(Mandatory)] [bool]$Required,
+        [string]$ErrorMessage = ''
+    )
+    $matches = [bool](
+        $Source.Present -and
+        $After.Present -and
+        [string]$Source.Sha256 -eq [string]$After.Sha256 -and
+        [int64]$Source.SizeBytes -eq [int64]$After.SizeBytes
+    )
+    return [pscustomobject][ordered]@{
+        RelativePath       = $RelativePath
+        Category           = $Category
+        SourceRole         = $SourceRole
+        Required           = $Required
+        Action             = $Action
+        Success            = [bool]($matches -or -not $Required)
+        ErrorMessage       = $ErrorMessage
+        SourcePath         = $Source.Path
+        SourceSizeBytes    = $Source.SizeBytes
+        SourceFileVersion  = $(if($Source.PSObject.Properties['FileVersion']){[string]$Source.FileVersion}else{''})
+        SourceSha256       = $Source.Sha256
+        BeforePresent      = $Before.Present
+        BeforeSizeBytes    = $Before.SizeBytes
+        BeforeFileVersion  = $(if($Before.PSObject.Properties['FileVersion']){[string]$Before.FileVersion}else{''})
+        BeforeSha256       = $Before.Sha256
+        AfterPresent       = $After.Present
+        AfterSizeBytes     = $After.SizeBytes
+        AfterFileVersion   = $(if($After.PSObject.Properties['FileVersion']){[string]$After.FileVersion}else{''})
+        AfterSha256        = $After.Sha256
+        MatchesSource      = $matches
+    }
+}
+
+function Sync-ServicedWinPeMediaFiles {
+    <#
+    .SYNOPSIS
+        Implements Microsoft media Dynamic Update steps 27 and 28 after the
+        Setup DU overlay.
+
+    .DESCRIPTION
+        Mounts the final serviced boot.wim index 2 read-only and treats it as
+        the authority for:
+          * sources\setup.exe
+          * sources\setuphost.exe on image build 26100+
+          * Windows\Boot\EFI\bootmgfw.efi
+          * Windows\Boot\EFI\bootmgr.efi
+          * Windows\Boot\EFI\boot.stl
+
+        It then performs the Microsoft-documented final media sweep:
+          * bootmgfw.efi, bootx64.efi, bootia32.efi, bootaa64.efi
+            receive the serviced bootmgfw.efi
+          * bootmgr.efi receives the serviced bootmgr.efi
+          * EFI\Microsoft\Boot\boot.stl is created or overwritten
+          * Setup binaries are created or overwritten after Setup DU
+
+        The later P10 PCA2023 overlay intentionally replaces only the UEFI
+        critical path and root bootmgr.efi with the matching _EX payloads.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$ExtractedMediaPath,
+        [Parameter(Mandatory)] [string]$WorkRoot
+    )
+
+    $bootWim = Join-Path $ExtractedMediaPath 'sources\boot.wim'
+    $result = [pscustomobject][ordered]@{
+        SchemaVersion                   = 'winpe-media-final-sync/1.0'
+        GeneratedAtUtc                  = [datetime]::UtcNow.ToString('o')
+        Success                         = $false
+        ErrorMessage                    = $null
+        BootWimPath                     = $bootWim
+        SourceIndex                     = 2
+        SourceImageVersion              = $null
+        SetupHostRequired               = $false
+        StandardBootManagerTargetCount  = 0
+        RequiredRecordCount             = 0
+        FailureCount                    = 0
+        Records                         = @()
+    }
+
+    if (-not (Test-Path -LiteralPath $bootWim -PathType Leaf)) {
+        $result.ErrorMessage = ('boot.wim not found: {0}' -f $bootWim)
+        return $result
+    }
+
+    $mountDir = Join-Path $WorkRoot 'work\p09_winpe_media_sync_mount'
+    if (Test-Path -LiteralPath $mountDir) {
+        Remove-Item -LiteralPath $mountDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    New-Item -ItemType Directory -Path $mountDir -Force | Out-Null
+
+    $records = [System.Collections.Generic.List[object]]::new()
+    $mounted = $false
+    try {
+        $imageInfo = Invoke-DismCmdlet -CommandName 'Get-WindowsImage' -Parameters @{
+            ImagePath = $bootWim
+            Index = 2
+            ErrorAction = 'Stop'
+        }
+        if (-not $imageInfo -or -not $imageInfo.Version) {
+            throw 'boot.wim index 2 version could not be resolved.'
+        }
+        $imageVersion = [version][string]$imageInfo.Version
+        $result.SourceImageVersion = [string]$imageInfo.Version
+        $result.SetupHostRequired = [bool]($imageVersion -ge [version]'10.0.26100.0')
+
+        $null = Invoke-DismCmdlet -CommandName 'Mount-WindowsImage' -Parameters @{
+            ImagePath = $bootWim
+            Index = 2
+            Path = $mountDir
+            ReadOnly = $true
+            ErrorAction = 'Stop'
+            LogPath = (Join-Path $Script:LogsDir 'p09_winpe_media_sync_mount.log')
+        }
+        $mounted = $true
+
+        $sources = [ordered]@{
+            SetupExe = Get-SetupBinaryFileEvidence -Path (Join-Path $mountDir 'sources\setup.exe')
+            SetupHostExe = Get-SetupBinaryFileEvidence -Path (Join-Path $mountDir 'sources\setuphost.exe')
+            BootMgfw = Get-SetupBinaryFileEvidence -Path (Join-Path $mountDir 'Windows\Boot\EFI\bootmgfw.efi')
+            BootMgr = Get-SetupBinaryFileEvidence -Path (Join-Path $mountDir 'Windows\Boot\EFI\bootmgr.efi')
+            BootStl = Get-SetupBinaryFileEvidence -Path (Join-Path $mountDir 'Windows\Boot\EFI\boot.stl')
+        }
+
+        foreach ($requiredName in @('SetupExe','BootMgfw','BootMgr','BootStl')) {
+            if (-not $sources[$requiredName].Present) {
+                throw ('Required boot.wim index 2 source is missing: {0}' -f $requiredName)
+            }
+        }
+        if ($result.SetupHostRequired -and -not $sources.SetupHostExe.Present) {
+            throw ('boot.wim index 2 build {0} requires sources\setuphost.exe, but it is missing.' -f $result.SourceImageVersion)
+        }
+
+        $targets = [System.Collections.Generic.List[object]]::new()
+        $targets.Add([pscustomobject]@{
+            RelativePath = 'sources\setup.exe'
+            Category = 'SetupBinary'
+            SourceRole = 'boot.wim index 2 sources\setup.exe'
+            Source = $sources.SetupExe
+            Required = $true
+        }) | Out-Null
+        if ($sources.SetupHostExe.Present) {
+            $targets.Add([pscustomobject]@{
+                RelativePath = 'sources\setuphost.exe'
+                Category = 'SetupBinary'
+                SourceRole = 'boot.wim index 2 sources\setuphost.exe'
+                Source = $sources.SetupHostExe
+                Required = [bool]$result.SetupHostRequired
+            }) | Out-Null
+        }
+
+        $mediaBootFiles = @(Get-ChildItem -LiteralPath $ExtractedMediaPath -Force -Recurse -File -Filter 'b*.efi' -ErrorAction Stop |
+            Sort-Object FullName)
+        foreach ($file in $mediaBootFiles) {
+            $leaf = [string]$file.Name
+            $source = $null
+            $role = ''
+            if ($leaf -in @('bootmgfw.efi','bootx64.efi','bootia32.efi','bootaa64.efi')) {
+                $source = $sources.BootMgfw
+                $role = 'boot.wim index 2 Windows\Boot\EFI\bootmgfw.efi'
+            } elseif ($leaf -ieq 'bootmgr.efi') {
+                $source = $sources.BootMgr
+                $role = 'boot.wim index 2 Windows\Boot\EFI\bootmgr.efi'
+            }
+            if (-not $source) { continue }
+            $targets.Add([pscustomobject]@{
+                RelativePath = Get-PathRelativeToRootInvariant -RootPath $ExtractedMediaPath -FullPath $file.FullName
+                Category = 'StandardBootManager'
+                SourceRole = $role
+                Source = $source
+                Required = $true
+            }) | Out-Null
+        }
+
+        $criticalPath = Join-Path $ExtractedMediaPath 'EFI\Boot\bootx64.efi'
+        if (-not (Test-Path -LiteralPath $criticalPath -PathType Leaf)) {
+            throw ('Required x64 UEFI media boot path is missing before synchronization: {0}' -f $criticalPath)
+        }
+
+        $targets.Add([pscustomobject]@{
+            RelativePath = 'EFI\Microsoft\Boot\boot.stl'
+            Category = 'SecureBootTrustList'
+            SourceRole = 'boot.wim index 2 Windows\Boot\EFI\boot.stl'
+            Source = $sources.BootStl
+            Required = $true
+        }) | Out-Null
+
+        # De-duplicate path aliases while keeping deterministic order.
+        $seen = @{}
+        $uniqueTargets = [System.Collections.Generic.List[object]]::new()
+        foreach ($target in @($targets.ToArray() | Sort-Object RelativePath)) {
+            $key = ([string]$target.RelativePath).ToLowerInvariant()
+            if ($seen.ContainsKey($key)) { continue }
+            $seen[$key] = $true
+            $uniqueTargets.Add($target) | Out-Null
+        }
+
+        foreach ($target in $uniqueTargets) {
+            $destination = Join-Path $ExtractedMediaPath ([string]$target.RelativePath)
+            $parent = Split-Path -Parent $destination
+            if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+                New-Item -ItemType Directory -Path $parent -Force | Out-Null
+            }
+
+            $before = Get-SetupBinaryFileEvidence -Path $destination
+            $action = 'already-identical'
+            $errorMessage = ''
+            if (-not ($before.Present -and $before.Sha256 -eq $target.Source.Sha256 -and [int64]$before.SizeBytes -eq [int64]$target.Source.SizeBytes)) {
+                $action = 'copied'
+                if ($before.Present) {
+                    $item = Get-Item -LiteralPath $destination -ErrorAction Stop
+                    if ($item.IsReadOnly) { $item.IsReadOnly = $false }
+                }
+                try {
+                    Copy-Item -LiteralPath $target.Source.Path -Destination $destination -Force -ErrorAction Stop
+                } catch {
+                    $action = 'copy-failed'
+                    $errorMessage = [string]$_.Exception.Message
+                }
+            }
+            $after = Get-SetupBinaryFileEvidence -Path $destination
+            $record = New-WinPeMediaSyncRecord -RelativePath $target.RelativePath `
+                -Category $target.Category -SourceRole $target.SourceRole `
+                -Source $target.Source -Before $before -After $after `
+                -Action $action -Required ([bool]$target.Required) -ErrorMessage $errorMessage
+            $records.Add($record) | Out-Null
+        }
+
+        $result.Records = $records.ToArray()
+        $result.StandardBootManagerTargetCount = @($result.Records | Where-Object { $_.Category -eq 'StandardBootManager' }).Count
+        $result.RequiredRecordCount = @($result.Records | Where-Object { $_.Required }).Count
+        $result.FailureCount = @($result.Records | Where-Object { $_.Required -and -not $_.MatchesSource }).Count
+        if ($result.StandardBootManagerTargetCount -lt 1) {
+            throw 'No standard boot-manager target was discovered in the extracted media.'
+        }
+        if ($result.FailureCount -gt 0) {
+            throw ('{0} required WinPE-to-media synchronization record(s) failed identity verification.' -f $result.FailureCount)
+        }
+        $result.Success = $true
+    } catch {
+        $result.ErrorMessage = [string]$_.Exception.Message
+        $result.Records = $records.ToArray()
+        $result.FailureCount = @($result.Records | Where-Object { $_.Required -and -not $_.MatchesSource }).Count
+    } finally {
+        if ($mounted) {
+            try {
+                $null = Invoke-DismCmdlet -CommandName 'Dismount-WindowsImage' -Parameters @{
+                    Path = $mountDir
+                    Discard = $true
+                    ErrorAction = 'Stop'
+                }
+            } catch {
+                if ([string]::IsNullOrWhiteSpace([string]$result.ErrorMessage)) {
+                    $result.ErrorMessage = ('Failed to dismount boot.wim index 2 after media synchronization: {0}' -f $_.Exception.Message)
+                    $result.Success = $false
+                }
+            }
+        }
+        Remove-Item -LiteralPath $mountDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    return $result
+}
+
+function Test-FinalWinPeMediaIdentity {
+    <#
+    .SYNOPSIS
+        Proves that every file covered by the P09 Microsoft WinPE-to-media
+        synchronization contract is byte-identical in the final ISO.
+
+    .DESCRIPTION
+        P10 intentionally overlays two paths after P09:
+          * EFI\Boot\bootx64.efi
+          * root bootmgr.efi, when bootmgr_EX.efi exists
+        For those paths the post-P10 extracted-media copy is the expected
+        authority. All other files retain the boot.wim index 2 authority
+        recorded in P09_winpe_media_sync.json.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$MountedIsoRoot,
+        [Parameter(Mandatory)] [string]$ExtractedMediaPath,
+        [Parameter(Mandatory)] [string]$SyncEvidencePath
+    )
+
+    $result = [pscustomobject][ordered]@{
+        SchemaVersion = 'winpe-media-final-identity/1.0'
+        GeneratedAtUtc = [datetime]::UtcNow.ToString('o')
+        Available = $false
+        Status = 'Fail'
+        ErrorMessage = $null
+        SyncEvidencePath = $SyncEvidencePath
+        SyncEvidenceSha256 = (Get-FileSha256OrEmpty -Path $SyncEvidencePath)
+        RecordCount = 0
+        FailureCount = 0
+        MatchesExpected = $false
+        Records = @()
+    }
+    $rows = [System.Collections.Generic.List[object]]::new()
+    try {
+        $sync = Read-ReleaseJsonFile -Path $SyncEvidencePath
+        if (-not $sync) { throw 'P09 WinPE media synchronization evidence is missing or unreadable.' }
+        if ([string]$sync.SchemaVersion -ne 'winpe-media-final-sync/1.0') {
+            throw ('Unsupported P09 WinPE media synchronization schema: {0}' -f $sync.SchemaVersion)
+        }
+        if (-not ($sync.PSObject.Properties['Success'] -and $sync.Success)) {
+            throw ('P09 WinPE media synchronization evidence is not successful: {0}' -f $sync.ErrorMessage)
+        }
+        foreach ($record in @($sync.Records)) {
+            $relative = [string]$record.RelativePath
+            $expectedPath = [string]$record.SourcePath
+            $expectedRole = [string]$record.SourceRole
+            $expectedSize = [int64]$record.SourceSizeBytes
+            $expectedHash = ([string]$record.SourceSha256).ToLowerInvariant()
+            $normalized = $relative.Replace('/','\').TrimStart('\')
+            if ($normalized -ieq 'EFI\Boot\bootx64.efi' -or $normalized -ieq 'bootmgr.efi') {
+                $postOverlay = Join-Path $ExtractedMediaPath $normalized
+                $postEvidence = Get-SetupBinaryFileEvidence -Path $postOverlay
+                if (-not $postEvidence.Present) {
+                    throw ('Post-P10 authoritative media path is missing: {0}' -f $postOverlay)
+                }
+                $expectedPath = $postEvidence.Path
+                $expectedRole = 'post-P10 extracted-media overlay'
+                $expectedSize = [int64]$postEvidence.SizeBytes
+                $expectedHash = ([string]$postEvidence.Sha256).ToLowerInvariant()
+            }
+
+            $observedPath = Join-Path $MountedIsoRoot $normalized
+            $observed = Get-SetupBinaryFileEvidence -Path $observedPath
+            $match = [bool](
+                $observed.Present -and
+                [int64]$observed.SizeBytes -eq $expectedSize -and
+                [string]$observed.Sha256 -eq [string]$expectedHash
+            )
+            $rows.Add([pscustomobject][ordered]@{
+                RelativePath = $relative
+                Category = [string]$record.Category
+                ExpectedRole = $expectedRole
+                ExpectedPath = $expectedPath
+                ExpectedSizeBytes = $expectedSize
+                ExpectedSha256 = $expectedHash
+                ObservedPath = $observed.Path
+                ObservedPresent = $observed.Present
+                ObservedSizeBytes = $observed.SizeBytes
+                ObservedSha256 = $observed.Sha256
+                MatchesExpected = $match
+                Status = $(if($match){'Pass'}else{'Fail'})
+            }) | Out-Null
+        }
+        $result.Records = $rows.ToArray()
+        $result.RecordCount = $result.Records.Count
+        $result.FailureCount = @($result.Records | Where-Object { -not $_.MatchesExpected }).Count
+        if ($result.RecordCount -lt 4) {
+            throw ('P09 WinPE media synchronization evidence contains too few records: {0}' -f $result.RecordCount)
+        }
+        $result.Available = $true
+        $result.MatchesExpected = [bool]($result.FailureCount -eq 0)
+        $result.Status = $(if($result.MatchesExpected){'Pass'}else{'Fail'})
+        if (-not $result.MatchesExpected) {
+            $result.ErrorMessage = ('{0} final ISO WinPE media identity record(s) do not match.' -f $result.FailureCount)
+        }
+    } catch {
+        $result.ErrorMessage = [string]$_.Exception.Message
+        $result.Records = $rows.ToArray()
+        $result.RecordCount = $result.Records.Count
+        $result.FailureCount = @($result.Records | Where-Object { -not $_.MatchesExpected }).Count
+    }
+    return $result
+}
+
+
 # Phase P09: Assemble updated ISO (Build group)
 # ============================================================
 
@@ -20175,8 +20719,79 @@ function Invoke-BuildPhase09_AssembleIso {
             }
         }
 
-        # Step 2: Build output ISO
-        Write-SubSection 'Step 2: Build output ISO (oscdimg)'
+
+
+        # P09 Resume compatibility: r12.61 and earlier workspaces completed
+        # boot.wim servicing without Microsoft's final all-index Export step.
+        # Rehydrate that missing step here exactly once, unless the active OS
+        # policy intentionally preserved the source boot.wim.
+        if (-not $Script:SyntheticTestMode -and $Script:Execute) {
+            Set-DebugStep -Step 'ensure-boot-wim-export'
+            $bootWimForFinalization = Join-Path $Script:ExtractedDir 'sources\boot.wim'
+            $bootExportEvidencePath = Join-Path $Script:LogsDir 'P08_bootwim_export.json'
+            $bootExportEvidence = Read-ReleaseJsonFile -Path $bootExportEvidencePath
+            $bootPolicyForExport = Resolve-BootWimLcuPolicyValue -RawValue $Script:OsProfile.BootWimLcuPolicy
+            $bootPolicyExceptionForExport = Read-ReleaseJsonFile -Path (Join-Path $Script:LogsDir 'P08_bootwim_policy_exception.json')
+            $preserveBootWim = [bool](
+                $bootPolicyForExport -eq 'disabled' -or
+                ($bootPolicyExceptionForExport -and
+                 $bootPolicyExceptionForExport.PSObject.Properties['PreserveSourceBootWim'] -and
+                 $bootPolicyExceptionForExport.PreserveSourceBootWim)
+            )
+
+            if ($preserveBootWim) {
+                Write-Step 'boot.wim export skipped because the active servicing policy preserves the source boot.wim.'
+            } else {
+                $currentBootWimHash = (Get-FileHash -LiteralPath $bootWimForFinalization -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+                $exportEvidenceCurrent = [bool](
+                    $bootExportEvidence -and
+                    $bootExportEvidence.PSObject.Properties['Success'] -and
+                    $bootExportEvidence.Success -and
+                    $bootExportEvidence.PSObject.Properties['ExportedSha256'] -and
+                    [string]$bootExportEvidence.ExportedSha256 -eq [string]$currentBootWimHash
+                )
+                if ($exportEvidenceCurrent) {
+                    Write-Step ('boot.wim export evidence is current; no repeat export required ({0}).' -f $currentBootWimHash)
+                } else {
+                    Write-Caution 'boot.wim export evidence is missing or stale; rebuilding all indexes before final media synchronization.'
+                    $bootExportEvidence = Export-BootWimCompressed `
+                        -WimPath $bootWimForFinalization `
+                        -EvidenceOrigin 'P09ResumeRehydrated'
+                    Save-CanonicalJsonFile -InputObject $bootExportEvidence -Path $bootExportEvidencePath -Depth 16
+                    Write-Ok ('boot.wim export rehydrated for P09 Resume: indexes={0}; evidence={1}' -f `
+                        $bootExportEvidence.IndexCount,$bootExportEvidencePath)
+                }
+            }
+        }
+
+        # Microsoft media Dynamic Update steps 27 and 28 are a final
+        # WinPE-to-media synchronization AFTER the Setup DU overlay. This is
+        # intentionally separate from P10: P09 first makes every standard
+        # media boot-manager copy consistent with serviced boot.wim index 2;
+        # P10 then overlays only the PCA2023 _EX critical-path files.
+        Write-SubSection 'Step 2: Final WinPE-to-media synchronization'
+        Set-DebugStep -Step 'winpe-media-final-sync'
+        if ($Script:SyntheticTestMode) {
+            Write-Skip 'SyntheticTestMode: skipping real boot.wim-to-media synchronization.'
+        } elseif (-not $Script:Execute) {
+            Write-Skip 'Sandbox mode (no -Execute): skipping real boot.wim-to-media synchronization.'
+        } else {
+            $winPeMediaSync = Sync-ServicedWinPeMediaFiles `
+                -ExtractedMediaPath $Script:ExtractedDir `
+                -WorkRoot $Script:WorkRoot
+            $winPeMediaSyncJson = Join-Path $Script:LogsDir 'P09_winpe_media_sync.json'
+            $winPeMediaSyncCsv = Join-Path $Script:LogsDir 'P09_winpe_media_sync.csv'
+            Save-CanonicalJsonFile -InputObject $winPeMediaSync -Path $winPeMediaSyncJson -Depth 16
+            @($winPeMediaSync.Records) | Export-Csv -LiteralPath $winPeMediaSyncCsv -NoTypeInformation -Encoding UTF8
+            if (-not $winPeMediaSync.Success) {
+                throw ('P09 final WinPE-to-media synchronization failed: {0}' -f $winPeMediaSync.ErrorMessage)
+            }
+            Write-Ok ('Final WinPE-to-media synchronization passed: records={0}; standard boot-manager targets={1}; evidence={2}' -f `
+                @($winPeMediaSync.Records).Count,$winPeMediaSync.StandardBootManagerTargetCount,$winPeMediaSyncJson)
+        }
+
+        # Step 3: Build output ISO
+        Write-SubSection 'Step 3: Build output ISO (oscdimg)'
         Set-DebugStep -Step 'output-iso-name'
         $monthTag = (Get-Date -Format 'yyyy-MM')
         $outName = ('{0}_{1}_Updated_{2}.iso' -f $Script:OsProfile.OsShortName, $Script:OsLanguage, $monthTag)
@@ -21021,6 +21636,8 @@ function Invoke-VerifyPhase11_StaticVerify {
 
         $bootStlIdentityEvidencePath = Join-Path $Script:LogsDir 'P11_boot_stl_identity.json'
         $bootStlIdentityRowAdded = $false
+        $winPeMediaIdentityEvidencePath = Join-Path $Script:LogsDir 'P11_winpe_media_identity.json'
+        $winPeMediaIdentityRowAdded = $false
         $img = $null
         $mountedDrive = $null
         try {
@@ -21134,6 +21751,33 @@ function Invoke-VerifyPhase11_StaticVerify {
                     Write-Ok 'Final ISO boot.stl is byte-identical to the authoritative serviced-image source.'
                 } else {
                     Write-Fail ('Final ISO boot.stl identity verification failed: {0}' -f $bootStlIdentity.ErrorMessage)
+                }
+            }
+
+
+            # Microsoft media Dynamic Update steps 27/28 cover the complete
+            # final Setup + standard boot-manager surface, not only boot.stl.
+            # P10 may then replace only the PCA2023 critical-path files.
+            if ($Script:SyntheticTestMode) {
+                Add-VRow -Check 'WinPeMediaIdentity' -Expected 'real ISO only' -Actual 'SyntheticTestMode' -Status 'Pass' -Notes 'Final WinPE-to-media identity verification is intentionally skipped for the synthetic CI ISO.'
+                $winPeMediaIdentityRowAdded = $true
+            } else {
+                $p09MediaSyncEvidencePath = Join-Path $Script:LogsDir 'P09_winpe_media_sync.json'
+                $winPeMediaIdentity = Test-FinalWinPeMediaIdentity `
+                    -MountedIsoRoot $mountedDrive `
+                    -ExtractedMediaPath $Script:ExtractedDir `
+                    -SyncEvidencePath $p09MediaSyncEvidencePath
+                Save-CanonicalJsonFile -InputObject $winPeMediaIdentity -Path $winPeMediaIdentityEvidencePath -Depth 16
+                Add-VRow -Check 'WinPeMediaIdentity' `
+                    -Expected 'all P09 Setup/boot-manager/boot.stl records match the final ISO, with P10 _EX overlays applied only to their defined paths' `
+                    -Actual ('records={0}; failures={1}' -f $winPeMediaIdentity.RecordCount,$winPeMediaIdentity.FailureCount) `
+                    -Status $(if($winPeMediaIdentity.MatchesExpected){'Pass'}else{'Fail'}) `
+                    -Notes $(if($winPeMediaIdentity.MatchesExpected){'Final ISO satisfies the Microsoft WinPE-to-media synchronization contract.'}else{$winPeMediaIdentity.ErrorMessage})
+                $winPeMediaIdentityRowAdded = $true
+                if ($winPeMediaIdentity.MatchesExpected) {
+                    Write-Ok ('Final ISO WinPE media identity passed for {0} synchronized file(s).' -f $winPeMediaIdentity.RecordCount)
+                } else {
+                    Write-Fail ('Final ISO WinPE media identity verification failed: {0}' -f $winPeMediaIdentity.ErrorMessage)
                 }
             }
 
@@ -21358,6 +22002,23 @@ function Invoke-VerifyPhase11_StaticVerify {
             }
             Save-CanonicalJsonFile -InputObject $bootStlIdentity -Path $bootStlIdentityEvidencePath -Depth 12
         }
+
+        if (-not $winPeMediaIdentityRowAdded) {
+            Add-VRow -Check 'WinPeMediaIdentity' -Expected 'final ISO mounted and complete WinPE media contract verified' -Actual 'ISO mount unavailable' -Status 'Fail' -Notes 'The final ISO could not be mounted for WinPE media identity verification.'
+            $winPeMediaIdentity = [pscustomobject][ordered]@{
+                SchemaVersion = 'winpe-media-final-identity/1.0'
+                GeneratedAtUtc = [datetime]::UtcNow.ToString('o')
+                Available = $false
+                Status = 'Fail'
+                ErrorMessage = 'The final ISO could not be mounted for WinPE media identity verification.'
+                MatchesExpected = $false
+                RecordCount = 0
+                FailureCount = 1
+                Records = @()
+            }
+            Save-CanonicalJsonFile -InputObject $winPeMediaIdentity -Path $winPeMediaIdentityEvidencePath -Depth 16
+        }
+
         if ($img) {
             try { Dismount-DiskImage -ImagePath $Script:OutputIsoPath -ErrorAction SilentlyContinue | Out-Null } catch { $null = $_ }
         }
@@ -21645,6 +22306,8 @@ function Invoke-VerifyPhase11_StaticVerify {
             UefiElToritoEvidenceSha256=$(if($Script:SyntheticTestMode){''}else{Get-FileSha256OrEmpty -Path $elToritoEvidencePath})
             BootStlIdentityEvidencePath=$(if($Script:SyntheticTestMode){''}else{$bootStlIdentityEvidencePath})
             BootStlIdentityEvidenceSha256=$(if($Script:SyntheticTestMode){''}else{Get-FileSha256OrEmpty -Path $bootStlIdentityEvidencePath})
+            WinPeMediaIdentityEvidencePath=$(if($Script:SyntheticTestMode){''}else{$winPeMediaIdentityEvidencePath})
+            WinPeMediaIdentityEvidenceSha256=$(if($Script:SyntheticTestMode){''}else{Get-FileSha256OrEmpty -Path $winPeMediaIdentityEvidencePath})
             RowCount=$rows.Count
             FailureCount=0
             PolicyExceptionCount=$policyExceptionRows.Count
