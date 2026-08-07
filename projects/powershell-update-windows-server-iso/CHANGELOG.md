@@ -22,6 +22,38 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.04-r12.68] - 2026-08-07
+
+Tag: `e2e-distribution-finalization`.
+
+### Changed
+
+- **Distribution-layout finalization (identity-and-marker change on
+  the committed surface)**: the snapshot finalizes the clean-E2E
+  distribution layout — the supported post-install evidence
+  collector ships as a stable top-level distribution artifact and
+  the oscdimg qualification lab is retained under the
+  distribution's `tests/` — without changing any ISO servicing
+  behavior. On the committed script the delta is the version/tag
+  identity and the validation-marker comment only (+1 line net);
+  the distribution-side layout files are input-only under the
+  standing series ruling. `data/*` and `schema/*` are byte-identical
+  to r12.67.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.04-r12.68`
+  (date component moves to 08.04) with the measured tag
+  `e2e-distribution-finalization`. No terminal D-contract required
+  an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 6E/209W/27I (raw sweep
+  6E/210W/27I: +1W is the PSA7002 LF artefact; +1W on the marker
+  line, declared series debt). Snapshot form: BOM + LF; committed checkout form BOM+CRLF.
+
 ## [update-wsi-2026.08.03-r12.67] - 2026-08-07
 
 Tag: `catalog-boundary-horizontal-hardening`.

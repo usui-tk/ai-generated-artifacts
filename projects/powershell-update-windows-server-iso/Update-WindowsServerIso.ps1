@@ -718,7 +718,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.03-r12.67'
+$Script:ScriptVersion = 'update-wsi-2026.08.04-r12.68'
+# Validation marker: r12.68 finalizes the clean-E2E distribution layout without changing ISO servicing behavior: the supported post-install collector is shipped as a stable top-level artifact, and the oscdimg qualification lab is retained under tests/.
 # Validation marker: r12.67 completes the horizontal Catalog/PowerShell collection-shape hardening: all active Catalog response contracts are typed in-process validators, internal scriptblock validators are removed, Search/DownloadDialog/ScopedView bodies are semantically validated before caching, cache keys are collision-resistant and identity-bound, Catalog identities are scalar-validated at every legacy/current download boundary, Generic.List values are materialized with ToArray(), and collection selectors return flat sequences.
 # Validation marker: r12.62 implements the Microsoft media Dynamic Update final WinPE-to-media contract after Setup DU, exports the serviced boot.wim, uses /ResetBase /Defer for WinPE/WinRE cleanup, and verifies the complete final ISO identity surface before release assessment.
 # Validation marker: r12.60 accepts the UEFI-defined El Torito Sector Count 0/1 end-of-media sentinel and proves efisys_ex.bin identity by hashing its expected byte length from the catalog Load RBA.
@@ -727,7 +728,7 @@ $Script:ScriptVersion = 'update-wsi-2026.08.03-r12.67'
 # r12.58 selected efisys_ex.bin correctly but its verification parser bound Math.Min to Int32 on an 8.91-GiB ISO and returned a false failure.
 # r12.57 proved only loose-file presence/signatures and could therefore accept a non-bootable mixed PCA2011/PCA2023 ISO.
 # Validation marker retained: r12.55 Setup DU baseline-language preservation and P11 no-new-locale verification.
-$Script:ScriptTag     = 'catalog-boundary-horizontal-hardening'
+$Script:ScriptTag     = 'e2e-distribution-finalization'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
