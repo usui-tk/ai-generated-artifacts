@@ -778,15 +778,16 @@
     }
   },
   "Pca2023": {
-    "Mode": "Firmware2023Default",
-    "RequiredByDefault": false,
-    "RequiredUpdateLevelKb": "n/a",
-    "RequiredUpdateLevelMinDate": null,
+    "Mode": "ConvertByDefault",
+    "RequiredByDefault": true,
+    "RequiredUpdateLevelKb": "2024-4B or later",
+    "RequiredUpdateLevelMinDate": "2024-04-09",
     "NotesSource": [
-      "https://techcommunity.microsoft.com/blog/windowsservernewsandbestpractices/windows-server-secure-boot-playbook-for-certificates-expiring-in-2026/4495789"
+      "https://support.microsoft.com/en-us/topic/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager-d4064779-0e4e-43ac-b2ce-24f434fcfa0f",
+      "https://github.com/microsoft/secureboot_objects/blob/v1.6.5/scripts/windows/Make2023BootableMedia.ps1"
     ],
-    "Notes": "Server 2025 defaults to audit-only as a project safety policy until this project completes a measured Server 2025 conversion and Secure Boot E2E. Microsoft Make2023BootableMedia.ps1 is generic Windows-media tooling and does not state this project-specific exclusion. RequirePca2023 needs measured project evidence or -ForcePca2023OnServer2025.",
-    "CompliancePolicy": "AuditOnly",
+    "Notes": "Server 2025 PCA2023 conversion is enabled by default after the measured r12.56 ja-jp conversion completed with P11 33/33 Pass and all five PCA2023 output targets valid. P14 boot/install validation remains a separate release gate.",
+    "CompliancePolicy": "RequirePca2023",
     "SourceMediaAssurance": "Unverified"
   },
   "AutoRefreshPolicy": {
@@ -861,13 +862,14 @@
     }
   },
   "_meta": {
-    "scriptVersion": "update-wsi-2026.07.18-r12.15",
-    "generatedAt": "2026-07-18T00:00:00Z",
+    "scriptVersion": "update-wsi-2026.08.02-r12.57",
+    "generatedAt": "2026-08-02T00:00:00Z",
     "isTemplate": false,
     "migrationFromSchema": "3.0",
     "compatibilityNote": "PatchModel and legacy flat package fields are retained for staged migration.",
     "catalogCrossCheckManifest": "data/catalog-crosscheck-manifest.json",
-    "r1215CrossCheck": "2026-07 .NET and Safe OS DU cross-check against official Microsoft release notes and Server image inventory."
+    "r1215CrossCheck": "2026-07 .NET and Safe OS DU cross-check against official Microsoft release notes and Server image inventory.",
+    "r1257Pca2023Default": "Measured Server 2025 ja-jp PCA2023 conversion: P11 33/33 Pass; five output targets valid; P14 pending."
   },
   "PatchModel": "uup-checkpoint",
   "Compatibility": {

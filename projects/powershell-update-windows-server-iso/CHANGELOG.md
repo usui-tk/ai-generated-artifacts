@@ -22,6 +22,73 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.02-r12.57] - 2026-08-07
+
+Tag retained: `setupdu-baseline-language-preservation`.
+
+### Changed
+
+- **PCA2023 conversion becomes the Server 2025 default**: the single
+  declared-surface change is a value-level policy flip on
+  `data/config-Server2025.json` — `Pca2023.Mode` moves from
+  `Firmware2023Default` to `ConvertByDefault`, `RequiredByDefault`
+  from `false` to `true`, and `CompliancePolicy` from `AuditOnly` to
+  `RequirePca2023`. No declared key is added or removed, so the
+  terminal contract set and the derived gap timeline are unchanged.
+  The script delta (−4 lines) sits entirely on the same axis: the
+  `-ForcePca2023OnServer2025` switch is demoted to a deprecated
+  compatibility slot whose only remaining consumer is an operator
+  caution, the Server 2025 P10 documented-conversion-boundary skip
+  gate is removed (default-on needs no gate), and the fallback
+  compliance policy is `RequirePca2023` for every OS family.
+
+### Known defect (carried verbatim; corrected at r12.58)
+
+- Operator validation of media built from this revision found that
+  the PCA2023-converted Server 2025 ISOs fail Hyper-V Generation 2
+  UEFI boot (status `0xc0430001`) in both tested languages even
+  though P11 and P12 report green: the shared ISO assembly helper
+  still resolves the legacy `efisys.bin` as the El Torito UEFI boot
+  image, so the boot catalog embeds the PCA2011 image while the
+  loose media files are PCA2023 — firmware boots from the catalog,
+  not from the loose files, and the static checks only inspected the
+  loose files. This revision lands unmodified per the series rulings
+  (the history is the deliverable; no fix-forward); the correction
+  is the r12.58 revision.
+
+### Tests
+
+- **Two T39-style pin relocations** (both verified green at the
+  r12.57 frame and re-verified at the r12.75 terminal frame):
+  `pca2023_default_auto_test.py` replaces the retired force-gate
+  presence pin with three successor pins (promotion of the switch
+  into the Deprecated compatibility slot, the caution wiring on that
+  slot, and the ABSENCE of the removed gate);
+  `media_inspection_test.py` flips the Server 2025
+  documented-conversion-boundary marker from a presence pin to an
+  absence pin while retaining the operator opt-out marker, the two
+  `Get-P10SkipReason` call sites and the BY-POLICY caution.
+- **T40**: release pin advanced to `update-wsi-2026.08.02-r12.57`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Distribution note
+
+- The r12.57 snapshot ships its own regression additions (a Server
+  2025 PCA-default PowerShell test, a static validator, a ja-jp
+  PCA2023 fixture and a static validation summary) and edits its
+  release-validation trio; these are input-only under the standing
+  series ruling and are not committed.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 5E/121W/12I (raw sweep
+  5E/122W/12I: +1W is the PSA7002 LF artefact) — unchanged from
+  r12.56. The r12.57 snapshot in the currently attached archive
+  measures a UTF-8 BOM with mixed line endings (LF-dominant); the
+  committed checkout form remains BOM+CRLF via `.gitattributes`
+  normalization.
+
 ## [update-wsi-2026.08.02-r12.56] - 2026-08-02
 
 Tag retained: `setupdu-baseline-language-preservation`.

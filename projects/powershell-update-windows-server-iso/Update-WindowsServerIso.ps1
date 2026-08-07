@@ -331,21 +331,22 @@ param(
     [switch]   $Execute,
 
     # ---- Secure Boot / PCA2023 ----
-    # When set, enables P10 ConvertPca2023BootManager which rewrites the
-    # output ISO's boot manager to the 'Windows UEFI CA 2023'-signed form
+    # P10 ConvertPca2023BootManager rewrites the output ISO boot manager
+    # to the 'Windows UEFI CA 2023'-signed form
     # (Microsoft KB5053484 / Make2023BootableMedia.ps1 equivalent). Default
     # P10 ConvertPca2023BootManager runs BY DEFAULT (readiness-driven:
     # it converts only when the pre-flight snapshot says the media is
     # ready and not already signed; Critical/Healthy states skip). The
     # PCA2011 signing CA expired 2026-06, so a PCA2011-only boot manager
     # is the exception now, not the norm. Set this switch to keep the
-    # shipped (PCA2011-signed) boot manager and skip P10 entirely.
+    # shipped boot manager and skip P10 entirely. Under RequirePca2023 this
+    # is valid only for media already converted; otherwise P12 fails closed.
     [switch]   $SkipPca2023BootManager,
 
-    # Advanced override for Server 2025. The normal decision is now driven
-    # by data/Pca2023.CompliancePolicy. RequirePca2023 may invoke P10
-    # automatically; this switch forces the conversion attempt even when
-    # the configured policy would otherwise permit audit-only/legacy media.
+    # Deprecated compatibility-only parameter. Server 2025 PCA2023
+    # conversion is required by default from r12.57, so this switch no longer
+    # changes execution. It remains accepted for one compatibility window to
+    # avoid breaking existing automation; a warning is emitted when supplied.
     [switch]   $ForcePca2023OnServer2025,
 
     # When set, the script enters a special mode that takes an existing
@@ -391,7 +392,7 @@ param(
 # reason about reliably). Mirrors how P09 AssembleIso etc. reach
 # operator-supplied options.
 $Script:SkipPca2023BootManager    = [bool]$SkipPca2023BootManager
-$Script:ForcePca2023OnServer2025  = [bool]$ForcePca2023OnServer2025
+$Script:DeprecatedForcePca2023OnServer2025 = [bool]$ForcePca2023OnServer2025
 $Script:Pca2023OnlyMode           = [bool]$Pca2023OnlyMode
 $Script:Pca2023ScriptPath         = $Pca2023ScriptPath
 $Script:RunHyperVValidation       = [bool]$RunHyperVValidation
@@ -717,8 +718,8 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.02-r12.56'
-# Validation marker: r12.56 automatic per-invocation transcript, RunId-bound debug trace, and explicit PCA2023 audit/gate evidence.
+$Script:ScriptVersion = 'update-wsi-2026.08.02-r12.57'
+# Validation marker: r12.57 Server 2025 PCA2023 conversion is required by default; the legacy force switch is compatibility-only.
 # Validation marker retained: r12.55 Setup DU baseline-language preservation and P11 no-new-locale verification.
 $Script:ScriptTag     = 'setupdu-baseline-language-preservation'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
@@ -12100,7 +12101,7 @@ function Get-Pca2023CompliancePolicy {
         $policy = [string]$Script:OsProfile.Pca2023.CompliancePolicy
     }
     if ([string]::IsNullOrWhiteSpace($policy)) {
-        $policy = if ($Script:OsVersion -eq 'Server2025') { 'AuditOnly' } else { 'RequirePca2023' }
+        $policy = 'RequirePca2023'
     }
     if ($policy -notin @('RequirePca2023','AllowLegacyPca2011','AuditOnly')) {
         throw ("Unknown Pca2023.CompliancePolicy '{0}'." -f $policy)
@@ -16232,10 +16233,9 @@ function Get-Pca2023ReadinessSnapshot {
         $reasons.Add('Could not determine bootx64.efi signer (no Authenticode chain readable). May indicate damaged ISO, missing OpenSSL/Windows SDK, or Linux pwsh limitations.') | Out-Null
     }
 
-    # Add Server2025-specific advisory
-    if ($OsKey -eq 'Server2025') {
-        $reasons.Add('NOTE: Server 2025 is evaluated against Pca2023.CompliancePolicy, but automatic conversion is not attempted because this project''s Server 2025 conversion E2E has not yet completed. Use the force switch only as an approved experiment.') | Out-Null
-    }
+    # Server 2025 uses the same readiness-driven conversion path as the
+    # other supported releases. Runtime boot/install proof is still tracked
+    # separately by P14 and does not weaken the static PCA2023 requirement.
 
     [pscustomobject]@{
         Generated   = (Get-Date)
@@ -16811,11 +16811,13 @@ function Invoke-SetupPhase01_Initialize {
 function Test-Server2025PcaPolicyPreflight {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
-    param([Parameter(Mandatory)][string]$Policy,[bool]$ForceConversion,[AllowEmptyString()][string]$SourceAssurance='')
-    $allowed=$true; $reason='Policy does not require conversion.'
-    if ($Policy -eq 'RequirePca2023') {
-        $allowed = $ForceConversion -or ($SourceAssurance -eq 'VerifiedPca2023')
-        $reason = if ($allowed) { 'RequirePca2023 is backed by an explicit conversion override or verified source-media assurance.' } else { 'Server 2025 RequirePca2023 needs -ForcePca2023OnServer2025 or Pca2023.SourceMediaAssurance=VerifiedPca2023.' }
+    param([Parameter(Mandatory)][string]$Policy)
+    $allowed = $true
+    $reason = switch ($Policy) {
+        'RequirePca2023' { 'RequirePca2023 is enforced by readiness-driven P10 conversion and fail-closed P12 verification.' }
+        'AllowLegacyPca2011' { 'Policy permits either PCA2011 or PCA2023 media.' }
+        'AuditOnly' { 'Policy records readiness without requiring PCA2023.' }
+        default { $allowed=$false; "Unknown PCA2023 policy: $Policy" }
     }
     [pscustomobject]@{Allowed=$allowed;Reason=$reason}
 }
@@ -17242,11 +17244,13 @@ function Invoke-SetupPhase02_ResolveInputs { # psa-disable-line PSA6003 -- "Inpu
         Write-Ok ('Profile loaded: {0} / {1} (build {2})' -f $Script:OsProfile.WimEdition, $Script:OsLanguage, $Script:OsProfile.Build)
         Write-Step ('Volume label prefix: {0}' -f $Script:OsLangProfile.VolumeLabelPrefix)
         if ($Script:OsVersion -eq 'Server2025') {
-            $pcaPolicy=if($Script:OsProfile.Pca2023 -and $Script:OsProfile.Pca2023.CompliancePolicy){[string]$Script:OsProfile.Pca2023.CompliancePolicy}else{'AuditOnly'}
-            $sourceAssurance=if($Script:OsProfile.Pca2023 -and $Script:OsProfile.Pca2023.PSObject.Properties['SourceMediaAssurance']){[string]$Script:OsProfile.Pca2023.SourceMediaAssurance}else{''}
-            $pcaPreflight=Test-Server2025PcaPolicyPreflight -Policy $pcaPolicy -ForceConversion ([bool]$Script:ForcePca2023OnServer2025) -SourceAssurance $sourceAssurance
+            $pcaPolicy=if($Script:OsProfile.Pca2023 -and $Script:OsProfile.Pca2023.CompliancePolicy){[string]$Script:OsProfile.Pca2023.CompliancePolicy}else{'RequirePca2023'}
+            $pcaPreflight=Test-Server2025PcaPolicyPreflight -Policy $pcaPolicy
             if(-not $pcaPreflight.Allowed){throw $pcaPreflight.Reason}
             Write-Step ('Server2025 PCA2023 preflight: policy={0}; {1}' -f $pcaPolicy,$pcaPreflight.Reason)
+            if ($Script:DeprecatedForcePca2023OnServer2025) {
+                Write-Caution '-ForcePca2023OnServer2025 is deprecated and has no effect in r12.57; Server 2025 conversion is already enabled by default.'
+            }
         }
 
         # Step 2: Resolve ISO source
@@ -19654,11 +19658,9 @@ function Invoke-BuildPhase09_AssembleIso {
 # -SkipPca2023BootManager). The PCA2011 signing CA expired 2026-06,
 # so leaving the shipped PCA2011-signed boot manager is now the
 # exception (older firmware without the 2023 certs), not the norm.
-# Server 2025 remains audit/gate-only by default as a PROJECT safety policy
-# until this project's Server 2025 conversion E2E is completed. Microsoft's
-# current Make2023BootableMedia.ps1 is generic Windows-media tooling and does
-# not express a Server 2025 exclusion. Conversion therefore still requires
-# -ForcePca2023OnServer2025 for now; this is not an upstream support claim.
+# Server 2025 follows the same readiness-driven default conversion path as
+# Server 2016/2019/2022. P12 requires the PCA2023 critical boot path; P14
+# remains the separate boot/install evidence gate.
 #
 # Group classification note: P10 lives inside the Build group as
 # a Build-group OPTIONAL phase (the only Build-group phase that
@@ -19687,7 +19689,6 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
 
         Skip conditions (all silent skip, recorded in result):
           - -SkipPca2023BootManager set (operator opt-out)
-          - OsKey == 'Server2025' AND -ForcePca2023OnServer2025 not set
           - Pre-flight readiness Health == 'Critical' (LCU prereq
             not met; we would only produce a corrupted ISO -- this
             is a SKIP, not a throw, so dry-run inspection can
@@ -19706,16 +19707,11 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
             return
         }
 
-        Set-DebugStep -Step 'gate-Server2025'
+        Set-DebugStep -Step 'gate-OsPolicy'
         $osKey = if ($Script:OsProfile) { $Script:OsProfile.OsKey } else { $null }
         Write-Step ('OsKey: {0}' -f $osKey)
         $pcaPolicyForGate = Get-Pca2023CompliancePolicy
-        if ($osKey -eq 'Server2025' -and -not $Script:ForcePca2023OnServer2025) {
-            Write-Step ('Skipped: OsKey={0}; Microsoft conversion workflow is not documented for Server 2025 (policy={1}).' -f $osKey,$pcaPolicyForGate)
-            Write-Step '         Use -ForcePca2023OnServer2025 only for an explicitly approved experimental conversion.'
-            Set-Content -LiteralPath (Join-Path $Script:MarkersDir 'P10.skipped') -Value ('skipped-by-policy: Server2025 documented-conversion boundary; policy=' + $pcaPolicyForGate) -Encoding UTF8
-            return
-        }
+        Write-Step ('PCA2023 compliance policy: {0}' -f $pcaPolicyForGate)
 
         Set-DebugStep -Step 'gate-ExtractedDir'
         # The extracted media path is set up by P05 ExpandIso into

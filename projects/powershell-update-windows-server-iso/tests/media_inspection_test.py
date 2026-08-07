@@ -268,12 +268,18 @@ def main() -> int:
     p, f = check("boot.wim stays the PRIMARY conversion source (MS alignment)",
                  re.search(r"Label\s*=\s*'boot\.wim'.*?Label\s*=\s*'install\.wim'", code, re.S) is not None,
                  "candidate order pinned", p, f)
-    p, f = check("P10 skip markers carry a reason; the output check consumes it (r11.64/r12.04)",
+    # r12.57 T39 revision: the Server 2025 documented-conversion-boundary
+    # skip gate was removed BY DESIGN (Pca2023 policy flip to
+    # RequirePca2023 / ConvertByDefault), so its marker string flips from
+    # a presence pin to an ABSENCE pin. The operator opt-out marker, the
+    # two Get-P10SkipReason call sites and the BY POLICY caution are
+    # retained (measured unchanged at the r12.57 and r12.75 frames).
+    p, f = check("P10 skip markers carry a reason; the output check consumes it (r11.64/r12.04/r12.57)",
                  "skipped-by-policy: operator opt-out (-SkipPca2023BootManager)" in code
-                 and "skipped-by-policy: Server2025 documented-conversion boundary; policy=" in code
+                 and "skipped-by-policy: Server2025 documented-conversion boundary; policy=" not in code
                  and code.count("-ConversionSkipReason (Get-P10SkipReason)") == 2
                  and "PCA2011-signed BY POLICY" in code,
-                 "marker reasons + both call sites wired", p, f)
+                 "marker reasons + both call sites wired (boundary gate retired)", p, f)
     p, f = check("the invalid Get-WindowsPackage -ImagePath call is gone",
                  re.search(r"Get-WindowsPackage'\s+-Parameters\s+@\{\s*ImagePath", code) is None,
                  "dead path buried", p, f)
