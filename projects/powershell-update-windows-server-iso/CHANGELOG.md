@@ -22,6 +22,37 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.07-r12.74] - 2026-08-07
+
+Tag retained: `post-install-evidence-collector-r9-merge`.
+
+### Changed
+
+- **Collector hardened to r11 / schema 1.9** (ISO servicing pipeline
+  unchanged from r12.72): full evidence collection now requires an
+  explicit post-install restart confirmation plus a clean startup
+  pending-reboot gate, records boot-history corroboration, and
+  re-checks the pending-reboot state immediately before the final
+  assessment. This is the collector revision that produced the
+  four-OS post-install evidence sets accompanying the distribution.
+  Collector delta +362 lines net (round-trip criterion verified both
+  directions); main-script delta is the identity and the
+  validation-marker comment (+2 net lines). `data/*` and `schema/*`
+  are byte-identical to r12.73.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.07-r12.74`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. Main script PSA committed 6E/229W/27I
+  (raw sweep 6E/230W/27I: +1W is the PSA7002 LF artefact) —
+  unchanged from r12.73. Snapshot form: main script BOM + LF;
+  collector BOM + CRLF; committed checkout form BOM+CRLF for both.
+
 ## [update-wsi-2026.08.07-r12.73] - 2026-08-07
 
 Tag retained: `post-install-evidence-collector-r9-merge`.

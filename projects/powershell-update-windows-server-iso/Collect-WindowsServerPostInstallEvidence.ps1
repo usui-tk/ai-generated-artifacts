@@ -19,6 +19,19 @@
     report with PASS, FAIL, REVIEW and INFO results for important items, the
     final result, exit code and evidence artifact paths.
 
+    Before full evidence collection starts, the collector requires an
+    explicit confirmation that the installed Windows Server guest has been
+    restarted at least once after the initial post-install boot. The mandatory
+    startup notice is always displayed. Interactive runs prompt for YES/NO;
+    unattended runs can use -ConfirmPostInstallRestart as the explicit
+    operator assertion. Current pending-reboot state is checked before full
+    collection and any pending or unreadable state stops the collection with
+    exit code 2. Boot-history events are collected as corroborating evidence,
+    but are not treated as authoritative proof because Windows Setup itself can
+    reboot the machine during installation. Pending-reboot state is checked a
+    second time at the end of a successful collection to detect state changes
+    that occur while the collector is running.
+
     The script does not install updates or change the installed operating
     system. EFI System Partition inspection and MSInfo32 collection are
     enabled by default. ESP inspection temporarily assigns an unused drive
@@ -33,8 +46,8 @@
     Exit code 0 means that collection and validation completed without a
     detected issue. Exit code 2 means that evidence was created but at least
     one validation item failed, one collection item requires review, or an
-    operational review condition (for example an advisory pending reboot) was
-    detected. Exit code 1 means a fatal collector error.
+    operational review condition was detected, or the mandatory startup
+    prerequisite was not met. Exit code 1 means a fatal collector error.
 
     The installed Windows Server release is detected automatically from the
     running system by correlating Win32_OperatingSystem ProductType and Caption
@@ -58,6 +71,12 @@
     Runs msinfo32 /report and includes the text report. Enabled by default.
     Specify -IncludeMsInfo32:$false only when collection must be disabled.
 
+.PARAMETER ConfirmPostInstallRestart
+    Explicitly confirms, for non-interactive or automated execution, that the
+    guest OS has been restarted at least once after the initial post-install
+    boot. When omitted, the collector prompts for YES/NO before collecting full
+    evidence. This parameter does not bypass pending-reboot verification.
+
 .EXAMPLE
     .\Collect-WindowsServerPostInstallEvidence.ps1
 
@@ -75,19 +94,232 @@ param(
     [switch]$InspectEsp = $true,
 
     [Parameter(Mandatory = $false)]
-    [switch]$IncludeMsInfo32 = $true
+    [switch]$IncludeMsInfo32 = $true,
+
+    [Parameter(Mandatory = $false)]
+    [switch]$ConfirmPostInstallRestart
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
-$script:SchemaVersion = 'windows-server-post-install-evidence/1.8'
-$script:CollectorVersion = 'r10'
+$script:SchemaVersion = 'windows-server-post-install-evidence/1.9'
+$script:CollectorVersion = 'r11'
 
 function Get-UtcTimestamp {
     [CmdletBinding()]
     param()
     return [datetime]::UtcNow.ToString('o')
+}
+
+function Write-PostInstallRestartPrerequisiteBanner {
+    [CmdletBinding()]
+    param()
+
+    Write-Host ''
+    Write-Host '================================================================================================================' -ForegroundColor Yellow
+    Write-Host ' MANDATORY POST-INSTALL RESTART PRECONDITION' -ForegroundColor Yellow
+    Write-Host '================================================================================================================' -ForegroundColor Yellow
+    Write-Host ' Before collecting validation evidence, complete Windows Server installation and restart the guest OS at least'
+    Write-Host ' once after the initial post-install boot. Run this collector only after that restart has completed.'
+    Write-Host ''
+    Write-Host ' The collector will stop before full evidence collection when:'
+    Write-Host '   - the restart has not been explicitly confirmed;'
+    Write-Host '   - CBS / Windows Update / PendingFileRenameOperations reports any pending reboot; or'
+    Write-Host '   - pending-reboot registry state cannot be read reliably.'
+    Write-Host ''
+    Write-Host ' System boot events are recorded as corroborating evidence only. Windows Setup can reboot during installation,'
+    Write-Host ' so a raw count of boot events is not authoritative proof of the required post-install restart.'
+    Write-Host '================================================================================================================' -ForegroundColor Yellow
+    Write-Host ''
+}
+
+function Get-PostInstallRestartConfirmation {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [switch]$ConfirmedByParameter
+    )
+
+    if ($ConfirmedByParameter) {
+        return [pscustomobject][ordered]@{
+            Confirmed = $true
+            Source = 'ConfirmPostInstallRestartParameter'
+            Response = 'YES'
+            PromptAttemptCount = 0
+            ErrorMessage = $null
+        }
+    }
+
+    $lastError = $null
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        try {
+            $response = [string](Read-Host 'Have you restarted Windows Server at least once after the initial post-install boot? Type YES or NO')
+        }
+        catch {
+            $lastError = $_.Exception.Message
+            break
+        }
+
+        $normalized = $response.Trim().ToUpperInvariant()
+        if ($normalized -eq 'YES') {
+            return [pscustomobject][ordered]@{
+                Confirmed = $true
+                Source = 'InteractivePrompt'
+                Response = 'YES'
+                PromptAttemptCount = $attempt
+                ErrorMessage = $null
+            }
+        }
+        if ($normalized -eq 'NO') {
+            return [pscustomobject][ordered]@{
+                Confirmed = $false
+                Source = 'InteractivePrompt'
+                Response = 'NO'
+                PromptAttemptCount = $attempt
+                ErrorMessage = $null
+            }
+        }
+
+        Write-Warning 'Please type exactly YES or NO.'
+    }
+
+    return [pscustomobject][ordered]@{
+        Confirmed = $false
+        Source = 'InteractivePromptUnavailableOrInvalid'
+        Response = $null
+        PromptAttemptCount = if ($null -ne $lastError) { 0 } else { 3 }
+        ErrorMessage = if ($null -ne $lastError) {
+            "Interactive confirmation failed: $lastError. For unattended execution, restart the guest OS first and rerun with -ConfirmPostInstallRestart."
+        }
+        else {
+            'A valid YES/NO confirmation was not provided after three attempts.'
+        }
+    }
+}
+
+function Get-BootHistoryEvidence {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$OperatingSystem
+    )
+
+    $installDate = Get-PropertyValue -InputObject $OperatingSystem -Name 'InstallDate'
+    $lastBootUpTime = Get-PropertyValue -InputObject $OperatingSystem -Name 'LastBootUpTime'
+    $queryErrors = New-Object 'System.Collections.Generic.List[string]'
+    $events = New-Object 'System.Collections.Generic.List[object]'
+
+    $queries = @(
+        [pscustomobject]@{ Name='KernelGeneralBoot'; LogName='System'; ProviderName='Microsoft-Windows-Kernel-General'; Id=12; Kind='BootStart' },
+        [pscustomobject]@{ Name='EventLogServiceStart'; LogName='System'; ProviderName='EventLog'; Id=6005; Kind='BootCorroboration' },
+        [pscustomobject]@{ Name='WindowsVersionAtBoot'; LogName='System'; ProviderName='EventLog'; Id=6009; Kind='BootCorroboration' },
+        [pscustomobject]@{ Name='NormalRestartInitiated'; LogName='System'; ProviderName='User32'; Id=1074; Kind='RestartInitiated' }
+    )
+
+    foreach ($query in $queries) {
+        try {
+            $found = @(
+                Get-WinEvent -FilterHashtable @{
+                    LogName = $query.LogName
+                    ProviderName = $query.ProviderName
+                    Id = [int]$query.Id
+                } -MaxEvents 64 -ErrorAction Stop
+            )
+            foreach ($event in $found) {
+                $events.Add([pscustomobject][ordered]@{
+                    QueryName = $query.Name
+                    Kind = $query.Kind
+                    Id = [int]$event.Id
+                    ProviderName = [string]$event.ProviderName
+                    TimeCreated = if ($event.TimeCreated) { $event.TimeCreated.ToString('o') } else { $null }
+                    RecordId = if ($null -ne $event.RecordId) { [long]$event.RecordId } else { $null }
+                })
+            }
+        }
+        catch {
+            # An empty event set is not a collector error. Other failures are
+            # retained as evidence, but boot history is corroboration-only and
+            # never overrides the explicit restart confirmation + reboot gate.
+            if ($_.FullyQualifiedErrorId -notmatch 'NoMatchingEventsFound') {
+                $queryErrors.Add("$($query.Name): $($_.Exception.Message)")
+            }
+        }
+    }
+
+    $eventArray = @($events.ToArray() | Sort-Object TimeCreated -Descending)
+    $afterInstall = if ($null -ne $installDate) {
+        @($eventArray | Where-Object {
+            -not [string]::IsNullOrWhiteSpace($_.TimeCreated) -and
+            ([datetime]$_.TimeCreated) -ge ([datetime]$installDate)
+        })
+    }
+    else { @() }
+
+    $bootStartAfterInstall = @($afterInstall | Where-Object Kind -eq 'BootStart')
+    $restartInitiatedAfterInstall = @($afterInstall | Where-Object Kind -eq 'RestartInitiated')
+    $corroboration = if ($bootStartAfterInstall.Count -ge 2 -or $restartInitiatedAfterInstall.Count -ge 1) {
+        'Observed'
+    }
+    elseif ($queryErrors.Count -gt 0) {
+        'Unknown'
+    }
+    else {
+        'NotObserved'
+    }
+
+    return [pscustomobject][ordered]@{
+        Authority = 'CorroborationOnly'
+        GateAuthority = $false
+        InstallDate = if ($null -ne $installDate) { ([datetime]$installDate).ToString('o') } else { $null }
+        LastBootUpTime = if ($null -ne $lastBootUpTime) { ([datetime]$lastBootUpTime).ToString('o') } else { $null }
+        Corroboration = $corroboration
+        BootStartEventCountAfterInstallDate = $bootStartAfterInstall.Count
+        NormalRestartEventCountAfterInstallDate = $restartInitiatedAfterInstall.Count
+        EventCount = $eventArray.Count
+        QueryComplete = [bool]($queryErrors.Count -eq 0)
+        QueryErrors = $queryErrors.ToArray()
+        Events = $eventArray
+        Interpretation = 'Event IDs 12/6005/6009/1074 are reboot-history evidence only. Setup-driven reboots can occur before first post-install validation, so event counts are not an authoritative prerequisite gate.'
+    }
+}
+
+function Resolve-StartupPreflightDecision {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [object]$RestartConfirmation,
+        [Parameter(Mandatory = $true)] [object]$PendingReboot,
+        [Parameter(Mandatory = $true)] [object]$BootHistory
+    )
+
+    $reasons = New-Object 'System.Collections.Generic.List[string]'
+    if ($RestartConfirmation.Confirmed -ne $true) {
+        $reasons.Add('The required post-install restart was not explicitly confirmed.')
+    }
+    if ($PendingReboot.CollectionComplete -ne $true) {
+        $reasons.Add('Pending-reboot state could not be read completely.')
+    }
+    elseif ([string]$PendingReboot.Classification -ne 'None') {
+        $reasons.Add("Pending reboot is currently present (classification=$($PendingReboot.Classification)).")
+    }
+
+    $allowed = (
+        $RestartConfirmation.Confirmed -eq $true -and
+        $PendingReboot.CollectionComplete -eq $true -and
+        [string]$PendingReboot.Classification -eq 'None'
+    )
+
+    return [pscustomobject][ordered]@{
+        AllowedToCollect = [bool]$allowed
+        RequiredRestartConfirmed = [bool]$RestartConfirmation.Confirmed
+        PendingRebootClear = [bool](
+            $PendingReboot.CollectionComplete -eq $true -and
+            [string]$PendingReboot.Classification -eq 'None'
+        )
+        BootHistoryCorroboration = [string]$BootHistory.Corroboration
+        BootHistoryIsAuthoritative = $false
+        Reasons = $reasons.ToArray()
+    }
 }
 
 function Get-PropertyValue {
@@ -2735,6 +2967,7 @@ function Get-AssessmentReportLines {
         'Pass' { 'PASS' }
         'Fail' { 'FAIL' }
         'ReviewRequired' { 'REVIEW REQUIRED' }
+        'PreconditionNotMet' { 'PRECONDITION NOT MET' }
         'FatalError' { 'FATAL ERROR' }
         default { $OverallStatus.ToUpperInvariant() }
     }
@@ -2793,6 +3026,7 @@ function Write-AssessmentConsoleReport {
         'Pass' { 'PASS' }
         'Fail' { 'FAIL' }
         'ReviewRequired' { 'REVIEW REQUIRED' }
+        'PreconditionNotMet' { 'PRECONDITION NOT MET' }
         'FatalError' { 'FATAL ERROR' }
         default { $OverallStatus.ToUpperInvariant() }
     }
@@ -2899,7 +3133,109 @@ try {
         throw "Operating system identity preflight failed: $identityPreflightError"
     }
 
-    $computer = Get-CimInstance -ClassName Win32_ComputerSystem
+    do {
+        Write-PostInstallRestartPrerequisiteBanner
+        $restartConfirmation = Get-PostInstallRestartConfirmation -ConfirmedByParameter:$ConfirmPostInstallRestart
+        $bootHistory = Get-BootHistoryEvidence -OperatingSystem $os
+        $pendingRebootAtStart = Get-PendingRebootEvidence
+        $startupDecision = Resolve-StartupPreflightDecision `
+            -RestartConfirmation $restartConfirmation `
+            -PendingReboot $pendingRebootAtStart `
+            -BootHistory $bootHistory
+        $startupPreflight = [pscustomobject][ordered]@{
+            SchemaVersion = 'windows-server-post-install-startup-preflight/1.0'
+            GeneratedAtUtc = Get-UtcTimestamp
+            RestartConfirmation = $restartConfirmation
+            PendingRebootAtStart = $pendingRebootAtStart
+            BootHistory = $bootHistory
+            Decision = $startupDecision
+        }
+        $startupPreflight | ConvertTo-Json -Depth 16 |
+            Set-Content -LiteralPath (Join-Path $evidenceDir 'startup-preflight.json') -Encoding UTF8
+
+        Write-Host ('Post-install restart confirmed : {0} ({1})' -f $restartConfirmation.Confirmed, $restartConfirmation.Source)
+        Write-Host ('Startup pending reboot         : {0}' -f $pendingRebootAtStart.Classification)
+        Write-Host ('Boot history corroboration     : {0} (informational only)' -f $bootHistory.Corroboration)
+
+        if (-not $startupDecision.AllowedToCollect) {
+            $preflightItems = New-Object 'System.Collections.Generic.List[object]'
+            $preflightItems.Add((New-AssessmentItem `
+                -Name 'Post-install restart confirmation' `
+                -Status $(if ($restartConfirmation.Confirmed) { 'PASS' } else { 'REVIEW' }) `
+                -Detail $(if ($restartConfirmation.Confirmed) { 'Explicitly confirmed' } else { 'Restart not confirmed; reboot the guest OS and rerun the collector' })))
+
+            $pendingStatus = if ($pendingRebootAtStart.CollectionComplete -ne $true) {
+                'REVIEW'
+            }
+            elseif ($pendingRebootAtStart.BlockingRebootPending) {
+                'FAIL'
+            }
+            elseif ($pendingRebootAtStart.RebootPending) {
+                'REVIEW'
+            }
+            else {
+                'PASS'
+            }
+            $preflightItems.Add((New-AssessmentItem `
+                -Name 'Startup pending reboot gate' `
+                -Status $pendingStatus `
+                -Detail ('classification={0}; collectionComplete={1}' -f $pendingRebootAtStart.Classification, $pendingRebootAtStart.CollectionComplete)))
+            $preflightItems.Add((New-AssessmentItem `
+                -Name 'Boot history corroboration' `
+                -Status 'INFO' `
+                -Detail ('{0}; bootStartAfterInstall={1}; normalRestartAfterInstall={2}; not authoritative' -f `
+                    $bootHistory.Corroboration, $bootHistory.BootStartEventCountAfterInstallDate, $bootHistory.NormalRestartEventCountAfterInstallDate)))
+
+            $assessmentItems = $preflightItems.ToArray()
+            $reviewMessages = New-Object 'System.Collections.Generic.List[string]'
+            foreach ($reason in @($startupDecision.Reasons)) { $reviewMessages.Add([string]$reason) }
+            $reviewMessages.Add('Full post-install evidence collection was intentionally not started. Restart the guest OS if needed, wait for the reboot to complete, and rerun the collector.')
+            $summary = [pscustomobject][ordered]@{
+                SchemaVersion = $script:SchemaVersion
+                CollectorVersion = $script:CollectorVersion
+                GeneratedAtUtc = Get-UtcTimestamp
+                DetectedOsVersion = $detectedOsKey
+                OperatingSystemDetection = $osIdentity
+                OverallStatus = 'PreconditionNotMet'
+                AssessmentItems = @($assessmentItems)
+                ValidationFailures = @()
+                CollectionFailures = @()
+                ReviewFindings = $reviewMessages.ToArray()
+                StartupPreflight = $startupPreflight
+                FullEvidenceCollectionStarted = $false
+            }
+            $summary | ConvertTo-Json -Depth 20 |
+                Set-Content -LiteralPath (Join-Path $evidenceDir 'summary.json') -Encoding UTF8
+            @(
+                "SchemaVersion: $($summary.SchemaVersion)"
+                "CollectorVersion: $($summary.CollectorVersion)"
+                "GeneratedAtUtc: $($summary.GeneratedAtUtc)"
+                'OverallStatus: PreconditionNotMet'
+                "DetectedOsVersion: $detectedOsKey"
+                "PostInstallRestartConfirmed: $($restartConfirmation.Confirmed)"
+                "StartupPendingRebootClassification: $($pendingRebootAtStart.Classification)"
+                "BootHistoryCorroboration: $($bootHistory.Corroboration)"
+                'FullEvidenceCollectionStarted: False'
+                ''
+                'Reasons:'
+                @($reviewMessages | ForEach-Object { "  - $_" })
+            ) | Set-Content -LiteralPath (Join-Path $evidenceDir 'summary.txt') -Encoding UTF8
+            Get-AssessmentReportLines `
+                -AssessmentItems @($assessmentItems) `
+                -OverallStatus 'PreconditionNotMet' `
+                -ExitCode 2 `
+                -EvidenceDirectory $evidenceDir `
+                -ZipPath $zipPath |
+                Set-Content -LiteralPath (Join-Path $evidenceDir 'assessment-report.txt') -Encoding UTF8
+            $exitCode = 2
+            Write-Warning 'Mandatory startup precondition was not met. Full evidence collection was not started.'
+            break
+        }
+
+        Write-Host 'Startup precondition: PASS. Beginning full evidence collection.' -ForegroundColor Green
+        Write-Host ''
+
+        $computer = Get-CimInstance -ClassName Win32_ComputerSystem
     $bios = Get-CimInstance -ClassName Win32_BIOS
     $baseBoard = Get-CimInstance -ClassName Win32_BaseBoard -ErrorAction SilentlyContinue
     $computerProduct = Get-CimInstance -ClassName Win32_ComputerSystemProduct -ErrorAction SilentlyContinue
@@ -2911,7 +3247,6 @@ try {
 
 
     $secureBoot = Get-SecureBootEvidence -EvidenceDirectory $evidenceDir
-    $pendingReboot = Get-PendingRebootEvidence
     $packages = Get-InstalledPackageEvidence
     $windowsFeatures = Get-WindowsFeatureEvidence
     $dotNetFramework = Get-DotNetFrameworkEvidence -WindowsFeatures $windowsFeatures
@@ -3022,6 +3357,11 @@ try {
             Write-Warning "msinfo32 collection failed: $($msInfo.ErrorMessage)"
         }
     }
+
+    # Recheck immediately before final assessment so that a background
+    # servicing/updater transition during evidence collection cannot be hidden
+    # by the clean startup snapshot.
+    $pendingReboot = Get-PendingRebootEvidence
 
     $validationFailures = New-Object 'System.Collections.Generic.List[string]'
     $collectionFailures = New-Object 'System.Collections.Generic.List[string]'
@@ -3175,6 +3515,11 @@ try {
     }
 
     $assessmentItems = @(
+        New-AssessmentItem `
+            -Name 'Post-install restart prerequisite' `
+            -Status 'PASS' `
+            -Detail ('confirmed={0}; startupPending={1}; bootHistory={2} (corroboration only)' -f `
+                $restartConfirmation.Source, $pendingRebootAtStart.Classification, $bootHistory.Corroboration)
         Get-PostInstallAssessmentItems `
             -OsIdentity $osIdentity `
             -DetectedOsKey $detectedOsKey `
@@ -3221,6 +3566,9 @@ try {
         ValidationFailures = $validationFailures.ToArray()
         CollectionFailures = $collectionFailures.ToArray()
         ReviewFindings = $reviewFindings.ToArray()
+        StartupPreflight = $startupPreflight
+        FullEvidenceCollectionStarted = $true
+        PendingRebootAtStart = $pendingRebootAtStart
         OperatingSystem = [pscustomobject][ordered]@{
             Caption = [string]$os.Caption
             ProductName = [string](Get-PropertyValue -InputObject $cv -Name 'ProductName')
@@ -3235,6 +3583,7 @@ try {
             OsArchitecture = [string]$os.OSArchitecture
             SystemDirectory = [string]$os.SystemDirectory
             WindowsDirectory = [string]$os.WindowsDirectory
+            InstallDate = if ($os.InstallDate) { $os.InstallDate.ToString('o') } else { $null }
             LastBootUpTime = if ($os.LastBootUpTime) { $os.LastBootUpTime.ToString('o') } else { $null }
         }
         ComputerSystem = [pscustomobject][ordered]@{
@@ -3315,6 +3664,13 @@ try {
         "BootManagerPrimarySignerIndicatesWindowsUefiCa2023: $($secureBoot.Assessment.BootManagerPrimarySignerIndicatesWindowsUefiCa2023)"
         "BootManagerSignerAssessmentScope: $($secureBoot.Assessment.BootManagerSignerAssessmentScope)"
         "ProblemDeviceCount: $($problemDevices.Count)"
+        "PostInstallRestartConfirmationSource: $($restartConfirmation.Source)"
+        "PostInstallRestartConfirmed: $($restartConfirmation.Confirmed)"
+        "BootHistoryCorroboration: $($bootHistory.Corroboration)"
+        "BootStartEventCountAfterInstallDate: $($bootHistory.BootStartEventCountAfterInstallDate)"
+        "NormalRestartEventCountAfterInstallDate: $($bootHistory.NormalRestartEventCountAfterInstallDate)"
+        "PendingRebootAtStart: $($pendingRebootAtStart.RebootPending)"
+        "PendingRebootAtStartClassification: $($pendingRebootAtStart.Classification)"
         "PendingReboot: $($pendingReboot.RebootPending)"
         "PendingRebootClassification: $($pendingReboot.Classification)"
         "PendingRebootBlocking: $($pendingReboot.BlockingRebootPending)"
@@ -3419,6 +3775,7 @@ try {
     if ($validationFailures.Count -gt 0 -or $collectionFailures.Count -gt 0 -or $reviewFindings.Count -gt 0) {
         $exitCode = 2
     }
+    } while ($false)
 }
 catch {
     $exitCode = 1
