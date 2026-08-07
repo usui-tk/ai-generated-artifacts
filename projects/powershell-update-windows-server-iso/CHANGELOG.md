@@ -379,6 +379,22 @@ the script and follows the
 
 ### Static analysis
 
+- **PSA info-debt drain, batch 7 — [OutputType] declarations.** The
+  26 advanced functions flagged by PSA6007 (the Catalog client core,
+  the oscdimg reference/resolution family, the release-evidence
+  writers, and the resume-state initialiser) gain `[OutputType]`
+  attributes derived from an AST extraction of every return
+  expression per function (pscustomobject evidence records for the
+  evidence writers and resolvers, `[bool]` for the row predicate,
+  `[string[]]`/`[object[]]` for the candidate enumerators,
+  `[string]` for the evidence-path saver, `[void]` for the interop
+  initialiser, `[object]` where the surface is a web response or
+  parsed-JSON union). Advisory metadata only — no behavior change.
+  Main-script debt is now 0E/120W/0I: the INFO class is fully
+  drained, and the 120 remaining warnings are all documented
+  declared-debt classes. ScriptVersion
+  `update-wsi-2026.08.08-r12.80`, tag `psa-outputtype-drain`; the
+  T40 release pin advances in the same change set.
 - **PSA warning-debt drain, batches 5+6 — naming adjudication and
   timeless comments.** Batch 5 (adjudication, no code change):
   PSA6005 (10) is adjudicated as analyzer false positives — the

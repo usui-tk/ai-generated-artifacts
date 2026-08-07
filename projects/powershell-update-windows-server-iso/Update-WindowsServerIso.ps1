@@ -718,10 +718,10 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.08-r12.79'
+$Script:ScriptVersion = 'update-wsi-2026.08.08-r12.80'
 # Validation history: the per-revision validation markers formerly kept
 # here live in CHANGELOG.md (chronological log) and SPEC.md Part D (rationale).
-$Script:ScriptTag     = 'psa-comment-drain'
+$Script:ScriptTag     = 'psa-outputtype-drain'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -5285,6 +5285,7 @@ function Write-CatalogTransportEvidence {
 
 function Invoke-CatalogWebRequest {
     [CmdletBinding()]
+    [OutputType([object])]
     param(
         [Parameter(Mandatory)][string]$Url,
         [Parameter(Mandatory)][ValidateSet('GET','POST')][string]$Method,
@@ -5403,6 +5404,7 @@ function Get-CatalogText {
 
 function Search-Catalog {
     [CmdletBinding()]
+    [OutputType([object[]])]
     param([Parameter(Mandatory)]$Query,[switch]$RefreshCache)
     $queryValues = [object[]](ConvertTo-CatalogBoundaryArray -Value $Query)
     if ($queryValues.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$queryValues[0])) {
@@ -5735,6 +5737,7 @@ function Get-CatalogIdentityRule {
         are retained solely to assess whether display metadata is canonical EN/JA.
     #>
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param([Parameter(Mandatory)]$Patch)
 
     $type = Get-PatchEntryType -Patch $Patch
@@ -6004,6 +6007,7 @@ function Test-CatalogRowAgainstRule {
         Coarse search-row filter. ScopedView performs the authoritative check.
     #>
     [CmdletBinding()]
+    [OutputType([bool])]
     param(
         [Parameter(Mandatory)]$Row,
         [Parameter(Mandatory)]$Rule
@@ -8042,6 +8046,7 @@ function Set-WimImageCreationTimeXml {
 
 function Initialize-WimApiInterop {
     [CmdletBinding()]
+    [OutputType([void])]
     param()
 
     if ('UpdateWsi.Native.WimApi' -as [type]) { return }
@@ -10405,6 +10410,7 @@ function Resolve-EfisysBin {
 
 function Get-OscdimgReferenceConfiguration {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param()
 
     $path = Join-Path $Script:ScriptRoot $Script:OscdimgReferenceRelativePath
@@ -10424,6 +10430,7 @@ function Get-OscdimgReferenceConfiguration {
 
 function Get-OscdimgPeEvidence {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param([Parameter(Mandatory)] [string]$Path)
 
     $result = [pscustomobject][ordered]@{
@@ -10464,6 +10471,7 @@ function Get-OscdimgPeEvidence {
 
 function Get-OscdimgAuthenticodeEvidence {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param([Parameter(Mandatory)] [string]$Path)
 
     $result = [pscustomobject][ordered]@{
@@ -10494,6 +10502,7 @@ function Get-OscdimgAuthenticodeEvidence {
 
 function Get-OscdimgAdkRegistrationEvidence {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param()
 
     $products = @()
@@ -10553,6 +10562,7 @@ function Get-OscdimgAdkRegistrationEvidence {
 
 function Get-OscdimgReferenceFromMicrosoftScriptText {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)] [string]$Text,
         [Parameter(Mandatory)] [string]$ReferenceName,
@@ -10589,6 +10599,7 @@ function Get-OscdimgReferenceFromMicrosoftScriptText {
 
 function Invoke-OscdimgRepositoryRequest {
     [CmdletBinding()]
+    [OutputType([object])]
     param([Parameter(Mandatory)] [string]$Uri)
 
     $headers = @{ 'User-Agent' = ('ISO-Patch-Project-OscdimgQualification/{0}' -f $Script:ScriptVersion) }
@@ -10601,6 +10612,7 @@ function Invoke-OscdimgRepositoryRequest {
 
 function Resolve-OscdimgRepositoryReferences {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param([Parameter(Mandatory)] $Configuration)
 
     $records = [System.Collections.Generic.List[object]]::new()
@@ -10706,6 +10718,7 @@ function Resolve-OscdimgRepositoryReferences {
 
 function Get-OscdimgManagedRepositoryCandidates {
     [CmdletBinding()]
+    [OutputType([object[]])]
     param([Parameter(Mandatory)] $RepositoryResolution)
 
     $results = @()
@@ -10759,6 +10772,7 @@ function Get-OscdimgManagedRepositoryCandidates {
 
 function Get-OscdimgLocalCandidatePaths {
     [CmdletBinding()]
+    [OutputType([string[]])]
     param()
 
     $list = [System.Collections.Generic.List[string]]::new()
@@ -10786,6 +10800,7 @@ function Get-OscdimgLocalCandidatePaths {
 
 function Get-OscdimgCandidateEvidence {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)] [string]$Path,
         [Parameter(Mandatory)] [string]$SourceType,
@@ -10847,6 +10862,7 @@ function Get-OscdimgCandidateEvidence {
 
 function Mount-OscdimgQualificationIsoMarker {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)] [string]$IsoPath,
         [Parameter(Mandatory)] [string]$ExpectedText
@@ -10876,6 +10892,7 @@ function Mount-OscdimgQualificationIsoMarker {
 
 function Invoke-OscdimgQualificationBuild {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)] [string]$OscdimgPath,
         [Parameter(Mandatory)] [string]$SourceRoot,
@@ -10900,6 +10917,7 @@ function Invoke-OscdimgQualificationBuild {
 
 function Invoke-OscdimgFunctionalQualification {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)] $Candidate,
         [Parameter(Mandatory)] [string]$BiosImage,
@@ -10990,6 +11008,7 @@ function Invoke-OscdimgFunctionalQualification {
 
 function Save-OscdimgResolutionEvidence {
     [CmdletBinding()]
+    [OutputType([string])]
     param([Parameter(Mandatory)] $Evidence)
 
     $dir = Join-Path $Script:WorkRoot 'logs\tool-resolution'
@@ -12718,6 +12737,7 @@ function Get-FileSha256OrEmpty {
 
 function Read-ReleaseJsonFile {
     [CmdletBinding()]
+    [OutputType([object])]
     param([Parameter(Mandatory)][string]$Path)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
     return (Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-CanonicalJson)
@@ -12887,6 +12907,7 @@ function Test-ReleaseEvidenceIdentity {
 
 function Write-ReleaseEvidenceMarker {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)]$Identity,
@@ -13214,6 +13235,7 @@ function Get-BootValidationAssessment {
 
 function Save-ReleaseEvidenceIndex {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param()
     $identity = Get-ReleaseEvidenceIdentity
     $p11Path = Join-Path $Script:LogsDir 'P11_static_verification.json'
@@ -13408,6 +13430,7 @@ function Get-DismLogClassification {
 
 function Write-DismLogClassificationEvidence {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [AllowEmptyString()][string]$LogPath,
         [AllowEmptyString()][string]$OperationStatus='Ok',
@@ -14202,6 +14225,7 @@ function Get-SetupDuFileVersionDecision {
 
 function Write-SetupDuFileDecisionEvidence {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param([Parameter(Mandatory)][object[]]$Decisions,[AllowNull()]$PackageAuthority,[AllowNull()]$Policy)
     Initialize-RuntimeDirectories -Directory @($Script:VersionDecisionDir)
     $jsonPath=Join-Path $Script:VersionDecisionDir 'P09_setupdu_file_decisions.json'
@@ -19128,6 +19152,7 @@ function Test-RemotePatchUrlStatus {
         declaring the result inconclusive.
     #>
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param([Parameter(Mandatory)][string]$Uri)
     try {
         $r = Invoke-WebRequest -Uri $Uri -Method Head -UserAgent $script:CatUA `
@@ -26142,6 +26167,7 @@ function Restore-ResolvedPatchAssetsForResume {
 
 function Initialize-ResumeBuildState {
     [CmdletBinding()]
+    [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)][ValidateSet('P08','P09')][string]$PhaseId,
         [switch]$ValidateOnly
