@@ -22,6 +22,37 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.07-r12.73] - 2026-08-07
+
+Tag retained: `post-install-evidence-collector-r9-merge`.
+
+### Changed
+
+- **Collector hardened to r10 / schema 1.8** (ISO servicing pipeline
+  unchanged from r12.72): pending-reboot evidence now distinguishes
+  genuinely blocking servicing state from narrowly recognized
+  Microsoft updater cleanup activity, and Secure Boot event message
+  parsing is line-safe when BucketId/Confidence fields are blank.
+  Collector delta +287 lines net (round-trip criterion verified both
+  directions per the r12.70 rule); on the main script the delta is
+  the identity and the validation-marker comment (+1 net line, date
+  component moves to 08.07). `data/*` and `schema/*` are
+  byte-identical to r12.72.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.07-r12.73`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. Main script PSA committed 6E/229W/27I
+  (raw sweep 6E/230W/27I: +1W is the PSA7002 LF artefact; +1W on the
+  marker line, declared series debt). Snapshot form: main script
+  BOM + LF; collector BOM + CRLF; committed checkout form BOM+CRLF
+  for both.
+
 ## [update-wsi-2026.08.05-r12.72] - 2026-08-07
 
 Tag retained: `post-install-evidence-collector-r9-merge`.

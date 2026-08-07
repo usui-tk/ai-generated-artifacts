@@ -32,8 +32,9 @@
 
     Exit code 0 means that collection and validation completed without a
     detected issue. Exit code 2 means that evidence was created but at least
-    one validation item failed or one collection item requires review. Exit code 1 means a
-    fatal collector error.
+    one validation item failed, one collection item requires review, or an
+    operational review condition (for example an advisory pending reboot) was
+    detected. Exit code 1 means a fatal collector error.
 
     The installed Windows Server release is detected automatically from the
     running system by correlating Win32_OperatingSystem ProductType and Caption
@@ -80,8 +81,8 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
-$script:SchemaVersion = 'windows-server-post-install-evidence/1.7'
-$script:CollectorVersion = 'r9'
+$script:SchemaVersion = 'windows-server-post-install-evidence/1.8'
+$script:CollectorVersion = 'r10'
 
 function Get-UtcTimestamp {
     [CmdletBinding()]
@@ -370,6 +371,150 @@ function Get-FreeDriveLetter {
     throw 'No unused drive letter is available for temporary ESP inspection.'
 }
 
+function Test-PendingFileRenameAdvisoryCleanup {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$SourcePath
+    )
+
+    # PendingFileRenameOperations stores NT-style paths. The observed updater
+    # entries can include the *1 prefix used by the registry representation.
+    # Normalize only those syntactic prefixes; do not canonicalize or broaden
+    # the allow-list because an unknown operation must remain fail-closed.
+    $normalized = $SourcePath -replace '^(?:\*1)?\\\?\?\\', ''
+    $patterns = @(
+        '(?i)^[A-Z]:\\Windows\\SystemTemp\\MicrosoftEdgeUpdate\.exe\.old\{[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\}$',
+        '(?i)^[A-Z]:\\Windows\\SystemTemp\\CopilotUpdate\.exe\.old\{[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\}$',
+        '(?i)^[A-Z]:\\Program Files \(x86\)\\Microsoft\\EdgeUpdate\\[0-9][^\\]*$'
+    )
+
+    foreach ($pattern in $patterns) {
+        if ($normalized -match $pattern) {
+            return [pscustomobject][ordered]@{
+                IsAdvisory = $true
+                NormalizedSource = $normalized
+                Reason = 'RecognizedMicrosoftUpdaterCleanup'
+            }
+        }
+    }
+
+    return [pscustomobject][ordered]@{
+        IsAdvisory = $false
+        NormalizedSource = $normalized
+        Reason = 'UnrecognizedPendingFileOperation'
+    }
+}
+
+function Convert-PendingFileRenameOperationsEvidence {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [object]$Value
+    )
+
+    $rawValues = @()
+    if ($null -ne $Value) {
+        if ($Value -is [System.Array]) {
+            $rawValues = @($Value | ForEach-Object { if ($null -eq $_) { '' } else { [string]$_ } })
+        }
+        else {
+            $rawValues = @([string]$Value)
+        }
+    }
+
+    $records = New-Object 'System.Collections.Generic.List[object]'
+    $malformed = (($rawValues.Count % 2) -ne 0)
+    for ($index = 0; $index -lt $rawValues.Count; $index += 2) {
+        $source = [string]$rawValues[$index]
+        $hasTarget = (($index + 1) -lt $rawValues.Count)
+        $target = if ($hasTarget) { [string]$rawValues[$index + 1] } else { $null }
+        $operation = if (-not $hasTarget) {
+            'Malformed'
+        }
+        elseif ([string]::IsNullOrEmpty($target)) {
+            'Delete'
+        }
+        else {
+            'RenameOrMove'
+        }
+
+        $advisory = [pscustomobject][ordered]@{
+            IsAdvisory = $false
+            NormalizedSource = ($source -replace '^(?:\*1)?\\\?\?\\', '')
+            Reason = if ($operation -eq 'Malformed') { 'MalformedPair' } else { 'NotEligibleForAdvisoryClassification' }
+        }
+        if ($operation -eq 'Delete' -and -not [string]::IsNullOrWhiteSpace($source)) {
+            $advisory = Test-PendingFileRenameAdvisoryCleanup -SourcePath $source
+        }
+
+        $records.Add([pscustomobject][ordered]@{
+            PairIndex = [int]($index / 2)
+            Source = $source
+            Target = $target
+            Operation = $operation
+            NormalizedSource = $advisory.NormalizedSource
+            AdvisoryCleanup = [bool]$advisory.IsAdvisory
+            ClassificationReason = [string]$advisory.Reason
+        }) | Out-Null
+    }
+
+    $advisoryCount = @($records | Where-Object AdvisoryCleanup).Count
+    $blockingCount = @($records | Where-Object { -not $_.AdvisoryCleanup }).Count
+    return [pscustomobject][ordered]@{
+        RawValueCount = $rawValues.Count
+        PairCount = $records.Count
+        Malformed = [bool]$malformed
+        AdvisoryOperationCount = $advisoryCount
+        BlockingOperationCount = $blockingCount
+        AdvisoryCleanupOnly = [bool]($records.Count -gt 0 -and -not $malformed -and $blockingCount -eq 0)
+        Records = $records.ToArray()
+    }
+}
+
+function Resolve-PendingRebootClassification {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)] [bool]$CbsPending,
+        [Parameter(Mandatory = $true)] [bool]$WindowsUpdatePending,
+        [Parameter(Mandatory = $true)] [bool]$PendingFileRenamePresent,
+        [Parameter(Mandatory = $true)] [object]$PendingFileRenameEvidence,
+        [Parameter(Mandatory = $true)] [ValidateRange(0, 2147483647)] [int]$ReadErrorCount
+    )
+
+    $pfroAdvisory = [bool](
+        $PendingFileRenamePresent -and
+        $PendingFileRenameEvidence.AdvisoryCleanupOnly
+    )
+    $pfroBlocking = [bool](
+        $PendingFileRenamePresent -and
+        -not $PendingFileRenameEvidence.AdvisoryCleanupOnly
+    )
+    $blockingPending = [bool]($CbsPending -or $WindowsUpdatePending -or $pfroBlocking)
+    $advisoryPending = [bool](-not $blockingPending -and $pfroAdvisory)
+    $classification = if ($blockingPending) {
+        'Blocking'
+    }
+    elseif ($advisoryPending) {
+        'Advisory'
+    }
+    elseif ($ReadErrorCount -gt 0) {
+        'Unknown'
+    }
+    else {
+        'None'
+    }
+
+    return [pscustomobject][ordered]@{
+        RebootPending = [bool]($blockingPending -or $advisoryPending)
+        BlockingRebootPending = $blockingPending
+        AdvisoryRebootPending = $advisoryPending
+        Classification = $classification
+    }
+}
+
 function Get-PendingRebootEvidence {
     [CmdletBinding()]
     param()
@@ -396,25 +541,32 @@ function Get-PendingRebootEvidence {
         $present = $false
         $value = $null
         $errorMessage = $null
-        if ($null -eq $check.ValueName) {
-            $present = Test-Path -LiteralPath $check.Path
-        }
-        elseif (Test-Path -LiteralPath $check.Path) {
-            try {
-                # Read the registry key first and inspect the property bag. This
-                # avoids recording a terminating error when an optional value is
-                # absent, which is a normal "not pending" condition.
+        try {
+            $pathPresent = Test-Path -LiteralPath $check.Path -ErrorAction Stop
+            if ($null -eq $check.ValueName) {
+                $present = [bool]$pathPresent
+            }
+            elseif ($pathPresent) {
+                # Read the registry key first and inspect the property bag. An
+                # absent optional value is a normal "not pending" condition;
+                # access/read failures are separately preserved as evidence.
                 $propertyBag = Get-ItemProperty -LiteralPath $check.Path -ErrorAction Stop
                 $property = $propertyBag.PSObject.Properties[$check.ValueName]
                 if ($null -ne $property) {
                     $value = $property.Value
-                    $present = ($null -ne $value)
+                    if ($check.Name -eq 'PendingFileRenameOperations') {
+                        $parsed = Convert-PendingFileRenameOperationsEvidence -Value $value
+                        $present = ($parsed.RawValueCount -gt 0)
+                    }
+                    else {
+                        $present = ($null -ne $value)
+                    }
                 }
             }
-            catch {
-                $errorMessage = $_.Exception.Message
-                $present = $false
-            }
+        }
+        catch {
+            $errorMessage = $_.Exception.Message
+            $present = $false
         }
 
         [pscustomobject][ordered]@{
@@ -425,8 +577,35 @@ function Get-PendingRebootEvidence {
         }
     }
 
+    $cbs = @($results | Where-Object Name -eq 'CBSRebootPending' | Select-Object -First 1)
+    $wu = @($results | Where-Object Name -eq 'WindowsUpdateRebootRequired' | Select-Object -First 1)
+    $pfroCheck = @($results | Where-Object Name -eq 'PendingFileRenameOperations' | Select-Object -First 1)
+    $pfro = if ($pfroCheck.Count -gt 0 -and $pfroCheck[0].Present) {
+        Convert-PendingFileRenameOperationsEvidence -Value $pfroCheck[0].Value
+    }
+    else {
+        Convert-PendingFileRenameOperationsEvidence -Value $null
+    }
+
+    $readErrors = @($results | Where-Object { -not [string]::IsNullOrWhiteSpace($_.ErrorMessage) })
+    $cbsPending = ($cbs.Count -gt 0 -and $cbs[0].Present)
+    $wuPending = ($wu.Count -gt 0 -and $wu[0].Present)
+    $pfroPresent = ($pfroCheck.Count -gt 0 -and $pfroCheck[0].Present)
+    $classification = Resolve-PendingRebootClassification `
+        -CbsPending ([bool]$cbsPending) `
+        -WindowsUpdatePending ([bool]$wuPending) `
+        -PendingFileRenamePresent ([bool]$pfroPresent) `
+        -PendingFileRenameEvidence $pfro `
+        -ReadErrorCount $readErrors.Count
+
     return [pscustomobject][ordered]@{
-        RebootPending = (@($results | Where-Object Present).Count -gt 0)
+        RebootPending = [bool]$classification.RebootPending
+        BlockingRebootPending = [bool]$classification.BlockingRebootPending
+        AdvisoryRebootPending = [bool]$classification.AdvisoryRebootPending
+        Classification = [string]$classification.Classification
+        CollectionComplete = [bool]($readErrors.Count -eq 0)
+        ReadErrorCount = $readErrors.Count
+        PendingFileRenameOperations = $pfro
         Checks = @($results)
     }
 }
@@ -1047,10 +1226,16 @@ function Get-SecureBootEventFieldValue {
     if (-not [string]::IsNullOrWhiteSpace($message)) {
         foreach ($pattern in $MessagePatterns) {
             if ($message -match $pattern) {
-                if ($Matches.ContainsKey(1)) {
-                    return [string]$Matches[1].Trim()
+                $candidate = if ($Matches.ContainsKey(1)) {
+                    [string]$Matches[1]
                 }
-                return [string]$Matches[0].Trim()
+                else {
+                    [string]$Matches[0]
+                }
+                $candidate = $candidate.Trim()
+                if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+                    return $candidate
+                }
             }
         }
     }
@@ -1085,13 +1270,16 @@ function Get-SecureBootRolloutStatus {
 
     $bucketId = Get-SecureBootEventFieldValue -Event $bucketEvent `
         -Names @('BucketId', 'BucketID') `
-        -MessagePatterns @('BucketId:\s*([^\r\n]+)')
+        -MessagePatterns @('(?m)^BucketId:[ \t]*([^\r\n]*)[ \t]*$')
     $confidence = Get-SecureBootEventFieldValue -Event $bucketEvent `
         -Names @('BucketConfidenceLevel', 'Confidence') `
-        -MessagePatterns @('BucketConfidenceLevel:\s*([^\r\n]+)')
+        -MessagePatterns @('(?m)^BucketConfidenceLevel:[ \t]*([^\r\n]*)[ \t]*$')
+    $updateType = Get-SecureBootEventFieldValue -Event $bucketEvent `
+        -Names @('UpdateType') `
+        -MessagePatterns @('(?m)^UpdateType:[ \t]*([^\r\n]*)[ \t]*$')
     $skipReason = Get-SecureBootEventFieldValue -Event $bucketEvent `
         -Names @('SkipReason') `
-        -MessagePatterns @('SkipReason:\s*([^\r\n]+)')
+        -MessagePatterns @('(?m)^SkipReason:[ \t]*([^\r\n]*)[ \t]*$')
     $knownIssueFromSkipReason = $null
     if (-not [string]::IsNullOrWhiteSpace($skipReason) -and $skipReason -match '(KI_\d+)') {
         $knownIssueFromSkipReason = $Matches[1]
@@ -1137,6 +1325,7 @@ function Get-SecureBootRolloutStatus {
         LatestCompletionOrPendingEventTime = if ($null -ne $bucketEvent) { $bucketEvent.TimeCreated } else { $null }
         BucketId = $bucketId
         Confidence = $confidence
+        UpdateType = $updateType
         SkipReason = $skipReason
         SkipReasonKnownIssue = $knownIssueFromSkipReason
         EventCounts = [pscustomobject]$count
@@ -1859,6 +2048,16 @@ function Get-SecureBootAssessment {
         $SecureBoot.FirmwareVariables.DirectRequirementsSatisfied
     )
 
+    if (
+        $SecureBoot.RolloutStatus.LatestEventId -eq 1801 -and
+        $directFirmwareCertificatesConfirmed -and
+        -not $microsoftCompletionConfirmed
+    ) {
+        $information.Add(
+            'The latest Microsoft rollout event is 1801 while direct firmware-variable inspection already satisfies the required 2023 certificate set. This is retained as a Microsoft monitoring-state divergence; rollout completion is not inferred from the direct observation alone.'
+        )
+    }
+
     $state = if ($SecureBoot.Enabled -ne $true) {
         'NotApplicableOrDisabled'
     }
@@ -1885,6 +2084,7 @@ function Get-SecureBootAssessment {
         LatestRolloutEventId = $SecureBoot.RolloutStatus.LatestEventId
         RolloutBucketId = $SecureBoot.RolloutStatus.BucketId
         RolloutConfidence = $SecureBoot.RolloutStatus.Confidence
+        RolloutUpdateType = $SecureBoot.RolloutStatus.UpdateType
         RolloutRebootPending = [bool]$SecureBoot.RolloutStatus.RebootPending
         RolloutMissingKek = [bool]$SecureBoot.RolloutStatus.MissingKek
         Event1808Count = [int]$event1808Count
@@ -2260,7 +2460,8 @@ function Get-PostInstallAssessmentItems {
         [Parameter(Mandatory = $true)] [bool]$InspectEspRequested,
         [Parameter(Mandatory = $true)] [bool]$MsInfo32Requested,
         [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [string[]]$ValidationFailures,
-        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [string[]]$CollectionFailures
+        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [string[]]$CollectionFailures,
+        [Parameter(Mandatory = $true)] [AllowEmptyCollection()] [string[]]$ReviewFindings
     )
 
     $items = New-Object 'System.Collections.Generic.List[object]'
@@ -2406,9 +2607,23 @@ function Get-PostInstallAssessmentItems {
         '{0} problematic device(s)' -f @($ProblemDevices).Count
     )))
 
-    $rebootStatus = if ($PendingReboot.RebootPending) { 'FAIL' } else { 'PASS' }
+    $rebootStatus = if ($PendingReboot.BlockingRebootPending) {
+        'FAIL'
+    }
+    elseif ($PendingReboot.AdvisoryRebootPending -or -not $PendingReboot.CollectionComplete) {
+        'REVIEW'
+    }
+    else {
+        'PASS'
+    }
     $items.Add((New-AssessmentItem -Name 'Pending reboot' -Status $rebootStatus -Detail (
-        'pending={0}' -f $PendingReboot.RebootPending
+        'pending={0}; classification={1}; PFRO pairs={2}; advisory={3}; blocking={4}; readErrors={5}' -f `
+            $PendingReboot.RebootPending,
+            $PendingReboot.Classification,
+            $PendingReboot.PendingFileRenameOperations.PairCount,
+            $PendingReboot.PendingFileRenameOperations.AdvisoryOperationCount,
+            $PendingReboot.PendingFileRenameOperations.BlockingOperationCount,
+            $PendingReboot.ReadErrorCount
     )))
 
     $winReStatus = if ($Reagent.Started -and $Reagent.Succeeded) { 'PASS' } else { 'REVIEW' }
@@ -2489,6 +2704,15 @@ function Get-PostInstallAssessmentItems {
         '{0} collection issue(s)' -f @($CollectionFailures).Count
     }
     $items.Add((New-AssessmentItem -Name 'Collection completeness' -Status $collectionStatus -Detail $collectionDetail))
+
+    $reviewStatus = if (@($ReviewFindings).Count -eq 0) { 'PASS' } else { 'REVIEW' }
+    $reviewDetail = if (@($ReviewFindings).Count -eq 0) {
+        'No operational review finding was detected'
+    }
+    else {
+        '{0} operational review finding(s)' -f @($ReviewFindings).Count
+    }
+    $items.Add((New-AssessmentItem -Name 'Operational review findings' -Status $reviewStatus -Detail $reviewDetail))
 
     return $items.ToArray()
 }
@@ -2801,6 +3025,7 @@ try {
 
     $validationFailures = New-Object 'System.Collections.Generic.List[string]'
     $collectionFailures = New-Object 'System.Collections.Generic.List[string]'
+    $reviewFindings = New-Object 'System.Collections.Generic.List[string]'
 
     foreach ($message in @($osIdentity.ValidationMessages)) {
         $validationFailures.Add([string]$message)
@@ -2811,8 +3036,20 @@ try {
     if ($problemDevices.Count -gt 0) {
         $validationFailures.Add("$($problemDevices.Count) problematic PnP device(s) detected.")
     }
-    if ($pendingReboot.RebootPending) {
-        $validationFailures.Add('A pending reboot condition was detected.')
+    if ($pendingReboot.BlockingRebootPending) {
+        $validationFailures.Add(
+            'A blocking pending reboot condition was detected (CBS, Windows Update, or an unrecognized/malformed PendingFileRenameOperations entry).'
+        )
+    }
+    elseif ($pendingReboot.AdvisoryRebootPending) {
+        $reviewFindings.Add(
+            'PendingFileRenameOperations contains only recognized Microsoft Edge/Copilot updater cleanup deletions. Restart the server and rerun the collector; this is an operational stabilization condition rather than an ISO validation failure.'
+        )
+    }
+    if (-not $pendingReboot.CollectionComplete) {
+        $collectionFailures.Add(
+            "Pending-reboot evidence collection was incomplete: $($pendingReboot.ReadErrorCount) registry read error(s)."
+        )
     }
 
     $invalidKernelSignatures = @(
@@ -2959,13 +3196,14 @@ try {
             -InspectEspRequested ([bool]$InspectEsp) `
             -MsInfo32Requested ([bool]$IncludeMsInfo32) `
             -ValidationFailures $validationFailures.ToArray() `
-            -CollectionFailures $collectionFailures.ToArray()
+            -CollectionFailures $collectionFailures.ToArray() `
+            -ReviewFindings $reviewFindings.ToArray()
     )
 
     $overallStatus = if ($validationFailures.Count -gt 0) {
         'Fail'
     }
-    elseif ($collectionFailures.Count -gt 0) {
+    elseif ($collectionFailures.Count -gt 0 -or $reviewFindings.Count -gt 0) {
         'ReviewRequired'
     }
     else {
@@ -2982,6 +3220,7 @@ try {
         AssessmentItems = @($assessmentItems)
         ValidationFailures = $validationFailures.ToArray()
         CollectionFailures = $collectionFailures.ToArray()
+        ReviewFindings = $reviewFindings.ToArray()
         OperatingSystem = [pscustomobject][ordered]@{
             Caption = [string]$os.Caption
             ProductName = [string](Get-PropertyValue -InputObject $cv -Name 'ProductName')
@@ -3064,6 +3303,7 @@ try {
         "SecureBootLatestRolloutEventId: $($secureBoot.RolloutStatus.LatestEventId)"
         "SecureBootRolloutBucketId: $($secureBoot.RolloutStatus.BucketId)"
         "SecureBootRolloutConfidence: $($secureBoot.RolloutStatus.Confidence)"
+        "SecureBootRolloutUpdateType: $($secureBoot.RolloutStatus.UpdateType)"
         "SecureBoot2023Assessment: $($secureBoot.Assessment.State)"
         "SecureBootDirectCertificateRequirementsSatisfied: $($secureBoot.FirmwareVariables.DirectRequirementsSatisfied)"
         "SecureBootMicrosoftCompletionConfirmed: $($secureBoot.Assessment.MicrosoftCompletionConfirmed)"
@@ -3076,6 +3316,9 @@ try {
         "BootManagerSignerAssessmentScope: $($secureBoot.Assessment.BootManagerSignerAssessmentScope)"
         "ProblemDeviceCount: $($problemDevices.Count)"
         "PendingReboot: $($pendingReboot.RebootPending)"
+        "PendingRebootClassification: $($pendingReboot.Classification)"
+        "PendingRebootBlocking: $($pendingReboot.BlockingRebootPending)"
+        "PendingRebootAdvisory: $($pendingReboot.AdvisoryRebootPending)"
         "WinRE ExitCode: $($reagent.ExitCode)"
         "ESP Inspected: $($esp.Requested)"
         "ESP Available: $($esp.Available)"
@@ -3096,6 +3339,11 @@ try {
             @($collectionFailures | ForEach-Object { "  - $_" })
         })
         ""
+        "Review findings:"
+        $(if ($reviewFindings.Count -eq 0) { '  none' } else {
+            @($reviewFindings | ForEach-Object { "  - $_" })
+        })
+        ""
         "Informational findings:"
         $(if (@($secureBoot.Assessment.InformationalFindings).Count -eq 0) { '  none' } else {
             @($secureBoot.Assessment.InformationalFindings | ForEach-Object { "  - $_" })
@@ -3105,7 +3353,7 @@ try {
     Get-AssessmentReportLines `
         -AssessmentItems @($assessmentItems) `
         -OverallStatus $summary.OverallStatus `
-        -ExitCode $(if ($validationFailures.Count -gt 0 -or $collectionFailures.Count -gt 0) { 2 } else { 0 }) `
+        -ExitCode $(if ($validationFailures.Count -gt 0 -or $collectionFailures.Count -gt 0 -or $reviewFindings.Count -gt 0) { 2 } else { 0 }) `
         -EvidenceDirectory $evidenceDir `
         -ZipPath $zipPath |
         Set-Content -LiteralPath (Join-Path $evidenceDir 'assessment-report.txt') -Encoding UTF8
@@ -3168,7 +3416,7 @@ try {
         -LiteralPath (Join-Path $evidenceDir 'secureboot-script-inventory.csv') `
         -NoTypeInformation -Encoding UTF8
 
-    if ($validationFailures.Count -gt 0 -or $collectionFailures.Count -gt 0) {
+    if ($validationFailures.Count -gt 0 -or $collectionFailures.Count -gt 0 -or $reviewFindings.Count -gt 0) {
         $exitCode = 2
     }
 }
@@ -3230,6 +3478,13 @@ finally {
             Write-Host ''
             Write-Host 'Collection review details:' -ForegroundColor Yellow
             foreach ($message in @($summary.CollectionFailures)) {
+                Write-Host "  - $message" -ForegroundColor Yellow
+            }
+        }
+        if (@($summary.ReviewFindings).Count -gt 0) {
+            Write-Host ''
+            Write-Host 'Operational review details:' -ForegroundColor Yellow
+            foreach ($message in @($summary.ReviewFindings)) {
                 Write-Host "  - $message" -ForegroundColor Yellow
             }
         }
