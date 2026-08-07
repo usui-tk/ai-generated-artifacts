@@ -95,6 +95,33 @@ the script and follows the
   closed). Specification source: distribution axes R1273/R1274/R1275,
   re-authored. With T47 this closes the Collector coverage gap;
   offline suite is now 26 PASS + the declared T30 red.
+- **T49 `oscdimg_reference_test.py` added** (phase B): first contract
+  protecting the declared tool-reference file adopted at r12.63.
+  D-half, anchored on `data/tool-references/oscdimg-reference.json`:
+  the file's SchemaVersion pinned exactly, ExpectedAdkFamily /
+  ExpectedAdkServicingKb asserted by FORMAT only, at least two AMD64
+  repository references each with a 64-hex digest and a Microsoft
+  Symbol Server URL, and at least two qualified identities with valid
+  digests — the concrete declared values are deliberately NOT
+  duplicated into the test, because the declared file is the value
+  authority and duplicating values is the staleness hazard the
+  declaration model exists to avoid. B-half, AST-verified: the legacy
+  ADK fallback executes nothing and states its non-modification
+  behavior, the installer-URL variable and adksetup.exe constants and
+  the retired advisory messages are gone from executable code,
+  New-BootableIso requires functional qualification and records the
+  functional status and resolver evidence path, P01 preserves
+  machine-readable resolver-failure evidence, the five oscdimg schema
+  identities and three reference names and qualification evidence
+  keys are declared, and the Microsoft-script reference parser is
+  exercised behaviorally on a synthetic fixture (symbol-store key,
+  lowercased hash, version, date). 44 assertions; fault detection
+  verified by mutation on a disposable copy (an invalid declared
+  digest and a re-introduced retired advisory message both fail
+  closed). Specification source: distribution axes R1263/R1264,
+  re-authored; the R1264 collection-shape rows are deferred to the
+  T51 binder guard per the ledger. Offline suite is now 27 PASS + the
+  declared T30 red.
 
 ## [update-wsi-2026.08.07-r12.75] - 2026-08-07
 
