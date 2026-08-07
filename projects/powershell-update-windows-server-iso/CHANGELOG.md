@@ -241,6 +241,32 @@ the script and follows the
   R1252/R1265/R1266/R1267, re-authored; the R1252 servicing-contract
   component-hash rows are ADOPT-D in T45; revision-floor rows are
   DROP. Offline suite is now 29 PASS + the declared T30 red.
+- **T51 `generic_list_binder_test.py` added** (phase D, second part):
+  the r12.17/r12.64 incident class — PowerShell 7.4+ throwing
+  'Argument types do not match' when a Generic.List[object] holding
+  PSCustomObject rows is materialized through the array subexpression
+  or constructed through New-Object. Static pins: no New-Object
+  Generic.List construction anywhere in the active script; P11
+  evidence takes RowCount from the List Count property directly with
+  the failing subexpression form absent; the r12.64 oscdimg
+  repository-reference resolver uses constructor-created
+  List[object]/List[string] with explicit typed ToArray()
+  materialization for records and errors (forbidden subexpression
+  forms absent, repository-resolution schema advanced to
+  secureboot-objects-oscdimg-resolution/1.1); the local-candidate
+  resolver constructs via ::new() and returns a typed ToArray() with
+  the subexpression return absent. Behavioral pins under the pinned
+  pwsh: constructor-created List[object] of PSCustomObjects
+  materializes with order and properties preserved and groups
+  correctly (the exact r12.64 repository-record shape); List[string]
+  paths survive typed materialization; the exact r12.17 P11 evidence
+  shape builds with RowCount from .Count. 17 assertions; fault
+  detection verified by mutation on a disposable copy (the r12.63
+  @()-materialization failure shape and a reintroduced New-Object
+  construction both fail closed). Specification source: distribution
+  axes R1217/R1264 plus the R1264 collection-shape rows deferred from
+  T49, re-authored; oscdimg function uniqueness stays pinned in T49.
+  Offline suite is now 30 PASS + the declared T30 red.
 
 ## [update-wsi-2026.08.07-r12.75] - 2026-08-07
 
