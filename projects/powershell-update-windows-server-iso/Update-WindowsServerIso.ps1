@@ -718,8 +718,9 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.02-r12.57'
-# Validation marker: r12.57 Server 2025 PCA2023 conversion is required by default; the legacy force switch is compatibility-only.
+$Script:ScriptVersion = 'update-wsi-2026.08.02-r12.58'
+# Validation marker: r12.58 binds the ISO El Torito UEFI boot entry to efisys_ex.bin after PCA2023 conversion.
+# r12.57 proved only loose-file presence/signatures and could therefore accept a non-bootable mixed PCA2011/PCA2023 ISO.
 # Validation marker retained: r12.55 Setup DU baseline-language preservation and P11 no-new-locale verification.
 $Script:ScriptTag     = 'setupdu-baseline-language-preservation'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
@@ -9742,27 +9743,224 @@ function Resolve-EtfsbootCom {
     throw 'etfsboot.com not found in any of the expected locations.'
 }
 
+function Get-IsoElToritoUefiBootImageEvidence {
+    <#
+    .SYNOPSIS
+        Parse an ISO9660 El Torito boot catalog and prove that the UEFI
+        boot entry embeds the expected efisys image byte-for-byte.
+    .DESCRIPTION
+        Mount-DiskImage exposes files from the ISO filesystem but does not
+        expose the El Torito boot image selected by firmware. r12.57 checked
+        the loose efi\boot\bootx64.efi and efisys_ex.bin files only, so a
+        PCA2011 efisys.bin could still remain wired into the boot catalog.
+        This parser reads the boot record descriptor, boot catalog and EFI
+        section entry directly from the ISO, then hashes the embedded image
+        using the expected image length.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string]$IsoPath,
+        [Parameter(Mandatory)] [string]$ExpectedImagePath
+    )
+
+    $result = [pscustomobject][ordered]@{
+        SchemaVersion='iso-el-torito-uefi/1.0'
+        GeneratedAtUtc=([datetime]::UtcNow.ToString('o'))
+        Available=$false
+        Status='Unknown'
+        ErrorMessage=''
+        IsoPath=$IsoPath
+        ExpectedImagePath=$ExpectedImagePath
+        ExpectedImageSizeBytes=0
+        ExpectedImageSha256=''
+        BootCatalogLba=$null
+        BootCatalogValidationChecksumValid=$false
+        BootCatalogValidationSignatureValid=$false
+        UefiEntryFound=$false
+        UefiPlatformId='0xEF'
+        UefiBootIndicator=''
+        UefiBootImageLba=$null
+        UefiBootImageSectorCount=$null
+        UefiBootImageCatalogBytes=$null
+        ObservedImageSha256=''
+        MatchesExpected=$false
+    }
+
+    if (-not (Test-Path -LiteralPath $IsoPath -PathType Leaf)) {
+        $result.Status='Fail'
+        $result.ErrorMessage=('ISO not found: {0}' -f $IsoPath)
+        return $result
+    }
+    if (-not (Test-Path -LiteralPath $ExpectedImagePath -PathType Leaf)) {
+        $result.Status='Fail'
+        $result.ErrorMessage=('Expected UEFI boot image not found: {0}' -f $ExpectedImagePath)
+        return $result
+    }
+
+    $stream=$null
+    try {
+        $expectedItem=Get-Item -LiteralPath $ExpectedImagePath -ErrorAction Stop
+        $result.ExpectedImageSizeBytes=[int64]$expectedItem.Length
+        $result.ExpectedImageSha256=((Get-FileHash -LiteralPath $ExpectedImagePath -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant())
+
+        $sectorSize=2048
+        $stream=[System.IO.File]::Open($IsoPath,[System.IO.FileMode]::Open,[System.IO.FileAccess]::Read,[System.IO.FileShare]::Read)
+        $descriptor=New-Object byte[] $sectorSize
+        $catalogLba=$null
+        for($sector=16;$sector -lt 128;$sector++) {
+            $stream.Position=[int64]$sector*$sectorSize
+            $read=$stream.Read($descriptor,0,$descriptor.Length)
+            if($read -ne $descriptor.Length){break}
+            $identifier=[System.Text.Encoding]::ASCII.GetString($descriptor,1,5)
+            if($identifier -ne 'CD001'){continue}
+            $descriptorType=[int]$descriptor[0]
+            if($descriptorType -eq 0) {
+                $bootSystemId=[System.Text.Encoding]::ASCII.GetString($descriptor,7,32).Trim([char[]]@([char]0,[char]32))
+                if($bootSystemId -eq 'EL TORITO SPECIFICATION') {
+                    $catalogLba=[System.BitConverter]::ToUInt32($descriptor,71)
+                    break
+                }
+            }
+            if($descriptorType -eq 255){break}
+        }
+        if($null -eq $catalogLba){throw 'El Torito boot record descriptor was not found.'}
+        $result.BootCatalogLba=[int64]$catalogLba
+
+        $catalogOffset=[int64]$catalogLba*$sectorSize
+        if($catalogOffset -ge $stream.Length){throw 'El Torito boot catalog LBA points beyond the ISO.'}
+        $catalogLength=[int][System.Math]::Min(65536,($stream.Length-$catalogOffset))
+        $catalog=New-Object byte[] $catalogLength
+        $stream.Position=$catalogOffset
+        $catalogRead=$stream.Read($catalog,0,$catalog.Length)
+        if($catalogRead -lt 128){throw 'El Torito boot catalog is truncated.'}
+
+        $validationSum=[uint32]0
+        for($i=0;$i -lt 32;$i+=2) {
+            $validationSum=[uint32](($validationSum+[System.BitConverter]::ToUInt16($catalog,$i)) -band 0xffff)
+        }
+        $result.BootCatalogValidationChecksumValid=($validationSum -eq 0)
+        $result.BootCatalogValidationSignatureValid=($catalog[30] -eq 0x55 -and $catalog[31] -eq 0xAA)
+        if(-not $result.BootCatalogValidationSignatureValid){throw 'El Torito boot catalog validation signature is invalid.'}
+        if(-not $result.BootCatalogValidationChecksumValid){throw 'El Torito boot catalog validation checksum is invalid.'}
+
+        $entries=[System.Collections.Generic.List[object]]::new()
+        $initialIndicator=[int]$catalog[32]
+        if($initialIndicator -in @(0x00,0x88)) {
+            $entries.Add([pscustomobject]@{
+                PlatformId=[int]$catalog[1]
+                BootIndicator=$initialIndicator
+                SectorCount=[System.BitConverter]::ToUInt16($catalog,38)
+                LoadRba=[System.BitConverter]::ToUInt32($catalog,40)
+            }) | Out-Null
+        }
+
+        $offset=64
+        while(($offset+32) -le $catalogRead) {
+            $header=[int]$catalog[$offset]
+            if($header -notin @(0x90,0x91)){break}
+            $platform=[int]$catalog[$offset+1]
+            $entryCount=[System.BitConverter]::ToUInt16($catalog,$offset+2)
+            for($entryIndex=0;$entryIndex -lt $entryCount;$entryIndex++) {
+                $entryOffset=$offset+32+(32*$entryIndex)
+                if(($entryOffset+32) -gt $catalogRead){throw 'El Torito section entry extends beyond the catalog data.'}
+                $entries.Add([pscustomobject]@{
+                    PlatformId=$platform
+                    BootIndicator=[int]$catalog[$entryOffset]
+                    SectorCount=[System.BitConverter]::ToUInt16($catalog,$entryOffset+6)
+                    LoadRba=[System.BitConverter]::ToUInt32($catalog,$entryOffset+8)
+                }) | Out-Null
+            }
+            $offset+=32*(1+$entryCount)
+            if($header -eq 0x91){break}
+        }
+
+        $uefiEntry=$null
+        foreach($entry in $entries) {
+            if($entry.PlatformId -eq 0xEF -and $entry.BootIndicator -eq 0x88) {
+                $uefiEntry=$entry
+                break
+            }
+        }
+        if(-not $uefiEntry){throw 'A bootable EFI (platform 0xEF) El Torito entry was not found.'}
+
+        $result.UefiEntryFound=$true
+        $result.UefiBootIndicator=('0x{0:X2}' -f $uefiEntry.BootIndicator)
+        $result.UefiBootImageLba=[int64]$uefiEntry.LoadRba
+        $result.UefiBootImageSectorCount=[int]$uefiEntry.SectorCount
+        $result.UefiBootImageCatalogBytes=[int64]$uefiEntry.SectorCount*512
+
+        $imageOffset=[int64]$uefiEntry.LoadRba*$sectorSize
+        $expectedLength=[int64]$result.ExpectedImageSizeBytes
+        if($result.UefiBootImageCatalogBytes -lt $expectedLength){throw 'The EFI El Torito catalog sector count is smaller than the expected efisys image.'}
+        if(($imageOffset+$expectedLength) -gt $stream.Length){throw 'The EFI El Torito image extends beyond the ISO when evaluated using the expected image length.'}
+
+        $sha=[System.Security.Cryptography.SHA256]::Create()
+        try {
+            $stream.Position=$imageOffset
+            $remaining=$expectedLength
+            $buffer=New-Object byte[] 1048576
+            while($remaining -gt 0) {
+                $want=[int][System.Math]::Min($buffer.Length,$remaining)
+                $got=$stream.Read($buffer,0,$want)
+                if($got -le 0){throw 'Unexpected end of ISO while hashing the EFI El Torito image.'}
+                $null=$sha.TransformBlock($buffer,0,$got,$buffer,0)
+                $remaining-=$got
+            }
+            $empty=[byte[]]@()
+            $null=$sha.TransformFinalBlock($empty,0,0)
+            $result.ObservedImageSha256=(-join ($sha.Hash | ForEach-Object { '{0:x2}' -f $_ }))
+        } finally {
+            $sha.Dispose()
+        }
+
+        $result.MatchesExpected=([string]$result.ObservedImageSha256 -eq [string]$result.ExpectedImageSha256)
+        $result.Available=$true
+        $result.Status=$(if($result.MatchesExpected){'Pass'}else{'Fail'})
+        if(-not $result.MatchesExpected) {
+            $result.ErrorMessage='The ISO El Torito UEFI entry does not embed the expected PCA2023 efisys image.'
+        }
+    } catch {
+        $result.Status='Fail'
+        $result.ErrorMessage=$_.Exception.Message
+    } finally {
+        if($stream){$stream.Dispose()}
+    }
+    return $result
+}
+
 function Resolve-EfisysBin {
     <#
     .SYNOPSIS
-        Locate efisys.bin using the three-tier fallback chain
-        documented in SPEC Part B.5 P09.
+        Resolve the UEFI El Torito boot image. PCA2023 ISO assembly must
+        use efisys_ex.bin; ordinary pre-conversion assembly may use the
+        legacy efisys.bin.
     #>
     [CmdletBinding()]
     [OutputType([string])]
-    param([Parameter(Mandatory)] [string]$ExtractedIsoRoot)
-    $candidates = @(
+    param(
+        [Parameter(Mandatory)] [string]$ExtractedIsoRoot,
+        [ValidateSet('Auto','Pca2011','Pca2023')] [string]$Policy='Auto'
+    )
+
+    $pca2023Path=Join-Path $ExtractedIsoRoot 'efi\microsoft\boot\efisys_ex.bin'
+    $legacyCandidates=@(
         (Join-Path $ExtractedIsoRoot 'efi\microsoft\boot\efisys.bin')
         'C:\Program Files\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\efisys.bin'
         'C:\Program Files (x86)\Windows Kits\10\Assessment and Deployment Kit\Deployment Tools\amd64\Oscdimg\efisys.bin'
     )
-    if ($env:ISOFACTORY_PE_DIR) {
-        $candidates += (Join-Path $env:ISOFACTORY_PE_DIR 'fwfiles\efisys.bin')
+    if($env:ISOFACTORY_PE_DIR){$legacyCandidates+=(Join-Path $env:ISOFACTORY_PE_DIR 'fwfiles\efisys.bin')}
+
+    if($Policy -in @('Auto','Pca2023')) {
+        if(Test-Path -LiteralPath $pca2023Path){return $pca2023Path}
+        if($Policy -eq 'Pca2023') {
+            throw ('PCA2023 UEFI El Torito image is required but efisys_ex.bin was not found: {0}' -f $pca2023Path)
+        }
     }
-    foreach ($c in $candidates) {
-        if (Test-Path -LiteralPath $c) { return $c }
+    foreach($candidate in $legacyCandidates) {
+        if(Test-Path -LiteralPath $candidate){return $candidate}
     }
-    throw 'efisys.bin not found in any of the expected locations.'
+    throw ('No usable UEFI El Torito image was found for policy {0}.' -f $Policy)
 }
 
 function Install-WindowsAdkFallback {
@@ -10140,12 +10338,15 @@ function New-BootableIso {
     param(
         [Parameter(Mandatory)] [string]$ExtractedIsoRoot,
         [Parameter(Mandatory)] [string]$OutputIsoPath,
-        [Parameter(Mandatory)] [string]$VolumeLabel
+        [Parameter(Mandatory)] [string]$VolumeLabel,
+        [ValidateSet('Auto','Pca2011','Pca2023')] [string]$UefiBootImagePolicy='Auto'
     )
     Set-DebugStep -Step 'oscdimg-resolve-tools'
     $oscdimg  = Resolve-OscdimgExe
     $etfsboot = Resolve-EtfsbootCom -ExtractedIsoRoot $ExtractedIsoRoot
-    $efisys   = Resolve-EfisysBin   -ExtractedIsoRoot $ExtractedIsoRoot
+    $efisys   = Resolve-EfisysBin   -ExtractedIsoRoot $ExtractedIsoRoot -Policy $UefiBootImagePolicy
+    $resolvedUefiMode = $(if ([System.IO.Path]::GetFileName($efisys) -ieq 'efisys_ex.bin') { 'Pca2023' } else { 'Pca2011' })
+    Write-Step ('UEFI El Torito boot image: mode={0}; path={1}' -f $resolvedUefiMode, $efisys)
 
     # Sanitise label (oscdimg max 32 chars, ASCII subset)
     $label = $VolumeLabel
@@ -10175,6 +10376,20 @@ function New-BootableIso {
     }
     if (-not (Test-Path -LiteralPath $OutputIsoPath)) {
         throw ('oscdimg.exe reported success but {0} was not created.' -f $OutputIsoPath)
+    }
+    if($Script:LogsDir -and (Test-Path -LiteralPath $Script:LogsDir -PathType Container)) {
+        $assemblyEvidence=[pscustomobject][ordered]@{
+            SchemaVersion='iso-boot-assembly/1.0'
+            CreatedAtUtc=([datetime]::UtcNow.ToString('o'))
+            OutputIsoPath=$OutputIsoPath
+            UefiBootImagePolicy=$UefiBootImagePolicy
+            ResolvedUefiBootMode=$resolvedUefiMode
+            SelectedUefiBootImagePath=$efisys
+            SelectedUefiBootImageSizeBytes=[int64](Get-Item -LiteralPath $efisys).Length
+            SelectedUefiBootImageSha256=((Get-FileHash -LiteralPath $efisys -Algorithm SHA256).Hash.ToLowerInvariant())
+            BiosBootImagePath=$etfsboot
+        }
+        Save-CanonicalJsonFile -InputObject $assemblyEvidence -Path (Join-Path $Script:LogsDir 'iso_boot_assembly.json') -Depth 8
     }
     return $OutputIsoPath
 }
@@ -12129,6 +12344,13 @@ function Test-Pca2023PolicyCompliance {
         }
         if (-not $efisys -or $efisys.Status -eq 'Fail') {
             $eligible = $false; $reasons.Add('PCA2023 efisys_ex.bin media payload is missing or invalid.') | Out-Null
+        }
+        if($OutputCheck.PSObject.Properties['ElToritoVerificationRequired'] -and $OutputCheck.ElToritoVerificationRequired) {
+            $elTorito=$OutputCheck.ElToritoUefiBootImageCheck
+            if(-not $elTorito -or -not $elTorito.Available -or -not $elTorito.MatchesExpected) {
+                $eligible=$false
+                $reasons.Add('ISO El Torito UEFI boot entry is not bound to the PCA2023 efisys_ex.bin payload.') | Out-Null
+            }
         }
         if ($OutputCheck.OverallStatus -in @('Fail','Warning','Unknown')) {
             $eligible = $false; $reasons.Add(('Output readiness status is {0}.' -f $OutputCheck.OverallStatus)) | Out-Null
@@ -15877,7 +16099,8 @@ function Test-OutputIsoPca2023Readiness {
     [OutputType([pscustomobject])]
     param(
         [Parameter(Mandatory)] [string]$ExtractedMediaPath,
-        [AllowEmptyString()] [string]$ConversionSkipReason = ''
+        [AllowEmptyString()] [string]$ConversionSkipReason = '',
+        [AllowEmptyString()] [string]$OutputIsoPath = ''
     )
 
     $skippedByPolicy = $ConversionSkipReason.StartsWith('skipped-by-policy')
@@ -15890,6 +16113,8 @@ function Test-OutputIsoPca2023Readiness {
         ConversionSkippedByPolicy = $skippedByPolicy
         ConversionSkipReason      = $ConversionSkipReason
         OfficialWorkflow = (Get-SecureBootWorkflowReference)
+        ElToritoVerificationRequired = (-not [string]::IsNullOrWhiteSpace($OutputIsoPath))
+        ElToritoUefiBootImageCheck = $null
         TargetChecks  = @()
         Reasons       = @()
     }
@@ -15922,6 +16147,7 @@ function Test-OutputIsoPca2023Readiness {
 
     $checks  = [System.Collections.Generic.List[object]]::new()
     $reasons = [System.Collections.Generic.List[string]]::new()
+    $elToritoStatus='NotChecked'
 
     # ---- Target #1: UEFI critical path (bootx64.efi / bootaa64.efi) ----
     if (Test-Path -LiteralPath $criticalPath) {
@@ -16105,9 +16331,23 @@ function Test-OutputIsoPca2023Readiness {
         }) | Out-Null
     }
 
+
+    # ---- ISO El Torito UEFI boot image identity ----
+    # Firmware boots the platform-0xEF image from the ISO boot catalog; it
+    # does not boot the loose efi\boot\bootx64.efi file directly. Therefore
+    # presence/signature checks alone are insufficient.
+    if($result.ElToritoVerificationRequired) {
+        $elTorito=Get-IsoElToritoUefiBootImageEvidence -IsoPath $OutputIsoPath -ExpectedImagePath $efisysExPath
+        $result.ElToritoUefiBootImageCheck=$elTorito
+        $elToritoStatus=$elTorito.Status
+        if(-not ($elTorito.Available -and $elTorito.MatchesExpected)) {
+            $reasons.Add(('El Torito UEFI boot image mismatch: {0}' -f $elTorito.ErrorMessage)) | Out-Null
+        }
+    }
+
     # ---- Aggregate OverallStatus ----
     # Priority: Fail > Warning > PassWithNotes > Pass
-    $hasFail          = $false
+    $hasFail          = [bool]($elToritoStatus -eq 'Fail')
     $hasWarning       = $false
     $hasPassWithNotes = $false
     foreach ($c in $checks) {
@@ -16124,7 +16364,7 @@ function Test-OutputIsoPca2023Readiness {
 
     # SCOPE clarifier - always appended so downstream consumers see the
     # exact boundary of what this in-tree check can and cannot prove.
-    $reasons.Add('SCOPE: file presence + signer-chain only. Actual boot behaviour on firmware with PCA2011 revoked from DBX is NOT verified here. Manual boot test on hardware or a Hyper-V Gen2 VM with a PCA2023 Secure Boot template is required before production deployment.') | Out-Null
+    $reasons.Add('SCOPE: loose-file presence + signer-chain + El Torito UEFI boot-image identity. Actual boot behaviour on firmware with PCA2011 revoked from DBX is NOT verified here. Manual boot test on hardware or a Hyper-V Gen2 VM with a PCA2023 Secure Boot template is required before production deployment.') | Out-Null
 
     # IMPORTANT: use $checks.ToArray() rather than @($checks).
     # PowerShell 7.4's @() operator on a System.Collections.Generic.List[object]
@@ -16282,8 +16522,9 @@ function Show-Pca2023ReadinessSnapshot {
             $passNotesCnt = @($OutputCheck.TargetChecks | Where-Object { $_.Status -eq 'PassWithNotes' }).Count
             $warnCount    = @($OutputCheck.TargetChecks | Where-Object { $_.Status -eq 'Warning' }).Count
             $failCount    = @($OutputCheck.TargetChecks | Where-Object { $_.Status -eq 'Fail' }).Count
-            Write-Step ('Output ISO check : overall={0,-13} targets={1} (Pass={2} PassWithNotes={3} Warn={4} Fail={5})' -f `
-                $OutputCheck.OverallStatus, $OutputCheck.TargetChecks.Count, $passCount, $passNotesCnt, $warnCount, $failCount)
+            $catalogState=$(if(-not $OutputCheck.ElToritoVerificationRequired){'not-required'}elseif($OutputCheck.ElToritoUefiBootImageCheck -and $OutputCheck.ElToritoUefiBootImageCheck.MatchesExpected){'PCA2023-match'}else{'FAIL'})
+            Write-Step ('Output ISO check : overall={0,-13} targets={1} (Pass={2} PassWithNotes={3} Warn={4} Fail={5}); ElTorito={6}' -f `
+                $OutputCheck.OverallStatus, $OutputCheck.TargetChecks.Count, $passCount, $passNotesCnt, $warnCount, $failCount,$catalogState)
         }
         return
     }
@@ -16341,6 +16582,10 @@ function Show-Pca2023ReadinessSnapshot {
         Write-Step ('  OverallStatus      : {0}' -f $OutputCheck.OverallStatus)
         if ($OutputCheck.Available) {
             Write-Step ('  Targets checked    : {0}' -f $OutputCheck.TargetChecks.Count)
+            if($OutputCheck.ElToritoVerificationRequired) {
+                $el=$OutputCheck.ElToritoUefiBootImageCheck
+                Write-Step ('  El Torito UEFI    : {0} (catalog LBA={1}; image LBA={2})' -f $(if($el -and $el.MatchesExpected){'PCA2023 efisys_ex.bin match'}else{'FAIL'}),$(if($el){$el.BootCatalogLba}else{'n/a'}),$(if($el){$el.UefiBootImageLba}else{'n/a'}))
+            }
             foreach ($t in $OutputCheck.TargetChecks) {
                 Write-Step ('    - [{0,-13}] {1}' -f $t.Status, $t.Label)
                 if ($t.ActualSignature) {
@@ -16428,6 +16673,16 @@ function Format-Pca2023ReadinessForReport {
         [void]$sb.AppendLine(('OverallStatus       : {0}' -f $OutputCheck.OverallStatus))
         if ($OutputCheck.Available) {
             [void]$sb.AppendLine(('Targets checked     : {0}' -f $OutputCheck.TargetChecks.Count))
+            if($OutputCheck.ElToritoVerificationRequired) {
+                $el=$OutputCheck.ElToritoUefiBootImageCheck
+                [void]$sb.AppendLine(('El Torito UEFI image: {0}' -f $(if($el -and $el.MatchesExpected){'PCA2023 efisys_ex.bin match'}else{'FAIL'})))
+                if($el){
+                    [void]$sb.AppendLine(('  Catalog LBA       : {0}' -f $el.BootCatalogLba))
+                    [void]$sb.AppendLine(('  Image LBA         : {0}' -f $el.UefiBootImageLba))
+                    [void]$sb.AppendLine(('  Expected SHA-256  : {0}' -f $el.ExpectedImageSha256))
+                    [void]$sb.AppendLine(('  Observed SHA-256  : {0}' -f $el.ObservedImageSha256))
+                }
+            }
             foreach ($t in $OutputCheck.TargetChecks) {
                 [void]$sb.AppendLine('')
                 [void]$sb.AppendLine(('  [{0,-13}] {1}' -f $t.Status, $t.Label))
@@ -19760,18 +20015,36 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
             Set-Content -LiteralPath (Join-Path $Script:MarkersDir 'P10.skipped') -Value 'prereq-critical: media below the 2024-4B floor; no conversion source' -Encoding UTF8
             return
         }
+        $repairIsoBootCatalog=$false
         if ($pre.Health -eq 'Healthy') {
-            Write-Step 'Skipped: ISO is ALREADY PCA2023-signed (Health=Healthy). No conversion needed.'
-            Set-Content -LiteralPath (Join-Path $Script:MarkersDir 'P10.skipped') -Value 'already-healthy: bootx64.efi is already PCA2023-signed' -Encoding UTF8
-            return
+            $expectedPcaBootImage=Join-Path $extractedPath 'efi\microsoft\boot\efisys_ex.bin'
+            if(-not $Script:SyntheticTestMode -and $Script:OutputIsoPath -and (Test-Path -LiteralPath $Script:OutputIsoPath -PathType Leaf)) {
+                $preCatalog=Get-IsoElToritoUefiBootImageEvidence -IsoPath $Script:OutputIsoPath -ExpectedImagePath $expectedPcaBootImage
+                Save-CanonicalJsonFile -InputObject $preCatalog -Path (Join-Path $Script:LogsDir 'P10_preexisting_el_torito_check.json') -Depth 12
+                if($preCatalog.Available -and $preCatalog.MatchesExpected) {
+                    Write-Step 'Skipped: extracted media and ISO El Torito UEFI entry are already PCA2023-consistent.'
+                    Set-Content -LiteralPath (Join-Path $Script:MarkersDir 'P10.skipped') -Value 'already-healthy: loose files and El Torito UEFI image are PCA2023-consistent' -Encoding UTF8
+                    return
+                }
+                Write-Caution ('Extracted media is PCA2023-ready, but the output ISO boot catalog is stale or mismatched: {0}' -f $preCatalog.ErrorMessage)
+                Write-Step 'P10 will repair the ISO by rebuilding it with efisys_ex.bin as the El Torito UEFI boot image.'
+                $repairIsoBootCatalog=$true
+            } else {
+                Write-Step 'Skipped: extracted media is already PCA2023-signed and there is no real output ISO requiring El Torito repair.'
+                Set-Content -LiteralPath (Join-Path $Script:MarkersDir 'P10.skipped') -Value 'already-healthy: bootx64.efi is already PCA2023-signed' -Encoding UTF8
+                return
+            }
         }
-        Write-Step ('Pre-flight OK: Health={0}. Proceeding with conversion.' -f $pre.Health)
+        if(-not $repairIsoBootCatalog){Write-Step ('Pre-flight OK: Health={0}. Proceeding with conversion.' -f $pre.Health)}
 
         # ---- Step 3: Run the conversion ----
         Write-SubSection 'Step 3: Convert boot manager to PCA2023 signing'
         Set-DebugStep -Step 'conversion'
         $convResult = $null
-        if ($Script:Pca2023ScriptPath) {
+        if($repairIsoBootCatalog) {
+            Write-Step 'PCA2023 file-copy conversion is not repeated; repairing only the ISO El Torito UEFI boot entry.'
+            $convResult=[pscustomobject]@{Success=$true;FilesUpdated=@();SourceWim='already-converted-tree';ErrorMessage=$null}
+        } elseif ($Script:Pca2023ScriptPath) {
             Write-Step ('Using external script: {0}' -f $Script:Pca2023ScriptPath)
             if (-not (Test-Path -LiteralPath $Script:Pca2023ScriptPath)) {
                 throw ('External -Pca2023ScriptPath does not exist: {0}' -f $Script:Pca2023ScriptPath)
@@ -19835,7 +20108,8 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
             New-BootableIso `
                 -ExtractedIsoRoot $extractedPath `
                 -OutputIsoPath $Script:OutputIsoPath `
-                -VolumeLabel $isoLabel | Out-Null
+                -VolumeLabel $isoLabel `
+                -UefiBootImagePolicy Pca2023 | Out-Null
             $reasmElapsed = [int](New-TimeSpan -Start $reasmStart -End (Get-Date)).TotalSeconds
             Write-Step ('ISO re-assembled in {0}s: {1}' -f $reasmElapsed, $Script:OutputIsoPath)
         } else {
@@ -19854,14 +20128,15 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
         $postElapsed = [int](New-TimeSpan -Start $postStart -End (Get-Date)).TotalSeconds
         Write-Step ('Post-flight snapshot Health = {0} (computed in {1}s)' -f $post.Health, $postElapsed)
 
-        # ---- Test-OutputIsoPca2023Readiness: post-build file-based check ----
+        # ---- Test-OutputIsoPca2023Readiness: post-build loose-file + boot-catalog check ----
         # Run an output-side verification against the five Microsoft
-        # conversion targets (SPEC.md B.18). The result is stashed on
+        # conversion targets plus the firmware-visible El Torito UEFI image.
+        # The result is stashed on
         # the snapshot so P12 / P13 see the same authoritative data.
         Set-DebugStep -Step 'post-flight-output-check'
-        Write-Step 'Running output-ISO PCA2023 readiness check (5-target file inspection)...'
+        Write-Step 'Running output-ISO PCA2023 readiness check (5 loose-file targets + El Torito UEFI image identity)...'
         $ocStart = Get-Date
-        $outputCheck = Test-OutputIsoPca2023Readiness -ExtractedMediaPath $extractedPath -ConversionSkipReason (Get-P10SkipReason)
+        $outputCheck = Test-OutputIsoPca2023Readiness -ExtractedMediaPath $extractedPath -ConversionSkipReason (Get-P10SkipReason) -OutputIsoPath $(if($Script:SyntheticTestMode){''}else{$Script:OutputIsoPath})
         $ocElapsed = [int](New-TimeSpan -Start $ocStart -End (Get-Date)).TotalSeconds
         $post.OutputCheck = $outputCheck
         Write-Step ('Output ISO check OverallStatus = {0} (computed in {1}s)' -f $outputCheck.OverallStatus, $ocElapsed)
@@ -20369,6 +20644,24 @@ function Invoke-VerifyPhase11_StaticVerify {
         Add-VRow -Check 'IsoSize' -Expected (">= " + $expSize.ToString()) `
             -Actual $sz.ToString() -Status $sizeStatus -Notes ('{0:F2} GB' -f ($sz / 1GB))
         Write-Ok ('Output ISO size: {0:F2} GB' -f ($sz / 1GB))
+
+        $elToritoEvidencePath=Join-Path $Script:LogsDir 'P11_uefi_el_torito.json'
+        if($Script:SyntheticTestMode) {
+            Add-VRow -Check 'UefiElToritoBootImage' -Expected 'real ISO only' -Actual 'SyntheticTestMode' -Status 'Pass' -Notes 'Binary boot-catalog verification is intentionally skipped for the synthetic CI ISO.'
+        } else {
+            $expectedPcaBootImage=Join-Path $Script:ExtractedDir 'efi\microsoft\boot\efisys_ex.bin'
+            $elToritoEvidence=Get-IsoElToritoUefiBootImageEvidence -IsoPath $Script:OutputIsoPath -ExpectedImagePath $expectedPcaBootImage
+            Save-CanonicalJsonFile -InputObject $elToritoEvidence -Path $elToritoEvidencePath -Depth 12
+            $elToritoActual=$(if($elToritoEvidence.Available){'sha256=' + $elToritoEvidence.ObservedImageSha256}else{'unavailable'})
+            $elToritoNotes=('catalogLba={0}; imageLba={1}; expectedSha256={2}; {3}' -f $elToritoEvidence.BootCatalogLba,$elToritoEvidence.UefiBootImageLba,$elToritoEvidence.ExpectedImageSha256,$elToritoEvidence.ErrorMessage)
+            if($elToritoEvidence.Available -and $elToritoEvidence.MatchesExpected) {
+                Add-VRow -Check 'UefiElToritoBootImage' -Expected 'El Torito platform 0xEF image == efisys_ex.bin' -Actual $elToritoActual -Status 'Pass' -Notes $elToritoNotes
+                Write-Ok 'UEFI El Torito boot image is byte-identical to efisys_ex.bin.'
+            } else {
+                Add-VRow -Check 'UefiElToritoBootImage' -Expected 'El Torito platform 0xEF image == efisys_ex.bin' -Actual $elToritoActual -Status 'Fail' -Notes $elToritoNotes
+                Write-Fail 'UEFI El Torito boot image is not the PCA2023 efisys_ex.bin payload.'
+            }
+        }
 
         # Step 2: mount + WIM presence
         Set-DebugStep -Step 'iso-mount-verify'
@@ -20890,7 +21183,7 @@ function Invoke-VerifyPhase11_StaticVerify {
         # throws 'Argument types do not match' for New-Object-created lists.
         # r12.17 uses constructor-created lists globally and reads Count directly.
         $p11Evidence = [pscustomobject][ordered]@{
-            SchemaVersion='P11-static-verification/1.0'
+            SchemaVersion='P11-static-verification/1.1'
             Status=$p11Status
             CreatedAtUtc=([datetime]::UtcNow.ToString('o'))
             Identity=$identity
@@ -20900,6 +21193,8 @@ function Invoke-VerifyPhase11_StaticVerify {
             PostInspectionSha256=(Get-FileSha256OrEmpty -Path (Join-Path $Script:LogsDir 'inspection_post.json'))
             InstallWimDisplayMetadataPath=(Join-Path $Script:LogsDir 'P07_installwim_display_metadata_after.json')
             InstallWimDisplayMetadataSha256=(Get-FileSha256OrEmpty -Path (Join-Path $Script:LogsDir 'P07_installwim_display_metadata_after.json'))
+            UefiElToritoEvidencePath=$(if($Script:SyntheticTestMode){''}else{$elToritoEvidencePath})
+            UefiElToritoEvidenceSha256=$(if($Script:SyntheticTestMode){''}else{Get-FileSha256OrEmpty -Path $elToritoEvidencePath})
             RowCount=$rows.Count
             FailureCount=0
             PolicyExceptionCount=$policyExceptionRows.Count
@@ -20975,9 +21270,9 @@ function Invoke-VerifyPhase12_VerifyPca2023Readiness {
         # $null on the new snapshot object, so we recompute here. This
         # block is idempotent regardless of whether P10 ran.
         Set-DebugStep -Step 'output-check'
-        Write-Step 'Running output-ISO PCA2023 readiness check (5-target file inspection)...'
+        Write-Step 'Running output-ISO PCA2023 readiness check (5 loose-file targets + El Torito UEFI image identity)...'
         $ocStart = Get-Date
-        $outputCheck = Test-OutputIsoPca2023Readiness -ExtractedMediaPath $extractedPath -ConversionSkipReason (Get-P10SkipReason)
+        $outputCheck = Test-OutputIsoPca2023Readiness -ExtractedMediaPath $extractedPath -ConversionSkipReason (Get-P10SkipReason) -OutputIsoPath $(if($Script:SyntheticTestMode){''}else{$Script:OutputIsoPath})
         $ocElapsed = [int](New-TimeSpan -Start $ocStart -End (Get-Date)).TotalSeconds
         $snapshot.OutputCheck = $outputCheck  # psa-disable-line PSA2009 -- $snapshot is returned by Get-OrEnsurePca2023Snapshot, which initialises OutputCheck = $null in its [pscustomobject]@{...} return; flow-insensitive analysis cannot trace this.
         Write-Step ('Output ISO check OverallStatus = {0} (computed in {1}s; {2} targets inspected)' -f `

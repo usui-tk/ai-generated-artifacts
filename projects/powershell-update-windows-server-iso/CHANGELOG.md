@@ -22,6 +22,50 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.02-r12.58] - 2026-08-07
+
+Tag retained: `setupdu-baseline-language-preservation`.
+
+### Fixed
+
+- **The r12.57 PCA2023 boot failure is corrected at the El Torito
+  layer**: the shared ISO assembly now binds the El Torito
+  platform-0xEF (UEFI) boot entry to `efisys_ex.bin` for
+  PCA2023-converted media, instead of letting the legacy `efisys.bin`
+  remain wired into the boot catalog while only the loose files were
+  converted. A new boot-catalog parser
+  (`Get-IsoElToritoUefiBootImageEvidence`,
+  `iso-el-torito-uefi/1.0` evidence) reads the ISO9660 boot catalog,
+  extracts the UEFI boot image by LBA/sector count, and proves
+  byte-identity against the expected efisys image; P11 gains a
+  static-verification row backed by a `P11_uefi_el_torito.json`
+  evidence file (`P11-static-verification/1.1`) and P12 consumes the
+  same proof, so the class of failure r12.57 shipped (catalog and
+  loose files disagreeing) is now caught before any boot attempt.
+  Script delta +295 lines; `data/config-Server2025.json` changes at
+  the value level only (the `Pca2023.Notes` sentence now describes
+  the correction; `_meta.scriptVersion` stamp) — no declared key is
+  added or removed.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.02-r12.58`
+  (the tag is retained). No terminal D-contract required an edit, and
+  the two pins relocated at r12.57 remain green unchanged.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 5E/138W/12I (raw sweep
+  5E/139W/12I: +1W is the PSA7002 LF artefact). The +17W step versus
+  r12.57 is concentrated in the new El Torito parser (PSA2009 rises
+  from 1 to 17) and is carried as declared series debt per the
+  no-fix-forward rule. Snapshot form: BOM + LF;
+  committed checkout form BOM+CRLF via `.gitattributes`.
+  (Supersedes the corresponding sentence in the r12.57 entry:
+  the "mixed line endings" reading there was a measurement
+  artifact; the archive snapshots measure pure BOM + LF.)
+
 ## [update-wsi-2026.08.02-r12.57] - 2026-08-07
 
 Tag retained: `setupdu-baseline-language-preservation`.
