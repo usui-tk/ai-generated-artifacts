@@ -22,6 +22,40 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.03-r12.67] - 2026-08-07
+
+Tag: `catalog-boundary-horizontal-hardening`.
+
+### Changed
+
+- **The Catalog/PowerShell collection-shape hardening is applied
+  horizontally**: the r12.64–r12.66 fix patterns are completed
+  across every active Catalog boundary rather than only at the
+  originally failing sites. All active Catalog response contracts
+  are typed in-process validators (internal scriptblock validators
+  removed); Search, DownloadDialog and ScopedView bodies are
+  semantically validated BEFORE caching; cache keys are
+  collision-resistant and identity-bound; Catalog identities are
+  scalar-validated at every legacy and current download boundary;
+  `Generic.List` values are materialized with `ToArray()`; and
+  collection selectors return flat sequences throughout. Script-only
+  change (+147 lines net); `data/*` and `schema/*` are
+  byte-identical to r12.66.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.03-r12.67`
+  with the measured tag `catalog-boundary-horizontal-hardening`. No
+  terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 6E/208W/27I (raw sweep
+  6E/209W/27I: +1W is the PSA7002 LF artefact) — unchanged from
+  r12.66. Snapshot form: BOM + LF; committed
+  checkout form BOM+CRLF.
+
 ## [update-wsi-2026.08.03-r12.66] - 2026-08-07
 
 Tag: `catalog-validator-scope-fix`.
