@@ -289,6 +289,56 @@ the script and follows the
   (`data/servicing-contract-baselines.json`), not on distribution
   test code.
 
+### Documentation
+
+- **TESTING.md tier re-baseline** (test re-implementation campaign,
+  phase E — docs-only): the suite documentation is re-baselined to
+  the measured r12.75 series-terminal state. §0 gains rows for the
+  six campaign contracts (T47 – T52) and re-measured rows for T30
+  (still the declared SUPERSEDED-PENDING red, 6/8; the series closed
+  with the discovery model declared in T46 and behaviorally covered
+  in T50, while the terminal retained the title-heuristic selector —
+  the final supersession disposition is a consolidation-stream
+  adjudication), T35 (9 after the r12.57 default-enable reshape), T40
+  (21 after the option-B structural-invariant rework), T41/T42/T43
+  (139/37/128 at r12.75 — the counts track the declaration), T45
+  (26; the anchor exists, the NOT-YET path is dormant) and the
+  canonical-format gate (28 files); a suite-level re-measure
+  statement records the baseline (30 test files PASS + the declared
+  T30 red only). §5's quick-run reference is rewritten to the
+  current suite — the stale pre-r12.00 rows referencing the retired
+  and deleted T23/T27/T28/T31/T33/T34/T37 files are removed — and the
+  two-bucket determinism categorisation is replaced by the three-tier
+  execution model: tier 1 offline-deterministic (Python + the pinned
+  pwsh), tier 2 live-network (T1/T4; the expanded live-network tier
+  design remains a standing consolidation item), tier 3 evidence
+  (user-side G2/G3 and the operator-pending pipeline rows). The
+  E-DEFER register is declared explicitly EMPTY with the measured
+  reason: no re-authored assertion group required real-machine
+  execution, including the WinPE media-sync runtime, which phase C
+  measured as fully runnable under Linux pwsh with only a
+  platform-invariant normalization. An absorption-boundary section
+  records that the input-only required regression set was fully
+  dispositioned in the out-of-repo ledger and that the external
+  historical corpus stays out of scope absent a separate order.
+  `tests/README.md` (the canonical inventory) is synced in the same
+  change set: T47 – T52 inventory and file-layout rows added, the
+  T30/T35/T40/T45/T46 rows and the stale counts re-measured, and the
+  stdlib-only wording corrected to name the pwsh dependency. Stale T3
+  assertion counts in TESTING.md §2.3/§6.1 are corrected to the
+  measured 7.
+- **Test re-implementation campaign closed** (phase E is the final
+  phase). Every disposition in the out-of-repo re-implementation
+  ledger is landed; the repository suite is the operative regression
+  net going forward. The standing consolidation items now resume
+  in this stream: PSA declared-debt drain (with ScriptVersion bumps),
+  knowledge-ledger sweep, live-network tier design, and — at the
+  release conversation — the fold of this [Unreleased] section into
+  a release heading together with the README.md/README.ja.md
+  both-language sync and heading lock-step check. Re-examination of
+  the refactoring plan begins only after those items complete, per
+  the standing work order.
+
 ## [update-wsi-2026.08.07-r12.75] - 2026-08-07
 
 Tag retained: `post-install-evidence-collector-r9-merge`.

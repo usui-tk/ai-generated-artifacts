@@ -13,7 +13,7 @@ This document consolidates everything needed to verify and evaluate
 2. **Synthetic smoke tests** — read-only Actions executable in CI
 3. **Live Catalogue verification** — probes that catch Microsoft-side schema drift
 4. **Operator-pending verification** — full `-Execute` builds (requires Windows + ADK + ≥ 100 GB disk + admin)
-5. **Self-verification tool suite** — T1 through T46 (canonical inventory in [`tests/README.md`](./tests/README.md); since r12.00 this includes the declaration-derived T41 – T46 set and eight retirements recorded in SPEC §B.15.4)
+5. **Self-verification tool suite** — T1 through T52 (canonical inventory in [`tests/README.md`](./tests/README.md); since r12.00 this includes the declaration-derived T41 – T46 set and eight retirements recorded in SPEC §B.15.4; since the series-end test re-implementation campaign it includes the T47 – T52 contracts re-authored from the external implementation's terminal regression set)
 6. **Continuous integration** — four GitHub Actions stages
 
 > **Documentation language policy**: This document is maintained in
@@ -78,26 +78,38 @@ a build identifier plus a calendar date. Pending items are marked
 | T25 dism_export_args_test.py (6 assertions, `Get-DismExportArgumentList` returns the five-token `/Export-Image ... /Compress:max` vector targeting the requested source index, `-ScratchDir` appends one `/ScratchDir:<path>` token and is omitted otherwise; guards the same precedence trap) | ✓ all pass | r11.25 p07-resetbase-default-on-scratchdir build / 2026-06-11 |
 | T26 defender_exclusion_plan_test.py (13 assertions, the three pure helpers behind `-UseDefenderExclusions`: `Get-DefenderManagedExclusionSet` (WorkRoot path + four servicing process names), `Get-DefenderExclusionPlan` (add-only-absent, case/slash-insensitive), `Get-DefenderExclusionDecision` (fail-closed -- applies only when every prerequisite is positively satisfied; `$null`/unknown -> skip); the `*-MpPreference`/`Get-MpComputerStatus` wrappers are Windows-only and not exercised) | ✓ all pass | r11.26 defender-exclusion-optin build / 2026-06-11 |
 | T29 patch_integrity_digest_test.py (14 assertions, digest-format boundary: `ConvertTo-HexDigestString` base64->hex round-trip vs an independent Python implementation for SHA-1/SHA-256, the live-captured KB5095966 Catalog vector, hex pass-through, garbage/wrong-length rejection, plus the r12.00 single-accessor wiring guard -- both `Test-PatchIntegrity` expectations normalized through the boundary; all baseline hash seeding goes through `Get-BaselineHashValue` (canonical `Integrity.<Alg>.Value` node + retained-legacy flat fields); no direct `$p.Digest`/`$p.Sha256` seeding may resurface) | ✓ all pass | r12.00 schema-v4-role-planner / 2026-08-01 |
-| T30 setup_du_discriminator_test.py (8 assertions, `Select-SetupDuCandidate` against rows captured verbatim from the live Catalog 2026-07-02) | **SUPERSEDED-PENDING — the declared red on the integration branch**: r12.00's selector returns three candidates where one is expected; the structural replacement is `DiscoveryPolicy.SearchProfiles` conformance, arriving at r12.19 / r12.51-53 | r12.00 schema-v4-role-planner / 2026-08-01 |
+| T30 setup_du_discriminator_test.py (8 assertions, `Select-SetupDuCandidate` against rows captured verbatim from the live Catalog 2026-07-02) | **SUPERSEDED-PENDING — the declared red on the integration branch** (6/8): the r12 series closed with the discovery model it awaited in place — declared in `DiscoveryPolicy.SearchProfiles` (guarded by T46) with behavioral Catalog coverage in T50 — while the title-heuristic selector T30 pins was retained by the terminal; the final supersession disposition (revise or retire T30) is adjudicated in the consolidation stream | r12.75 series terminal / 2026-08-07 |
 | T32 checkpoint_placement_test.py (15 assertions, checkpoint placement + routing contract: `Get-PatchLocalPath` lands LCU/Checkpoint in the `cu` discovery subfolder and every other Kind flat; `Build-PatchPlan` routes Kind `Checkpoint` to NO WIM target (co-located for DISM PackagePath discovery, never applied standalone); since r12.00 the `PatchModel` Forbid axis is retired -- the test guards its absence and pins the State-driven integrity rule) | ✓ all pass | r12.00 schema-v4-role-planner / 2026-08-01 |
-| T35 pca2023_default_auto_test.py (7 assertions, r11.55 pca2023-default-auto surface: retired `-EnablePca2023BootManager` token absent, `-SkipPca2023BootManager` + `-ForcePca2023OnServer2025` declared, P10 opt-out gate + Server 2025 force-gate present, script-scope default falsy (P10 default-on)) | ✓ all pass | r11.55 pca2023-default-auto / 2026-07-06 |
+| T35 pca2023_default_auto_test.py (9 assertions, PCA2023 default-auto surface: retired `-EnablePca2023BootManager` token absent, `-SkipPca2023BootManager` + `-ForcePca2023OnServer2025` declared, P10 opt-out gate present, script-scope default falsy (P10 default-on); since the r12.57 default-enable reshape the Server 2025 force-gate is gone by design and the force switch survives only as a deprecated compatibility slot with a wired caution — the force-gate pin was revised T39-style at that merge) | ✓ all pass | r12.75 series terminal / 2026-08-07 |
 | T36 p08_plan_scope_test.py (10 assertions, r11.56 P08 plan-scope + WinRE has-work contract: `Test-WimSequenceHasWork` null-hardening incl. the `@($null)` crash shape; single hoisted `$plan` assignment above the policy branch; has-work decided before the install.wim mount; the inline crash-prone Where-Object gone) | ✓ all pass | r11.60 kb-alias / 2026-07-07 |
 | T38 media_inspection_test.py (31 assertions, media-inspection + verify-refit contract: `ConvertFrom-InspectionBuildValue` shape matrix; `Compare-MediaInspection` pure diff (build advance, package delta, prereq flip, `_EX` appearance on BOTH WIM kinds, post-missing, SHA change); `Get-InspectionCrossChecks` observe-first matrix; `Get-DotNetRollupEvidence` census (plain + `_481` suffix + absent) + the DotNet-only KbId/FileName divergence data audit; structure pins -- P06 pre / P11 SHA identity + post / per-Kind rows (`KindVerificationScope`, `DotNetRollupApplied`, Kb_ behind the Server2016 guard, alias extractor gone) / conversion source fallback order + `SourceWim` / skip-aware output check (marker reasons + both call sites) / P13 diff; the invalid `Get-WindowsPackage -ImagePath` path gone) | ✓ all pass (r12.04: Kb_ guard window widened for the grown P11 census block; P10 skip-marker reasons follow the documented-conversion-boundary stance) | r12.04 release-validation-hardening / 2026-08-02 |
 | T39 boot_verification_tools_test.py (17 assertions, boot-verification tool-set contract: every tool `.ps1` ParseFile-clean; pure-function REPL matrix -- `Convert-Rgb565ToBmpByte` deterministic BMP with bottom-up rows, `ConvertFrom-EfiSignatureList` synthetic-list walk + garbage degradation, subject presence, adjudicated cell map T1-T12, ledger semantics with unknown-cell throw; autounattend template well-formed + all four tokens + explicit disk-0 wipe; structure pins -- MicrosoftWindows Secure Boot template everywhere, `State=Running` documented as a non-verdict, README T9-first rule + KB5025885 mitigation values) | ✓ all pass (r12.04: the VM-state-is-not-a-verdict honesty pin is structural -- Success derives from guest evidence or forces operator review, never from VmState) | r12.04 release-validation-hardening / 2026-08-02 |
-| T40 setup_binaries_sync_test.py (16 assertions, Setup-binary sync contract: plan build gates with the 26100 setuphost.exe boundary and unknown-build degradation; exact size/SHA-256/ISO-8601-UTC file evidence + missing-path shape; closed record vocabulary; structure pins -- P08S between P08/P09 in all three pipeline lists, SHA-verified copy hard-fails, ReadOnly cleared, CSV/JSON evidence artifacts, console before/after lines, boot.wim-side stash + P09 post-overlay reapply, P11 `SetupBinarySync_*` Fail grading; release pin tracks the current revision -- advanced in every merge commit) | ✓ all pass | r12.00 schema-v4-role-planner / 2026-08-01 |
-| T41 apply_plan_conformance_test.py (declaration-derived: every `Lines[]` entry conforms to the config's declared `ServicingModel.ApplyPlans`; expected values read from the config under test; supersedes T27 / T32-routing / T33-ordering; 143 assertions at r12.00) | ✓ all pass | r12.00 schema-v4-role-planner / 2026-08-01 |
-| T42 servicing_model_declaration_test.py (declaration-derived: `SourcePrerequisites[]` + `Condition.Mode`, `Common.BootWimUpdateModel`, `ValidationPolicy` flags; supersedes T31 / T34 / T37 / T33-envelope; 30 assertions at r12.00) | ✓ all pass | r12.00 schema-v4-role-planner / 2026-08-01 |
-| T43 line_integrity_declaration_test.py (declaration-derived: `Lines[].Integrity` + `Roles` + parent/URL resolvability; supersedes T23 / T29-wiring; 158 assertions at r12.00) | ✓ all pass | r12.00 schema-v4-role-planner / 2026-08-01 |
+| T40 setup_binaries_sync_test.py (21 assertions, Setup-binary sync contract: plan build gates with the 26100 setuphost.exe boundary and unknown-build degradation (since r12.72 sync plans carry setup.exe + setuphost.exe when present, build-independent); exact size/SHA-256/ISO-8601-UTC file evidence + missing-path shape; closed record vocabulary; structure pins -- SHA-verified copy hard-fails, ReadOnly cleared, CSV/JSON evidence artifacts, console before/after lines, boot.wim-side stash + P09 post-overlay reapply, P11 `SetupBinarySync_*` Fail grading; since the option-B rework the P08S wiring is guarded by a structural invariant (every quoted phase-ID list of three or more elements containing both P08 and P09 must wire P08S strictly between them) plus per-site pins naming the five known pipeline lists, replacing the fragile global token-count proxy; release pin tracks the current ScriptVersion) | ✓ all pass | r12.75 series terminal / 2026-08-07 |
+| T41 apply_plan_conformance_test.py (declaration-derived: every `Lines[]` entry conforms to the config's declared `ServicingModel.ApplyPlans`; expected values read from the config under test; supersedes T27 / T32-routing / T33-ordering; 143 assertions at r12.00, 139 at r12.75 -- the count tracks the declared Lines) | ✓ all pass | r12.75 series terminal / 2026-08-07 |
+| T42 servicing_model_declaration_test.py (declaration-derived: `SourcePrerequisites[]` + `Condition.Mode`, `Common.BootWimUpdateModel`, `ValidationPolicy` flags; supersedes T31 / T34 / T37 / T33-envelope; 30 assertions at r12.00, 37 at r12.75 -- the count tracks the declaration) | ✓ all pass | r12.75 series terminal / 2026-08-07 |
+| T43 line_integrity_declaration_test.py (declaration-derived: `Lines[].Integrity` + `Roles` + parent/URL resolvability; supersedes T23 / T29-wiring; 158 assertions at r12.00, 128 at r12.75 -- the count tracks the baseline Line count) | ✓ all pass | r12.75 series terminal / 2026-08-07 |
 | T44 compatibility_declaration_test.py (declaration-derived meta-contract: `Compatibility.LegacyFieldsRetained` / `.CanonicalV4Fields` disjoint and truthful; 64 assertions) | ✓ all pass | r12.00 schema-v4-role-planner / 2026-08-01 |
-| T45 servicing_contract_baseline_test.py (declaration-derived series instrument over `data/servicing-contract-baselines.json`; anchor introduced at r12.44 -- reports NOT-YET before that and exits 0) | NOT-YET (recorded gap, not a failure) | r12.00 schema-v4-role-planner / 2026-08-01 |
+| T45 servicing_contract_baseline_test.py (26 assertions, declaration-derived series instrument over `data/servicing-contract-baselines.json`: per-OS contract revisions + SHA-256 pins, plus the campaign extension's script-computed component-hash cross-check -- the contract constructors are extracted from the script's own AST under the pinned pwsh and each of the eight component digests per OS must equal the declared baseline value, closing the loop the declaration-shape assertions leave open; the anchor file exists on the branch since the r12.44 merge, so the NOT-YET path is dormant; the extension section requires pwsh, the declaration-shape sections remain pure Python) | ✓ all pass | r12.75 series terminal / 2026-08-07 |
 | T46 discovery_policy_declaration_test.py (declaration-derived: `DiscoveryPolicy.CatalogAliases` + per-Kind `SearchProfiles` well-formed and consistent; supersedes T28; 112 assertions) | ✓ all pass | r12.00 schema-v4-role-planner / 2026-08-01 |
-| Part C §C.3.4 — `canonical_json_format_check.py` (24 JSON files canonicalised, format gate) | ✓ all pass | r11.55 pca2023-default-auto build (re-verified) / 2026-07-06 |
+| T47 collector_artifact_test.py (29 assertions, the Collector's identity and artifact contract: supported deliverable filename present and the retired project-context filename absent; the exact CollectorVersion/SchemaVersion pair pinned and advanced deliberately per Collector release; project-neutral evidence contract (error schema, artifact prefix, OS-tokenized naming); pre-r9 retirement guards with cross-version baseline comparison disabled; collection posture (ESP/MSInfo32 default-on, C:\Temp output contract, mountvol-based read-only ESP access, the eight-function evidence inventory); the no-network invariant; and a Collector parse gate extending the battery beyond the main script) | ✓ all pass | r12.75 series terminal (Collector r12) / 2026-08-07 |
+| T48 collector_semantics_test.py (42 assertions, the Collector's behavioral contract over the r10→r12 hardening arc, exercised via AST-extracted functions against fixtures carrying measured four-OS post-install facts: PFRO Advisory/Blocking classification with CBS / Windows Update overrides, Secure Boot event-field parsing, the restart-preflight decision matrix (fail-closed on Advisory/Blocking/Unknown startup states; boot history corroborates but never decides), and the r12 Secure Boot evidence semantics (WinCS parsing, `UEFICA2023Status` as the status authority, stale-1808 rejection, the measured 2019 monitoring divergence held conservative)) | ✓ all pass | r12.75 series terminal (Collector r12) / 2026-08-07 |
+| T49 oscdimg_reference_test.py (44 assertions, protection for the declared tool-reference file adopted at r12.63: the D-half asserts `data/tool-references/oscdimg-reference.json` internal coherence and formats only -- the declared file stays the value authority, concrete values are deliberately not duplicated into the test; the B-half pins host non-modification of the legacy ADK fallback, qualification-required wiring for `New-BootableIso`, resolver-failure evidence preservation, and the Microsoft-script reference parser behaviorally) | ✓ all pass | r12.75 series terminal / 2026-08-07 |
+| T50 catalog_semantics_test.py (104 assertions, the Catalog boundary and collection-shape contract over the r12.52→r12.67 hardening arc: the 48-function catalog/collection inventory (each defined exactly once), horizontal static invariants, typed semantic validator wiring with `CATALOG_VALIDATOR_EXECUTION_FAILED` excluded from transient retries, legacy-helper containment, Setup-DU scalar identity pins, and the runtime groups -- semantic retry, typed endpoint semantics (the exact-KB row filter pinned on a single-anchor page because the measured filter is a ±1800-char context-window heuristic), cache identity tags, scalar boundaries, and flat collection shapes from the measured Server 2016 four-row query) | ✓ all pass | r12.75 series terminal / 2026-08-07 |
+| T51 generic_list_binder_test.py (17 assertions, the PowerShell 7.4+ Generic.List binder and collection-materialization guard over the r12.17/r12.64 incident class: no New-Object Generic.List construction in the active script; P11 evidence RowCount from the List Count property directly; the oscdimg resolvers use constructor-created typed lists with explicit ToArray() materialization; behavioral pins under the pinned pwsh confirm the exact incident shapes materialize correctly) | ✓ all pass | r12.75 series terminal / 2026-08-07 |
+| T52 media_authority_test.py (50 assertions, the P09/P10/P11 final-writer authority model exercised via AST-extracted functions with the DISM boundary mocked: the retained r12.62 media-sync surface and WinPE media-sync runtime (the standard boot-manager target set pinned in platform-invariant normalized form), the r12.72 P10 write-set authority binding, P11 final-identity evidence gating (tampered-ISO and stale-evidence states rejected), the measured Server 2022 reviewed-pinned Catalog identity shape, the measured Server 2019 final Setup-binary authority, and the Setup-DU final manifest validation guards) | ✓ all pass | r12.75 series terminal / 2026-08-07 |
+| Part C §C.3.4 — `canonical_json_format_check.py` (28 JSON files canonicalised, format gate) | ✓ all pass | r12.75 series terminal / 2026-08-07 |
 | Config schema gate — `config_schema_test.py` (20 assertions, declaration-based selection: each config's `Schema` field selects `config.schema.json` (3.0) or `config.schema.v4.json` (4.0); 2020-12 keyword coverage self-tested) | ✓ all pass | r12.00 schema-v4-role-planner / 2026-08-01 |
 | Seed contract gate — `seed_contract_test.py` (17 assertions, `data/seed/seed-Server*.json` vs `schema/config-seed.schema.json` + structural seed rules; the SEED contract for the offline dataset rebuild) | ✓ all pass | r11.51 audit-residue-sweep build (re-verified) / 2026-07-02 |
 | Stage 1 (Linux: BOM/CRLF/ASCII format check + config schema gate + psa.py text/SARIF + PSScriptAnalyzer/SARIF; the full offline T-suite runs in the local gate battery, not in Stage 1) | ✓ green | CI continuous |
 | Stage 2 (Windows PSScriptAnalyzer + parse + read-only smoke) | ✓ green | CI continuous |
 | Stage 3 (synthetic full pipeline with ADK install) | ✓ green | CI on push-to-main |
 | Stage 4 (monthly baseline refresh + auto-PR) | ✓ green | CI 2026-05-15 (last scheduled run) |
+
+The full offline suite was re-measured at the r12.75 series terminal
+(tree `e39c12c8…`) on 2026-08-07: **30 test files PASS + the declared
+T30 red only** (the three schema/format gates included). Rows edited
+in that re-baseline carry the `r12.75 series terminal / 2026-08-07`
+stamp; unedited rows keep their historical verification stamps.
 
 The eleven `_pending operator confirmation_` rows reflect that
 `-Execute` pipeline runs against real Microsoft evaluation ISOs are
@@ -188,14 +200,14 @@ Verification checklist:
 python3 tests/powershell_harness.py
 ```
 
-Expected: 10 assertions pass (PowerShell function-level tests for the
+Expected: 7 assertions pass (PowerShell function-level tests for the
 parser / scope / resolver helpers).
 
 Verification checklist:
 
 - [x] Harness launches `.\Update-WindowsServerIso.ps1 -Action TestHarness` in a sub-process
 - [x] JSON-over-stdin REPL accepts each function-call payload
-- [x] Each of the 10 assertions returns a stable shape
+- [x] Each of the 7 assertions returns a stable shape
 
 ### 2.4 DryRun mode — Setup / Fetch / Plan only
 
@@ -407,51 +419,99 @@ current status. The full design rationale is in [SPEC.md](./SPEC.md) §C.9.
 
 ### Quick run reference
 
+Counts below are the values measured at the r12.75 series terminal
+on 2026-08-07 (the declaration-derived contracts track the declared
+surface, so their counts move with it):
+
 ```bash
-# Offline tests — safe everywhere
+# Offline suite — deterministic; most contracts drive the pinned pwsh
 python3 tests/catalog_fixture_test.py        # T2: 13 fixture assertions
-python3 tests/powershell_harness.py          # T3: 10 PS function assertions
+python3 tests/powershell_harness.py          # T3: 7 PS function assertions (TestHarness REPL)
 python3 tests/release_info_parser_test.py    # T6: 13 release-info parser assertions
 python3 tests/dotnet_cu_parser_test.py       # T7: 16 .NET CU parser assertions
 python3 tests/canonical_json_test.py         # T11: 26 PS/Python byte-level parity assertions
-python3 tests/config_required_ssu_downloadurl_test.py            # T23: 19 required-SSU consistency-contract assertions (PatchBaseline.Lines; SSU => separate-ssu only since r11.52)
-python3 tests/dism_cleanup_args_test.py                          # T24: 6 cleanup-arg-vector assertions (1639 collapse guard + /ResetBase default + /ScratchDir)
-python3 tests/dism_export_args_test.py                           # T25: 6 export-arg-vector assertions (Export-Image /Compress:max + /ScratchDir)
-python3 tests/defender_exclusion_plan_test.py                    # T26: 13 Defender pure-helper assertions (managed set + add-only-absent plan + fail-closed decision)
-python3 tests/catalog_patchset_builder_test.py                   # T27: 16 offline b3 dataset-builder assertions (ConvertTo-ConfigLines from captured raw; SetupDU @ ApplyOrder 5; starvation guard)
-python3 tests/setup_du_forbid_test.py                            # T28: 12 Resolve-SetupDu Forbid-branch assertions (non-2025 -> empty SetupDU "no line"; offline, no fixture)
-python3 tests/patch_integrity_digest_test.py                     # T29: 11 digest-format boundary assertions (Catalog base64 -> hex at Test-PatchIntegrity; Digest+Sha256 wiring)
-python3 tests/setup_du_discriminator_test.py                     # T30: 8 Setup-DU discriminator assertions (title-based selection over verbatim-captured live rows)
-python3 tests/lcu_target_verify_test.py                          # T31: 27 TargetBuildAfterUpdate derived-field assertions (per-OS comparator incl. KbIdsAtBuild membership + data/schema contract + P11 wiring)
-python3 tests/checkpoint_placement_test.py                       # T32: 11 checkpoint-model assertions (cu/ landing split; Checkpoint never applied standalone; uup-checkpoint Require/Forbid)
-python3 tests/bridge_lcu_contract_test.py                        # T33: 19 bridge-LCU assertions (I0/B0-first, Install+Boot routing, 2022 envelope + floor 20348.1960, Digest cross-encoding)
-python3 tests/bootwim_policy_test.py                             # T34: 16 BootWimLcuPolicy assertions (per-OS matrix; schema enum; Resolve-BootWimLcuPolicyValue REPL)
-python3 tests/pca2023_default_auto_test.py                       # T35: 7 PCA2023 default-auto surface assertions (retired token absent; opt-out + 2025 force gates)
-python3 tests/p08_plan_scope_test.py                             # T36: 10 P08 plan-scope assertions (null-hardened has-work helper; plan hoisted above the policy branch)
-python3 tests/per_os_evidence_test.py                            # T37: 17 per-OS LCU evidence assertions (forked resolvers incl. the same-build KB-set carry; MS-verified 2024-4B floors; 3-source consensus)
-python3 tests/media_inspection_test.py                           # T38: 31 media-inspection + verify-refit assertions (pure diff; observe-first; DotNet census; per-Kind rows; skip-aware output check)
-python3 tests/boot_verification_tools_test.py                    # T39: 17 boot-verification tool-set assertions (ParseFile; BMP/ESL pure functions; cell map; template + verdict pins)
-python3 tests/setup_binaries_sync_test.py                        # T40: 16 setup-binary sync assertions (plan gates; file evidence; P08S/P09/P11 structure pins)
+python3 tests/removed_live_wua_guard_test.py # T20: 20 removed-live-WUA static-guard assertions
+python3 tests/dism_cleanup_args_test.py      # T24: 6 cleanup-arg-vector assertions
+python3 tests/dism_export_args_test.py       # T25: 6 export-arg-vector assertions
+python3 tests/defender_exclusion_plan_test.py    # T26: 13 Defender pure-helper assertions
+python3 tests/patch_integrity_digest_test.py     # T29: 14 digest-format boundary + single-accessor wiring assertions
+python3 tests/setup_du_discriminator_test.py     # T30: 8 assertions -- the declared SUPERSEDED-PENDING red (6/8; see §0)
+python3 tests/checkpoint_placement_test.py       # T32: 15 checkpoint placement + routing + State-integrity assertions
+python3 tests/pca2023_default_auto_test.py       # T35: 9 PCA2023 default-auto surface assertions
+python3 tests/p08_plan_scope_test.py             # T36: 10 P08 plan-scope + WinRE has-work assertions
+python3 tests/media_inspection_test.py           # T38: 31 media-inspection + verify-refit assertions
+python3 tests/boot_verification_tools_test.py    # T39: 17 boot-verification tool-set assertions
+python3 tests/setup_binaries_sync_test.py        # T40: 21 setup-binary sync assertions (structural P08S invariant + per-site pins)
+python3 tests/apply_plan_conformance_test.py     # T41: 139 declared-ApplyPlans conformance assertions
+python3 tests/servicing_model_declaration_test.py  # T42: 37 declared-servicing-model assertions
+python3 tests/line_integrity_declaration_test.py   # T43: 128 Lines[].Integrity + Roles assertions
+python3 tests/compatibility_declaration_test.py    # T44: 64 legacy/canonical meta-contract assertions
+python3 tests/servicing_contract_baseline_test.py  # T45: 26 baseline-declaration + component-hash cross-check assertions
+python3 tests/discovery_policy_declaration_test.py # T46: 112 DiscoveryPolicy/SearchProfiles assertions
+python3 tests/collector_artifact_test.py     # T47: 29 Collector identity/artifact/no-network assertions + Collector parse gate
+python3 tests/collector_semantics_test.py    # T48: 42 Collector behavioral assertions (PFRO / restart preflight / Secure Boot)
+python3 tests/oscdimg_reference_test.py      # T49: 44 declared oscdimg-reference + qualification-wiring assertions
+python3 tests/catalog_semantics_test.py      # T50: 104 Catalog boundary + collection-shape assertions
+python3 tests/generic_list_binder_test.py    # T51: 17 Generic.List binder + materialization guard assertions
+python3 tests/media_authority_test.py        # T52: 50 final-writer authority-model assertions
 
 # Schema / format gates (every commit that touches data)
-python3 tests/config_schema_test.py                          # config schema gate
-python3 tests/seed_contract_test.py                          # seed contract gate (data/seed/* vs config-seed.schema.json)
-python3 tests/canonical_json_format_check.py                 # JSON canonical-format gate; SPEC §C.3.4
+python3 tests/config_schema_test.py          # config schema gate (20; declaration-based v3/v4 selection)
+python3 tests/seed_contract_test.py          # seed contract gate (17; data/seed/* vs config-seed.schema.json)
+python3 tests/canonical_json_format_check.py # JSON canonical-format gate (28 files); SPEC §C.3.4
 
 # Live tests — require unrestricted egress
 python3 tests/catalog_probe.py --check all   # T1: Microsoft Update Catalog
 python3 tests/eval_iso_probe.py              # T4: Server<N> ISO CDN
 ```
 
-### Determinism categories
+### Execution tiers
 
-- **Offline-deterministic** (Stage 1 CI gate, every PR): T2, T3, T6 – T11,
-  T20, T24 – T26, T29, T32, T35 – T36, T38 – T46, plus the canonical JSON
-  format gate, the config schema gate (declaration-based v3/v4 selection)
-  and the seed contract gate. T30 is the declared SUPERSEDED-PENDING red
-  on the integration branch until its scheduled replacement
-  (r12.19 / r12.51 cards).
-- **Live-network** (Stage 4 monthly + ad-hoc): T1, T4.
+The suite is declared in three tiers by execution environment. This
+tier model is the series-end re-baseline (test re-implementation
+campaign, phase E); it replaces the earlier two-bucket determinism
+categorisation.
+
+| Tier | Contracts | Environment | Cadence |
+|---|---|---|---|
+| **1 — Offline-deterministic** | T2, T3, T6, T7, T11, T20, T24 – T26, T29, T30, T32, T35, T36, T38 – T52, plus the config-schema, seed-contract and canonical-format gates | Python 3 + the pinned pwsh (7.4.6) on PATH; runs on Linux; no network. Many contracts drive the script or the Collector through the TestHarness REPL or AST-extraction drivers, so pwsh is a tier-level dependency; a handful (e.g. T20) are pure text scans | Local gate battery on every change; the offline portion of CI |
+| **2 — Live-network** | T1, T4 | Unrestricted egress to Microsoft endpoints | Stage 4 monthly + ad-hoc before releases. The design of an expanded live-network tier is a standing consolidation item |
+| **3 — Evidence (user-side)** | G2: the required regression set executed on real Windows PowerShell 5.1 against the distribution ZIP. G3: Collector r12 real-machine evidence from the four Server VMs. Plus every `_pending operator confirmation_` pipeline row in §0 | Real Windows hosts / real media; outside the sandbox by nature | At the user's cadence; results recorded in §0 when delivered |
+
+### Suite declaration (measured baseline)
+
+The tier-1 baseline at the r12.75 series terminal (2026-08-07):
+**30 test files PASS + the declared T30 red only.** Any other red on
+this branch is a regression. The per-contract assertion counts are the
+values in the quick-run reference above; the declaration-derived
+contracts (T41 – T46 and the D-halves of T45/T49) re-derive their
+expected values from the declared surfaces at every run, so their
+counts move only when the declaration moves.
+
+### E-DEFER register
+
+Empty. The re-implementation campaign's disposition taxonomy reserved
+`E-DEFER` for assertion groups that would have required real machines
+or real media at test-execution time. The measured outcome is that no
+group needed it: every re-authored group runs in tier 1 — including
+the WinPE media-sync runtime, the strongest deferral candidate, which
+phase C measured as fully runnable under Linux pwsh with only a
+platform-invariant normalization of the boot-manager alias set
+(Windows de-duplicates case-insensitive alias records; the normalized
+unique set is identical on both platforms). Real-machine verification
+remains represented in tier 3, not as deferred sandbox tests.
+
+### Absorption boundary
+
+The campaign absorbed the external implementation's terminal required
+regression set as an input-only specification source (never adopted
+verbatim, per the standing governance ruling). Every source assertion
+group received an explicit disposition — re-authored into the T47+
+contracts or the T40/T45 reworks, recorded as already covered, or
+recorded as dropped with a reason — in an out-of-repo disposition
+ledger, all groups landed. The external historical test corpus beyond
+the required set is explicitly out of the absorption scope unless a
+separate bounded sweep is ordered.
 
 ## 6. Continuous integration coverage
 
@@ -467,7 +527,7 @@ File: `.github/workflows/projects__powershell-update-windows-server-iso__stage1_
 | 1 | `psa.py` | Static analysis on `Update-WindowsServerIso.ps1` |
 | 2 | `Invoke-ScriptAnalyzer` (pwsh 7) | PSScriptAnalyzer with project `PSScriptAnalyzerSettings.psd1` |
 | 3 | T2 | `catalog_fixture_test.py` (13 assertions) |
-| 4 | T3 | `powershell_harness.py` (10 assertions) |
+| 4 | T3 | `powershell_harness.py` (7 assertions) |
 | 5 | T6 – T10 | Five offline parser / cache / resolver regression tests |
 | 6 | T11 | `canonical_json_test.py` — PS/Python byte-level parity (26 assertions, SPEC §B.23) |
 | 7 | Part C §C.3.4 gate | `canonical_json_format_check.py` — every `data/*.json` / `tests/fixtures/*.json` / `tests/snapshots/*.json` re-serialised byte-identical |
