@@ -103,8 +103,8 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
-$script:SchemaVersion = 'windows-server-post-install-evidence/1.9'
-$script:CollectorVersion = 'r11'
+$script:SchemaVersion = 'windows-server-post-install-evidence/1.10'
+$script:CollectorVersion = 'r12'
 
 function Get-UtcTimestamp {
     [CmdletBinding()]
@@ -1570,6 +1570,152 @@ function Get-SecureBootRolloutStatus {
     }
 }
 
+function Get-WindowsUefiCa2023CapableInterpretation {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [object]$Value
+    )
+
+    $numericValue = $null
+    $validNumericValue = $false
+    if ($null -ne $Value -and -not [string]::IsNullOrWhiteSpace([string]$Value)) {
+        try {
+            $numericValue = [uint32]$Value
+            $validNumericValue = $true
+        }
+        catch {
+            $validNumericValue = $false
+        }
+    }
+
+    $meaning = if (-not $validNumericValue) {
+        'NotReportedOrUnparseable'
+    }
+    elseif ($numericValue -eq 0) {
+        'WindowsUefiCa2023NotPresentInDb'
+    }
+    elseif ($numericValue -eq 1) {
+        'WindowsUefiCa2023PresentInDb'
+    }
+    elseif ($numericValue -eq 2) {
+        'WindowsUefiCa2023PresentInDbAndBootingFrom2023SignedBootManager'
+    }
+    else {
+        'UnknownReferenceValue'
+    }
+
+    return [pscustomobject][ordered]@{
+        Available = [bool]$validNumericValue
+        Value = if ($validNumericValue) { [uint32]$numericValue } else { $null }
+        Meaning = $meaning
+        ReferenceOnly = $true
+        AuthoritativeStatusSignal = $false
+        StatusAuthority = 'UEFICA2023Status'
+        BootManager2023ReferenceEvidence = [bool]($validNumericValue -and $numericValue -eq 2)
+    }
+}
+
+function Convert-WinCsSecureBootQueryOutput {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [string]$Text
+    )
+
+    $fields = [ordered]@{
+        Flag = $null
+        CurrentConfiguration = $null
+        State = $null
+        PendingConfiguration = $null
+        PendingAction = $null
+        CVE = $null
+        FwLink = $null
+    }
+    $availableConfigurations = New-Object 'System.Collections.Generic.List[string]'
+    $inAvailableConfigurations = $false
+
+    foreach ($rawLine in @(([string]$Text) -split "`r?`n")) {
+        $line = [string]$rawLine
+        if ($line -match '^\s*Available Configurations:\s*$') {
+            $inAvailableConfigurations = $true
+            continue
+        }
+        if ($inAvailableConfigurations -and $line -match '^\s+(F[0-9A-Fa-f]{8,})\s*$') {
+            $availableConfigurations.Add($Matches[1]) | Out-Null
+            continue
+        }
+        $inAvailableConfigurations = $false
+        if ($line -match '^\s*([^:]+):[ \t]*(.*?)[ \t]*$') {
+            $name = $Matches[1].Trim()
+            $value = $Matches[2].Trim()
+            switch -Regex ($name) {
+                '^Flag$' { $fields.Flag = $value; break }
+                '^Current Configuration$' { $fields.CurrentConfiguration = $value; break }
+                '^State$' { $fields.State = $value; break }
+                '^Pending Configuration$' { $fields.PendingConfiguration = $value; break }
+                '^Pending Action$' { $fields.PendingAction = $value; break }
+                '^CVE$' { $fields.CVE = $value; break }
+                '^FwLink$' { $fields.FwLink = $value; break }
+            }
+        }
+    }
+
+    return [pscustomobject][ordered]@{
+        Parsed = [bool](-not [string]::IsNullOrWhiteSpace($fields.Flag) -or -not [string]::IsNullOrWhiteSpace($fields.State))
+        Flag = $fields.Flag
+        CurrentConfiguration = $fields.CurrentConfiguration
+        State = $fields.State
+        PendingConfiguration = $fields.PendingConfiguration
+        PendingAction = $fields.PendingAction
+        CVE = $fields.CVE
+        FwLink = $fields.FwLink
+        AvailableConfigurations = $availableConfigurations.ToArray()
+    }
+}
+
+function Get-WinCsSecureBootInterpretation {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [object]$ParsedQuery,
+
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [string]$UefiCa2023Status
+    )
+
+    $state = [string](Get-PropertyValue -InputObject $ParsedQuery -Name 'State')
+    $meaning = if ($UefiCa2023Status -eq 'Updated') {
+        'NotRequiredCertificatesAlreadyUpdated'
+    }
+    elseif ($state -eq 'Enabled') {
+        'DeploymentConfigurationEnabled'
+    }
+    elseif ($state -eq 'Disabled') {
+        'DeploymentConfigurationDisabled'
+    }
+    elseif ([string]::IsNullOrWhiteSpace($state)) {
+        'NotAvailableOrUnparsed'
+    }
+    else {
+        'DeploymentConfigurationStateObserved'
+    }
+
+    return [pscustomobject][ordered]@{
+        Purpose = 'DeploymentConfigurationOnly'
+        State = if ([string]::IsNullOrWhiteSpace($state)) { $null } else { $state }
+        Meaning = $meaning
+        IsCompletionSignal = $false
+        AuthoritativeStatusSignal = $false
+        StatusAuthority = 'UEFICA2023Status'
+        RequiresActionBasedOnWinCsAlone = $false
+    }
+}
+
 function Get-SecureBootScheduledTaskEvidence {
     [CmdletBinding()]
     param(
@@ -1650,7 +1796,11 @@ function Get-SecureBootScheduledTaskEvidence {
 
 function Get-WinCsSecureBootEvidence {
     [CmdletBinding()]
-    param()
+    param(
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
+        [string]$UefiCa2023Status
+    )
 
     $paths = @(
         (Join-Path $env:SystemRoot 'System32\WinCsFlags.exe'),
@@ -1659,21 +1809,29 @@ function Get-WinCsSecureBootEvidence {
     $path = @($paths | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1)
 
     if ($path.Count -eq 0) {
+        $parsed = Convert-WinCsSecureBootQueryOutput -Text $null
         return [pscustomobject][ordered]@{
             Available = $false
             Path = $null
             Key = 'F33E0C8E002'
             Query = $null
+            Parsed = $parsed
+            Interpretation = Get-WinCsSecureBootInterpretation -ParsedQuery $parsed -UefiCa2023Status $UefiCa2023Status
         }
     }
+
+    $query = Invoke-CapturedCommand `
+        -FilePath $path[0] `
+        -ArgumentList @('/query', '--key', 'F33E0C8E002')
+    $parsed = Convert-WinCsSecureBootQueryOutput -Text ([string]$query.StdOut)
 
     return [pscustomobject][ordered]@{
         Available = $true
         Path = $path[0]
         Key = 'F33E0C8E002'
-        Query = Invoke-CapturedCommand `
-            -FilePath $path[0] `
-            -ArgumentList @('/query', '--key', 'F33E0C8E002')
+        Query = $query
+        Parsed = $parsed
+        Interpretation = Get-WinCsSecureBootInterpretation -ParsedQuery $parsed -UefiCa2023Status $UefiCa2023Status
     }
 }
 
@@ -1853,6 +2011,9 @@ function Get-SecureBootEvidence {
         MicrosoftUpdateManagedOptIn = Get-NamedRegistryValue -Snapshot $mainSnapshot -Name 'MicrosoftUpdateManagedOptIn'
         UEFICA2023Status = [string](Get-NamedRegistryValue -Snapshot $servicingSnapshot -Name 'UEFICA2023Status')
         WindowsUEFICA2023Capable = Get-NamedRegistryValue -Snapshot $servicingSnapshot -Name 'WindowsUEFICA2023Capable'
+        WindowsUEFICA2023CapableInterpretation = Get-WindowsUefiCa2023CapableInterpretation -Value (
+            Get-NamedRegistryValue -Snapshot $servicingSnapshot -Name 'WindowsUEFICA2023Capable'
+        )
         UEFICA2023Error = Get-NamedRegistryValue -Snapshot $servicingSnapshot -Name 'UEFICA2023Error'
         UEFICA2023ErrorEvent = Get-NamedRegistryValue -Snapshot $servicingSnapshot -Name 'UEFICA2023ErrorEvent'
         OEMManufacturerName = [string](Get-NamedRegistryValue -Snapshot $deviceAttributesSnapshot -Name 'OEMManufacturerName')
@@ -1872,7 +2033,7 @@ function Get-SecureBootEvidence {
         -EventEvidence $events `
         -UefiCa2023Status $registryEvidence.UEFICA2023Status
     $task = Get-SecureBootScheduledTaskEvidence -EvidenceDirectory $EvidenceDirectory
-    $winCs = Get-WinCsSecureBootEvidence
+    $winCs = Get-WinCsSecureBootEvidence -UefiCa2023Status $registryEvidence.UEFICA2023Status
     $scriptInventory = Get-SecureBootScriptInventory
 
     return [pscustomobject][ordered]@{
@@ -2206,9 +2367,7 @@ function Get-SecureBootAssessment {
 
     # Get-AuthenticodeSignature exposes one selected signer certificate. It
     # does not provide an authoritative inventory of every embedded signature
-    # in a multiply signed EFI image. Therefore these values are retained as
-    # useful observations, but they are not used as the primary completion
-    # criterion for the Microsoft Secure Boot certificate rollout.
+    # in a multiply signed EFI image. Keep it as diagnostic evidence only.
     $bootManagerPrimarySigner2023 = (
         $bootManagerPresent -and
         $bootManager[0].SignerIndicatesWindowsUefiCa2023 -eq $true
@@ -2217,17 +2376,47 @@ function Get-SecureBootAssessment {
         $bootManagerPresent -and
         $bootManager[0].SignerIndicatesWindowsProductionPca2011 -eq $true
     )
+    $bootManagerPrimarySignerSubject = if ($bootManagerPresent) {
+        [string](Get-PropertyValue -InputObject $bootManager[0] -Name 'SignerSubject')
+    }
+    else { $null }
 
     $findings = New-Object 'System.Collections.Generic.List[string]'
     $information = New-Object 'System.Collections.Generic.List[string]'
     $statusUpdated = ($SecureBoot.Registry.UEFICA2023Status -eq 'Updated')
+    $latestRolloutEventId = Get-PropertyValue -InputObject $SecureBoot.RolloutStatus -Name 'LatestEventId'
+    $latestCompletionEventIs1808 = ($latestRolloutEventId -eq 1808)
     $event1808Count = @(
         $SecureBoot.Events.Events | Where-Object { $_.Id -eq 1808 }
     ).Count
     $event1799Count = @(
         $SecureBoot.Events.Events | Where-Object { $_.Id -eq 1799 }
     ).Count
-    $completionEventPresent = ($event1808Count -gt 0)
+    $historicalEvent1808Observed = ($event1808Count -gt 0)
+
+    # Microsoft completion semantics are current-state based: either the
+    # deployment registry status is Updated, or the latest rollout event is
+    # 1808. A stale historical 1808 must never override a newer pending/error
+    # event such as 1801.
+    $currentMicrosoftCompletionSignal = [bool]($statusUpdated -or $latestCompletionEventIs1808)
+
+    $capableInterpretation = Get-PropertyValue `
+        -InputObject $SecureBoot.Registry `
+        -Name 'WindowsUEFICA2023CapableInterpretation'
+    if ($null -eq $capableInterpretation) {
+        $capableInterpretation = Get-WindowsUefiCa2023CapableInterpretation `
+            -Value (Get-PropertyValue -InputObject $SecureBoot.Registry -Name 'WindowsUEFICA2023Capable')
+    }
+
+    $bootManager2023EvidenceSources = New-Object 'System.Collections.Generic.List[string]'
+    if ($statusUpdated) { $bootManager2023EvidenceSources.Add('RegistryUEFICA2023StatusUpdated') | Out-Null }
+    if ($latestCompletionEventIs1808) { $bootManager2023EvidenceSources.Add('LatestTpmWmiEvent1808') | Out-Null }
+    if ([bool](Get-PropertyValue -InputObject $capableInterpretation -Name 'BootManager2023ReferenceEvidence' -DefaultValue $false)) {
+        $bootManager2023EvidenceSources.Add('WindowsUEFICA2023CapableReferenceValue2') | Out-Null
+    }
+    if ($event1799Count -gt 0) { $bootManager2023EvidenceSources.Add('TpmWmiEvent1799Observed') | Out-Null }
+    if ($bootManagerPrimarySigner2023) { $bootManager2023EvidenceSources.Add('AuthenticodePrimarySignerWindowsUefiCa2023') | Out-Null }
+    $bootManager2023EvidenceConfirmed = ($bootManager2023EvidenceSources.Count -gt 0)
 
     if ($statusUpdated -and $SecureBoot.FirmwareVariables.RequiredVariablesAvailable -and -not $SecureBoot.FirmwareVariables.DirectRequirementsSatisfied) {
         $findings.Add(
@@ -2235,14 +2424,15 @@ function Get-SecureBootAssessment {
         )
     }
 
-    if ($statusUpdated -and $completionEventPresent -and $bootManagerPresent -and -not $bootManagerPrimarySigner2023) {
-        $information.Add(
-            'The primary signer selected by Get-AuthenticodeSignature is not Windows UEFI CA 2023. This is informational because the cmdlet does not authoritatively enumerate every embedded EFI signature; UEFICA2023Status and event 1808 indicate rollout completion.'
-        )
-    }
     if ($event1799Count -gt 0) {
         $information.Add(
             'TPM-WMI event 1799 confirms installation of a boot manager signed by Windows UEFI CA 2023.'
+        )
+    }
+
+    if ($historicalEvent1808Observed -and -not $latestCompletionEventIs1808 -and -not $statusUpdated) {
+        $information.Add(
+            'Historical event 1808 evidence exists, but it is not treated as current rollout completion because the latest rollout event is not 1808 and UEFICA2023Status is not Updated.'
         )
     }
 
@@ -2258,7 +2448,7 @@ function Get-SecureBootAssessment {
             $_.Id -in @(1033, 1795, 1796, 1797, 1798, 1802, 1803)
         }
     ).Count
-    if ($errorEventCount -gt 0 -and -not ($statusUpdated -or $completionEventPresent)) {
+    if ($errorEventCount -gt 0 -and -not $currentMicrosoftCompletionSignal) {
         $findings.Add("$errorEventCount Secure Boot update error/block event(s) are present.")
     }
     if ($SecureBoot.RolloutStatus.RebootPending) {
@@ -2267,13 +2457,13 @@ function Get-SecureBootAssessment {
     if ($SecureBoot.RolloutStatus.MissingKek) {
         $findings.Add('Secure Boot certificate rollout event 1803 indicates that a matching KEK update was not found.')
     }
-    if ($SecureBoot.RolloutStatus.LatestEventId -eq 1808 -and -not $statusUpdated) {
-        $information.Add('Event 1808 indicates certificate completion although UEFICA2023Status is not Updated.')
+    if ($latestCompletionEventIs1808 -and -not $statusUpdated) {
+        $information.Add('Latest event 1808 indicates certificate completion although UEFICA2023Status is not Updated.')
     }
 
     $microsoftCompletionConfirmed = [bool](
         $SecureBoot.Enabled -eq $true -and
-        ($statusUpdated -or $completionEventPresent)
+        $currentMicrosoftCompletionSignal
     )
     $directFirmwareCertificatesConfirmed = [bool](
         $SecureBoot.FirmwareVariables.RequiredVariablesAvailable -and
@@ -2281,7 +2471,7 @@ function Get-SecureBootAssessment {
     )
 
     if (
-        $SecureBoot.RolloutStatus.LatestEventId -eq 1801 -and
+        $latestRolloutEventId -eq 1801 -and
         $directFirmwareCertificatesConfirmed -and
         -not $microsoftCompletionConfirmed
     ) {
@@ -2313,7 +2503,9 @@ function Get-SecureBootAssessment {
         State = $state
         MicrosoftMonitoringStatus = $SecureBoot.MicrosoftMonitoringStatus
         RegistryStatusUpdated = [bool]$statusUpdated
-        LatestRolloutEventId = $SecureBoot.RolloutStatus.LatestEventId
+        LatestRolloutEventId = $latestRolloutEventId
+        LatestCompletionEventIs1808 = [bool]$latestCompletionEventIs1808
+        HistoricalEvent1808Observed = [bool]$historicalEvent1808Observed
         RolloutBucketId = $SecureBoot.RolloutStatus.BucketId
         RolloutConfidence = $SecureBoot.RolloutStatus.Confidence
         RolloutUpdateType = $SecureBoot.RolloutStatus.UpdateType
@@ -2322,16 +2514,28 @@ function Get-SecureBootAssessment {
         Event1808Count = [int]$event1808Count
         Event1799Count = [int]$event1799Count
         MicrosoftCompletionConfirmed = [bool]$microsoftCompletionConfirmed
+        MicrosoftCompletionEvidence = @(
+            if ($statusUpdated) { 'RegistryUEFICA2023StatusUpdated' }
+            if ($latestCompletionEventIs1808) { 'LatestTpmWmiEvent1808' }
+        )
         DirectCertificateRequirementsSatisfied = [bool]$SecureBoot.FirmwareVariables.DirectRequirementsSatisfied
         DirectFirmwareCertificatesConfirmed = [bool]$directFirmwareCertificatesConfirmed
         BootManagerPresent = [bool]$bootManagerPresent
+        BootManager2023EvidenceConfirmed = [bool]$bootManager2023EvidenceConfirmed
+        BootManager2023EvidenceSources = $bootManager2023EvidenceSources.ToArray()
+        WindowsUEFICA2023CapableInterpretation = $capableInterpretation
+        BootManagerAuthenticodePrimarySignerSubject = $bootManagerPrimarySignerSubject
+        BootManagerAuthenticodePrimarySignerIndicatesWindowsUefiCa2023 = [bool]$bootManagerPrimarySigner2023
+        BootManagerAuthenticodePrimarySignerIndicatesWindowsProductionPca2011 = [bool]$bootManagerPrimarySigner2011
+        BootManagerAuthenticodeAssessmentScope = 'DiagnosticOnlyPrimarySignerReturnedByGetAuthenticodeSignature'
+        BootManagerAuthenticodeDiagnosticNote = 'Get-AuthenticodeSignature returns a selected primary signer and is retained as diagnostic evidence only; Microsoft rollout completion is evaluated from UEFICA2023Status and the latest rollout event.'
+        # Retain legacy property names for consumers, but make their diagnostic
+        # scope explicit through BootManagerSignerAssessmentScope.
         BootManagerPrimarySignerIndicatesWindowsUefiCa2023 = [bool]$bootManagerPrimarySigner2023
         BootManagerPrimarySignerIndicatesWindowsProductionPca2011 = [bool]$bootManagerPrimarySigner2011
-        # Retain the r6 property names for consumers, but clarify their scope
-        # with the new PrimarySigner properties above.
         BootManagerSignedByWindowsUefiCa2023 = [bool]$bootManagerPrimarySigner2023
         BootManagerSignedByWindowsProductionPca2011 = [bool]$bootManagerPrimarySigner2011
-        BootManagerSignerAssessmentScope = 'PrimarySignerReturnedByGetAuthenticodeSignature'
+        BootManagerSignerAssessmentScope = 'DiagnosticOnlyPrimarySignerReturnedByGetAuthenticodeSignature'
         ConsistencyFindings = $findings.ToArray()
         InformationalFindings = $information.ToArray()
     }
@@ -3661,8 +3865,16 @@ try {
         "SecureBootScriptInventoryFileCount: $($secureBoot.MicrosoftScriptInventory.Summary.FileCount)"
         "SecureBootScriptInventoryValidMicrosoftSignedFileCount: $($secureBoot.MicrosoftScriptInventory.Summary.ValidMicrosoftSignedFileCount)"
         "SecureBootScriptBaselineHashComparisonEnabled: $($secureBoot.MicrosoftScriptInventory.InventoryPolicy.BaselineHashComparisonEnabled)"
-        "BootManagerPrimarySignerIndicatesWindowsUefiCa2023: $($secureBoot.Assessment.BootManagerPrimarySignerIndicatesWindowsUefiCa2023)"
-        "BootManagerSignerAssessmentScope: $($secureBoot.Assessment.BootManagerSignerAssessmentScope)"
+        "WindowsUEFICA2023Capable: $($secureBoot.Registry.WindowsUEFICA2023Capable)"
+        "WindowsUEFICA2023CapableMeaning: $($secureBoot.Registry.WindowsUEFICA2023CapableInterpretation.Meaning)"
+        "WindowsUEFICA2023CapableStatusAuthority: $($secureBoot.Registry.WindowsUEFICA2023CapableInterpretation.StatusAuthority)"
+        "WinCsState: $($secureBoot.WinCs.Parsed.State)"
+        "WinCsMeaning: $($secureBoot.WinCs.Interpretation.Meaning)"
+        "WinCsIsCompletionSignal: $($secureBoot.WinCs.Interpretation.IsCompletionSignal)"
+        "BootManager2023EvidenceConfirmed: $($secureBoot.Assessment.BootManager2023EvidenceConfirmed)"
+        "BootManager2023EvidenceSources: $(@($secureBoot.Assessment.BootManager2023EvidenceSources) -join ', ')"
+        "BootManagerAuthenticodePrimarySignerSubject: $($secureBoot.Assessment.BootManagerAuthenticodePrimarySignerSubject)"
+        "BootManagerAuthenticodeAssessmentScope: $($secureBoot.Assessment.BootManagerAuthenticodeAssessmentScope)"
         "ProblemDeviceCount: $($problemDevices.Count)"
         "PostInstallRestartConfirmationSource: $($restartConfirmation.Source)"
         "PostInstallRestartConfirmed: $($restartConfirmation.Confirmed)"

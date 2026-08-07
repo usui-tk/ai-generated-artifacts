@@ -22,6 +22,54 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.07-r12.75] - 2026-08-07
+
+Tag retained: `post-install-evidence-collector-r9-merge`.
+**This revision is the r12-series terminal** (user adjudication,
+2026-08-07): the external r12 implementation ended here, and every
+snapshot from r12.00 through r12.75 has now been landed verbatim
+onto this branch (r12.02 lost upstream; r12.36 landed twice per the
+double-work rule). The series is CLOSED; consolidation work
+(declared-debt drain, knowledge-ledger sweep) follows as separately
+governed commits.
+
+### Changed
+
+- **Collector hardened to r12 / schema 1.10 — Secure Boot evidence
+  semantics** (ISO servicing pipeline unchanged from r12.72): the
+  current/latest rollout state is authoritative; a historical event
+  1808 can no longer override newer state; WinCS is treated as
+  deployment-configuration evidence only; and the
+  WindowsUEFICA2023Capable / Authenticode signer observations are
+  explicitly scoped as diagnostics. A startup-preflight evidence
+  record (`windows-server-post-install-startup-preflight/1.0`)
+  accompanies the main schema. This is the collector revision the
+  distribution's acceptance gates expect for the four-VM re-run.
+  Collector delta +236 lines net (round-trip criterion verified
+  both directions); main-script delta is the identity and the
+  validation-marker comment (+2 net lines). The staged main script
+  is byte-identical to the terminal-evaluation specimen whose ZIP
+  and script SHA-256 were verified against the published plan
+  identity. `data/*` and `schema/*` are byte-identical to r12.74.
+
+### Tests
+
+- **T40**: release pin advanced to the terminal
+  `update-wsi-2026.08.07-r12.75` (the tag is retained). No terminal
+  D-contract required an edit anywhere in the r12.57–r12.75 stretch;
+  the contract set closes exactly as derived at r12.00.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. Main script PSA committed 6E/229W/27I
+  (raw sweep 6E/230W/27I: +1W is the PSA7002 LF artefact); the
+  collector r12 measures 1E/13W/44I standalone as a reference
+  figure. All PSA findings across both deliverables are declared
+  series debt, scheduled for the post-terminal drain. Snapshot form: main script
+  BOM + LF; collector BOM + CRLF; committed checkout form BOM+CRLF
+  for both.
+
 ## [update-wsi-2026.08.07-r12.74] - 2026-08-07
 
 Tag retained: `post-install-evidence-collector-r9-merge`.
