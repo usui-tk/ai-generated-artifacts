@@ -22,6 +22,36 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.02-r12.59] - 2026-08-07
+
+Tag retained: `setupdu-baseline-language-preservation`.
+
+### Fixed
+
+- **The r12.58 El Torito verification is Int64-safe and P10 fails
+  closed**: the r12.58 parser selected the correct `efisys_ex.bin`
+  but clamped its read length through an Int32-bound `Math.Min`, so
+  a real multi-gigabyte ISO (measured on an 8.91-GiB image) produced
+  a false verification failure. The catalog read is now Int64-safe
+  with an explicit truncated-catalog guard, and P10 fails CLOSED —
+  the phase itself fails when the firmware-visible embedded image
+  cannot be proven, instead of deferring the failure to P11 while
+  reporting P10 done. Script delta +25 lines;
+  `data/config-Server2025.json` value-level only (Notes sentence +
+  `_meta.scriptVersion`) — no declared key changes.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.02-r12.59`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 5E/140W/12I (raw sweep
+  5E/141W/12I: +1W is the PSA7002 LF artefact; +2W on the revised
+  parser code, declared series debt). Snapshot form: BOM + LF; committed checkout form BOM+CRLF.
+
 ## [update-wsi-2026.08.02-r12.58] - 2026-08-07
 
 Tag retained: `setupdu-baseline-language-preservation`.

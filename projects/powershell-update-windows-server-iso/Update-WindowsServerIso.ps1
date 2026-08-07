@@ -718,8 +718,9 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.02-r12.58'
-# Validation marker: r12.58 binds the ISO El Torito UEFI boot entry to efisys_ex.bin after PCA2023 conversion.
+$Script:ScriptVersion = 'update-wsi-2026.08.02-r12.59'
+# Validation marker: r12.59 makes the El Torito parser Int64-safe for real ISO files larger than 2 GiB and fails P10 closed when the firmware-visible image cannot be proven.
+# r12.58 selected efisys_ex.bin correctly but its verification parser bound Math.Min to Int32 on an 8.91-GiB ISO and returned a false failure.
 # r12.57 proved only loose-file presence/signatures and could therefore accept a non-bootable mixed PCA2011/PCA2023 ISO.
 # Validation marker retained: r12.55 Setup DU baseline-language preservation and P11 no-new-locale verification.
 $Script:ScriptTag     = 'setupdu-baseline-language-preservation'
@@ -9829,7 +9830,14 @@ function Get-IsoElToritoUefiBootImageEvidence {
 
         $catalogOffset=[int64]$catalogLba*$sectorSize
         if($catalogOffset -ge $stream.Length){throw 'El Torito boot catalog LBA points beyond the ISO.'}
-        $catalogLength=[int][System.Math]::Min(65536,($stream.Length-$catalogOffset))
+        # FileStream.Length and the subtraction result are Int64.  In Windows
+        # PowerShell 5.1, passing an Int32 literal as the first Math.Min
+        # argument can bind the Int32 overload and attempt to narrow a real
+        # multi-gigabyte ISO length to Int32.  Keep both operands Int64, then
+        # narrow only the bounded (<= 65536) result used for the byte array.
+        $catalogBytesAvailable=[int64]$stream.Length-$catalogOffset
+        if($catalogBytesAvailable -lt 128){throw 'El Torito boot catalog is truncated.'}
+        $catalogLength=[int][System.Math]::Min([int64]65536,[int64]$catalogBytesAvailable)
         $catalog=New-Object byte[] $catalogLength
         $stream.Position=$catalogOffset
         $catalogRead=$stream.Read($catalog,0,$catalog.Length)
@@ -9901,7 +9909,7 @@ function Get-IsoElToritoUefiBootImageEvidence {
             $remaining=$expectedLength
             $buffer=New-Object byte[] 1048576
             while($remaining -gt 0) {
-                $want=[int][System.Math]::Min($buffer.Length,$remaining)
+                $want=[int][System.Math]::Min([int64]$buffer.LongLength,[int64]$remaining)
                 $got=$stream.Read($buffer,0,$want)
                 if($got -le 0){throw 'Unexpected end of ISO while hashing the EFI El Torito image.'}
                 $null=$sha.TransformBlock($buffer,0,$got,$buffer,0)
@@ -20141,6 +20149,23 @@ function Invoke-BuildPhase10_ConvertPca2023BootManager {
         $post.OutputCheck = $outputCheck
         Write-Step ('Output ISO check OverallStatus = {0} (computed in {1}s)' -f $outputCheck.OverallStatus, $ocElapsed)
         Show-Pca2023ReadinessSnapshot -Snapshot $post -Compact -OutputCheck $outputCheck
+
+        # P10 is the phase that constructs or repairs PCA2023 media.  It must
+        # not write P10.ok when the firmware-visible El Torito payload is
+        # unavailable, unparsable, or different from efisys_ex.bin.  r12.58
+        # deferred this hard failure to P11 and therefore reported P10 DONE
+        # even when its own post-flight OverallStatus was Fail.
+        if(-not $Script:SyntheticTestMode -and $outputCheck.ElToritoVerificationRequired) {
+            $postElTorito=$outputCheck.ElToritoUefiBootImageCheck
+            Save-CanonicalJsonFile -InputObject $postElTorito -Path (Join-Path $Script:LogsDir 'P10_postflight_el_torito_check.json') -Depth 12
+            if(-not ($postElTorito -and $postElTorito.Available -and $postElTorito.MatchesExpected)) {
+                $postElToritoError=$(if($postElTorito -and $postElTorito.ErrorMessage){$postElTorito.ErrorMessage}else{'No usable El Torito evidence was returned.'})
+                throw ('P10 post-flight El Torito verification failed: {0}' -f $postElToritoError)
+            }
+        }
+        if($outputCheck.OverallStatus -eq 'Fail') {
+            throw 'P10 post-flight PCA2023 output verification failed.'
+        }
 
         New-Item -ItemType File -Path (Join-Path $Script:MarkersDir 'P10.ok') -Force | Out-Null
     } finally {
