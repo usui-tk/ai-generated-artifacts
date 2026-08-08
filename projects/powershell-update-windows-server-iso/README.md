@@ -150,7 +150,7 @@ projects/powershell-update-windows-server-iso/
 │   ├── config.schema.json            # Config Schema v3.0 (retained-compatibility)
 │   ├── config.schema.v4.json         # Config Schema v4.0 (canonical, r12.00)
 │   └── config-seed.schema.json       # SEED projection (SPEC B.14.2)
-├── tests/                            # Self-verification suite (sparse T1-T46 + gates)
+├── tests/                            # Self-verification suite (sparse T1-T52 + gates)
 └── docs/history/                     # Per-cycle investigation reports
 ```
 
@@ -525,14 +525,20 @@ last-verified row.
 
 ## Self-verification tools
 
-The `tests/` subdirectory ships sixteen Python-based self-verification
-tools (sparse T-numbering, T1 – T46; numbers of retired tools are never
-reused) plus three format / schema / seed gates. Since r12.00 the set
-includes six declaration-derived contracts (T41 – T46) that read their
-expected values from the config under test rather than hardcoding them. They probe the
-script's external dependencies, unit-test its PowerShell functions, and
-enforce the SPEC §B.23 JSON canonical format. All offline tools use only
-the Python standard library (no `pip install` required).
+The `tests/` subdirectory ships the Python-based self-verification
+suite (sparse T-numbering, T1 – T52; numbers of retired tools are never
+reused) plus three format / schema / seed gates. The set includes six
+declaration-derived contracts (T41 – T46) that read their expected
+values from the config under test rather than hardcoding them, and the
+six series-end contracts (T47 – T52) covering the evidence Collector,
+the declared oscdimg reference, the Catalog boundary and collection
+shapes, the Generic.List binder guard, and the final-writer authority
+model. The suite is declared in three execution tiers in TESTING.md §5
+(offline-deterministic / live-network / user-side evidence); the
+offline tier is **all green — no declared red**. Offline tools use the
+Python standard library, and most contracts additionally drive the
+pinned PowerShell (pwsh) on PATH through a REPL or AST-extraction
+harness.
 
 ```bash
 # Offline tests — safe to run anywhere

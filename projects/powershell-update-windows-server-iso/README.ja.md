@@ -143,7 +143,7 @@ projects/powershell-update-windows-server-iso/
 │   ├── config.schema.json            # Config Schema v3.0（互換保持）
 │   ├── config.schema.v4.json         # Config Schema v4.0（正準・r12.00）
 │   └── config-seed.schema.json       # SEED 射影（SPEC B.14.2）
-├── tests/                            # 自己検証スイート（疎番号 T1-T46 + ゲート）
+├── tests/                            # 自己検証スイート（疎番号 T1-T52 + ゲート）
 └── docs/history/                     # サイクル別の調査レポート
 ```
 
@@ -510,14 +510,18 @@ python3 ../../quality-tools/powershell-static-analyzer/psa.py Update-WindowsServ
 
 ## 自己検証ツール
 
-`tests/` サブディレクトリには 16 個の Python 自己検証ツール（疎番号
-T1 – T46。退役したツールの番号は再利用しません）に加え、
-フォーマット／スキーマ／シードの 3 ゲートが同梱されています。r12.00
-以降は、期待値をハードコードせず検証対象 config の宣言から読み取る
-declaration-derived 契約 6 本（T41 – T46）を含みます。これらは
-スクリプトの外部依存をプローブし、PowerShell 関数をユニットテストし、
-さらに SPEC §B.23 の JSON canonical 形式を強制します。オフラインツールは
-Python 標準ライブラリのみを利用するため、`pip install` は不要です。
+`tests/` サブディレクトリには Python 自己検証スイート（疎番号
+T1 – T52。退役したツールの番号は再利用しません）に加え、
+フォーマット／スキーマ／シードの 3 ゲートが同梱されています。
+期待値をハードコードせず検証対象 config の宣言から読み取る
+declaration-derived 契約 6 本（T41 – T46）と、シリーズ終端の 6 契約
+（T47 – T52：証跡 Collector・宣言済み oscdimg リファレンス・Catalog
+境界とコレクション形状・Generic.List バインダガード・final-writer
+権威モデル）を含みます。スイートは TESTING.md §5 の 3 実行ティア
+（オフライン決定的／ライブネットワーク／ユーザー側証跡）で宣言され、
+オフラインティアは**全緑 — 宣言赤なし**です。オフラインツールは
+Python 標準ライブラリを利用し、多くの契約は加えて PATH 上のピン留め
+PowerShell（pwsh）を REPL / AST 抽出ハーネス経由で駆動します。
 
 ```bash
 # オフラインテスト — どこでも安全に実行可能

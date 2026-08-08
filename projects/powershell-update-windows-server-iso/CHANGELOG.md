@@ -22,6 +22,18 @@ the script and follows the
 
 ## [Unreleased]
 
+## [update-wsi-2026.08.08-r12.82] - 2026-08-08
+
+Tag: `consolidation-fold`. **This release folds the entire series-end
+consolidation** — the test re-implementation campaign (T47 – T52 and
+the T40/T45 reworks; phases 0 – E), the PSA debt drain (batches 1 – 7
+and the Collector r13 batch), the G3 evidence-gate closure, the
+knowledge-ledger sweep (research doc r2.5), the canon-frame incident
+remediation with its adopted prevention controls, and the T30
+retirement that takes the offline suite all green. With it the
+external-implementation merge / consolidation / maintainability arc
+is closed. Entries below are folded verbatim from [Unreleased].
+
 ### Governance
 
 - **Series-end consolidation stream opened.** The r12 merge campaign
