@@ -377,6 +377,23 @@ the script and follows the
   main 0E/229W/27I and collector 0E/13W/44I; the warning/info drain
   continues in subsequent reviewed batches.
 
+### Tests
+
+- **T30 retired** (user adjudication at the consolidation fold; the
+  series rule's retirement record — what it asserted, why that
+  reading is superseded, and the successors — is SPEC §B.15.4). The
+  declared SUPERSEDED-PENDING red carried since r12.00 is closed by
+  retirement rather than revision: the declared per-Kind
+  `DiscoveryPolicy.SearchProfiles` model the contract awaited is
+  landed and guarded by T46, and the current Setup-DU selection
+  behaviour is covered by T50's scalar identity pins and measured
+  row-filter semantics, so a permanently red title-heuristic
+  instrument added no protection beyond that pair. The offline suite
+  is now **30 test files, ALL PASS — no declared red**; TESTING.md's
+  §0 row, quick-run reference, tier table and suite-declaration
+  baseline and the tests/README.md inventory are updated in the same
+  change set.
+
 ### Governance
 
 - **Canon-frame restoration (incident remediation, user ruling).** The

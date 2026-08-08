@@ -1536,10 +1536,23 @@ expresses what used to be four hand-written per-OS branches.
 Successor: T42 (SourcePrerequisites conformance) plus the declared
 `Detection` list.
 
-(The ninth broken contract, T30 `setup_du_discriminator_test.py`, is
-**not** retired: it is SUPERSEDED-PENDING — the declared red on the
-integration branch — until `DiscoveryPolicy.SearchProfiles` is
-honoured end to end; re-examined at the r12.19 and r12.51 merge cards.)
+**T30 `setup_du_discriminator_test.py` — the title-heuristic Setup-DU
+discriminator (retired 2026-08-08 at the consolidation fold, user
+adjudication).** The ninth contract stayed SUPERSEDED-PENDING — the
+declared red on the integration branch — through the whole r12 series.
+It asserted title-based candidate selection over Catalog rows captured
+verbatim from the live service in July 2026, and its pinned capture
+aged into a permanent 6/8 red (three candidates where one is
+expected). It was not wrong about Microsoft's model so much as pinned
+to a superseded selection mechanism: the structural answer it awaited
+— the declared per-Kind `DiscoveryPolicy.SearchProfiles` — landed and
+is guarded declaratively by T46 (112 assertions) with the current
+selection behaviour covered by T50 (Setup-DU scalar identity pins and
+the measured context-window row-filter semantics). Keeping a
+permanently red historical instrument added no protection beyond that
+pair. Successors: T46 + T50; the retained title-heuristic code path
+remains behaviourally covered by T50 until any future removal, which
+would be its own adjudication.
 
 ### B.15.4 Hotpatch is out of scope
 

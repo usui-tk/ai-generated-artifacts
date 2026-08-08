@@ -78,7 +78,7 @@ a build identifier plus a calendar date. Pending items are marked
 | T25 dism_export_args_test.py (6 assertions, `Get-DismExportArgumentList` returns the five-token `/Export-Image ... /Compress:max` vector targeting the requested source index, `-ScratchDir` appends one `/ScratchDir:<path>` token and is omitted otherwise; guards the same precedence trap) | ✓ all pass | r11.25 p07-resetbase-default-on-scratchdir build / 2026-06-11 |
 | T26 defender_exclusion_plan_test.py (13 assertions, the three pure helpers behind `-UseDefenderExclusions`: `Get-DefenderManagedExclusionSet` (WorkRoot path + four servicing process names), `Get-DefenderExclusionPlan` (add-only-absent, case/slash-insensitive), `Get-DefenderExclusionDecision` (fail-closed -- applies only when every prerequisite is positively satisfied; `$null`/unknown -> skip); the `*-MpPreference`/`Get-MpComputerStatus` wrappers are Windows-only and not exercised) | ✓ all pass | r11.26 defender-exclusion-optin build / 2026-06-11 |
 | T29 patch_integrity_digest_test.py (14 assertions, digest-format boundary: `ConvertTo-HexDigestString` base64->hex round-trip vs an independent Python implementation for SHA-1/SHA-256, the live-captured KB5095966 Catalog vector, hex pass-through, garbage/wrong-length rejection, plus the r12.00 single-accessor wiring guard -- both `Test-PatchIntegrity` expectations normalized through the boundary; all baseline hash seeding goes through `Get-BaselineHashValue` (canonical `Integrity.<Alg>.Value` node + retained-legacy flat fields); no direct `$p.Digest`/`$p.Sha256` seeding may resurface) | ✓ all pass | r12.00 schema-v4-role-planner / 2026-08-01 |
-| T30 setup_du_discriminator_test.py (8 assertions, `Select-SetupDuCandidate` against rows captured verbatim from the live Catalog 2026-07-02) | **SUPERSEDED-PENDING — the declared red on the integration branch** (6/8): the r12 series closed with the discovery model it awaited in place — declared in `DiscoveryPolicy.SearchProfiles` (guarded by T46) with behavioral Catalog coverage in T50 — while the title-heuristic selector T30 pins was retained by the terminal; the final supersession disposition (revise or retire T30) is adjudicated in the consolidation stream | r12.75 series terminal / 2026-08-07 |
+| T30 setup_du_discriminator_test.py | **RETIRED 2026-08-08** (user adjudication at the consolidation fold): the declared SUPERSEDED-PENDING red is closed by retirement — the discovery model it awaited is landed and guarded by T46, with current selection behaviour covered by T50; the retirement record (what it asserted, why, successors) is SPEC §B.15.4 | r12.82 consolidation fold / 2026-08-08 |
 | T32 checkpoint_placement_test.py (15 assertions, checkpoint placement + routing contract: `Get-PatchLocalPath` lands LCU/Checkpoint in the `cu` discovery subfolder and every other Kind flat; `Build-PatchPlan` routes Kind `Checkpoint` to NO WIM target (co-located for DISM PackagePath discovery, never applied standalone); since r12.00 the `PatchModel` Forbid axis is retired -- the test guards its absence and pins the State-driven integrity rule) | ✓ all pass | r12.00 schema-v4-role-planner / 2026-08-01 |
 | T35 pca2023_default_auto_test.py (9 assertions, PCA2023 default-auto surface: retired `-EnablePca2023BootManager` token absent, `-SkipPca2023BootManager` + `-ForcePca2023OnServer2025` declared, P10 opt-out gate present, script-scope default falsy (P10 default-on); since the r12.57 default-enable reshape the Server 2025 force-gate is gone by design and the force switch survives only as a deprecated compatibility slot with a wired caution — the force-gate pin was revised T39-style at that merge) | ✓ all pass | r12.75 series terminal / 2026-08-07 |
 | T36 p08_plan_scope_test.py (10 assertions, r11.56 P08 plan-scope + WinRE has-work contract: `Test-WimSequenceHasWork` null-hardening incl. the `@($null)` crash shape; single hoisted `$plan` assignment above the policy branch; has-work decided before the install.wim mount; the inline crash-prone Where-Object gone) | ✓ all pass | r11.60 kb-alias / 2026-07-07 |
@@ -107,7 +107,9 @@ a build identifier plus a calendar date. Pending items are marked
 
 The full offline suite was re-measured at the r12.75 series terminal
 (tree `e39c12c8…`) on 2026-08-07: **30 test files PASS + the declared
-T30 red only** (the three schema/format gates included). Rows edited
+T30 red only** (the three schema/format gates included); since the
+T30 retirement at the 2026-08-08 consolidation fold the offline suite
+is **30 test files, ALL PASS — no declared red**. Rows edited
 in that re-baseline carry the `r12.75 series terminal / 2026-08-07`
 stamp; unedited rows keep their historical verification stamps.
 
@@ -435,7 +437,6 @@ python3 tests/dism_cleanup_args_test.py      # T24: 6 cleanup-arg-vector asserti
 python3 tests/dism_export_args_test.py       # T25: 6 export-arg-vector assertions
 python3 tests/defender_exclusion_plan_test.py    # T26: 13 Defender pure-helper assertions
 python3 tests/patch_integrity_digest_test.py     # T29: 14 digest-format boundary + single-accessor wiring assertions
-python3 tests/setup_du_discriminator_test.py     # T30: 8 assertions -- the declared SUPERSEDED-PENDING red (6/8; see §0)
 python3 tests/checkpoint_placement_test.py       # T32: 15 checkpoint placement + routing + State-integrity assertions
 python3 tests/pca2023_default_auto_test.py       # T35: 9 PCA2023 default-auto surface assertions
 python3 tests/p08_plan_scope_test.py             # T36: 10 P08 plan-scope + WinRE has-work assertions
@@ -474,7 +475,7 @@ categorisation.
 
 | Tier | Contracts | Environment | Cadence |
 |---|---|---|---|
-| **1 — Offline-deterministic** | T2, T3, T6, T7, T11, T20, T24 – T26, T29, T30, T32, T35, T36, T38 – T52, plus the config-schema, seed-contract and canonical-format gates | Python 3 + the pinned pwsh (7.4.6) on PATH; runs on Linux; no network. Many contracts drive the script or the Collector through the TestHarness REPL or AST-extraction drivers, so pwsh is a tier-level dependency; a handful (e.g. T20) are pure text scans | Local gate battery on every change; the offline portion of CI |
+| **1 — Offline-deterministic** | T2, T3, T6, T7, T11, T20, T24 – T26, T29, T32, T35, T36, T38 – T52, plus the config-schema, seed-contract and canonical-format gates | Python 3 + the pinned pwsh (7.4.6) on PATH; runs on Linux; no network. Many contracts drive the script or the Collector through the TestHarness REPL or AST-extraction drivers, so pwsh is a tier-level dependency; a handful (e.g. T20) are pure text scans | Local gate battery on every change; the offline portion of CI |
 | **2 — Live-network** | T1, T4 | Unrestricted egress to Microsoft endpoints | Stage 4 monthly + ad-hoc before releases. The design of an expanded live-network tier is a standing consolidation item |
 | **3 — Evidence (user-side)** | G2: the required regression set executed on real Windows PowerShell 5.1 against the distribution ZIP. G3: Collector r12 real-machine evidence from the four Server VMs. Plus every `_pending operator confirmation_` pipeline row in §0 | Real Windows hosts / real media; outside the sandbox by nature | At the user's cadence; results recorded in §0 when delivered |
 
@@ -488,9 +489,9 @@ The evidence archives themselves stay outside the repository
 
 ### Suite declaration (measured baseline)
 
-The tier-1 baseline at the r12.75 series terminal (2026-08-07):
-**30 test files PASS + the declared T30 red only.** Any other red on
-this branch is a regression. The per-contract assertion counts are the
+The tier-1 baseline since the T30 retirement (2026-08-08 consolidation
+fold): **30 test files, ALL PASS — no declared red.** Any red on this
+branch is a regression. The per-contract assertion counts are the
 values in the quick-run reference above; the declaration-derived
 contracts (T41 – T46 and the D-halves of T45/T49) re-derive their
 expected values from the declared surfaces at every run, so their
