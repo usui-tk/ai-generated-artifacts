@@ -1,809 +1,1061 @@
 ---
-title: "Windows Server Patched-ISO Build — Metadata-Source Reference Architecture"
-subtitle: "An Architecture Decision Record for selecting the production metadata source of an autonomous ISO-build pipeline"
-doc-type: reference-architecture (ADR-structured)
+title: "Windows Server ISO Update Mechanics — Independent Technical Research Record"
+subtitle: "Reverse engineering, controlled experiments, Microsoft servicing-source analysis, offline media servicing, and Secure Boot observations"
+doc-type: independent-technical-research-report
 lang: en
-doc-provenance:
-  layer-1-format: 1.0.0
-  layer-2-template: 1.0.0
-  rendered: 2026-08-08
 status: living-document
-revision: "r2.5 (r12-series measured extensions: Catalog localization/declared discovery, Setup-DU coverage, parent/child delivery, PCA2023 measured subset, WIM metadata mechanics; 2026-08)"
-scope: "Windows Server 2016 / 2019 / 2022 / 2025 LTSC, x64, offline slipstream"
-snapshot: "2026-06 Patch Tuesday cycle"
-companion-ja: "windows-server-iso-update-mechanics.ja.md (derived from this English version)"
+revision: "r3.0 — independent research re-baseline"
+rendered: 2026-08-08
+scope: "Windows Server 2016 / 2019 / 2022 / 2025 LTSC, x64, offline installation-media servicing"
+primary-research-window: "2026-05 through 2026-08"
+retained-snapshot: "2026-06 Patch Tuesday metadata harvest, with later dated experimental corrections"
+companion-ja: "windows-server-iso-update-mechanics.ja.md (derived from this English version after review)"
 ---
 
-# Windows Server Patched-ISO Build: Which Metadata Source, and Why
+# Windows Server ISO Update Mechanics — Independent Technical Research Record
 
-> 🇺🇸 **English version (authoritative source for the Japanese translation).**
-> The Japanese edition `windows-server-iso-update-mechanics.ja.md` is produced *from* this file and must be kept in lock-step with it. Edit English first; never edit the two in parallel.
-
-> **Document type.** This is a **reference architecture**, structured as an **Architecture Decision Record (ADR)**: it states a *Context*, the *Alternatives Considered*, the *Decision*, and its *Consequences* (§3.1), then substantiates each with a data-model walk-through and embedded, reproducible implementations. It began as a research memo; the structure has outgrown that label.
-
-> **Reading guide — Stable vs Snapshot.** Two kinds of content are interleaved on purpose, and every reader should mentally tag which is which:
-> - **`[STABLE]`** — timeless architecture, data models, evaluation criteria, GUIDs. Expected to hold across months/years.
-> - **`[SNAPSHOT]`** — concrete KB / updateID / digest values for the **2026-06** Patch Tuesday. **These rotate every month**; the tooling re-discovers them on each run.
+> **English is the authoritative editorial source for this research record.** The Japanese edition is derived from this file after the English revision is reviewed and accepted.
 >
-> | Section | Class |
-> |---|---|
-> | §1–§3 (roles, ADR, evaluation matrix), §13.2 (GUID register), §14 (architecture) | **`[STABLE]`** |
-> | §4–§6 data models, §7 generation matrix, §8 Secure Boot (also `[DRAFT]`), §9–§11 tooling | **`[STABLE]`** |
-> | §12 (validated snapshot), and every concrete KB/updateID/digest anywhere in the text | **`[SNAPSHOT]`** |
-
-> **Normative language (RFC-2119 style).** Where this document states an operational rule, the strength is marked so requirements can be told apart from explanation (and machine-extracted):
-> - **MUST** / **MUST NOT** — a hard requirement; violating it produces an incorrect or failed build.
-> - **SHOULD** — a strong recommendation; deviate only with a specific reason.
-> - **MAY** — an option with no correctness impact.
+> **Independence statement.** This report is intentionally maintained outside any implementation project. It records what was observed about Windows Server installation-media servicing through Microsoft documentation research, protocol and package reverse engineering, controlled servicing experiments, boot/install testing, and troubleshooting. It is **not** a specification for a particular script, repository, phase model, or configuration schema.
 >
-> Unmarked prose is **explanation or observation**, not a requirement.
+> **How this report is meant to be used.** An implementation may use these findings to choose its own policy. If an implementation document and this report disagree about *what Windows actually does*, the disagreement should trigger re-validation of the underlying evidence. The report should not be rewritten merely to match an implementation. Conversely, an implementation is free to make a deliberate operational choice that differs from a research recommendation, provided the choice and its consequences are explicit.
 
 ---
 
-## Abstract
+## Executive summary
 
-**Problem.** Build a fully-patched Windows Server 2016 / 2019 / 2022 / 2025 installation ISO (x64, LTSC) from a Microsoft Evaluation image plus the current month's cumulative updates — offline, reproducibly, and in a way an **autonomous build pipeline** can drive end-to-end. The hard part is upstream of any DISM command: *which Microsoft surface do you take the patch identities and dependencies from?* The data is scattered across surfaces that disagree on shape, completeness, and reachability.
+The central finding of this research is that **building a correctly updated Windows Server installation ISO is a media-coherence problem, not an `install.wim`-only patching problem**.
 
-**Result.** The **Microsoft Update Catalog** is the **production source** — the single surface the build consumes. Two other surfaces play supporting roles only: **MS-WSUSSS** (SOAP) is the **authority source** (the oracle used to *prove* the Catalog is right), and **`wsusscn2.cab`** is the **verification source** (the offline dependency/applicability database). These three roles are kept strictly distinct.
+The relevant state is distributed across several independent targets and several Microsoft metadata surfaces:
 
-**Why the Catalog.** It is the only surface that is **reachable** by an unattended agent (plain HTTP, no auth), **complete** (serves every line the ISO needs, *including Dynamic Update*), and **verifiable** (every artifact it returns matches the authority oracle byte-for-byte on the shared **Digest** primary key). The authority surface is unreachable; the verification surface is incomplete. So the Catalog is the only viable **Single Production Source** — and its output is *proved*, not trusted.
+- the installed operating-system images in `sources\install.wim`;
+- Windows PE in `sources\boot.wim`;
+- Windows RE (`winre.wim`) nested inside the operating-system image;
+- Setup binaries and compatibility content in the media `sources\` directory;
+- UEFI boot-manager files and Secure Boot signing state;
+- update metadata exposed through the Microsoft Update Catalog, Windows Update/WSUS protocols, Microsoft release-information pages, and `wsusscn2.cab`.
 
-The full reasoning — the three-role model, the seven-axis evaluation matrix, and the ADR-form decision — is Part I (§2–§3). Parts II–V then substantiate it with per-surface data models, the resolution→ISO mapping, the complete embedded tooling, and the harvested data. **Scope:** offline servicing/rebuild of Windows Server LTSC media, x64 only; client Windows, Windows Update for Business, and live in-place servicing are out of scope (full non-goals: §1.1).
+The most durable conclusions are:
 
-### Architecture at a glance
+1. **No single Microsoft metadata surface is the complete epistemic source for every question.** The Microsoft Update Catalog is the most practical public artifact-resolution surface, while MS-WSUSSS, `wsusscn2.cab`, Microsoft release information, KB articles, and the packages themselves provide independent evidence for identity, applicability, dependency, supersedence, and servicing behavior.
+2. **Package topology changes materially by Windows generation.** Standalone SSUs, combined SSU+LCU packages, checkpoint cumulative updates, classic CAB/MSU packaging, UUP/WIM packaging, SafeOS Dynamic Update, Setup Dynamic Update, and .NET rollups must not be generalized from one release to another.
+3. **Dynamic Update is a family of roles, not one package.** Setup DU, SafeOS DU, servicing-stack content, cumulative updates, and applicable drivers address different media targets. Microsoft explicitly documents separate operations for WinRE, `install.wim`, `boot.wim`, Setup media, Setup binaries, and boot-manager files.
+4. **Setup-media coherence is a correctness requirement.** A 2026-07-11 troubleshooting campaign reproduced installation failure when serviced WinPE Setup binaries and media `sources\setup*.exe` diverged. Microsoft independently documents the same invariant: the saved WinPE Setup binaries must match the copies on the media or Windows Setup can fail.
+5. **`boot.wim` servicing is not safely described by a universal rule such as “never apply an LCU.”** Current Microsoft guidance explicitly includes cumulative-update servicing of WinPE. Historical experiments also showed release- and source-media-specific applicability/prerequisite differences, including `0x80070032`, `0x800f0823`, and checkpoint-related failures. The correct engineering rule is to treat boot-image servicing as a measured, package-aware operation.
+6. **“Not found” is not evidence of non-existence until the search space is exhausted.** Early conclusions that Setup Dynamic Update was limited to newer Server releases were later falsified by live Catalog measurements that found valid Setup DU rows for Server 2016, 2019, and 2022 as well as 2025.
+7. **Cross-source hash comparison must respect package boundaries.** SHA-1 Digest is a strong join only when two surfaces describe the same physical file. An outer MSU and an inner CAB are different artifacts and can legitimately have different hashes.
+8. **PCA2023/Secure Boot readiness is a multi-layer state.** Firmware trust variables, boot-manager signer chain, bootable-media files, and installed-OS state are related but not interchangeable evidence. Static Authenticode inspection does not replace a Secure Boot boot test.
+9. **WIM presentation metadata and WIM payload state are different axes.** Servicing can update the contained OS while leaving edition-list timestamps semantically stale; controlled WIM metadata editing can correct presentation metadata when performed with integrity preservation and explicit evidence.
+10. **A “fully patched ISO” is always a scoped claim.** It must state the date, source media, update families, media targets, languages, architectures, prerequisite policy, and validation class.
 
-**Figure 1 — Architecture at a glance.** The whole design on one screen: three roles, one production data dependency, a proved artifact, an autonomous build.
+The report therefore recommends an evidence-driven model:
 
+```text
+Microsoft documentation / protocol specifications
+                    +
+       live metadata and package harvests
+                    +
+      package / WIM / ISO reverse engineering
+                    +
+ controlled servicing + boot/install experiments
+                    |
+                    v
+            verified research claims
+                    |
+                    v
+       engineering implications / options
+                    |
+                    v
+     implementation-specific design decisions
 ```
-  ┌──────────────────────────────────────────────────────────────────────┐
-  │                       RESEARCH / VERIFICATION                          │
-  │                                                                        │
-  │   AUTHORITY              VERIFICATION                                   │
-  │   MS-WSUSSS (SOAP)  ───► wsusscn2.cab                                   │
-  │   ground truth          dependency / applicability                     │
-  │        │                      │                                        │
-  │        └──── Digest (primary key) proves ────┐                         │
-  └──────────────────────────────────────────────┼─────────────────────────┘
-                                                 ▼
-  ┌──────────────────────────────────────────────────────────────────────┐
-  │                    PRODUCTION  (Single Production Source)               │
-  │                                                                        │
-  │   Learn release-info ─► MICROSOFT UPDATE CATALOG ─► URL + SHA-1 Digest  │
-  │   (LCU KB seed)         reachable · complete · proved                   │
-  │                                  │                                      │
-  │                                  ▼                                      │
-  │   Autonomous Build Pipeline:  download → verify → DISM apply → ISO      │
-  └──────────────────────────────────────────────────────────────────────┘
-                                  ▼
-                Offline, fully-patched, bootable Windows Server media
-```
 
-(The figures are numbered for stable cross-reference. Figure 1 here; the three-role model is **Figure 2** (§2.1), the Catalog data model **Figure 3** (§6.2.1), the research and production architectures **Figures 4–5** (§14), and the one-line summary **Figure 6** (§14.1).)
-
-### Methodology and provenance discipline
-
-Every load-bearing claim below was derived empirically, then cross-checked across at least two of the three surfaces. The disciplines that produced it, and that the reader should hold the document to:
-
-- **Oracle-anchored verification.** [A] SOAP is the answer-key. A claim about [B] or [C] "graduates" from hypothesis to fact only when it matches the oracle by a schema-independent key — the **file Digest (SHA-1, base64)** wherever possible.
-- **Absence is earned, never assumed.** "The data is not here" is a high-bar conclusion reached only after exhausting alternate streams, search patterns, and extraction methods. Several early "absent" calls in the source investigation were simply *wrong searches* (see §5.4 and §6.4). Where a genuine absence survives that bar, it is stated *with its reason* (e.g. the 2022 SafeOS DU, §5.5).
-- **Client-first failure attribution (for [A]).** When a documented, callable, production protocol endpoint returns an error or a sparse result, the default explanation is a **defect in our request**, not a server limitation — because real WSUS servers demonstrably sync the full catalog from the same endpoint every day.
-- **Provenance tags.** `[VERIFIED]` = grounded in real harvested SOAP data; `[CAB-VERIFIED <date>]` = grounded in the actual downloaded `wsusscn2.cab`; `[CATALOG-VERIFIED <date>]` = grounded in a real Catalog round-trip; `[DRAFT]` = structurally reasoned but **not yet rigorously tested** (the Secure Boot material in §8 carries this). Untagged text is reasoning/structure, not a hard fact.
+The arrow is intentionally one-way. Implementation design can generate new hypotheses, but it does not by itself establish Windows behavior.
 
 ---
 
-# PART I — Conclusion and Evaluation Axes
+# PART I — Research scope, evidence model, and adjudication rules
 
-## 1. Background, goal, and audience
+## 1. Purpose
 
-Microsoft ships Windows Server in two install-ready forms: the **Evaluation ISO** (Microsoft Evaluation Center; 180-day timer; freely downloadable, no licensing) and the **retail / volume-licensed ISO**. For agent-driven automation the Evaluation ISO is the most practical input, but redistribution and storage of the media must still comply with Microsoft's licensing terms.
+This report consolidates the technical knowledge accumulated while investigating how to reconstruct patched Windows Server installation media for:
 
-A practitioner building a "fully patched" ISO from such media starts from: *what is the minimum set of `.msu` / `.cab` packages I must apply to `install.wim` so that, once deployed and booted, the image is at the current Patch Tuesday level and is accepted by a Secure Boot environment that no longer trusts PCA2011?* The naïve answer — "apply this month's LCU" — is incomplete. The full answer touches:
+- Windows Server 2016;
+- Windows Server 2019;
+- Windows Server 2022;
+- Windows Server 2025;
+- x64 installation media;
+- primarily `en-us` and `ja-jp` media;
+- offline servicing and ISO reconstruction;
+- UEFI / Secure Boot / Hyper-V Generation 2 validation.
 
-- which **metadata surface** actually publishes each line (LCU / SSU / .NET CU / Dynamic Update);
-- whether the LCU requires a **Servicing Stack Update** applied first (the `0x800f0823` failure);
-- whether the `install.wim` already ships the **PCA2023-signed boot binaries** or whether they must be synthesised;
-- how to **verify** the result without booting physical hardware.
+The goal is not to prescribe one automation implementation. The goal is to preserve enough verified knowledge that a third party can answer questions such as:
 
-**Audience.** Two readers. First, a human engineer (Takayuki / usui-tk) maintaining a real ISO-update pipeline. Second — and explicitly — a **future LLM/agent session with no memory of this work**, which must be able to pick up the source decision, re-run the tooling, and reproduce the data from the embedded scripts and snapshots alone. The conclusion-first structure and the embedded reference implementations exist primarily for that second reader.
+- Which update family am I actually looking at?
+- Which image or media layer does it modify?
+- Is an apparent absence real, or did the query miss the row?
+- Does the package require a servicing-stack or checkpoint prerequisite?
+- Is a failure caused by DISM, package applicability, stale Setup media, ISO mastering, or Secure Boot state?
+- Which observations are durable and which are dated snapshots?
+- If two project documents disagree, which external evidence can adjudicate the disagreement?
 
-### 1.1 Non-goals `[STABLE]`
+## 2. What this report is not
 
-To set expectations precisely, the following are explicitly **out of scope**. The architecture here neither solves nor comments on them, and a reader expecting any of them should look elsewhere:
+This report is **not**:
 
-- **Windows Client editions** (Windows 10 / 11 consumer/pro media). This document is Windows Server LTSC only, even though some payloads (UUP, 24H2) are shared with the client line.
-- **Online / in-place servicing.** Only *offline* slipstream into `install.wim` is covered; live Windows Update, in-place upgrades, and running-OS patching are out of scope.
-- **Windows Update for Business** policy orchestration, deployment rings, and update deferrals.
-- **WSUS / SCCM / ConfigMgr deployment.** This is not a patch-*deployment* or fleet-management design; it is a *media-build* design. (MS-WSUSSS appears here only as a verification oracle, not as a deployment surface.)
-- **Enterprise patch management** generally — compliance reporting, maintenance windows, approval workflows.
-- **Non-x64 architectures** (arm64, x86) — except where noted as a thing to *exclude* (e.g. the 2025 arm64 .NET sibling).
-- **Driver / firmware / OEM image customisation** and bootable-USB authoring.
-- **Definitive Secure Boot end-to-end validation** — present only as `[DRAFT]` (§8), not yet held to the verification bar the metadata work meets.
+- a repository specification;
+- a phase-by-phase user manual for a particular PowerShell script;
+- a replacement for Microsoft licensing terms;
+- a Windows Update fleet-management design;
+- a claim that one monthly package set remains current indefinitely;
+- a claim that a Hyper-V boot test proves every physical UEFI implementation;
+- a guarantee that Microsoft will preserve today's Catalog HTML, package naming, or servicing topology.
 
-## 2. Conclusion summary: three surfaces, one production source
+Project-specific phase names, config schemas, command-line switches, and CI states are therefore excluded from the normative research narrative. Where a project experiment produced useful evidence, the **measurement** is retained while the project-specific mechanism is omitted or relegated to provenance notes.
 
-The end-to-end shape of the chosen pipeline:
+## 3. Evidence taxonomy
 
+Claims use the following labels. A label describes the *kind of evidence*, not whether an implementation currently uses the finding.
+
+| Label | Meaning |
+|---|---|
+| **`[MEASURED]`** | Directly observed in a controlled servicing, package, WIM, ISO, VM, firmware-variable, or file-inspection experiment. |
+| **`[REPRODUCED]`** | Repeated across more than one run, image, language, OS generation, or independent test path. |
+| **`[PROTOCOL-VERIFIED]`** | Grounded in captured MS-WSUSSS / MS-WUSP protocol data and mapped to concrete update identities. |
+| **`[CAB-VERIFIED <date>]`** | Grounded in a specific downloaded `wsusscn2.cab` snapshot. |
+| **`[CATALOG-VERIFIED <date>]`** | Grounded in a live Microsoft Update Catalog search/download-resolution round trip. |
+| **`[MICROSOFT-DOCUMENTED]`** | Stated in current Microsoft Learn, Microsoft Support, Open Specifications, or Microsoft-maintained source. |
+| **`[INFERRED]`** | Reasoned from multiple observations but not directly demonstrated in every relevant environment. |
+| **`[HISTORICAL <date/revision>]`** | True of the recorded experiment or snapshot; not asserted to remain current. |
+| **`[OPEN]`** | Unresolved or not yet verified to the same bar as neighboring claims. |
+
+### 3.1 Confidence is separate from recency
+
+A dated measurement can remain high-confidence evidence of what happened on that date. A current Microsoft document can be highly authoritative but still require interpretation for older source media. “Current” and “high confidence” are therefore different dimensions.
+
+### 3.2 Evidence priority for Windows-behavior disputes
+
+When claims conflict, use this order as a review heuristic rather than an absolute hierarchy:
+
+1. **Reproducible direct measurement on the relevant OS/media/package**, with captured logs/hashes/artifacts.
+2. **Microsoft documentation or protocol specification that explicitly covers the same operation and release family.**
+3. **Independent Microsoft metadata/package evidence** (Catalog, WSUS protocol, `wsusscn2.cab`, KB package manifests, CompDB, file signatures).
+4. **Cross-version inference** supported by repeated measurements.
+5. **Implementation documentation or code** as a source of hypotheses about what should be re-tested.
+
+Implementation documents are authoritative for what *that implementation intends to do*, but they are not automatically evidence of what Windows or Microsoft servicing does.
+
+## 4. Conflict-adjudication protocol
+
+If this report and an implementation disagree:
+
+1. **Classify the disagreement.** Is it about Windows behavior, or merely an implementation policy choice?
+2. **Locate the original evidence.** Prefer logs, captured Catalog rows, package files, WIM inspection, VM evidence, firmware-variable evidence, or Microsoft source material over summaries.
+3. **Reproduce on the narrowest relevant target.** Avoid changing production code before the behavior is understood.
+4. **Record whether the old research claim is confirmed, narrowed, or falsified.** Never convert an unexplained contradiction into a silent rewrite.
+5. **Update this report only when the evidence changes.** Preserve the superseded interpretation in a dated note when it explains an important past failure.
+6. **Then update the consuming implementation** if its design no longer reflects the verified behavior.
+
+This protocol is a direct consequence of several incidents in this research program where an implementation assumption was later falsified by live Catalog data or by an end-to-end servicing run.
+
+---
+
+# PART II — Methodology and experimental surfaces
+
+## 5. Research methods used
+
+The findings in this report came from a combination of:
+
+- Microsoft Update Catalog search/result parsing and `DownloadDialog.aspx` resolution;
+- direct download and hashing of `.msu`, `.cab`, `.psf`, `.wim`, EFI, and related payloads;
+- MS-WSUSSS / MS-WUSP SOAP protocol harvesting on Windows hosts;
+- `wsusscn2.cab` offline-catalog extraction and streamed XML analysis;
+- package manifest and CompDB inspection;
+- DISM offline servicing of `install.wim`, `boot.wim`, and `winre.wim`;
+- WIM resource / metadata inspection and controlled metadata rewriting;
+- Setup-media file comparison (`setup.exe`, `setuphost.exe`, boot manager files);
+- Authenticode/X.509 signer-chain inspection;
+- firmware Secure Boot variable collection;
+- ISO reconstruction with Microsoft `oscdimg.exe`;
+- Hyper-V Generation 2 UEFI/Secure Boot boot and installation tests;
+- post-install evidence collection inside Windows Server VMs;
+- fault isolation by testing competing hypotheses against the failing WinPE environment.
+
+## 6. Lab discipline
+
+Several practices materially improved the reliability of the work:
+
+- **Capture before interpretation.** Keep raw HTTP/SOAP responses and package identities before normalizing them.
+- **Hash physical artifacts.** Record SHA-256 locally even when an upstream service exposes SHA-1.
+- **Separate logical identity from container identity.** A KB, Catalog `updateID`, MSU wrapper, inner CAB, UUP leaf, and PSF are not interchangeable identifiers.
+- **Treat absence as a high-bar claim.** Search alternate titles, Products values, classifications, release tokens, and update families before concluding “does not exist.”
+- **Test one hypothesis at a time.** The 2026-07-11 Setup failure was resolved by separately exonerating UDF/ISO readability and storage enumeration before focusing on Setup binary identity.
+- **Retain dated snapshots.** Concrete KBs, GUIDs, digests, and file names are evidence, not timeless configuration.
+- **Do not infer a future E2E result from a previous revision.** Historical successful builds remain provenance, not automatic proof of a later implementation.
+
+---
+
+# PART III — Microsoft update metadata surfaces
+
+## 7. Why multiple metadata surfaces matter
+
+Microsoft exposes overlapping servicing information through surfaces built for different jobs. The investigation repeatedly failed when these surfaces were treated as if they were interchangeable.
+
+A useful decomposition is:
+
+| Question | Strong evidence surface |
+|---|---|
+| What update artifacts can I download? | Microsoft Update Catalog |
+| What does WSUS synchronize and how are revisions/bundles related? | MS-WSUSSS |
+| What applicability/supersedence data is available for offline scan? | `wsusscn2.cab` |
+| What LCU/build does Microsoft publish for a Server release? | Microsoft release information + KB article |
+| What is actually inside the package? | MSU/CAB/WIM/PSF/CompDB inspection |
+| Will this source media accept the package? | DISM servicing experiment + package logs |
+| Does the resulting installation media boot/install? | Rebuilt ISO + VM/hardware validation |
+
+The durable lesson is **role separation**, not a claim that one surface is universally authoritative for every question.
+
+## 8. MS-WSUSSS — protocol authority and relationship evidence
+
+### 8.1 Protocol role
+
+`[MICROSOFT-DOCUMENTED]` MS-WSUSSS is Microsoft's SOAP-based server-to-server WSUS synchronization protocol. A downstream update server obtains update metadata from an upstream server through this protocol.
+
+Primary specification:
+
+https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-wsusss/f49f0c3e-a426-4b4b-b401-9aeb2892815c
+
+### 8.2 Measured data model
+
+`[PROTOCOL-VERIFIED 2026-06]` The harvested update universe is naturally expressed as:
+
+```text
+bundle / revision identity
+        |
+        +--> category / product / classification relationships
+        +--> applicability / prerequisite / supersedence relationships
+        |
+        v
+leaf / payload metadata
+        |
+        v
+concrete file(s) + digest(s)
 ```
-Learn release-info (?accept=text/markdown)      → discover the current LCU KB per build
-            |
-            v
-Microsoft Update Catalog  [C]  (PRODUCTION)     → resolve KB → download URLs + SHA-1 digests
-            |                                       (all lines incl. Dynamic Update; no auth)
-            v
-Download .msu / .cab  →  verify SHA-1
-            |
-            v
-DISM offline servicing  (SSU/baseline → LCU → .NET → SafeOS-DU(WinRE))
-            |
-            v
-PCA2023 media synthesis (_EX boot bins)  [DRAFT, §8]
-            |
-            v
-Rebuild ISO  →  signer-chain + boot verification
-```
-The upper stages (discovery + resolution) lean on the reachable, reproducible Catalog; correctness is proved against the [A] SOAP oracle and cross-checked against the [B] cab.
 
-| | Surface | What it is | Reachable from agent sandbox? | Reproducible offline? | Covers **all** lines? | Role in this pipeline |
-|---|---|---|---|---|---|---|
-| **[A]** | MS-WSUSSS SOAP | Server-to-server sync protocol (authoritative) | **No** (TLS-MITM at egress; needs Windows host) | No | Yes | **Oracle / answer-key only** |
-| **[B]** | `wsusscn2.cab` | Offline applicability-scan catalog | Yes (download + parse) | Yes | **No** (omits Dynamic Update for classic OSes) | **Verification source** — dependency / applicability / offline-validation DB |
-| **[C]** | Microsoft Update Catalog | Public HTML web app | **Yes** (HTTP, no auth) | Yes (cache every response) | **Yes** (incl. Dynamic Update) | **PRODUCTION source** |
+The useful identity fields include `UpdateID`, `RevisionNumber`, relationship edges, payload file names, sizes, and SHA-1 digests.
 
-**Why the Catalog wins — and why authority is not the deciding axis.** [A] is strictly the most authoritative: it is the exact protocol a real downstream WSUS server uses, and it is where our ground-truth came from. If "most authoritative" were the criterion, [A] would win outright. But the objective is an **agent that builds the ISO unattended and reproducibly**, and on that objective:
+### 8.3 Reachability observation
 
-- [A] **fails the reachability test.** The sandbox→`sws.update.microsoft.com` path dies at an upstream TLS-MITM cert-verify failure in the egress gateway; importing Microsoft certificates into the container cannot fix it (it is not a container trust-store gap). [A] needs a real Windows host and a careful multi-call sync sequence — neither reproducible by the agent alone.
-- [B] **fails the completeness and ergonomics tests.** It is reachable and reproducible and it matches the oracle by digest — but it **omits the Dynamic Update line by design** (it is the *offline applicability scan for the running OS*; SafeOS DU targets WinRE, a separate image, so the whole SafeOS-DU lineage is out of scope — §5.5). It is also multi-gigabyte and reliably stalls naïve handling. Using it as the single source means *still* hopping to the Catalog for Dynamic Update — i.e. maintaining two sources for no gain.
-- [C] **passes all three.** It is directly reachable over plain HTTP with no authentication, it serves **every** line including Dynamic Update, and it hands back direct CDN URLs plus SHA-1 digests. An agent can search it, resolve it, download from it, and cache every response so a re-run is offline and idempotent.
+`[HISTORICAL 2026-06]` In the original research environment, direct access to the upstream WSUSSS endpoint from the agent sandbox failed in the egress TLS path before a valid protocol exchange could be completed. A Windows host was used for the SOAP harvest instead.
 
-So the verdict is decided by **operability for an autonomous agent**, not by protocol seniority. We keep [A] as the oracle precisely *because* it is the most authoritative — it is what lets us *prove* the Catalog picked the right artifacts — and we keep [B] as a fast offline dependency cross-check. But the artifact that the build actually consumes comes from **[C]**.
+This is an **environment-specific observation**, not a statement that the service is globally inaccessible. It remains relevant because it forced the research process to separate “protocol authority” from “operational artifact source.”
 
-### 2.1 Authority, Production, Verification are three different roles
+### 8.4 Handler / packaging-era observations
 
-The most common reader error is to collapse "authoritative" and "best to use" into one axis — to reason *SOAP → Microsoft-official → most correct → therefore use it*. That chain is wrong at the last step. **"Most authoritative" is not "most usable."** The objective is an automated ISO build, and for that objective the surfaces sort into **three distinct roles**, not a single ranking. The roles, defined up front:
+`[PROTOCOL-VERIFIED]` The investigation observed several handler families across the four Server generations, including CBS-oriented classic servicing, OSInstaller/UUP-era data, and command-line installation metadata. The exact representation changed by release, which is one reason generational assumptions proved fragile.
 
-> - **Authority source** — *the surface that is canonically correct by construction* (a real WSUS server syncs the whole catalog from it daily). Used to define ground truth, not to feed the build.
-> - **Production source** — *the metadata source that an autonomous build pipeline directly consumes* to obtain the artifacts (download URLs + integrity digests) it applies. This is the only one the build actually calls.
-> - **Verification source** — *the offline database of relationships (dependency / applicability / supersedence)* used to validate the set the production source resolved.
+For the 2026-06 harvested sample:
 
-**Figure 2 — The three-role model (Authority / Production / Verification).**
+- Server 2016 exposed a standalone SSU relationship alongside classic CBS update data;
+- Server 2019 and 2022 represented servicing-stack content through combined/embedded servicing models rather than a separate monthly SSU line;
+- Server 2025 used UUP/checkpoint-era packaging and CompDB-style image composition metadata.
 
-```
-                 +------------------------------+
-                 |        AUTHORITY SOURCE       |
-                 |        MS-WSUSSS (SOAP)        |
-                 |  the protocol a real WSUS     |
-                 |  server syncs from daily      |
-                 +---------------+---------------+
-                                 |
-                      Digest verification  (SHA-1, schema-independent)
-                                 |  "Catalog is not trusted on faith —
-                                 v   it is SOAP-verified"
-                 +------------------------------+
-                 |       PRODUCTION SOURCE       |
-                 |   Microsoft Update Catalog    |
-                 |  reachable · complete · agent-|
-                 |  drivable · gives URLs+digests|
-                 +---------------+---------------+
-                                 |
-                          Download URL  →  ISO build pipeline
-                                 ^
-                      Applicability / dependency / supersedence
-                                 |
-                 +------------------------------+
-                 |      VERIFICATION SOURCE      |
-                 |        wsusscn2.cab           |
-                 |  offline dependency / applic- |
-                 |  ability / validation database|
-                 +------------------------------+
+These observations are a dated packaging snapshot, not a guarantee that Microsoft will preserve the same external representation indefinitely.
+
+## 9. `wsusscn2.cab` — offline applicability and supersedence corpus
+
+### 9.1 What it is
+
+`[MICROSOFT-DOCUMENTED / CAB-VERIFIED]` `wsusscn2.cab` is Microsoft's offline Windows Update scan catalog. The research used it as an independent corpus for update identity, applicability, supersedence, and package relationships.
+
+Stable download entry point used by the investigation:
+
+https://go.microsoft.com/fwlink/?LinkID=74689
+
+### 9.2 Safe handling
+
+The 2026-06 snapshot expanded into a very large XML corpus. The practical rules were:
+
+- list CAB contents before extraction;
+- stream the master XML rather than loading it wholesale;
+- extract detail CABs selectively;
+- locate revisions/files by identity/digest rather than bulk-extracting every child;
+- record the downloaded CAB's SHA-256 so later analysis can be tied to an exact snapshot.
+
+### 9.3 The 2026-06 SafeOS observation — keep it narrow
+
+`[CAB-VERIFIED 2026-06-24]` An exhaustive search of the downloaded 2026-06 `wsusscn2.cab` corpus did not find the specific Server 2022 SafeOS Dynamic Update artifact that was independently resolved through the Catalog/protocol research.
+
+The correct durable conclusion is **not** “`wsusscn2.cab` never contains Dynamic Update.” The defensible conclusion is:
+
+> The Server 2022 SafeOS DU tested in the 2026-06 snapshot was absent from the exact offline-scan corpus that was searched; therefore `wsusscn2.cab` must not be assumed to be complete for every installation-media Dynamic Update artifact.
+
+This narrower wording survives later discoveries and avoids turning one snapshot into a global product rule.
+
+## 10. Microsoft Update Catalog — practical artifact resolution
+
+### 10.1 Why it matters
+
+The Catalog is the most practical public surface found in this work for resolving:
+
+```text
+search / KB / product context
+          -> Catalog row (updateID)
+          -> one or more downloadable files
+          -> direct Microsoft CDN URL
+          -> upstream digest metadata
 ```
 
-- **Authority source — MS-WSUSSS [A].** The ground truth. Not consumed by the build; it exists to *prove the production source is right*.
-- **Production source — Microsoft Update Catalog [C].** The surface the build actually calls. Chosen for operability, not seniority.
-- **Verification source — `wsusscn2.cab` [B].** A *different role* from the Catalog: where the Catalog yields **artifacts** (URLs + digests), the cab yields **relationships** (dependency, applicability, supersedence). It validates the set the Catalog resolved; it is not a fallback artifact store.
+It is therefore the recommended **artifact-resolution surface** for an automated research or build workflow, while independent sources should be used to validate the interpretation.
 
-> **Naming convention (used throughout).** From here on, the architectural **role name is the primary referent**, and the concrete surface is the implementation detail. The memo prefers "the **Authority source** verifies the **Production source**" over "SOAP proves the Catalog," and introduces the surface name (SOAP / Catalog / cab) afterwards where the mechanics need it. The role names are what the reader should remember; the surfaces are how the roles happen to be implemented in 2026.
+### 10.2 Catalog data model
 
-Three facts make this split decisive rather than cosmetic:
+`[CATALOG-VERIFIED 2026-06]` The investigated traversal used:
 
-1. **The Catalog is the only *Single Production Source*.** This is the architectural argument, and it is stronger than "reachable." A production source is only useful if a pipeline can obtain **every** required line from it *alone*, with no second source to stitch in. The Catalog is the **only** surface that satisfies this: it is reachable *and* serves every line (LCU, SSU, .NET CU, **and Dynamic Update**). SOAP serves every line but is unreachable; the cab is reachable but omits Dynamic Update — so neither can stand alone. The Catalog therefore is not merely *a* reachable source; it is the only source capable of acting as a **Single Production Source**, which means the production architecture needs exactly one data dependency. Minimal architecture is a feature, not a coincidence.
-2. **The Catalog is SOAP-verified, not trusted — joined by a cross-source Primary Key.** Every line the Catalog resolves was matched to the [A] oracle by **file Digest (SHA-1, base64)**. The Digest is best understood not as a mere integrity checksum but as the **primary key shared across all three surfaces** — the same physical file carries the same Digest in SOAP, in the Catalog, and in `wsusscn2.cab`, regardless of how each wraps it. Matching on that primary key turns the claim from "the Catalog is probably right" into "the Catalog's artifact is, cryptographically, the same file the authoritative protocol serves" (§12.3). This is the report's strongest guarantee.
-3. **The Catalog is the only *reachable* surface that carries Dynamic Update.** `wsusscn2.cab` omits the SafeOS DU lineage by design (§5.5); SOAP has it but is unreachable. The Catalog has it **and** is reachable without authentication. For an OS line the ISO genuinely needs (2022/2025 SafeOS DU), this is on its own a deciding factor — and it is the concrete reason fact 1 holds.
+1. `Search.aspx?q=<query>` — candidate rows with update ID, title, Products, classification, date/version/size metadata.
+2. `DownloadDialog.aspx` — file list, direct CDN URL, file name, SHA-1 digest, and sometimes SHA-256.
+3. `ScopedViewInline.aspx?updateid=<GUID>` — additional row details such as supersedence / KB relationships.
 
-## 3. Evaluation matrix (so the verdict is a design decision, not a preference)
+Conceptually:
 
-The comparison in §2 is not a single "which is best" ranking; it is a score across several independent axes. Laying them out as a matrix turns the verdict from a subjective preference into a reproducible design decision a reader can re-derive.
+```text
+logical update identity
+      |
+      v
+Catalog updateID
+      |
+      v
+files[] = { filename, URL, digest, optional sha256 }
+      |
+      +--> download and local SHA-256
+      |
+      +--> packaging-aware cross-check against independent evidence
+```
 
-| Axis | What it asks | [A] SOAP | [B] `wsusscn2.cab` | [C] Catalog |
+### 10.3 HTML and localization are part of the problem
+
+`[MEASURED 2026-08]` Catalog display strings can vary with localization/request context. Title and Classification display text were observed in multiple languages while KB IDs, update GUIDs, file names, and other structural identity fields remained more stable.
+
+Therefore:
+
+- do not treat English display text as a universal schema;
+- use Products, architecture, KB/update ID, file identity, and role-specific discriminators together;
+- semantically validate the returned page even when HTTP status is 200;
+- cache raw responses used to make an engineering decision.
+
+### 10.4 “One search” is not a completeness test
+
+`[MICROSOFT-DOCUMENTED]` Microsoft's Dynamic Update guidance explicitly warns that all package types may not appear in one Catalog search and that different search terms may be necessary.
+
+This is important because the research itself initially promoted a point-in-time search failure into an incorrect generational assumption about Setup Dynamic Update. Later live Catalog surveys disproved that assumption.
+
+## 11. Microsoft release information — independent LCU calendar evidence
+
+Microsoft release-information pages are useful for determining the published LCU/build lineage for a Windows Server release and for checking whether a Catalog-selected LCU corresponds to the expected servicing level.
+
+The research conclusion is deliberately modest:
+
+- use release information as **independent release/build evidence**;
+- use the Catalog/package itself for exact artifact resolution;
+- do not make either source validate itself circularly.
+
+## 12. Cross-source identity: hashes are physical-file identifiers, not universal logical keys
+
+The original investigation used SHA-1 Digest very successfully to join the same physical files across sources. That result was real but too broadly generalized in earlier text.
+
+### 12.1 Same-file case
+
+If SOAP, Catalog, and offline metadata all describe the **same CAB/MSU object**, matching hashes are strong evidence that they refer to the same bytes.
+
+### 12.2 Wrapper/container case
+
+If one surface exposes:
+
+```text
+outer-update.msu
+    -> inner-update.cab
+```
+
+while another surface describes only `inner-update.cab`, then the two hashes **should differ**. The correct join may require:
+
+- KB identity;
+- Catalog update ID;
+- bundle/leaf relationship;
+- package manifest identity;
+- file name / size;
+- the hash of the corresponding same physical sub-artifact.
+
+### 12.3 Operational integrity
+
+For downloaded files, calculate and retain a local SHA-256 regardless of whether an upstream surface supplies one. This gives a durable local artifact identity even when upstream metadata relies on SHA-1 or leaves its SHA-256 field blank.
+
+---
+
+# PART IV — Installation-media servicing mechanics
+
+## 13. Installation media is a set of coupled servicing targets
+
+`[MICROSOFT-DOCUMENTED]` Microsoft's current Dynamic Update media guidance explicitly treats the following as separate targets:
+
+- WinRE (`winre.wim`);
+- the operating-system image (`install.wim`);
+- WinPE (`boot.wim`);
+- the installation-media file tree (`sources`, boot files, Setup files, and related media content).
+
+Primary guidance:
+
+https://learn.microsoft.com/en-us/windows/deployment/update/media-dynamic-update
+
+The documented sequence includes, among other steps:
+
+- servicing-stack/LCU servicing of WinRE;
+- Safe OS Dynamic Update to WinRE;
+- LCU servicing of the installed OS image;
+- LCU servicing of WinPE;
+- Setup Dynamic Update to the new media;
+- copying `setup.exe` / `setuphost.exe` from serviced WinPE to media;
+- copying serviced boot-manager files from WinPE to media.
+
+This strongly supports the central research conclusion: **correctly updated media is a coordinated state across images and loose media files.**
+
+## 14. Dynamic Update roles
+
+Dynamic Update should be modeled by **purpose and target**, not by one generic “DU” switch.
+
+### 14.1 Setup Dynamic Update
+
+Role: update Setup binaries/data and compatibility content in the media file tree.
+
+The Catalog discriminator can vary by release. For Server 2022-era rows, Microsoft documents the combination of:
+
+- Title resembling `Dynamic Update for Microsoft server operating system, version 21H2`;
+- Product `Windows 10 and later Dynamic Update`;
+- Description `SetupUpdate`.
+
+For Server 2025, the title itself more clearly identifies `Setup Dynamic Update`.
+
+### 14.2 Safe OS Dynamic Update
+
+Role: update the SafeOS / recovery environment path, principally WinRE.
+
+For Server 2022-era rows, Microsoft documents:
+
+- Product `Windows Safe OS Dynamic Update`;
+- Description `ComponentUpdate`.
+
+For Server 2025 the title is more explicit (`Safe OS Dynamic Update ... 24H2`).
+
+### 14.3 Servicing-stack / cumulative-update content
+
+Since 2021 Microsoft has broadly combined servicing-stack content with cumulative updates for supported modern branches, but older media and older Server releases can still require explicit prerequisites. A media builder must evaluate the actual source-image servicing-stack floor and the target package's requirements rather than relying on a generic “SSU is always embedded” rule.
+
+### 14.4 Latest available, not necessarily same month
+
+`[MICROSOFT-DOCUMENTED]` Microsoft states that when SafeOS DU or Setup DU is not available for the same month as the current LCU, the most recent published version of that Dynamic Update should be used. This is an important distinction between **release cadence** and **package role**.
+
+## 15. Setup Dynamic Update exists beyond the newest Server generation
+
+### 15.1 Superseded interpretation
+
+`[HISTORICAL 2026-06]` An early query path returned no Server 2022 Setup DU and led to the provisional statement that Setup DU was essentially a Server 2025 / 24H2-era construct.
+
+That interpretation is **falsified**.
+
+### 15.2 Later Catalog evidence
+
+`[CATALOG-VERIFIED 2026-07/08]` Later live Catalog measurements resolved real Setup Dynamic Update rows for all four investigated Server generations, including:
+
+- Server 2016 — observed Setup DU KB5068794;
+- Server 2019 — observed Setup DU KB5068795;
+- Server 2022 — observed Setup DU KB5079518;
+- Server 2025 — Setup DU rows under the modern 24H2 naming model.
+
+The durable conclusion is not that each branch must publish a new Setup DU every month. It is:
+
+> **Setup Dynamic Update is not a “Server 2025-only feature.” Availability and the newest applicable row must be resolved by servicing branch and date.**
+
+This correction is one of the main reasons the research record must remain independent of old implementation matrices.
+
+## 16. SafeOS Dynamic Update: distinguish publication, discovery, and applicability
+
+The same caution applies to SafeOS DU. A row can exist in the Catalog even when a particular historical resolver or baseline did not include it.
+
+The research therefore separates three questions:
+
+1. **Publication:** Does Microsoft publish a SafeOS DU row for the servicing branch?
+2. **Discovery:** Did the query and discriminator find the correct row?
+3. **Applicability/use:** Is that package appropriate for the specific source media and target image being rebuilt?
+
+A project-specific “allowed/forbidden Kind matrix” is not evidence of publication semantics. Later live Catalog work showed that generation-level forbids can encode stale assumptions.
+
+## 17. Servicing-stack prerequisites: source media age matters
+
+### 17.1 Server 2016 standalone SSU behavior
+
+`[MEASURED / CATALOG-VERIFIED]` In the 2026 research window, Server 2016 still required a separate servicing-stack prerequisite for the tested source media/current LCU combination. Missing the SSU led to `0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED` in the servicing path.
+
+### 17.2 Server 2022 bridge-LCU incident
+
+`[MEASURED 2026-07-06]` A Server 2022 Evaluation image with an old servicing stack failed when the then-current LCU was applied directly. The investigation identified a required intermediate cumulative-update floor. Applying the bridge LCU first advanced the image servicing stack sufficiently for the current LCU.
+
+The measured floor recorded in that campaign was servicing stack `20348.1960`, satisfied by the 2023-09 cumulative update KB5030216 before applying the 2026-era current LCU.
+
+`[MEASURED 2026-07-07]` The same floor problem was subsequently reproduced while servicing `boot.wim`, demonstrating that the prerequisite was a **source-image servicing property**, not merely an `install.wim` peculiarity.
+
+### 17.3 Engineering implication
+
+A current LCU is not necessarily directly applicable to old installation media even when it is the correct current LCU for the OS release. Preflight must consider:
+
+```text
+source image build / servicing stack
+                +
+ target update prerequisite floor
+                +
+ package generation / checkpoint requirements
+```
+
+## 18. `boot.wim`: replace universal rules with measured/package-aware servicing
+
+### 18.1 Why the old “never apply LCU” statement is too strong
+
+Earlier work encountered `0x80070032` and `0x8007371b` failures when attempting to force certain cumulative-update payloads into particular WinPE images. That led to the provisional generalization that `boot.wim` should not be LCU-serviced.
+
+Current Microsoft guidance explicitly includes cumulative-update servicing of WinPE (`boot.wim`) and then copies the resulting Setup and boot-manager binaries back to the media. Therefore the universal prohibition is not defensible.
+
+### 18.2 What the experiments actually support
+
+`[MEASURED 2026-07]` Servicing behavior differed by Server source media and update-generation combination:
+
+- some WinPE images accepted the cumulative servicing path;
+- Server 2019 source media tested in the campaign rejected the attempted LCU path with `0x80070032`;
+- old Server 2022 media needed the same source prerequisite/bridge logic observed on the OS image;
+- Server 2025 introduced checkpoint/UUP package-layout constraints that made package placement and invocation semantics significant.
+
+The correct durable statement is:
+
+> **WinPE servicing is release- and package-aware. Use Microsoft's documented media-update sequence as the baseline, then verify applicability and prerequisites on the actual source media. Do not encode a universal “always” or “never” rule from a single generation.**
+
+## 19. Setup binary consistency — measured root cause and Microsoft-documented invariant
+
+This is one of the strongest findings in the entire research program because it was independently established by troubleshooting and by Microsoft guidance.
+
+### 19.1 Failure record
+
+`[MEASURED 2026-07-11]` Rebuilt Server 2016, Server 2022, and Server 2025 ISOs whose `boot.wim` had been serviced to the then-current level failed in Hyper-V before edition selection with the message:
+
+> `A media driver your computer needs is missing.`
+
+The failure initially resembled ISO/UDF or storage-driver corruption. Those hypotheses were tested and rejected in the failing WinPE session:
+
+- the approximately 8.4 GB `install.wim` was readable from the mounted ISO;
+- `diskpart` saw the target disk online;
+- therefore neither basic UDF readability nor storage enumeration explained the failure.
+
+Direct comparison then found the Setup engine was mixed-version:
+
+| File | Serviced WinPE (`X:\sources`) | Media (`D:\sources`) |
+|---|---:|---:|
+| `setup.exe` | 333,304 bytes, 2026-07-08 | 333,184 bytes, 2026-01-15 |
+| `setuphost.exe` | 910,824 bytes | 910,800 bytes |
+
+Server 2019 was the exception in that test set because its WinPE had not moved to the same newer servicing state, so the Setup engine and loose media files remained accidentally consistent.
+
+### 19.2 Independent Microsoft confirmation
+
+`[MICROSOFT-DOCUMENTED]` Microsoft Dynamic Update media guidance instructs the operator to save `setup.exe` and `setuphost.exe` from serviced WinPE and copy them to the media after the Setup DU overlay. Microsoft explicitly warns that if these binaries are not identical, Windows Setup will fail during installation.
+
+Primary source:
+
+https://learn.microsoft.com/en-us/windows/deployment/update/media-dynamic-update
+
+### 19.3 Durable conclusion
+
+**Servicing `boot.wim` can change the Setup engine. Rebuilt media must keep WinPE Setup binaries and media `sources\` Setup binaries synchronized after all operations that can overwrite either side.**
+
+This is not an implementation-specific phase requirement. It is a media-consistency invariant.
+
+## 20. Setup DU overlay and Setup-binary synchronization are distinct operations
+
+Microsoft's documented order is important:
+
+```text
+service WinPE
+   |
+   +--> save Setup binaries / boot manager
+   |
+apply Setup Dynamic Update to media
+   |
+   v
+replace media Setup binaries with saved serviced-WinPE copies
+   |
+   v
+replace boot-manager files with serviced-WinPE copies
+```
+
+This means “apply Setup DU” is **not equivalent** to “make Setup binaries coherent.” An implementation that performs only the overlay can still leave a version mismatch if later/earlier writer order is wrong.
+
+## 21. `install.wim` and .NET servicing
+
+### 21.1 Multiple image indexes
+
+A Server ISO can contain several editions/indexes. Servicing one index does not prove the others were updated. Validation should enumerate all intended target indexes.
+
+### 21.2 .NET is runtime-aware
+
+The Catalog can expose umbrella .NET Framework CUs with several runtime-specific child files. The relevant leaf depends on which .NET runtime is present in the source image.
+
+The research encountered two common failure modes:
+
+- selecting the umbrella KB but silently dropping N-1 child files;
+- choosing a newer runtime leaf that was not the in-media runtime for that Server generation.
+
+The durable rule is to retain all candidate child artifacts during resolution and make applicability/runtime selection explicit.
+
+## 22. Server 2025 checkpoint cumulative updates and WIM-format packaging
+
+`[MEASURED / MICROSOFT-DOCUMENTED]` Server 2025 introduced a material packaging change in the research window:
+
+- checkpoint cumulative-update behavior;
+- WIM-format MSU / UUP-style payload composition;
+- package folders that must contain the target CU and relevant checkpoints so DISM can discover prerequisites correctly;
+- CompDB metadata describing composition and target OS versions.
+
+Microsoft's current Dynamic Update guidance states that, beginning with Windows 11 24H2 and Windows Server 2025, a latest cumulative update can require one or more prerequisite checkpoint cumulative updates and that DISM discovers needed checkpoints from the package folder when the target CU is applied.
+
+Therefore **a checkpoint is not safely modeled as a generic standalone SSU that should always be force-applied first**.
+
+---
+
+# PART V — Secure Boot / PCA2023 research
+
+## 23. Why Secure Boot media state is separate from OS patch state
+
+Secure Boot migration introduces at least four independently observable layers:
+
+1. firmware trust variables (`PK`, `KEK`, `db`, `dbx` and their effective certificate state);
+2. Windows boot-manager binaries and their signing chains;
+3. bootable-media UEFI files / El Torito boot image;
+4. installed-OS Secure Boot servicing state.
+
+A result at one layer does not automatically prove the others.
+
+## 24. Microsoft 2011-to-2023 certificate transition
+
+`[MICROSOFT-DOCUMENTED]` Microsoft's 2011 Secure Boot certificates enter their 2026 expiration window. Microsoft guidance for the transition requires both updated trust material in firmware and a boot manager signed under the newer 2023 trust chain.
+
+Relevant Microsoft sources include:
+
+- Enterprise deployment guidance for CVE-2023-24932:
+  https://support.microsoft.com/en-au/topic/enterprise-deployment-guidance-for-cve-2023-24932-88b8f034-20b7-4a45-80cb-c6049b0f9967
+- Windows Secure Boot certificate expiration and CA updates:
+  https://support.microsoft.com/en-us/servicing/os/secure-boot/2025/06/windows-secure-boot-certificate-expiration-and-ca-updates
+- Secure Boot certificate updates guidance for IT professionals and organizations:
+  https://support.microsoft.com/en-us/servicing/os/secure-boot/2025/06/secure-boot-certificate-updates-guidance-for-it-professionals-and-organizations
+- Updating Windows bootable media to use the PCA2023-signed boot manager:
+  https://support.microsoft.com/en-us/servicing/os/windows/2025/02/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager
+- Microsoft Secure Boot Objects repository:
+  https://github.com/microsoft/secureboot_objects
+
+## 25. `_EX` / PCA2023-signed boot binaries
+
+`[MEASURED]` The investigation found PCA2023-signed boot binaries staged in `_EX`-style directories on serviced media/images for applicable releases. Their provenance is release-dependent: older base media may acquire them only after sufficient cumulative servicing, while newer media can already contain the required assets.
+
+The key verification lesson is:
+
+- `Get-AuthenticodeSignature` exposes the immediate signer information;
+- verifying PCA2023 trust should inspect the X.509 chain and the actual boot-critical targets, not merely search the immediate signer string;
+- bootable-media conversion must be validated on the emitted boot files, not only inside `install.wim`.
+
+## 26. Static verification versus boot verification
+
+A useful evidence ladder is:
+
+```text
+file present
+  < hash/size identity
+  < Authenticode signature valid
+  < signer chain reaches intended 2023 trust
+  < ISO boot structure contains intended file
+  < Hyper-V Gen2 Secure Boot succeeds
+  < Windows Setup completes
+  < installed-OS evidence confirms expected state
+  < representative physical-firmware validation
+```
+
+Each higher rung answers a question the lower rung cannot.
+
+Historical test campaigns successfully booted and installed selected rebuilt Server 2016/2022/2025 media under Hyper-V Generation 2 after the relevant media fixes. Those results are retained as **dated experimental provenance** and should not be generalized into a claim that every future monthly ISO or every physical platform is validated.
+
+---
+
+# PART VI — WIM metadata mechanics
+
+## 27. Why image metadata became a separate research topic
+
+Offline servicing changes package and file state inside a WIM but does not necessarily update every human-facing timestamp or edition-list metadata field in the way an ISO consumer expects.
+
+This matters because Windows Setup and Explorer can display metadata derived from WIM XML rather than from the most recently applied package date.
+
+## 28. Measured WIM behavior
+
+`[MEASURED]` The investigation established that:
+
+- WIM image XML carries fields such as `CREATIONTIME` and `LASTMODIFICATIONTIME`;
+- servicing does not guarantee that those fields acquire the desired presentation date;
+- export/capture behavior can modify some metadata, but not necessarily with the semantic date wanted for a rebuilt monthly ISO;
+- direct resource editing can persist a chosen date when resource encoding/size/descriptor constraints are respected and the WIM integrity table is rebuilt.
+
+The important separation is:
+
+> **Payload servicing state and presentation metadata are different state variables.**
+
+Changing display metadata must never be used as evidence that the payload was successfully serviced. Payload verification remains independent.
+
+## 29. Recommended evidence when rewriting WIM metadata
+
+If a workflow intentionally rewrites WIM presentation dates, retain at least:
+
+- pre-edit WIM hash / metadata dump;
+- target date and timezone convention;
+- exact fields changed;
+- post-edit WIM integrity verification;
+- post-edit `Get-WindowsImage` / equivalent metadata readback;
+- proof that edition indexes and payload hashes/content remain otherwise as expected.
+
+---
+
+# PART VII — ISO reconstruction and boot-media mastering
+
+## 30. `oscdimg` is part of the trust boundary
+
+A rebuilt Windows installation tree must be re-emitted with a boot structure compatible with BIOS/UEFI expectations. Microsoft's `oscdimg.exe` supports multi-boot media using BIOS and UEFI boot entries.
+
+Primary Microsoft reference:
+
+https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/oscdimg-command-line-options
+
+A typical Microsoft-documented multi-boot pattern uses both `etfsboot.com` and `efisys.bin` through `-bootdata`.
+
+The research therefore treats the following as evidence-worthy:
+
+- exact `oscdimg.exe` identity/version used;
+- boot image paths supplied to `-bootdata`;
+- ISO volume label;
+- resulting ISO SHA-256;
+- extraction/readback of the ISO;
+- boot-critical file identity between staging tree and emitted ISO;
+- UEFI/Secure Boot boot test where required.
+
+## 31. Do not diagnose a Setup failure as ISO corruption without evidence
+
+The 2026-07-11 incident is the canonical example. The visible “media driver” message suggested storage or media corruption, but direct WinPE tests showed:
+
+- the large `install.wim` was readable from the DVD;
+- the target disk was visible;
+- the actual differentiator was mixed-version Setup binaries.
+
+The general lesson is to instrument the failing environment and falsify alternatives before changing ISO-mastering logic.
+
+---
+
+# PART VIII — Dated cross-generation observations
+
+## 32. Packaging and servicing snapshot
+
+The following table summarizes **observed** differences from the 2026 research window. It is intentionally descriptive rather than a timeless support matrix.
+
+| Area | Server 2016 | Server 2019 | Server 2022 | Server 2025 |
 |---|---|---|---|---|
-| **Reachability** | Obtainable from the build environment (agent sandbox) without a privileged side-channel? | ✗ (TLS-MITM at egress; needs a Windows host) | ✓ (CDN download) | ✓ (HTTP, no auth) |
-| **Machine readability** | Is the response a stable, parseable shape ordinary tooling can consume? | △ (opaque SOAP blobs; empty-500 faults; no `?wsdl`) | ✓ (XML, but 25 GB) | ✓ (HTML, predictable forms) |
-| **Reproducibility** | Can a third party re-run and get the identical result, every input pinnable? | ✗ (live protocol/anchor state) | ✓ (content-addressable; pin SHA-256) | ✓ (cache every HTML/HEAD response) |
-| **Autonomous-agent friendliness** | Can an agent *exercise* it iteratively (query → read → adjust → retry) with only HTTP/regex/CAB tools? | ✗ | △ (offline, but huge; stalls naïve handling) | ✓ |
-| **Completeness** (incl. **Dynamic Update**) | Does it publish *every* line the ISO needs? | ✓ | ✗ (no SafeOS DU for classic OSes) | ✓ |
-| **Stability** | Do identifiers survive Microsoft's renames over time? | ✓ (GUIDs) | ✓ (GUIDs) | △ (title strings rename; **GUID/KB invariant** — §6.1) |
-| **Cross-validation capability** | Can it be checked against an independent source by a schema-independent key? | n/a (it *is* the oracle) | ✓ (digest ↔ SOAP) | ✓ (digest ↔ SOAP) |
-| **→ Decision (resulting role)** | What the scores above commit the surface to | **Authority source** (oracle only) | **Verification source** (dependency/validation DB) | **Production source** ✅ (single, autonomous-build) |
+| Base build family | 14393 | 17763 | 20348 | 26100 |
+| Servicing-stack model observed | standalone SSU still relevant | combined/embedded SSU model | combined LCU; old media can need bridge prerequisite | checkpoint cumulative-update era |
+| LCU container behavior observed | classic large MSU/CAB | combined/UUP-derived classic container | combined/UUP-derived container | WIM/UUP/checkpoint packaging |
+| .NET update topology | runtime-specific behavior; older media differs | umbrella/child leaves | umbrella/child leaves | UUP-era .NET composition |
+| Setup DU publication | later Catalog survey found row | later Catalog survey found row | Microsoft documents 21H2 Setup DU; Catalog row observed | explicitly documented 24H2 Setup DU |
+| SafeOS DU | publication/discovery must be measured, not forbidden by generation | same principle | explicitly documented / 2026-06 artifact verified | explicitly documented / UUP-era artifact verified |
+| WinPE/boot servicing | actual applicability/prereq must be tested | tested LCU path hit `0x80070032` in one source-media campaign | old media reproduced servicing-stack floor problem | checkpoint/package-placement semantics matter |
+| PCA2023 asset provenance | can be deposited by later servicing | can be deposited by later servicing | depends on media/update floor | newer media more likely to contain staged assets |
 
-The matrix is not just a description; it terminates in a **decision**. The bottom row is the design conclusion the scores force: only **[C]** clears every axis a build pipeline depends on, so it becomes the **Production source**; **[A]** wins authority but fails reachability/agent-friendliness, so it is confined to **Authority/oracle**; **[B]** is reachable and cross-validatable but incomplete, so it lands as the **Verification source**. The roles in §2.1 are therefore *derived* from this matrix, not asserted ahead of it.
+The table is **not** a command matrix. It exists to prevent false generalization.
 
-Reading the matrix: **[C] is the only surface that scores well on every axis that matters for an unattended build** — reachability, machine readability, reproducibility, agent friendliness, completeness, and cross-validation. **[A]** scores highest on *authority* (an axis orthogonal to this table) but fails reachability and agent friendliness outright — which is exactly why it is the oracle, not the source. **[B]** is reachable, reproducible, and cross-validatable, but fails completeness (no Dynamic Update) and is only marginally agent-friendly — which is exactly why it is the verification database, not the production source.
+## 33. Important superseded conclusions
 
-A note on the "Autonomous-agent friendliness" axis, because it is the one that ages best. The value of the Catalog is not merely that an LLM *can read it*; it is that an autonomous agent can run the **entire** pipeline with no human and no privileged side-channel:
+The following earlier statements are retained here specifically because they were useful hypotheses that later evidence corrected:
 
-```
-agent → HTTP GET Search.aspx → parse HTML → updateID
-      → HTTP POST DownloadDialog.aspx → parse JS → {URL, SHA-1 digest}
-      → HTTP GET CDN → download .msu/.cab → verify SHA-1
-      → DISM offline servicing → rebuild ISO
-```
-Every arrow is an ordinary HTTP/parse/hash operation. Framing the criterion as **Autonomous-Agent-Friendly** (rather than the narrower "LLM-friendly") keeps the conclusion valid as agent tooling matures. The terms that age well are the *capability* terms, not the *technology* terms: "LLM" / "AI" will be re-labelled within a few years, but an **Autonomous Build Pipeline** driven by an **Autonomous Resolver** that performs **Autonomous Build** of the media is a description of the workflow itself, independent of whatever runs it. The deciding property of the Catalog, stated in those durable terms: it is the one surface a fully **autonomous build pipeline** can own end-to-end — discover, resolve, download, verify, and apply — with no human and no privileged side-channel.
-
-### 3.1 Architecture Decision Record (summary) `[STABLE]`
-
-Stated in the conventional ADR shape, so a software architect can read the decision in one block:
-
-- **Context.** An autonomous pipeline must build patched Windows Server LTSC ISOs offline and reproducibly. Patch identities + dependencies live on several Microsoft surfaces that differ in reachability, completeness, and machine-readability (§2). The build environment is an unattended agent sandbox with no Windows host and no privileged side-channel.
-- **Alternatives considered.** **(A) MS-WSUSSS SOAP** — most authoritative, complete; but unreachable from the sandbox and hard to reproduce. **(B) `wsusscn2.cab`** — reachable, reproducible, digest-exact; but omits Dynamic Update by design and is multi-gigabyte. **(C) Microsoft Update Catalog** — reachable without auth, complete (incl. Dynamic Update), agent-drivable, digest-verifiable. (Scored across seven axes in the §3 matrix.)
-- **Decision.** **This architecture selects the Microsoft Update Catalog as the single production source**, *because* it is the only alternative that simultaneously clears reachability, completeness, and machine-readability — i.e. the only one able to act as a **Single Production Source** — while remaining cryptographically verifiable against the authority. SOAP is retained as the **authority source** (oracle), `wsusscn2.cab` as the **verification source**.
-- **Consequences.** *Positive:* the production architecture has exactly **one** data dependency (minimal architecture); every resolved artifact is **proved** against the authority by the Digest primary key; the whole pipeline is autonomous-agent-drivable. *Negative / accepted costs:* the Catalog is HTML (regex parsers must be isolated and maintained, §6.1); title strings rename across OS generations (mitigated by GUID/KB invariants); Dynamic Update for classic OSes exists *only* on the Catalog, so there is no offline fallback for that one line. *Residual:* the Secure Boot / `_EX` media work (§8) is **`[DRAFT]`**, not yet held to the same verification bar.
-
----
-
-# PART II — Technical Substantiation (why each surface earned its rating)
-
-This part is the "why" behind Part I. A reader who accepts the verdict can skim to Part IV; a reader who does not should find the data model of each surface here.
-
-## 4. [A] MS-WSUSSS — the authoritative oracle (and why it can't be the source)
-
-### 4.1 What it is, and the access wall
-
-MS-WSUSSS is Microsoft's **server-to-server synchronization** SOAP protocol (the "USS" / upstream-server-sync surface). A downstream WSUS server calls it to pull the entire update catalog; a real client OS uses the sibling **MS-WUSP** client-server protocol. Both are fully and publicly specified (every request shape, type, field, sequence). The endpoints (`sws.update.microsoft.com`, `fe2cr.update.microsoft.com`, …) are production servers proven to work — real WSUS servers sync from them daily.
-
-That public-spec + callable-endpoint + proven-server triad is the basis of the **client-first rule**: any failure we see is, by default, a defect in *our* request, not a server limitation. It is also the basis of the access verdict: the protocol works, but **not from here**. The agent sandbox cannot complete the TLS handshake to `sws` — the egress gateway performs an upstream TLS-MITM whose cert-verify fails before our request is even sent. This is not fixable by importing Microsoft roots into the container. The metadata side therefore requires a **Windows host** (PowerShell 5.1, ja-JP), while the **payload CDN** (`dl.delivery.mp.microsoft.com`, matching `*.microsoft.com`) *is* reachable from the sandbox — so small payloads can be pulled and `cabextract`-ed in-container even though the metadata cannot.
-
-### 4.2 The data model: bundle → leaf → payload
-
-`[VERIFIED]` Every update in the WSUSSS universe is a three-layer object:
-
-- **Bundle** — carries `<Categories>` (the Product GUID and the Classification GUID), `<Prerequisites>` (applicability detectoids), and supersedence. This is the unit you *select* ("the newest live Server 2025 Security bundle").
-- **Leaf** — the bundle's child (`BundledLeaf` / reverse `BundledBy`); carries the actual `<PayloadFiles>` and the deep applicability detail.
-- **Payload files** — the concrete `.cab` / `.msu` / `.psf`, each with a **Digest (SHA-1, base64)**, a Size, and a resolvable download URL.
-
-The identity keys are `UpdateID` (GUID) + `RevisionNumber`. The **Digest is the schema-independent join key** that lets the same physical file be located across [A], [B], and [C] regardless of how each surface wraps it.
-
-### 4.3 The handler taxonomy and the era model
-
-`[CONFIRMED-EMPIRICAL]` The surface exposes three update **handlers**, and the patch lines migrate across them by generation — the single most important structural fact about the four OSes:
-
-- **`UpdateHandlers/Cbs`** — legacy LCU / SSU / .NET for 2016 / 2019 / 2022. Applicability is a full CBS component tree (rich on 2016, thinning by 2022).
-- **`UpdateHandlers/OSInstaller`** — UUP (2025): LCU, .NET, and SafeOS DU. Applicability is `ProductReleaseInstalled` + `DeviceAttribute` (thin SOAP) plus a **CompDB** (§4.5).
-- **`UpdateHandlers/CommandLineInstallation`** — **2022 SafeOS DU only** (the legacy DU model): `HandlerSpecificData` is an `InstallCommand Program="Windows10.0-KB5094157-x64.cab"`; applicability is trivial (`IsInstalled=False` / `IsInstallable=True`) because the DU is applied unconditionally to the setup media / WinRE by DISM, not gated on the running OS.
-
-### 4.4 SSU and .NET across generations — the "three-era" packaging
-
-`[CONFIRMED-EMPIRICAL]` The SSU *package* is consistent across generations (`Handler=Cbs`, `selfUpdate="true" permanence="permanent"`, payload `.cab` + express/`.psf`). What changes is the **packaging**:
-
-| OS | SSU delivery | SSU build (2026-06) | LCU servicing-stack floor |
-|---|---|---|---|
-| 2016 | **Standalone** (own bundle/leaf, `KB5094141`) | 14393.9220 | 14393.7692 (real, in `installerAssembly`) |
-| 2019 | **Embedded** in the LCU leaf (`KB5094143`) | ~17763.8880 | 17763.2090 (real) |
-| 2022 | **Embedded** in the LCU leaf (`KB5094147`) | 20348.5251 | placeholder `6.0.0.0` (real value only in embedded sub-package) |
-| 2025 | **Bundled file** — UUP checkpoint in the LCU mega-payload (`SSU-26100.32985`) | 26100.32985 | n/a (leaf has no CBS floor; checkpoint applied before the LCU body) |
-
-The `0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED` failure is a **numeric version comparison** at apply time: CBS compares the image's current servicing-stack version against the LCU's required floor. Only **2016 and 2019** declare a *real* floor in `installerAssembly`; only **2016** publishes a *standalone* SSU to satisfy it first. (2019's floor is met by the SSU embedded in the LCU.) .NET follows the same legacy→UUP gradient: 2016/2019/2022 use `Handler=Cbs` with a single `NDP48`/`NDP481` cab; 2025 uses `Handler=OSInstaller` with a tiny `DotNetServicingCompDB_*.cab` + the NDP481 cab.
-
-### 4.5 The 2025 UUP CompDB applicability model
-
-`[VERIFIED]` On 2025 the deep applicability is **not** a per-assembly CBS tree; it is a **Composition Database (CompDB)**, schema `http://schemas.microsoft.com/embedded/2004/10/ImageUpdate` — the same image-composition system DISM `/Apply-Image` uses. The small CompDB cabs (~11 KB) are CDN-reachable and `cabextract`-able in-sandbox. Each CompDB states the update class (`Type` = Standalone / BuildUpdate; `Feature Type` = **GDR** / **SetupDynamicUpdate** / **SafeOSUpdate**), the base build it applies to (`OSVersion`) and the build it produces (`TargetOSVersion`), and the package + payload (cab + hash). By 2025 the model is uniform across LCU / .NET / Setup DU / SafeOS DU. The **SSU has no CompDB** — it is delivered as a direct checkpoint payload and updates itself (selfUpdate/permanent), as in every era.
-
-A 2025-only note: **Setup DU is a 23H2/24H2-era construct**. Server 2022 has **no** Setup DU at all (catalog-confirmed: Setup DU count for 21H2 = 0); its only Dynamic Update is the SafeOS DU. So the 2022 "Setup DU" matrix cell is N/A, not un-fetched.
-
-### 4.6 Verdict on [A] — and why SOAP was still indispensable
-
-[A] gives the **complete, authoritative model** and the ground-truth digests for every line on every generation. It is irreplaceable as the oracle. But it is unreachable from the agent, needs a Windows host, and is hard to reproduce — so it cannot be the production source. Its data lives on as the per-OS `dataset/<os>.json` answer-key used to verify [B] and [C] (§12).
-
-**Why we still needed SOAP.** Choosing the Catalog as the production source can make the SOAP work look retrospectively unnecessary — it isn't. The Catalog is reachable and complete, but it **cannot verify itself**: nothing inside the Catalog tells you whether the file it handed back is the *canonical* artifact for that KB, or whether a row's `updateID` is the real WSUS bundle identity. Only an independent, authoritative surface can answer that, and SOAP is that surface. The dependency runs:
-
-```
-Catalog resolves a file  →  (Catalog alone cannot prove it is canonical)
-        │
-        ▼
-SOAP oracle Digest  ==  Catalog Digest      →  proof complete
-```
-
-So SOAP was **indispensable during the research/verification phase** even though it is **not consumed during production**. It is what let every Catalog result in §12.3 be stated as *proven* rather than *assumed*. The correct reading is not "SOAP turned out to be unusable" but "SOAP was the instrument that made the Catalog trustworthy, and having served that purpose it steps out of the production path." This is exactly the Authority-vs-Production split of §2.1, viewed from the SOAP side.
-
-## 5. [B] `wsusscn2.cab` — the offline dependency database (strong second, not primary)
-
-### 5.1 What it is, and the safe-handling problem
-
-`wsusscn2.cab` is the **Windows Update offline applicability-scan catalog** — the file the Windows Update Agent uses to scan a machine offline. It is a single ~650 MB CAB, re-published roughly twice a month, downloadable without authentication from the Windows Update CDN. It is everything [A] is not on the access axis: offline, static, content-addressable, agent-analyzable.
-
-The catch is scale. Extracted, it is **25 GB** of XML across 75 detail cabs. Naïve handling (full-load, `cat`, editor-open) reliably exhausts an agent's context and stalls the session. The non-negotiable discipline (all **MUST**): list before extracting, extract selectively, stream with `lxml.iterparse` / `XmlReader`, locate by Digest, and **MUST NOT** bulk-extract the detail cabs. (The reference tooling in §11 encodes this.)
-
-### 5.2 Physical structure: two layers, RevisionId-sharded
-
-`[CAB-VERIFIED 2026-06-24]` (snapshot SHA-256 `5b075a6d…eec122`, 649,341,212 B, package.xml `CreationDate 2026-06-09`):
-
-```
-wsusscn2.cab  (76 top-level entries)
-├── index.xml          <CABLIST>: maps a RevisionId → which packageN.cab (via RANGESTART). Binary-searchable.
-├── package.cab  → package.xml = MASTER XML (114 MB)
-│      <OfflineSyncPackage PackageVersion=1.1 ProtocolVersion=1.0 xmlns=…/OfflineSync>
-│        <Updates>      <Update RevisionId=…> × 136,478 </Updates>
-│        <FileLocations><FileLocation Id="<digest>" Url="…"/> × 97,339</FileLocations>  ← ONE top-level section
-└── package2.cab … package75.cab   = DETAIL cabs; 136,478 `c/<RevisionId>` files total (1:1 with Updates)
-```
-
-The Master XML's root element is **`<OfflineSyncPackage>`** in namespace `http://schemas.microsoft.com/msus/2004/02/OfflineSync` — "offline sync package" is Microsoft's own name for this format; `wsusscn2.cab` is merely the distribution filename. The split into 75 detail cabs is a **RevisionId-range sharding sized by content**: `index.xml`'s `<CABLIST>` assigns each `packageN.cab` a contiguous RevisionId range; boundaries fall where accumulated content warrants a new shard. Because `CreationDate ↑ ⇒ RevisionId ↑ ⇒ higher cab`, the **current month's patch set for every OS always lands in the newest 1–2 cabs** (package74/75 in this snapshot).
-
-### 5.3 Key/identity model — how the cab differs from [A]
-
-`[CAB-VERIFIED 2026-06-24]` The cab is the same data as [A] in a different shape, and the differences are the whole game:
-
-- **Identity key = `RevisionId` (int).** All cross-links use it (`<BundledBy><Revision Id=…>`, `<SupersededBy><Revision Id=…>`). (`UpdateId`+`RevisionNumber` are present too, but links are by RevisionId.)
-- **File key = Digest (SHA-1, b64).** A leaf's `<PayloadFiles><File Id="<digest>"/>` resolves to a URL via the single top-level `<FileLocations>` section. **Join everything by Digest.**
-- **Direction flips vs [A].** SOAP gives forward `BundledLeaf` / `SupersededIds` on the bundle. The cab **Master** gives **reverse** `BundledBy` / `SupersededBy` on the target; the **forward** `BundledUpdates` / `SupersededUpdates` live in the per-package **detail** cab.
-- **No namespace prefix** on Master children (default xmlns); SOAP used `upd:`.
-- **The Master carries no `KBArticleID` and no Title.** KB is derived from the `kb(\d+)` token in the `<FileLocation Url>`.
-
-`[CAB-VERIFIED 2026-06-24, session-2 correction]` A detail cab has **three** streams, not one: `c/<RevisionId>` (core: identity, relationships, ApplicabilityRules, CBS tree), `l/<lang>/<RevisionId>` (localized Titles — so **Titles do exist** in the cab, per language), and `x/<RevisionId>` (ExtendedProperties: **FileName + all file variants + SHA-256**). The earlier "FileName not in cab" claim was a session-1 error from only inspecting `c/`. All three streams are plaintext XML after CAB decompression.
-
-### 5.4 The supersedence reconciliation — the crux of "latest"
-
-`[CAB-VERIFIED 2026-06-24]` The make-or-break question for "which LCU is current?" is whether the cab's supersedence agrees with the oracle. It does, exactly:
-
-- Master: reverse `<SupersededBy>` (14,136 records in this snapshot).
-- Detail (bundle `c/<RevisionId>`): forward `<Relationships><SupersededUpdates>`.
-- **The 2016 LCU bundle's forward set = 119 IDs = the SOAP `SupersededIds[]` EXACTLY** (∩ = 119, cab-only = 0, soap-only = 0).
-
-So "live" = `<SupersededBy>` empty; the newest live bundle for a Product GUID is the current one. This reproduces the oracle's selection 1:1.
-
-### 5.5 The one genuine gap: SafeOS Dynamic Update is out of cab scope
-
-`[CAB-VERIFIED 2026-06-24]` This is the single line `wsusscn2.cab` does **not** carry, and the reason matters because it generalises. After an exhaustive sweep (the leaf UID `b20655a0`, bundle UID `c6476311`, both SHA-1 and SHA-256, the KB token, the entire 8-deep supersedence chain — all 0 in the Master; **and** a full sweep of all 74 detail cabs × {`c/`,`l/`,`x/`} = 0/74), plus two escalations (no embedded compressed blob anywhere; the downloaded LCU's `update.mum` of 191 packages has zero SafeOS-DU reference), the **2022 SafeOS DU KB5094157 is genuinely external to the cab and its referenced payloads** — an *earned* absence.
-
-The reason was twice corrected and is now precise: **`wsusscn2.cab` is the offline applicability-scan catalog for the *running OS*; the SafeOS DU targets WinRE (a separate image), which is outside offline-scan scope, so the whole SafeOS-DU update-category is excluded.** (It is *not* "WSUS=No" — that channel claim belonged to the WinRE *wrapper* KB5098814, a different package. KB5094157 itself ships on WU + Catalog + WSUS.) The architectural root cause: classic-servicing OSes (2016/2019/2022) deliver the SafeOS DU as a **fully separate update** ⇒ never bundled, never in the offline-scan cab; the UUP OS (2025) **co-bundles** the SafeOS DU inside the single multi-file LCU leaf ⇒ present and cab-derivable. This is exactly why 2025's SafeOS DU is recoverable from the cab and 2022's is not.
-
-### 5.6 Per-OS cab-native resolvers (and the per-OS gotchas)
-
-`[CAB-VERIFIED 2026-06-24]` Four independent per-OS resolvers reproduce the oracle from the cab alone (digest-exact on every line). They are kept **separate by design** — sharing logic too early hid data nuances. The gotchas that a shared resolver would silently break on:
-
-- **2016** — the SSU bundle is classified `Security`, **not** `ServicePacks`; LCU and SSU are filename-indistinguishable offline and are discriminated by **SelfContained `.cab` size** (SSU ~12.6 MB vs LCU ~1.83 GB, ~145×, both matching the oracle Size via a HEAD on the FileLocation URL).
-- **2019** — the Product GUID is **not** the most-frequent one on the bundle; use the OS-specific `f702a48c-…`. The .NET line is **older than the LCU** (May vs June) ⇒ select newest-per-line, not newest-Security-overall. In-scope .NET leaf = **non-NDP48** (base 4.7.2; 3.5 rides bundled).
-- **2022** — the same KB exists under two Product GUIDs (`71718f13` general vs `97b08ca0` Azure Edition); use `71718f13`. In-scope .NET is **flipped vs 2019**: **NDP48** in-scope (2022 in-box .NET = 4.8), NDP481 out-of-scope. SafeOS DU not in cab (§5.5).
-- **2025** — the LCU is **one 16-file UUP mega-payload**, not a SelfContained cab; classify by filename (`ssu-*`, `*-baseless*`/`*-x64.cab` = SafeOS, `.msu` KB==LCU?LCU:GA baseline, `-ndp*` = .NET, `*.wim` = LP/FoD, `*metadata*` = meta). SSU + SafeOS DU are leaf-embedded. In-scope .NET = **NDP481** (flipped again). arm64 exists only for .NET here → skip.
-
-### 5.7 The scope filter: GUID-based, not title-based
-
-`[CAB-VERIFIED 2026-06-24]` The filter that reduces ~136,000 Master entries to ~138 in-scope bundles uses **GUIDs**, because GUIDs are WSUS global identifiers that survive display-name renames (unlike the brittle title strings of §6.1). The four **Server LTSC Product GUIDs**: 2016 `569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5`, 2019 `f702a48c-919b-45d6-9aef-ca4248d50397`, 2022 `71718f13-7324-4b0f-8f9e-2ca9dc978e53`, 2025 `b256987d-4693-4c87-955d-dbb9341205eb`. The five observed **Classification GUIDs**: SecurityUpdates `0FA1201D-…` (LCUs), UpdateRollups `28BC880E-…` (.NET CUs), ServicePacks `68C5B0A3-…` (SSUs), CriticalUpdates `E6CF1350-…`, Updates `CD5FFD1E-…` (Dynamic Updates). EOS/ESU OS GUIDs (2008/2008 R2/2012/2012 R2) are an explicit **deny-list** because their data never disappears from the cab on end-of-support; the scope rule is **allow-overrides** (admit an update if it carries *any* allow-list GUID, even alongside a deny-list GUID — e.g. the multi-OS MSRT bundle).
-
-### 5.8 Verdict on [B]
-
-[B] is reachable, reproducible, and digest-exact against the oracle. But it plays a **different role from the Catalog**, and conflating the two is the trap. The Catalog is an **artifact source** (it yields the files: URLs + digests). `wsusscn2.cab` is a **relationship database** — it answers the questions an artifact source cannot:
-
-- **Dependency** — does this LCU declare a servicing-stack floor, and does the set satisfy it? (the `0x800f0823` pre-flight)
-- **Applicability** — is this update applicable to this OS/build, per the offline WUA scan model?
-- **Supersedence / validation** — is the chosen LCU the newest non-superseded build for this Product GUID?
-
-So [B] is best understood as the **offline dependency / applicability / validation database**, used to *validate the set the Catalog resolved* — not as a fallback artifact store. It cannot be the *single* production source: it omits Dynamic Update by design (§5.5), is multi-gigabyte, and demands streaming discipline to avoid stalling. Its proper place in the three-role model (§2.1) is the **verification source**, sitting beneath the production Catalog and supplying the relationship layer the Catalog does not expose.
-
-## 6. [C] Microsoft Update Catalog — the production source
-
-### 6.1 What it is, and the naming quirk you must handle
-
-The Catalog at `catalog.update.microsoft.com` is the only surface that publishes the actual `.msu`/`.cab` download URLs and is directly reachable from the agent with no authentication. It is an **HTML web app, not a JSON API**, so everything is regex-over-HTML plus one companion Markdown source on Microsoft Learn. A client SHOULD send a browser `User-Agent` (a plain library UA can be rejected), SHOULD space requests (~0.6 s), and SHOULD **cache every response** so re-runs are offline and idempotent.
-
-The one structural trap is the **OS naming change** between Server 2019 and 2022. Older OSes use the brand name in titles ("Windows Server 2019"); from Server 2022, Microsoft switched to the codename form ("Microsoft server operating system, version 21H2" for 2022, "…version 24H2" for 2025 — the brand "Server 2025" never appears in a title). A title heuristic MUST therefore maintain **both** naming conventions, and (the single most common silent error) MUST **post-filter the Products column** — a query containing `21H2` can still rank `24H2` rows highly, and vice-versa. The underlying **Product GUIDs are invariant** under these renames (§5.7), which is why the cab's GUID filter is more robust than any title match.
-
-**Measured extension (2026-08, r12-series terminal).** Two further Catalog behaviours were measured during the r12 reverse-engineering series and are confirmed at its terminal. First, the Catalog localizes Title and Classification **display strings** by request context (German, French, Japanese and more were observed), while Product names, KB IDs, update GUIDs and file names stay stable — so matching on raw English display text is a second fragility on top of the naming quirk above. Robust matching must be **semantic**: per-classification alias sets (including the localized forms) with a structural fallback keyed on the stable identity columns when a single unambiguous row remains. Second, the structural answer to title-heuristic fragility as a class is to make discovery **declared data** rather than code: the terminal implementation carries per-Kind search profiles (query strategy, title accept/reject constraints, classification requirements) as a declared policy object, so every heuristic is inspectable and guarded by declaration-derived tests instead of living in ad-hoc string predicates.
-
-### 6.2 The four surfaces
-
-`[CATALOG-VERIFIED 2026-06-24]`
-
-| # | Surface | Method | Gives you |
-|---|---|---|---|
-| 1 | `Search.aspx?q=<query>` | GET | result table: (updateID GUID, title, products, classification, date, version, size) |
-| 2 | `DownloadDialog.aspx` | POST `updateIDs=[{…"updateID":"<GUID>"}]` | per-update file list: fileName, **direct CDN URL**, **digest (SHA-1 b64)**, sha256 (often empty) |
-| 3 | `ScopedViewInline.aspx?updateid=<GUID>` | GET | supersedence (`n/a` = latest) + KB article numbers (optional confirmation gate) |
-| 4 | Learn release-info `?accept=text/markdown` | GET | the current LCU KB per build (the discovery seed for the LCU) |
-
-`DownloadDialog.aspx` is the **only** way to get real URLs + digests; its response is HTML with embedded JS assignments (`downloadInformation[i].files[n].url/digest/sha256/fileName`), matched by `files\[(\d+)\]\.(\w+)\s*=\s*'([^']*)'`. The `digest` is **SHA-1 base64** (the reliable integrity value); `sha256` is frequently empty; the `fileName` ends with the 40-hex SHA-1 of the same file. One update can return **multiple files** (the 2025 LCU = 2; a .NET rollup = several leaves) — always iterate `files[n]`.
-
-### 6.2.1 The Catalog is a data model, not just a scrape
-
-It is tempting to dismiss the Catalog as "an HTML site we scrape." That undersells what the investigation actually produced. The four surfaces in §6.2 are not independent pages; they compose into a **resolvable data model** with a single deterministic traversal — and recovering that traversal *is* the reverse-engineering result. Read as a design document, the model has **three layers**:
-
-**Figure 3 — The Catalog data model (Identity / Artifact / Validation layers).**
-
-```
-┌─ IDENTITY LAYER ────────────────────────────────────────────────┐
-│  KB (article number)                                            │
-│     │  Search.aspx?q=<KB>                                       │
-│     ▼                                                           │
-│  updateID (GUID)            ← the Catalog's per-row identity    │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │  DownloadDialog.aspx (POST updateID)
-┌─ ARTIFACT LAYER ─────────────▼──────────────────────────────────┐
-│  files[]  →  { fileName, Digest (SHA-1 b64), sha256?, URL }     │
-│     │                                                           │
-│     ├─ URL     → direct CDN download                           │
-│     └─ Digest  → the cross-source PRIMARY KEY ───────────┐      │
-└──────────────────────────────────────────────────────────┼──────┘
-                                                            │
-┌─ VALIDATION LAYER ─────────────────────────────────────────▼─────┐
-│  Digest  ==  [A] SOAP oracle Digest      → proves the artifact   │
-│  Digest/RevisionId  ↔  [B] wsusscn2.cab  → proves applicability  │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-- **Identity layer** — resolves the human KB to the Catalog's `updateID` (GUID). Three identifiers travel together and must not be confused: **KB** (stable per logical update), **updateID** (the per-row GUID and the DownloadDialog POST key), **Digest** (SHA-1 base64 of the file).
-- **Artifact layer** — resolves an `updateID` to one-or-more files, each with a direct CDN **URL** and a **Digest**.
-- **Validation layer** — the Digest is the **primary key shared across all three surfaces**: the same physical file carries the same Digest in SOAP, the Catalog, and `wsusscn2.cab`. Matching on it proves the Catalog's artifact equals the authoritative file (`==` the [A] oracle Digest) and lets the [B] cab supply the applicability/dependency facts the Catalog does not.
-
-That last layer is what makes the Catalog *verifiable* rather than merely scrape-able. Treating the Catalog as this three-layer model (not as opaque HTML) is what lets the autonomous resolver compute **seed → KB → updateID → URL + Digest** deterministically and then *prove* the result against SOAP by Digest equality (§6.4, §12.3).
-
-### 6.3 Seed-only resolution (no hardcoded KBs)
-
-`[CATALOG-VERIFIED 2026-06-24]` The design goal is that a future month resolves correctly **without editing KBs**. The only per-OS input is a 3-field **seed**:
-
-```
-2016: { products:"Windows Server 2016",                    buildMajor:"14393", verToken: null  }
-2019: { products:"Windows Server 2019",                    buildMajor:"17763", verToken: null  }
-2022: { products:"Microsoft Server operating system-21H2", buildMajor:"20348", verToken:"21H2" }
-2025: { products:"Microsoft Server Operating System-24H2", buildMajor:"26100", verToken:"24H2" }
-```
-Everything else (KBs, UIDs, URLs, digests) is **discovered** — and the seed-only property was proven by running every resolver against an empty cache and re-discovering each KB identically. The recipes:
-
-- **LCU** — fetch Learn release-info; pick the newest minor build for the OS's `buildMajor` → the LCU KB; search the Catalog for that KB; **post-filter by Products**; DownloadDialog the chosen row (2025 = 2-file set).
-- **SSU** — 2016: search `"Servicing Stack Update Windows Server 2016"`, pick newest, **apply before** the LCU. 2019/2022: none standalone (embedded). 2025: the non-LCU `.msu` in the LCU 2-file set (the GA baseline `KB5043080`, carrying the checkpoint SSU).
-- **.NET CU** — search the per-OS .NET query, post-filter Products, keep x64; pick the newest month's **superset rollup** (most runtime tokens); the in-scope leaf = the OS's in-media default runtime by `-ndp` tag (2019 → no `-ndp` tag; 2022 → `-ndp48`; 2025 → `-ndp481`).
-- **SafeOS DU** — 2022/2025 only. Discriminator differs by naming era: **2025** the title itself says "Safe OS Dynamic Update"; **2022** the title is just "Dynamic Update …" (identical to the Setup DU), so disambiguate by the **Products** column "Windows Safe OS Dynamic Update". x64 `.cab`; pick newest.
-
-### 6.4 The classic-vs-UUP join — how verification stays honest
-
-`[CATALOG-VERIFIED 2026-06-24]` The single most important matching fact: the Catalog's `updateID` relates to the [A] oracle's UID **differently** for classic vs UUP packaging.
-
-| line type | join key to oracle | digest behaviour |
+| Superseded statement | Why it was wrong / too broad | Replacement conclusion |
 |---|---|---|
-| classic LCU / .NET (`.msu`, 2016/2019/2022) | `updateID == oracle UID`, + KB | join-only (the `.msu` *wraps* the oracle's inner `.cab`, so SHA-1 differs) |
-| UUP LCU (2025) | **KB + digest** | **digest MATCH** |
-| SafeOS DU `.cab` (2022/2025) | **KB + digest** | **digest MATCH** |
-| 2025 .NET (`.msu`) | KB + leaf KB | join-only |
-
-The trap: for UUP (2025) the Catalog `updateID` **differs** from the oracle UID (different composition pipeline), so a UID-equality "verification" looks like a mismatch — you must join by **KB + digest** instead. For classic `.msu`s the wrapper's SHA-1 is *not* the inner cab's SHA-1, which is expected ("join-only"), not corruption.
-
-### 6.5 Verdict on [C]
-
-[C] scores well on every axis in the §3 matrix: reachable (HTTP, no auth), machine-readable (predictable HTML forms), reproducible (cache everything), autonomous-agent-friendly (seed-only resolution, ordinary HTTP/regex), complete (every line incl. Dynamic Update), and cross-validatable. That last property is the decisive one and bears restating in the strongest form: **the Catalog is not trusted — it is SOAP-verified.** Every resolved line was matched to the [A] oracle by **SHA-1 Digest**, a schema-independent key; for the lines where the Catalog and oracle ship the same physical file (UUP LCU, SafeOS DU `.cab`) the digests are **byte-identical**, and for the classic `.msu` wrappers the join holds by updateID+KB. The result: **all four OS pass on every line** (§12.3). The Catalog is the production source precisely because its output can be proven equal to the authoritative protocol's, while remaining the one surface an agent can reach and drive unattended.
+| “Setup DU is a Server 2025-era construct.” | Later live Catalog searches found valid Setup DU rows for 2016/2019/2022; Microsoft documents 2022 Setup DU explicitly. | Resolve Setup DU by servicing branch/date; do not gate publication by generation. |
+| “Server 2022 has no Setup DU.” | Falsified by Catalog measurement and Microsoft 21H2 guidance. | 21H2 has distinct Setup DU vs SafeOS DU discrimination. |
+| “SafeOS DU is only a 2022/2025 concern.” | Derived from a narrow 2026-06 resolver model and incomplete publication assumptions. | Separate publication, discovery, and applicability; do not encode absence from one snapshot as a generation rule. |
+| “`boot.wim` cannot be LCU-serviced.” | Some tested media/packages failed, but Microsoft current guidance explicitly services WinPE with the cumulative update; other branches accepted the path. | Treat WinPE servicing as package/source-media-specific and verify. |
+| “Digest is the universal cross-source primary key.” | Outer MSU and inner CAB are different files. | Use digest for same-file identity; use composite/package-aware joins otherwise. |
+| “An updated `install.wim` is enough for updated installation media.” | Setup/WinPE/media mismatch caused real installation failure; Microsoft documents multiple media targets. | Treat the ISO as a coupled multi-target servicing system. |
+| “A valid PCA2023 signature proves bootability.” | Signature is only one layer of the chain. | Separate file signature, ISO structure, firmware trust, boot, install, and post-install evidence. |
 
 ---
 
-# PART III — Cross-Cutting Concerns for the ISO
+# PART IX — 2026-06 metadata snapshot retained for reproducibility
 
-## 7. Patch-line × generation matrix (the consolidated view)
+## 34. SOAP harvest summary
 
-`[VERIFIED]` Pulling §4–§6 together — what each OS needs, and where it comes from in the chosen (Catalog) pipeline:
+`[PROTOCOL-VERIFIED 2026-06]`
 
-| Line | 2016 | 2019 | 2022 | 2025 | Production source |
-|---|---|---|---|---|---|
-| **LCU** | yes | yes | yes | yes (UUP, 2-file) | Catalog (KB via Learn) |
-| **SSU** | **standalone** (apply first) | embedded in LCU | embedded in LCU | GA-baseline `.msu` (checkpoint) | Catalog |
-| **.NET CU** | none in scope (in LCU) | rollup → non-NDP leaf | rollup → NDP48 leaf | rollup → NDP481 leaf | Catalog |
-| **SafeOS DU** | none | none | yes (cab-absent) | yes (cab-co-bundled) | Catalog |
+| OS | Records | Bundles | Live bundles | Newest LCU in captured dataset | Dominant recorded kinds |
+|---|---:|---:|---:|---|---|
+| Server 2016 | 518 | 259 | 21 | KB5094122 | dotnet / LCU / SSU / other |
+| Server 2019 | 421 | 181 | 11 | KB5094123 | dotnet / LCU / SSU / other |
+| Server 2022 | 412 | 193 | 11 | KB5094128 | dotnet / LCU / other |
+| Server 2025 | 80 | 40 | 3 | KB5094125 | dotnet / LCU / other |
 
-Reading it: the **LCU is the spine** on all four. The **SSU form changes era-to-era** (separate → embedded → checkpoint file). **.NET in-scope NDP flips** (2019 non-NDP → 2022 NDP48 → 2025 NDP481) and must never be hardcoded.
+A Server 2025 fragment in the captured oracle demonstrated the UUP-era relationship between the LCU leaf, servicing-stack/checkpoint content, and SafeOS payloads.
 
-**The Dynamic Update row is the decisive one for source selection.** Dynamic Update (SafeOS DU) appears only at 2022+, and it is the line that splits the three surfaces cleanly:
+## 35. `wsusscn2.cab` snapshot identity
 
-```
-wsusscn2.cab  →  Dynamic Update ABSENT (out of offline-scan scope, §5.5)
-MS-WSUSSS     →  Dynamic Update present, but the surface is UNREACHABLE from the agent
-Catalog       →  Dynamic Update present  AND  reachable without auth
-```
+`[CAB-VERIFIED 2026-06-24]`
 
-So for the 2022/2025 SafeOS DU — a line the ISO genuinely needs — the Catalog is not merely *a* source, it is the **only reachable production source that has the data at all**. The cab forces a Catalog hop; SOAP cannot be reached. This single row, on its own, is enough to disqualify [B] as a standalone production source and to confirm [C]. The Catalog supplies every line uniformly, including the one the offline cab structurally cannot.
-
-### 7.1 Measured extensions to the matrix (2026-08, r12-series terminal)
-
-Two facts measured during the r12 series refine the matrix above without changing its verdict. First, **Setup Dynamic Update rows exist for all four Server generations** — not only the uup-era OS: the live Catalog resolves a Setup DU for 2016, 2019, 2022 and 2025 alike, and the terminal per-OS configurations carry those rows (KB5068794 / KB5068795 / KB5079518 / KB5095966 as the 2026-07/08 snapshot values; the KBs roll monthly, the per-generation existence is the stable claim). Setup DU is a distinct family from the SafeOS DU discussed above: it updates Windows Setup's own sources on the media rather than the WinRE/Safe OS image.
-
-Second, the package **parent/child delivery mechanism is measured in use**: the Line model carries a `ParentKbId`, and the Server 2022 .NET CU children (KB5101010 and KB5101005) both declare parent KB5102206 — children of a combined parent package whose resolution goes through the parent row. Real four-VM post-install evidence corroborates the child KB installed on 2022. Whether any shipped **SSU** uses parent/child delivery remains unverified — the one measured 2016 standalone SSU resolves directly (`ParentKbId` null) — so the mechanism is confirmed for .NET children and stays an open question for SSUs.
-
-## 8. Secure Boot (PCA2023) and media structure  — **DRAFT / under verification**
-
-> **⚠️ STATUS: DRAFT.** Unlike the patch-metadata material (§4–§7, §12), the Secure Boot and media-structure findings below are **structurally reasoned and partially observed, but not yet rigorously tested** end-to-end against the metadata-grounded standard used elsewhere in this memo. They are carried forward from the earlier investigation as orientation and **will be revised** once the build-and-boot verification loop has been exercised with the same rigor. Treat everything in §8 as `[DRAFT]`.
-
-### 8.1 The PCA2023 migration in one paragraph `[DRAFT]`
-
-The 2024 cycle rotates the CA that signs Windows boot binaries from **PCA2011** (`Microsoft Windows Production PCA 2011`) to **PCA2023** (`Windows UEFI CA 2023`). Stage 1 (current): firmware updates provision PCA2023 into the platform DB on a rolling basis; both chains are accepted. Stage 2 (announced, late 2026+): PCA2011 moves to DBX on updated platforms, after which media whose boot manager is signed only under PCA2011 will fail to boot. Forward-compatible media must therefore ship **PCA2023-signed boot binaries** even though PCA2011 is still accepted today. Microsoft's reference is `Make2023BootableMedia.ps1` (KB5053484 / the `microsoft/secureboot_objects` repo) — pin it by **release tag or commit hash + function name**, never by its internal version string (which has gone stale).
-
-### 8.2 The `_EX` dual-staging and the per-version asymmetry `[DRAFT]`
-
-The mechanism is **dual-staging inside `install.wim`**: alongside `\Windows\Boot\{EFI,Fonts,DVD}\`, an updated image carries `{EFI,Fonts,DVD}_EX\` siblings holding the same binaries re-signed under PCA2023. The asymmetry that must be planned for:
-
-| OS | `EFI_EX` in GA install.wim | After LCU servicing | Notes |
-|---|---|---|---|
-| 2016 | ✗ (synthesise via LCU) | EFI_EX ✓, Fonts_EX ✓, **DVD_EX ✗** | `efisys_EX.bin` has no source even after servicing (open item) |
-| 2019 | ✗ (synthesise via LCU) | full `_EX` ✓ | byte-identical boot mgrs to 2016 |
-| 2022 | ✗ (synthesise via LCU) | full `_EX` ✓ | — |
-| 2025 | ✓ (ships at GA) | n/a | `_EX` already present; only patching needed |
-
-### 8.3 Two verification pitfalls worth keeping `[DRAFT]`
-
-- **`Get-AuthenticodeSignature` reports the *immediate* signer, not the trust anchor.** For PCA2023 detection you must rebuild the chain with `X509Chain.Build()` and check the root/intermediate by thumbprint — a binary whose immediate issuer name contains "PCA 2011" can still chain differently, and vice-versa.
-- **`boot.wim` is NOT serviced by the LCU.** WinPE is a reduced OS with its own servicing lifecycle; applying the LCU `.msu` to `boot.wim` fails (`0x80070032`), and the nested-CAB route fails the LCU cab (`0x8007371b`, missing pseudo-locale members). The PCA2023 `_EX` content therefore comes from the **serviced `install.wim`**, not from a patched `boot.wim`. (Copying files *into* a mounted `boot.wim` is still possible — what WinPE refuses is the CBS package transaction.)
-
-### 8.4 Verification reaches `[DRAFT]`
-
-A post-build check proves strictly less than a boot test, and the report must say so. File-presence proves layout; Authenticode-chain proves the signer chain; a Hyper-V Gen2 boot proves the virtual firmware accepts it; only **physical hardware** exercises the real DB/DBX trust decision. A `Pass` from a signer-chain verifier is **necessary but not sufficient**; it does not prove any firmware will accept the media.
-
-### 8.5 Measured update (2026-08, r12-series terminal) — a verified subset within the DRAFT
-
-The r12 series exercised the build loop this section was waiting for, and a measured subset can now be stated firmly. A Server 2025 conversion to the PCA2023-signed boot manager **completed and verified** on real ja-jp media: the static verification phase passed 33/33 with all five PCA2023 output targets valid. The root `\bootmgr.efi` on converted media **remains PCA2011 by Microsoft's media-conversion design** — it is not on the UEFI critical boot path (firmware boots `\EFI\Boot\bootx64.efi`), so its PCA2011 chain is not a conversion defect.
-
-Real post-install evidence from the four Server VMs (2026-08) additionally shows the Secure Boot 2023 certificate rollout **directly verified against firmware variables** on 2016, 2022 and 2025 built from the serviced media, with 2019 exhibiting a known monitoring divergence (the registry rollout state lags while the direct firmware-variable check already verifies the 2023 certificate set) that conservative evidence grading must not paper over. Boot behaviour on PCA2023-only firmware remains the separately-gated test §8.4 describes; the rest of §8 stays `[DRAFT]`.
-
-## 9. From resolution to ISO
-
-`[VERIFIED for source/ordering metadata; DISM mechanics are standard servicing guidance]` The Catalog gives, per OS, the files (direct URLs + SHA-1 digests) and which file is in-scope. Consuming them:
-
-1. **Download + verify (MUST).** Each file MUST be verified against its SHA-1 digest before use; a mismatch MUST abort the build.
-2. **Apply order (MUST).** Offline into `install.wim`, the order MUST be **SSU/baseline → LCU → .NET (in-scope leaf) → SafeOS DU (to WinRE) → /Cleanup-Image → recapture → rebuild ISO.**
-   - 2016: standalone SSU (`KB5094141`) MUST be applied **before** the LCU (`KB5094122`) — skipping the SSU → `0x800f0823`.
-   - 2019/2022: combined LCU (SSU embedded).
-   - 2025: GA baseline (`KB5043080`, checkpoint SSU) MUST precede the LCU (`KB5094125`).
-   - .NET: apply the in-scope leaf `.msu` (2019 `KB5087061` / 2022 `KB5087068` / 2025 `KB5087051`); the leaf carries the OS default runtime **and** 3.5. (Whether 3.5 needs a separate enable step is an open item.)
-   - SafeOS DU (2022 `KB5094157` / 2025 `KB5094150`): a `.cab` for the **WinRE / Safe OS** image — it MUST be applied to `winre.wim`, not the OS in `install.wim`.
-
-The ISO build is therefore a **two-source acquisition only in the abstract** (Catalog for everything; the cab/SOAP are verification). In practice the agent calls **one** production source — the Catalog — for all four lines.
-
-### 9.1 WIM image-metadata mechanics (measured, 2026-08)
-
-Servicing changes the `install.wim` images' metadata story in a way the standard DISM guidance does not cover, and the r12 series measured it end-to-end. Three facts, folded here with an explicit supersession: (1) the Windows Setup edition list and Explorer surface the WIM IMAGE **CREATIONTIME** date on the measured Server 2016 and 2022 media — a LASTMODIFICATIONTIME reflecting the servicing change does not alter what the user sees, so a serviced image that should *look* current needs its CREATIONTIME rewritten. (2) The WIMGAPI write path is **not reliable for that rewrite**: `WIMSetImageInformation` was measured returning success **without persisting** the requested image-XML value on the tested media (silent non-persistence), which supersedes any plan to write dates through the API. The reliable path is editing the WIM's **raw XML resource directly** — preserving byte length, encoding, BOM, terminators and resource descriptors, and always recalculating the integrity table — with WIMGAPI relegated to re-read verification only. (3) On the surviving read/verify path the API is strict about form: re-serialized Unicode XML **without the UTF-16LE BOM is rejected** (Win32 error 203) — the API requires the memory representation of a Unicode XML file, an easy trap for any tool that round-trips the XML through a BOM-stripping serializer.
-
----
-
-# PART IV — Reference Implementations (third-party reproducibility)
-
-This part embeds the **complete source** of every script used to produce, verify, or reproduce the findings above. They are placed at the **end of the document** (Appendices A–E) so the prose stays readable; this section is the index and the run recipes. Each tool is single-file and self-contained.
-
-## 10. Production tooling — Microsoft Update Catalog `[C]`
-
-Two interoperable single-file tools implement §6 (same actions, same JSON shapes, shared `findings/` cache). **Full source: Appendix A (Python) and Appendix B (PowerShell).**
-
-```
-catalog_patchset.py            # Python 3 (stdlib only)
-Resolve-CatalogPatchSet.ps1    # PowerShell 5.1+/7 (functional port)
-
-actions:
-  resolve    [2016 2019 2022 2025]   per-OS LCU/SSU/.NET/DU resolution (seed-only, no hardcoded KBs)
-  inventory  [2016 2019 2022 2025]   full .NET CU inventory (collect-don't-drop)
-  verify     [2016 2019 2022 2025]   cross-check vs the SOAP oracle (needs --oracle-dir / -OracleDir)
-```
-```bash
-# Python
-python3 catalog_patchset.py resolve 2016 2019 2022 2025 --cache findings
-# PowerShell
-pwsh ./Resolve-CatalogPatchSet.ps1 -Action resolve -Os 2016,2019,2022,2025 -CacheDir ./findings
-```
-Both cache to the same tags (`search.<slug>.html`, `dl.<uid8>.html`, `scoped.<uid8>.html`, `learn.release-info.md`, `sizes.json`) and are mutually cache-compatible — a third party can re-run either against the other's cache and get identical results.
-
-## 11. Verification tooling — the oracle generator `[A]` and the offline cross-check `[B]`
-
-These are not used in the production path; they exist to **prove the production path is correct**, and are embedded so the verification claims are independently reproducible.
-
-- **`Invoke-WuProtocolSurvey.ps1`** (Appendix C) — the MS-WSUSSS SOAP survey tool that produced the per-OS `dataset/<os>.json` oracle. PowerShell 5.1, ja-JP, requires a Windows host with reachability to the `sws` endpoint (i.e. **not** runnable in the agent sandbox — this is the access wall of §4.1, made concrete). It performs the anonymous handshake, the `GetRevisionIdList` anchor-delta enumeration, `GetUpdateData` bundle/leaf follow, and blob decompression. Read its `Expand-FsCompressedBlob` and `ConvertFrom-WuUpdateSegment` as the canonical XML-handling template.
-- **`wsusscn2_analyzer.py`** (Appendix D) and **`Resolve-Wsusscn2PatchSet.ps1`** (Appendix E) — the offline cab analyzers (schema `wsusscn2-analysis/1.1`). They stream the Master XML (`lxml.iterparse` / `XmlReader`), reproduce all four per-OS resolutions from the cab, `verify` against the oracle, and add the Catalog SafeOS-DU resolver (`safeos` / `-Action SafeOsDu`) for the one line the cab omits (§5.5).
-
-```bash
-# cab analyzer (offline cross-check)
-python3 wsusscn2_analyzer.py download
-python3 wsusscn2_analyzer.py analyze --cab wsusscn2.cab --summary -o result.json
-python3 wsusscn2_analyzer.py verify Server2025 --cab wsusscn2.cab --oracle Server2025.json
-```
-
----
-
-# PART V — Harvested Data and Appendices
-
-## 12. Validated snapshot (2026-06) — the actual data behind the claims
-
-> These rotate every Patch Tuesday. They are here to (a) anchor the prose in real values and (b) let a reader sanity-check the tooling. UIDs are the first 8 hex of the GUID; `digest` = SHA-1 base64.
-
-### 12.1 The [A] SOAP oracle — per-OS harvest shape `[VERIFIED 2026-06]`
-
-The harvested `dataset/<os>.json` answer-key (real `GetUpdateData` responses):
-
-| OS | Records | Bundles | Live bundles | Newest LCU | Kinds |
-|---|---|---|---|---|---|
-| Server 2016 | 518 | 259 | 21 | KB5094122 | dotnet=81 LCU=73 SSU=51 other=313 |
-| Server 2019 | 421 | 181 | 11 | KB5094123 | dotnet=82 LCU=56 SSU=23 other=260 |
-| Server 2022 | 412 | 193 | 11 | KB5094128 | dotnet=40 LCU=116 other=256 |
-| Server 2025 | 80 | 40 | 3 | KB5094125 | dotnet=18 LCU=22 other=40 |
-
-A real Server 2025 record fragment from the oracle (abridged), showing the leaf-embedded SSU and SafeOS DU:
-
-```json
-"Ssu":      { "Model":"uup-checkpoint-in-lcu-leaf", "Standalone":false, "Version":"26100.32985",
-              "Files":[{"FileName":"SSU-26100.32985-x64-express.cab","Digest":"yGhWECaSjm//sYUWJoQRo8zVw8k=","Size":112422}] },
-"SafeOsDu": { "Model":"co-bundled-in-lcu-leaf", "Standalone":false,
-              "Files":[{"FileName":"Windows11.0-KB5094150-x64-baseless.psf","Digest":"ORXQbDk0YK5ZUpmeQLToGOg2CdA=","Size":332819650}] }
-```
-
-### 12.2 The [B] cab snapshot identity `[CAB-VERIFIED 2026-06-24]`
-
-```
-Download : https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab  (via aka fwlink 74689)
+```text
+Download : https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab
 Size     : 649,341,212 bytes
 SHA-256  : 5b075a6d9fdaa1751b8c70bf164531163e6750444e9100453f96dce3a4eec122
-Master   : package.xml 114,221,784 B — 136,478 updates / 97,339 file-locations
-Root     : <OfflineSyncPackage> / http://schemas.microsoft.com/msus/2004/02/OfflineSync ; CreationDate 2026-06-09
+Master   : package.xml 114,221,784 bytes
+Root     : OfflineSyncPackage / http://schemas.microsoft.com/msus/2004/02/OfflineSync
+Creation : 2026-06-09
 ```
 
-### 12.3 Per-OS resolved set + three-way agreement `[VERIFIED + CAB-VERIFIED + CATALOG-VERIFIED, 2026-06]`
+This identity is intentionally preserved so later researchers can distinguish “the current `wsusscn2.cab`” from the exact file used by this analysis.
 
-| OS | LCU | SSU | .NET (in-scope leaf) | SafeOS DU | verify vs oracle |
-|---|---|---|---|---|---|
-| 2016 | KB5094122 (`e0284a61…`, `.msu`) | KB5094141 (standalone, apply first) | n/a (in LCU) | n/a | **OVERALL ✓** |
-| 2019 | KB5094123 (`786110c1…`) | embedded in LCU | KB5087061 (non-NDP48) | n/a | **OVERALL ✓** |
-| 2022 | KB5094128 (`522273b0…`) | embedded in LCU | KB5087068 (NDP48) | not in cab → Catalog **KB5094157** | **OVERALL ✓** |
-| 2025 | KB5094125 (`c108488b…`, UUP) | 26100.32985 (checkpoint) | KB5087051 (NDP481) | KB5094150 (cab co-bundled == Catalog) | **OVERALL ✓** |
+## 36. Resolved 2026-06 set
 
-The **Digest is the cross-source primary key** here: where the same physical file is shipped, the value is byte-identical across SOAP, Catalog, and cab.
+`[CATALOG-VERIFIED + CAB-VERIFIED + PROTOCOL-VERIFIED, 2026-06]`
 
-**Cross-source identity checks that passed (free correctness signals):**
-- 2025 LCU: Catalog `updateID ≠ oracle UID` (expected UUP) but **digest `jon6SRff…` MATCHES** the oracle.
-- 2022 SafeOS DU KB5094157: the Catalog row `updateID c6476311 == the SOAP bundle UID`, and the downloaded file's **SHA-1 `w+5dA…` AND SHA-256 `1idumQ…` match the oracle exactly** — the Catalog file is, cryptographically, the artifact the cab analysis was hunting.
-- 2025 SafeOS DU: the Catalog standalone file is **byte-size-identical** to the cab co-bundled `…KB5094150-x64.cab` (digest `icy52…`).
-- Learn release-info LCU/.NET KBs match the resolved KBs for all four OS (`CrossCheck.Match = true`).
+| OS | LCU | Servicing-stack form | .NET leaf used in that study | SafeOS DU evidence in that study |
+|---|---|---|---|---|
+| 2016 | KB5094122 | standalone SSU KB5094141 | handled by the then-current 2016 model | not resolved by the original SafeOS recipe |
+| 2019 | KB5094123 | embedded/combined | KB5087061 | not resolved by the original SafeOS recipe |
+| 2022 | KB5094128 | embedded/combined | KB5087068 (`NDP48`) | Catalog KB5094157; absent from searched cab snapshot |
+| 2025 | KB5094125 | checkpoint/UUP | KB5087051 (`NDP481`) | KB5094150 / co-bundled UUP-era evidence |
 
-### 12.4 Catalog DownloadDialog response shape (a real example) `[CATALOG-VERIFIED 2026-06]`
+**Important:** the “not resolved” cells describe the 2026-06 research recipe, **not proof that Microsoft never published such update families for those releases**. Later Catalog work is the reason this distinction is now explicit.
+
+## 37. Real Catalog `DownloadDialog` shape
+
+`[CATALOG-VERIFIED 2026-06]`
 
 ```js
 downloadInformation[0].files[0].url      = 'https://catalog.s.download.windowsupdate.com/.../windows10.0-kb5094122-x64_<sha1hex>.msu'
-downloadInformation[0].files[0].digest   = 'Nr3Up4Pt5vYXS4++EEbo46YTrUQ='   // SHA-1, base64 (reliable)
-downloadInformation[0].files[0].sha256   = ''                               // frequently EMPTY — do not depend on it
+downloadInformation[0].files[0].digest   = 'Nr3Up4Pt5vYXS4++EEbo46YTrUQ='   // SHA-1, base64
+downloadInformation[0].files[0].sha256   = ''                               // may be empty
 downloadInformation[0].files[0].fileName = 'windows10.0-kb5094122-x64_<sha1hex>.msu'
 ```
 
-## 13. Confidence levels, GUID register, glossary, open items
-
-### 13.1 Confidence levels
-
-| Claim class | Confidence | Basis |
-|---|---|---|
-| Per-OS LCU/SSU/.NET current set (2026-06) | **High** | three-way agreement (oracle + cab digest + Catalog digest) |
-| SSU three-era packaging model | **High** | decoded from real blobs + cab, cross-generation |
-| `wsusscn2.cab` structure (RevisionId, 3 streams, digest-join) | **High** | full streaming profile of the 2026-06 cab |
-| 2022 SafeOS DU cab-absence + reason | **High** | exhausted Master + 74 cabs × 3 streams + 2 escalations |
-| Catalog seed-only resolution | **High** | empty-cache re-discovery, all 4 OS verified vs oracle |
-| .NET 3.5 enable-step on apply | **Open** | not resolved; a build-session question |
-| §8 Secure Boot / `_EX` / boot verification | **DRAFT** | structurally reasoned, not yet rigorously tested |
-
-### 13.2 GUID register (the only durable seed)
-
-**Server LTSC Product GUIDs:** 2016 `569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5` · 2019 `f702a48c-919b-45d6-9aef-ca4248d50397` · 2022 `71718f13-7324-4b0f-8f9e-2ca9dc978e53` (general; `97b08ca0-…` = Azure Edition) · 2025 `b256987d-4693-4c87-955d-dbb9341205eb`.
-**Classification GUIDs:** SecurityUpdates `0FA1201D-4330-4FA8-8AE9-B877473B6441` · UpdateRollups `28BC880E-0592-4CBF-8F95-C79B17911D5F` · ServicePacks `68C5B0A3-D1A6-4553-AE49-01D3A7827828` · CriticalUpdates `E6CF1350-C01B-414D-A61F-263D14D133B4` · Updates `CD5FFD1E-E932-4E3A-BF74-18BF0B1BBD83`.
-**EOS/ESU deny-list:** 2008 `ba0ae9cc-…` · 2008 R2 `fdfe8200-…` · 2012 `a105a108-…` · 2012 R2 `d31bd4c3-…`.
-**2022 SafeOS DU category nodes:** `e4b04398-adbd-4b69-93b9-477322331cd3` (+ `dd1aa213-…`), DU-product `abc45868-…`.
-
-### 13.3 Glossary
-
-**LCU** Latest Cumulative Update · **SSU** Servicing Stack Update · **.NET CU** .NET Framework cumulative update · **DU** Dynamic Update (Setup DU and SafeOS DU) · **UUP** Unified Update Platform (2025 / Win11 24H2 composition pipeline) · **CompDB** Composition Database (UUP build-level applicability) · **CBS** Component-Based Servicing · **MSU/CAB/PSF** package container formats · **WIM** Windows Imaging Format (`install.wim`, `boot.wim`, `winre.wim`) · **WinRE / SafeOS** the recovery image the SafeOS DU targets · **PCA2011 / PCA2023** the boot-binary signing CAs.
-
-### 13.4 Open items
-
-- §8 Secure Boot end-to-end build-and-boot verification (DRAFT → verified).
-- DISM .NET 3.5 applicability / enable-step per OS.
-- Server 2016 `DVD_EX` / `efisys_EX.bin` canonical source.
-- Wiring the Catalog resolver URLs into the actual ISO builder (`Update-WindowsServerIso.ps1`).
-
-### 13.5 Provenance
-
-This memo synthesises three source investigations, each handed forward as a self-contained state file plus harvested datasets: the MS-WSUSSS SOAP survey (the oracle), the `wsusscn2.cab` reverse-engineering (the offline cross-check), and the Microsoft Update Catalog resolution work (the production source). The 2026-06 snapshot values throughout are dated examples; the embedded tooling (Appendices A–E) re-discovers the current set on every run.
-
-### 13.6 Revision history `[STABLE]`
-
-This is a living document; structure is now considered stable (future changes should be content, not reorganization).
-
-| Revision | Focus | Summary |
-|---|---|---|
-| r1.x | Investigation | Initial multi-surface investigation (SOAP / wsusscn2 / Catalog), facts collected across monthly cycles. |
-| r2.0 | Rewrite | Zero-based rewrite; conclusion-first three-source comparison; Catalog chosen as production source; all verification tooling embedded. |
-| r2.1 | Roles | Authority / Production / Verification three-role model; seven-axis evaluation matrix; "Autonomous-Agent-Friendly"; Catalog framed as a data model, not a scrape; SOAP-verified emphasis. |
-| r2.2 | Refinement | "Single Production Source"; Production-source definition up front; Digest as cross-source primary key; Identity/Artifact/Validation data-model layers; Decision row in the matrix; "Why we still needed SOAP"; research-vs-production architecture summary. |
-| r2.3 | ADR | Reference-architecture framing; ADR-form decision (§3.1); Stable-vs-Snapshot legend; slimmed Abstract; one-line architecture chain; role names as the primary referents. |
-| r2.4 | Editorial | Non-goals (§1.1); revision history (this table); figure identifiers (Figures 1–6); RFC-2119 normative language; one-page "Architecture at a glance" (Figure 1). Declared the final *structural* revision. |
-
-## 14. Architecture summary — research phase vs production phase
-
-The whole investigation collapses into two architectures: the **research/verification architecture** that *established* the production source is trustworthy, and the **production architecture** that the autonomous build pipeline runs from then on. Separating them is the cleanest one-screen statement of the memo's thesis.
-
-**Figure 4 — Research / verification architecture** (run once per source-of-truth audit; establishes correctness):
-
-```
-            ┌──────────────────────────────────────────────┐
-            │  RESEARCH / VERIFICATION PHASE                │
-            └──────────────────────────────────────────────┘
-
-  MS-WSUSSS SOAP  ──(harvest on a Windows host)──►  dataset/<os>.json   [A] oracle
-        │                                                    │
-        │                                          ground-truth Digest
-        ▼                                                    │
-  Microsoft Update Catalog  ──(resolve seed→KB→updateID→file)│
-        │                                                    │
-        ▼                                                    ▼
-     Catalog Digest  ═══════════ EQUAL? (Primary Key) ═══════╡  →  PROVEN
-        │                                                    │
-        ▼                                                    ▼
-  wsusscn2.cab  ──(applicability / dependency / supersedence)┘   cross-check
-```
-
-**Figure 5 — Production architecture** (run every Patch Tuesday by the autonomous build pipeline; consumes only the proven source):
-
-```
-            ┌──────────────────────────────────────────────┐
-            │  PRODUCTION PHASE  (Single Production Source) │
-            └──────────────────────────────────────────────┘
-
-  Learn release-info  ──►  current LCU KB per build           (discovery seed)
-        │
-        ▼
-  Microsoft Update Catalog  ──►  URL + SHA-1 Digest per line  (the ONE data dependency)
-        │                         LCU · SSU · .NET · SafeOS DU
-        ▼
-  Download  ──►  verify SHA-1 against Digest
-        │
-        ▼
-  DISM offline servicing   (SSU/baseline → LCU → .NET → SafeOS-DU→WinRE)
-        │
-        ▼
-  PCA2023 _EX media synthesis   [DRAFT, §8]
-        │
-        ▼
-  Rebuild ISO  ──►  patched, bootable Windows Server media
-```
-
-Read together: the **research architecture proves the Catalog equals the authority by Digest**; the **production architecture then needs exactly one data dependency** (the Catalog) because the Catalog is the only **Single Production Source**. SOAP and `wsusscn2.cab` appear only in the upper diagram — they made the lower diagram trustworthy, then stepped out of it. That asymmetry is the entire design: *verify with the authoritative-but-unreachable surfaces once; build from the reachable-and-complete surface forever.*
-
-### 14.1 The whole report in one line
-
-If the reader keeps nothing else, keep this chain — it is the memo end-to-end:
-
-**Figure 6 — The whole report in one line.**
-
-```
-   Research
-      │
-      ▼
-   Authority source        (MS-WSUSSS SOAP)        — defines ground truth
-      │   verifies, by Digest primary key
-      ▼
-   Verification source     (wsusscn2.cab)          — confirms applicability/dependency
-      │   cross-checks
-      ▼
-   Production design       (Microsoft Update Catalog = Single Production Source)
-      │   reachable · complete · proved
-      ▼
-   Autonomous Build Pipeline   (discover → resolve → download → verify → DISM)
-      │
-      ▼
-   Offline Patched Windows Server ISO
-```
-
-The Appendices that follow are the **reference implementation** of exactly this chain — the production source as runnable code (A–B) and the authority/verification sources that proved it (C–E). The architecture *is* the message; the code is its proof.
+The empty `sha256` field is why the workflow computes its own SHA-256 after download.
 
 ---
 
-# Appendices — Reference Implementation Source (full text)
+# PART X — Engineering implications (non-project-specific)
 
-> The scripts below are embedded verbatim for third-party reproducibility. They are the **complete** tools used to produce and verify every claim in this memo. Production path: Appendices **A–B** (Catalog). Verification: Appendix **C** (SOAP oracle generator), Appendices **D–E** (offline cab cross-check).
+## 38. A defensible offline-media update workflow
 
-## Appendix A — `catalog_patchset.py` (Catalog production resolver, Python)
+This report does not mandate an implementation, but the evidence supports the following generic sequence:
 
-**Role:** production source `[C]`. Seed-only per-OS resolution of LCU/SSU/.NET/SafeOS-DU from the Microsoft Update Catalog; `verify` cross-checks against the SOAP oracle. Stdlib only.
+```text
+1. identify source media exactly (OS, build, language, edition/indexes, hashes)
+2. resolve current/required update artifacts from Microsoft sources
+3. independently verify LCU/build and package-family interpretation
+4. evaluate source prerequisites / servicing-stack / checkpoint needs
+5. service WinRE according to package applicability and SafeOS guidance
+6. service each intended install.wim index
+7. service WinPE according to Microsoft guidance and actual applicability
+8. save serviced WinPE Setup + boot-manager binaries
+9. apply Setup Dynamic Update to the media tree when applicable
+10. restore/synchronize serviced WinPE Setup + boot-manager binaries to media
+11. perform PCA2023/Secure Boot media work when required by the target trust policy
+12. rebuild ISO with a known oscdimg toolchain and recorded boot entries
+13. inspect hashes, WIM state, package state, Setup-media identity, and signatures
+14. boot and install under the intended validation environment
+15. collect post-install evidence
+```
+
+The sequence should be treated as a **research-derived skeleton**. Exact package application details still depend on the release, source-media age, and current Microsoft servicing guidance.
+
+## 39. Definition of “fully patched ISO” for a research claim
+
+A technically useful statement should include at least:
+
+- Windows Server release and source-media build;
+- architecture;
+- language(s);
+- observation/build date;
+- target LCU/build;
+- servicing-stack/checkpoint prerequisites used;
+- .NET handling;
+- SafeOS DU and Setup DU handling;
+- whether `boot.wim` and `winre.wim` were serviced;
+- whether Setup binaries were synchronized;
+- Secure Boot/PCA2023 policy and evidence class;
+- ISO-mastering tool/version;
+- static verification result;
+- boot/install validation environment;
+- post-install validation result.
+
+Without that scope, “fully patched” is too ambiguous to compare across experiments.
+
+## 40. Minimum evidence bundle for a rebuilt ISO
+
+Recommended independent evidence includes:
+
+- source ISO SHA-256;
+- output ISO SHA-256;
+- exact package list with KB/update ID/file name/local SHA-256;
+- pre/post WIM inventory for all intended indexes;
+- servicing-stack/build evidence;
+- Setup binary hashes on WinPE and media;
+- boot-manager file hashes and signer chains;
+- `oscdimg` identity and command line;
+- boot/install result;
+- post-install OS/build/update evidence;
+- warnings and non-applicable-package results retained rather than silently discarded.
+
+---
+
+# PART XI — Relationship to consuming implementations
+
+## 41. Research report versus implementation documentation
+
+This distinction is deliberate:
+
+| Document class | Primary question |
+|---|---|
+| **This research report** | What has Windows/Microsoft servicing been observed or documented to do, and with what confidence? |
+| **Implementation specification** | What behavior does this implementation choose to support or enforce? |
+| **Implementation code/config** | What does this version actually execute? |
+| **Test documentation** | What evidence exists that this implementation behaved as intended? |
+
+All four can be “correct” at the same time because they answer different questions.
+
+### 41.1 When they disagree
+
+- If the disagreement is an **implementation policy choice**, record the rationale; the research report does not override it.
+- If the disagreement is a **claim about Windows behavior**, re-run or re-check the research evidence.
+- If the research claim is confirmed, the implementation should decide whether to change.
+- If the research claim is falsified, this report should be corrected with the new evidence and the superseded interpretation retained where historically useful.
+
+### 41.2 Known consumer
+
+One implementation that has consumed and generated experiments for this research is:
+
+https://github.com/usui-tk/ai-generated-artifacts/tree/main/projects/powershell-update-windows-server-iso
+
+That project is a **consumer and experimental contributor**, not the normative source for this document. Project phase names and current config structure are intentionally not used to define the research conclusions above.
+
+---
+
+# PART XII — Reproducibility, open questions, and references
+
+## 42. Historical research tooling
+
+The appendices retain the original research tools because they are part of the evidence provenance:
+
+- Appendix A — Python Microsoft Update Catalog resolver;
+- Appendix B — PowerShell Microsoft Update Catalog resolver;
+- Appendix C — MS-WSUSSS / MS-WUSP protocol survey and oracle generator;
+- Appendix D — Python `wsusscn2.cab` analyzer;
+- Appendix E — PowerShell `wsusscn2.cab` analyzer.
+
+These scripts are **historical research instruments**. Their comments can contain assumptions that were later superseded in the narrative above. They are retained to reproduce the original investigation, not to define current Windows servicing behavior.
+
+## 43. Durable identifiers retained from the investigation
+
+### 43.1 Server product GUIDs used in the 2026 source study
+
+- Server 2016: `569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5`
+- Server 2019: `f702a48c-919b-45d6-9aef-ca4248d50397`
+- Server 2022 general: `71718f13-7324-4b0f-8f9e-2ca9dc978e53`
+- Server 2025: `b256987d-4693-4c87-955d-dbb9341205eb`
+
+These are retained as research seeds. They should be revalidated if Microsoft taxonomy changes or if a different product/SKU branch is in scope.
+
+### 43.2 Classification GUIDs used in the study
+
+- Security Updates: `0FA1201D-4330-4FA8-8AE9-B877473B6441`
+- Update Rollups: `28BC880E-0592-4CBF-8F95-C79B17911D5F`
+- Service Packs: `68C5B0A3-D1A6-4553-AE49-01D3A7827828`
+- Critical Updates: `E6CF1350-C01B-414D-A61F-263D14D133B4`
+- Updates: `CD5FFD1E-E932-4E3A-BF74-18BF0B1BBD83`
+
+## 44. Open questions / future research
+
+- Re-run the complete SafeOS DU publication/discovery survey for all four Server generations using one standardized live-Catalog methodology and archive the raw rows.
+- Re-run Setup DU discovery periodically because title/Product naming is a moving interface.
+- Preserve a clean cross-generation `boot.wim` servicing matrix using the same source-media age and same-month package set, separating **package applicability** from **implementation policy**.
+- Extend physical-firmware PCA2023 validation beyond Hyper-V to representative hardware/virtual-firmware implementations.
+- Continue comparing Microsoft `secureboot_objects` / bootable-media guidance against actual signed binaries distributed by monthly Windows updates.
+- Revalidate `wsusscn2.cab` Dynamic Update coverage on newer snapshots before making any stronger corpus-wide statement.
+- Keep WIM metadata experiments separate from servicing-attainment tests so display-date work can never mask a payload failure.
+
+## 45. Revision history
+
+| Revision | Nature | Summary |
+|---|---|---|
+| r1.x | research memo | SOAP / WSUS / Catalog / `wsusscn2.cab` reverse engineering and initial package-source investigation. |
+| r2.x | reference-architecture phase | Promoted the metadata-source decision into an ADR-like architecture and embedded full research tooling. This improved reproducibility but gradually mixed implementation recommendations with research facts. |
+| r2.5 | measured extensions | Added r12-series experiments, Setup DU observations, PCA2023/WIM findings, but left contradictory “stable” statements in earlier sections. |
+| **r3.0** | **independent research re-baseline** | Restores the document's independent-research role; separates evidence from implementation policy; incorporates the later Catalog corrections, Setup-binary failure root cause, source-prerequisite findings, package-aware WinPE servicing, Secure Boot evidence layering, and packaging-aware identity rules while retaining historical snapshots and tools. |
+
+## 46. Primary references
+
+### Microsoft servicing / Dynamic Update
+
+- **Update Windows installation media with Dynamic Update**  
+  https://learn.microsoft.com/en-us/windows/deployment/update/media-dynamic-update
+- **Microsoft Update Catalog**  
+  https://www.catalog.update.microsoft.com/
+- **Windows Server release information**  
+  https://learn.microsoft.com/en-us/windows/release-health/windows-server-release-info
+
+### Microsoft update protocols / offline scan
+
+- **MS-WSUSSS — Windows Update Services: Server-Server Protocol**  
+  https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-wsusss/f49f0c3e-a426-4b4b-b401-9aeb2892815c
+- **MS-WUSP — Windows Update Services: Client-Server Protocol**  
+  https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-wusp/b8a2ad1d-11c4-4b64-a2cc-12771fcb079b
+- **`wsusscn2.cab` offline scan entry point**  
+  https://go.microsoft.com/fwlink/?LinkID=74689
+
+### Secure Boot / bootable media
+
+- **Enterprise deployment guidance for CVE-2023-24932**  
+  https://support.microsoft.com/en-au/topic/enterprise-deployment-guidance-for-cve-2023-24932-88b8f034-20b7-4a45-80cb-c6049b0f9967
+- **Windows Secure Boot certificate expiration and CA updates**  
+  https://support.microsoft.com/en-us/servicing/os/secure-boot/2025/06/windows-secure-boot-certificate-expiration-and-ca-updates
+- **Secure Boot certificate updates guidance for IT professionals and organizations**  
+  https://support.microsoft.com/en-us/servicing/os/secure-boot/2025/06/secure-boot-certificate-updates-guidance-for-it-professionals-and-organizations
+- **Updating Windows bootable media to use the PCA2023-signed boot manager**  
+  https://support.microsoft.com/en-us/servicing/os/windows/2025/02/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager
+- **Microsoft `secureboot_objects`**  
+  https://github.com/microsoft/secureboot_objects
+
+### ISO mastering
+
+- **Oscdimg Command-Line Options**  
+  https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/oscdimg-command-line-options
+- **Create an ISO image for UEFI platforms**  
+  https://learn.microsoft.com/en-us/troubleshoot/windows-server/setup-upgrade-and-drivers/create-iso-image-for-uefi-platforms
+
+### Research provenance / known consuming implementation
+
+- **Repository research tree**  
+  https://github.com/usui-tk/ai-generated-artifacts/tree/main/documents/research/windows-servicing
+- **Windows Server ISO update implementation that consumed and contributed experiments**  
+  https://github.com/usui-tk/ai-generated-artifacts/tree/main/projects/powershell-update-windows-server-iso
+
+---
+
+# Appendices — Historical Research Implementation Source (full text)
+
+> **Historical-tooling boundary.** The scripts below are preserved so a third party can reproduce the source investigation that informed earlier revisions. They are **research artifacts, not normative servicing specifications**. Comments and resolver assumptions inside them intentionally remain historically recognizable; when they conflict with the evidence-based narrative above, the narrative records the later adjudication.
+
+## Appendix A — `catalog_patchset.py` (historical Catalog resolver, Python)
+
+**Historical role:** Catalog artifact resolver used by the 2026 source investigation. Seed-only per-OS resolution of LCU/SSU/.NET/SafeOS-DU; `verify` cross-checks against the SOAP oracle. Stdlib only. Superseded assumptions are retained inside the source for provenance.
 
 ```python
 #!/usr/bin/env python3
@@ -1412,9 +1664,9 @@ if __name__ == "__main__":
 
 ```
 
-## Appendix B — `Resolve-CatalogPatchSet.ps1` (Catalog production resolver, PowerShell)
+## Appendix B — `Resolve-CatalogPatchSet.ps1` (historical Catalog resolver, PowerShell)
 
-**Role:** production source `[C]`, functional port of Appendix A. PowerShell 5.1+/7; same actions, same JSON shapes, shared `findings/` cache.
+**Historical role:** PowerShell port of the Catalog artifact resolver used in the 2026 source investigation. PowerShell 5.1+/7; same actions, same JSON shapes, shared `findings/` cache. Superseded resolver assumptions remain in the source for provenance.
 
 ```powershell
 #Requires -Version 5.1
@@ -1970,7 +2222,7 @@ switch ($Action) {
 
 ## Appendix C — `Invoke-WuProtocolSurvey.ps1` (MS-WSUSSS SOAP oracle generator)
 
-**Role:** verification oracle `[A]`. Produces the per-OS `dataset/<os>.json` answer-key via the MS-WSUSSS SOAP protocol. **Requires a Windows host with reachability to the `sws` endpoint — not runnable in the agent sandbox (the access wall of §4.1).** Read `Expand-FsCompressedBlob` / `ConvertFrom-WuUpdateSegment` as the canonical XML-handling template.
+**Historical role:** produces the per-OS `dataset/<os>.json` protocol-harvest answer key via MS-WSUSSS. The original research environment required a Windows host with reachability to the `sws` endpoint because the agent sandbox egress path could not complete the exchange. Read `Expand-FsCompressedBlob` / `ConvertFrom-WuUpdateSegment` as the captured XML-handling method used by that study.
 
 ```powershell
 ﻿#requires -Version 5.1
@@ -5495,7 +5747,7 @@ Write-Host '==================================================================='
 
 ## Appendix D — `wsusscn2_analyzer.py` (offline cab cross-check, Python)
 
-**Role:** offline dependency cross-check `[B]`. Streams the `wsusscn2.cab` Master XML (`lxml.iterparse`), reproduces all four per-OS resolutions, `verify`s against the oracle, and resolves the cab-absent SafeOS DU from the Catalog. Schema `wsusscn2-analysis/1.1`.
+**Historical role:** offline-catalog cross-check used in the 2026 study. Streams the `wsusscn2.cab` Master XML (`lxml.iterparse`), reproduces the study's per-OS resolutions, verifies against the protocol harvest, and uses the Catalog for the SafeOS DU that was absent from the specific 2026-06 cab snapshot. Schema `wsusscn2-analysis/1.1`.
 
 ```python
 #!/usr/bin/env python3
@@ -6803,7 +7055,7 @@ if __name__ == "__main__":
 
 ## Appendix E — `Resolve-Wsusscn2PatchSet.ps1` (offline cab cross-check, PowerShell)
 
-**Role:** offline dependency cross-check `[B]`, PowerShell port of Appendix D. Streaming `XmlReader`; 7-Zip extraction; HEAD size-probe for the 2016 LCU-vs-SSU discriminator.
+**Historical role:** PowerShell port of the 2026 offline-catalog cross-check. Streaming `XmlReader`; 7-Zip extraction; HEAD size-probe for the Server 2016 LCU-vs-SSU discriminator used in that study.
 
 ```powershell
 #Requires -Version 7.0

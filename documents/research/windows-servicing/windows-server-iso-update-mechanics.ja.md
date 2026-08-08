@@ -1,809 +1,1062 @@
 ---
-title: "Windows Server パッチ適用済みISOビルド — メタデータソース・リファレンスアーキテクチャ"
-subtitle: "自律ISOビルドパイプラインの本番メタデータソースを選定するためのアーキテクチャ意思決定記録（ADR）"
-doc-type: reference-architecture (ADR-structured)
+title: "Windows Server ISO 更新メカニズム — 独立技術調査記録"
+subtitle: "リバースエンジニアリング、制御された実験、Microsoft servicing source の分析、オフラインメディア servicing、Secure Boot の観測"
+doc-type: independent-technical-research-report
 lang: ja
-doc-provenance:
-  layer-1-format: 1.0.0
-  layer-2-template: 1.0.0
-  rendered: 2026-08-08
 status: living-document
-revision: "r2.5 (r12シリーズ実測拡張: Catalogローカライズ/宣言的発見・Setup-DU網羅・親子配送・PCA2023実測サブセット・WIMメタデータ機構; 2026-08)"
-scope: "Windows Server 2016 / 2019 / 2022 / 2025 LTSC, x64, オフライン slipstream"
-snapshot: "2026-06 Patch Tuesday サイクル"
-source-en: "windows-server-iso-update-mechanics.en.md（本書は英語版から派生した翻訳）"
+revision: "r3.0 — 独立調査としての再ベースライン"
+rendered: 2026-08-08
+scope: "Windows Server 2016 / 2019 / 2022 / 2025 LTSC、x64、オフライン・インストールメディア servicing"
+primary-research-window: "2026-05 から 2026-08"
+retained-snapshot: "2026-06 Patch Tuesday metadata harvest（その後の実験で得られた日付付き訂正を含む）"
+companion-en: "windows-server-iso-update-mechanics.en.md（本日本語版の編集上の正本）"
 ---
 
-# Windows Server パッチ適用済みISOビルド：どのメタデータソースを、なぜ選ぶか
+# Windows Server ISO 更新メカニズム — 独立技術調査記録
 
-> 🇯🇵 **日本語版（英語版から派生した翻訳）。**
-> 正本は英語版 `windows-server-iso-update-mechanics.en.md` です。本書は英語版に追従して保守します。**編集は必ず英語版を先に行い**、英語版と日本語版を並行して編集しないでください。コード（Appendix A〜E）は言語非依存のため英語のまま掲載しています。
-
-> **文書種別。** 本書は **リファレンスアーキテクチャ**であり、**アーキテクチャ意思決定記録（ADR: Architecture Decision Record）**の構造を採ります。すなわち *Context（背景）*・*Alternatives Considered（検討した代替案）*・*Decision（決定）*・*Consequences（結果）* を述べ（§3.1）、それぞれをデータモデルの解説と、再現可能な実装（埋め込みスクリプト）で裏付けます。当初は調査メモでしたが、構造がその枠を超えたためこの位置づけとしています。
-
-> **読み方の手引き — Stable と Snapshot。** 本書では2種類の内容を意図的に混在させています。読者は常にどちらかを意識してください。
-> - **`[STABLE]`** — 不変のアーキテクチャ、データモデル、評価基準、GUID。数か月〜数年単位で有効。
-> - **`[SNAPSHOT]`** — **2026-06** の Patch Tuesday 時点の具体的な KB / updateID / digest の値。**毎月入れ替わります**。ツールは実行のたびに再発見します。
+> **本調査記録の編集上の正本は英語版です。** 本日本語版は、英語版の改訂内容がレビューされ受け入れられた後、その内容から派生して作成されています。
 >
-> | セクション | 区分 |
-> |---|---|
-> | §1〜§3（役割・ADR・評価マトリクス）、§13.2（GUIDレジスタ）、§14（アーキテクチャ） | **`[STABLE]`** |
-> | §4〜§6 のデータモデル、§7 世代マトリクス、§8 Secure Boot（同時に `[DRAFT]`）、§9〜§11 ツール | **`[STABLE]`** |
-> | §12（検証済みスナップショット）、および本文中のあらゆる具体的な KB/updateID/digest | **`[SNAPSHOT]`** |
-
-> **規範表現（RFC-2119 形式）。** 本書が運用上のルールを述べる箇所では、要求事項と説明を区別できるよう（かつ機械的に抽出できるよう）強度を明示します。
-> - **MUST** / **MUST NOT** — 厳格な要求。違反するとビルドが不正になる、または失敗する。
-> - **SHOULD** — 強い推奨。逸脱する場合は具体的な理由が必要。
-> - **MAY** — 正しさに影響しない選択肢。
+> **独立性に関する声明。** 本レポートは、いかなる実装プロジェクトからも意図的に独立して維持されます。Microsoft 公式ドキュメントの調査、プロトコルおよびパッケージのリバースエンジニアリング、制御された servicing 実験、起動・インストール試験、ならびにトラブルシューティングを通じて観測された Windows Server インストールメディア servicing の挙動を記録するものです。特定のスクリプト、リポジトリ、phase model、configuration schema の**仕様書ではありません**。
 >
-> マークのない散文は **説明または観察**であり、要求事項ではありません。
+> **本レポートの利用方法。** 実装側は、本レポートの知見を用いて独自のポリシーを選択できます。実装ドキュメントと本レポートが「Windows が実際にどのように動作するか」という点で食い違う場合、その不一致は根拠となる証拠を再検証する契機とすべきです。実装に合わせることだけを理由として本レポートを書き換えるべきではありません。一方で、実装は、選択とその結果が明示されている限り、研究上の推奨と異なる運用上の判断を意図的に採用する自由があります。
 
 ---
 
-## 概要（Abstract）
+## エグゼクティブサマリ
 
-**Problem（課題）。** Microsoft 評価版イメージと当月の累積更新から、フルパッチ適用済みの Windows Server 2016 / 2019 / 2022 / 2025 インストール ISO（x64, LTSC）を、オフラインで、再現可能に、かつ **自律ビルドパイプライン（Autonomous Build Pipeline）が端から端まで実行できる形**でビルドすること。難所は DISM コマンド以前にあります。すなわち *パッチの識別子と依存関係を、どの Microsoft の面（surface）から取得するのか* です。データは、形・網羅性・到達可能性の点で互いに食い違う複数の面に散在しています。
+本調査の中心的な結論は、**正しく更新された Windows Server インストール ISO を構築することは、`install.wim` だけにパッチを適用する問題ではなく、メディア全体の整合性（media coherence）の問題である**という点です。
 
-**Result（結論）。** **Microsoft Update Catalog** が **本番ソース（Production source）** ＝ ビルドが実際に消費する唯一の面です。他の2つは補助的役割に徹します。**MS-WSUSSS**（SOAP）は **権威ソース（Authority source）**（Catalog が正しいことを *証明する* ためのオラクル）、**`wsusscn2.cab`** は **検証ソース（Verification source）**（オフラインの依存関係/適用性データベース）です。この3つの役割は厳密に区別します。
+関連する状態は、複数の独立した対象と、複数の Microsoft metadata surface に分散しています。
 
-**Why the Catalog（なぜ Catalog か）。** Catalog は、無人エージェントから **到達可能（reachable）**（素の HTTP、認証不要）であり、**網羅的（complete）**（ISO が必要とするすべてのライン、*Dynamic Update を含む*）であり、**検証可能（verifiable）**（返すすべての成果物が、共有の **Digest** プライマリキー上で権威オラクルとバイト単位で一致する）唯一の面です。権威ソースは到達不可、検証ソースは網羅性に欠けます。したがって Catalog は唯一実現可能な **単一本番ソース（Single Production Source）**であり、その出力は *信用* ではなく *証明* されています。
+- `sources\install.wim` 内のインストール対象 OS イメージ
+- `sources\boot.wim` 内の Windows PE
+- OS イメージ内部にネストされた Windows RE（`winre.wim`）
+- メディアの `sources\` ディレクトリにある Setup バイナリおよび互換性関連コンテンツ
+- UEFI boot manager ファイルおよび Secure Boot の署名状態
+- Microsoft Update Catalog、Windows Update/WSUS プロトコル、Microsoft release information ページ、`wsusscn2.cab` を通じて公開される update metadata
 
-詳しい論拠 — 三役モデル、7軸の評価マトリクス、ADR 形式の決定 — は Part I（§2〜§3）にあります。Part II〜V がそれを、面ごとのデータモデル、解決→ISO のマッピング、埋め込み実装一式、収集データで裏付けます。**スコープ:** Windows Server LTSC メディアのオフライン servicing/再ビルドのみ、x64 のみ。Windows クライアント、Windows Update for Business、稼働中OSの in-place servicing は対象外（完全な非ゴールは §1.1）。
+長期的に有効と判断できる主要な結論は次のとおりです。
 
-### Architecture at a glance（全体俯瞰）
+1. **すべての問いに対して完全な認識論的ソースとなる単一の Microsoft metadata surface は存在しません。** Microsoft Update Catalog は公開されている artifact 解決面として最も実用的ですが、MS-WSUSSS、`wsusscn2.cab`、Microsoft release information、KB 記事、およびパッケージそのものが、identity、applicability、dependency、supersedence、servicing behavior に関する独立した証拠を提供します。
+2. **パッケージのトポロジーは Windows 世代によって大きく変化します。** Standalone SSU、combined SSU+LCU、checkpoint cumulative update、classic CAB/MSU packaging、UUP/WIM packaging、SafeOS Dynamic Update、Setup Dynamic Update、.NET rollup を、ある1世代の挙動から別世代へ一般化してはいけません。
+3. **Dynamic Update は単一パッケージではなく、複数の役割からなるファミリです。** Setup DU、SafeOS DU、servicing-stack content、cumulative update、適用可能な driver は、それぞれ異なる media target を扱います。Microsoft は WinRE、`install.wim`、`boot.wim`、Setup media、Setup binaries、boot-manager files に対する個別の操作を明示しています。
+4. **Setup media の整合性は正しさの要件です。** 2026-07-11 のトラブルシューティングでは、servicing 済み WinPE の Setup バイナリと media の `sources\setup*.exe` が乖離したときにインストール失敗を再現しました。Microsoft も独立に同じ不変条件を文書化しており、WinPE から保存した Setup バイナリは media 上のコピーと一致していなければならず、そうでない場合 Windows Setup が失敗する可能性があります。
+5. **`boot.wim` servicing を「LCU を絶対に適用してはいけない」といった普遍的ルールで安全に説明することはできません。** 現在の Microsoft guidance では WinPE に対する cumulative-update servicing が明示的に含まれています。過去の実験でも、`0x80070032`、`0x800f0823`、checkpoint 関連失敗を含む、リリースおよび source media 固有の applicability / prerequisite 差が確認されました。適切な engineering rule は、boot image servicing を実測に基づく package-aware な操作として扱うことです。
+6. **「見つからない」は、検索空間を十分に探索するまでは「存在しない」ことの証拠ではありません。** Setup Dynamic Update が新しい Server リリースに限定されるという初期結論は、その後の live Catalog 実測により反証され、Server 2016、2019、2022、2025 のすべてで有効な Setup DU row が確認されました。
+7. **異なるソース間で hash を比較するときは package boundary を尊重する必要があります。** SHA-1 Digest は、2つの surface が同じ物理ファイルを記述している場合には強力な join key ですが、外側の MSU と内側の CAB は別 artifact であり、異なる hash を持つことが正当です。
+8. **PCA2023 / Secure Boot readiness は複数層からなる状態です。** Firmware trust variables、boot-manager signer chain、bootable-media files、installed-OS state は相互に関係していますが、証拠として相互代替できません。静的な Authenticode 検査は Secure Boot での実起動試験を置き換えません。
+9. **WIM の表示 metadata と WIM payload state は別の軸です。** Servicing により格納 OS 自体が更新されても、edition list に表示される timestamp が意味的に古いまま残る場合があります。整合性を保持し、明示的な証拠を残して行う制御された WIM metadata 編集により、presentation metadata を補正できます。
+10. **「fully patched ISO」は常に scope を伴う主張です。** 日付、source media、update family、media target、言語、architecture、prerequisite policy、validation class を明示しなければなりません。
 
-**Figure 1 — Architecture at a glance（全体俯瞰）。** 設計の全体を1画面で：三役・単一の本番データ依存・証明済み成果物・自律ビルド。
+したがって、本レポートでは次の evidence-driven model を推奨します。
 
+```text
+Microsoft documentation / protocol specifications
+                    +
+       live metadata and package harvests
+                    +
+      package / WIM / ISO reverse engineering
+                    +
+ controlled servicing + boot/install experiments
+                    |
+                    v
+            verified research claims
+                    |
+                    v
+       engineering implications / options
+                    |
+                    v
+     implementation-specific design decisions
 ```
-  ┌──────────────────────────────────────────────────────────────────────┐
-  │                       RESEARCH / VERIFICATION                          │
-  │                                                                        │
-  │   AUTHORITY              VERIFICATION                                   │
-  │   MS-WSUSSS (SOAP)  ───► wsusscn2.cab                                   │
-  │   ground truth          dependency / applicability                     │
-  │        │                      │                                        │
-  │        └──── Digest (primary key) proves ────┐                         │
-  └──────────────────────────────────────────────┼─────────────────────────┘
-                                                 ▼
-  ┌──────────────────────────────────────────────────────────────────────┐
-  │                    PRODUCTION  (Single Production Source)               │
-  │                                                                        │
-  │   Learn release-info ─► MICROSOFT UPDATE CATALOG ─► URL + SHA-1 Digest  │
-  │   (LCU KB seed)         reachable · complete · proved                   │
-  │                                  │                                      │
-  │                                  ▼                                      │
-  │   Autonomous Build Pipeline:  download → verify → DISM apply → ISO      │
-  └──────────────────────────────────────────────────────────────────────┘
-                                  ▼
-                Offline, fully-patched, bootable Windows Server media
-```
 
-（図は安定した相互参照のため番号を付しています。本図が Figure 1。三役モデルは **Figure 2**（§2.1）、Catalog のデータモデルは **Figure 3**（§6.2.1）、研究/本番アーキテクチャは **Figure 4〜5**（§14）、一行サマリは **Figure 6**（§14.1）です。）
-
-### 方法論と来歴（provenance）の規律
-
-以下の主要な主張はいずれも、経験的に導出したうえで、3つの面のうち少なくとも2つで相互検証しています。それを生んだ規律であり、読者が本書に対して適用すべき基準でもあります。
-
-- **オラクル基準の検証。** [A] SOAP が答え合わせの基準（answer-key）です。[B] や [C] に関する主張は、スキーマ非依存のキー — 可能な限り **ファイル Digest（SHA-1, base64）** — でオラクルと一致して初めて、仮説から事実へ「昇格」します。
-- **不在は証明するもの、決して仮定しない。** 「データはここに無い」は高いハードルの結論で、別ストリーム・別検索パターン・別抽出方法を尽くして初めて到達できます。元調査での初期の「不在」判定のいくつかは、単に *検索が誤っていた* だけでした（§5.4 / §6.4 参照）。そのハードルを越えてなお不在が確定する場合は、*理由とともに* 記述します（例：2022 SafeOS DU、§5.5）。
-- **クライアント先行の障害帰属（[A] 向け）。** 文書化され、呼び出し可能で、本番稼働しているプロトコルのエンドポイントがエラーや疎な結果を返した場合、既定の説明は **こちらのリクエストの欠陥**であってサーバー側の制限ではありません。実在の WSUS サーバーが同じエンドポイントから毎日カタログ全体を同期している事実が、その根拠です。
-- **来歴タグ。** `[VERIFIED]` = 実際に収集した SOAP データに基づく / `[CAB-VERIFIED <date>]` = 実際にダウンロードした `wsusscn2.cab` に基づく / `[CATALOG-VERIFIED <date>]` = 実際の Catalog ラウンドトリップに基づく / `[DRAFT]` = 構造的に推論したが **まだ厳密な検証を経ていない**（§8 の Secure Boot 関連がこれ）。タグの無い記述は、確定した事実ではなく推論・構造です。
+矢印は意図的に一方向です。実装設計から新たな仮説が生まれることはありますが、実装設計それ自体が Windows の挙動を立証するわけではありません。
 
 ---
 
-# PART I — 結論と評価軸
+# PART I — 調査範囲、証拠モデル、裁定ルール
 
-## 1. 背景・目的・想定読者
+## 1. 目的
 
-Microsoft は Windows Server をインストール可能な2形態で提供します。**評価版 ISO**（Microsoft Evaluation Center、180日タイマー、ライセンス不要で自由にダウンロード可能）と、**リテール/ボリュームライセンス ISO** です。エージェント駆動の自動化には評価版 ISO が最も実用的な入力ですが、メディアの再配布・保管は Microsoft のライセンス条項に従う必要があります。
+本レポートは、以下を対象として、パッチ適用済み Windows Server インストールメディアを再構築する方法を調査する過程で蓄積された技術知識を統合したものです。
 
-そのようなメディアから「フルパッチ適用済み」ISO を作る実務者は、まず次の問いから始めます。*デプロイして起動したとき、当月の Patch Tuesday レベルに達し、かつ PCA2011 をもはや信頼しない Secure Boot 環境に受け入れられるためには、`install.wim` に適用すべき `.msu` / `.cab` パッケージの最小セットは何か？* 素朴な答え「今月の LCU を当てる」は不完全です。完全な答えは少なくとも次に触れます。
+- Windows Server 2016
+- Windows Server 2019
+- Windows Server 2022
+- Windows Server 2025
+- x64 インストールメディア
+- 主として `en-us` および `ja-jp` メディア
+- offline servicing と ISO reconstruction
+- UEFI / Secure Boot / Hyper-V Generation 2 validation
 
-- 各ライン（LCU / SSU / .NET CU / Dynamic Update）を実際に公開している **メタデータ面**はどれか
-- その LCU は **Servicing Stack Update** を先に適用する必要があるか（`0x800f0823` 失敗）
-- `install.wim` がすでに **PCA2023 署名のブートバイナリ**を同梱しているか、合成が必要か
-- 物理ハードウェアを起動せずに結果を **検証**する方法
+目的は、特定の automation implementation を規定することではありません。第三者が、たとえば次の問いに答えられるだけの検証済み知識を保存することが目的です。
 
-**想定読者。** 2種類です。第一に、実在の ISO 更新パイプラインを保守する人間のエンジニア（Takayuki / usui-tk）。第二に — そして明示的に — **この作業の記憶を持たない将来の LLM/エージェントのセッション**。後者は、ソース選定を引き継ぎ、ツールを再実行し、埋め込みのスクリプトとスナップショットだけからデータを再現できなければなりません。結論先出しの構成と埋め込み実装は、主にこの第二の読者のために存在します。
+- 現在扱っているのは、実際にはどの update family なのか。
+- その更新は、どの image または media layer を変更するのか。
+- 見かけ上の欠落は本当に不存在なのか、それとも query が該当 row を取り逃しただけなのか。
+- その package には servicing-stack または checkpoint prerequisite が必要なのか。
+- 失敗原因は DISM、package applicability、古い Setup media、ISO mastering、Secure Boot state のどこにあるのか。
+- どの観測結果が長期的に有効で、どれが特定時点の snapshot なのか。
+- 2つの project document が矛盾した場合、どの外部証拠を使って裁定できるのか。
 
-### 1.1 Non-goals（非ゴール）`[STABLE]`
+## 2. 本レポートが対象としないもの
 
-期待値を正確に設定するため、以下は明示的に **対象外**です。本アーキテクチャはこれらを解決も論評もしません。これらを期待する読者は別を当たってください。
+本レポートは、次のものでは**ありません**。
 
-- **Windows クライアントエディション**（Windows 10 / 11 のコンシューマ/Pro メディア）。一部のペイロード（UUP, 24H2）がクライアント系と共有でも、本書は Windows Server LTSC のみ。
-- **オンライン / in-place servicing。** カバーするのは *オフライン* の `install.wim` への slipstream のみ。ライブの Windows Update、in-place アップグレード、稼働中OSのパッチ適用は対象外。
-- **Windows Update for Business** のポリシーオーケストレーション、デプロイリング、更新の延期。
-- **WSUS / SCCM / ConfigMgr のデプロイ。** これはパッチ *配布* やフリート管理の設計ではなく、*メディアビルド* の設計です。（MS-WSUSSS は検証オラクルとしてのみ登場し、配布面としては扱いません。）
-- **エンタープライズのパッチ管理** 全般 — コンプライアンスレポート、メンテナンスウィンドウ、承認ワークフロー。
-- **非 x64 アーキテクチャ**（arm64, x86）— *除外対象* として言及する場合（例：2025 の arm64 .NET 兄弟）を除く。
-- **ドライバー / ファームウェア / OEM イメージのカスタマイズ**、起動可能 USB の作成。
-- **Secure Boot のエンドツーエンド確定検証** — `[DRAFT]`（§8）としてのみ存在し、メタデータ作業と同じ検証水準には達していません。
+- repository specification
+- 特定 PowerShell script の phase-by-phase user manual
+- Microsoft licensing terms の代替
+- Windows Update fleet-management design
+- ある月の package set が無期限に current であり続けるという主張
+- Hyper-V の boot test がすべての物理 UEFI implementation を証明するという主張
+- Microsoft が現在の Catalog HTML、package naming、servicing topology を将来も維持するという保証
 
-## 2. 結論サマリ：3つの面、1つの本番ソース
+したがって、project 固有の phase name、config schema、command-line switch、CI state は、規範的な研究本文から除外します。Project experiment が有用な証拠を生んだ場合は、**measurement** は保持しますが、project 固有の mechanism は省略するか provenance note に移します。
 
-選定したパイプラインのエンドツーエンドの形：
+## 3. 証拠分類
 
+主張には以下のラベルを使用します。ラベルは*証拠の種類*を示すものであり、ある実装が現在その知見を採用しているかどうかを示すものではありません。
+
+| ラベル | 意味 |
+|---|---|
+| **`[MEASURED]`** | 制御された servicing、package、WIM、ISO、VM、firmware-variable、file-inspection experiment で直接観測したもの。 |
+| **`[REPRODUCED]`** | 複数の run、image、language、OS generation、または独立した test path で再現したもの。 |
+| **`[PROTOCOL-VERIFIED]`** | 取得した MS-WSUSSS / MS-WUSP protocol data に基づき、具体的な update identity へ対応付けたもの。 |
+| **`[CAB-VERIFIED <date>]`** | 特定時点で取得した `wsusscn2.cab` snapshot に基づくもの。 |
+| **`[CATALOG-VERIFIED <date>]`** | Microsoft Update Catalog の live search / download-resolution round trip に基づくもの。 |
+| **`[MICROSOFT-DOCUMENTED]`** | 現行の Microsoft Learn、Microsoft Support、Open Specifications、または Microsoft-maintained source に記載されているもの。 |
+| **`[INFERRED]`** | 複数の観測結果から推論したが、すべての関連環境で直接実証されたわけではないもの。 |
+| **`[HISTORICAL <date/revision>]`** | 記録された experiment または snapshot について真であるが、現在も同じであるとは主張しないもの。 |
+| **`[OPEN]`** | 未解決、または隣接する主張と同じ水準まで検証されていないもの。 |
+
+### 3.1 確信度と新しさは別の概念
+
+日付付きの measurement は、その日付に起きたことについて高い確信度を持つ証拠であり続けます。現在の Microsoft document は高い権威性を持つ場合でも、古い source media へ適用するときには解釈が必要になることがあります。したがって、「current」と「high confidence」は別の軸です。
+
+### 3.2 Windows の挙動に関する紛争での証拠優先順位
+
+主張が競合する場合、絶対的な階層ではなく review heuristic として、次の順序を使用します。
+
+1. **対象 OS / media / package 上で再現可能な直接測定**。ログ、hash、artifact が保存されていること。
+2. **同じ操作と release family を明示的に対象とする Microsoft documentation または protocol specification。**
+3. **独立した Microsoft metadata / package evidence**（Catalog、WSUS protocol、`wsusscn2.cab`、KB package manifest、CompDB、file signature）。
+4. **複数回の測定に支えられた cross-version inference。**
+5. **Implementation documentation または code**。これは何を再試験すべきかという仮説の情報源として扱う。
+
+Implementation document は、*その実装が何を意図しているか*については権威があります。しかし、Windows または Microsoft servicing が実際にどう動作するかを自動的に証明するものではありません。
+
+## 4. 競合を裁定するためのプロトコル
+
+本レポートと実装が食い違う場合は、次の手順を使用します。
+
+1. **不一致の種類を分類する。** Windows の挙動についての不一致なのか、単なる implementation policy choice なのか。
+2. **原始証拠を特定する。** 要約よりも、ログ、取得済み Catalog row、package file、WIM inspection、VM evidence、firmware-variable evidence、Microsoft source material を優先する。
+3. **最も狭い関連対象で再現する。** 挙動を理解する前に production code を変更しない。
+4. **旧研究主張が確認されたのか、範囲が狭められたのか、反証されたのかを記録する。** 説明のない矛盾を黙って書き換えに変換しない。
+5. **証拠が変わったときだけ本レポートを更新する。** 重要な過去の失敗を理解する助けになる場合は、superseded interpretation を日付付き note として残す。
+6. **その後で consuming implementation を更新する。** その design が、もはや検証済み挙動を反映していない場合に限る。
+
+この protocol は、実装上の仮定が後に live Catalog data や end-to-end servicing run によって反証された、本調査活動中の複数の事例から直接導かれています。
+
+---
+
+# PART II — 方法論と実験対象
+
+## 5. 使用した調査手法
+
+本レポートの知見は、以下を組み合わせて得られました。
+
+- Microsoft Update Catalog の search/result parsing と `DownloadDialog.aspx` resolution
+- `.msu`、`.cab`、`.psf`、`.wim`、EFI、および関連 payload の直接 download と hashing
+- Windows host 上での MS-WSUSSS / MS-WUSP SOAP protocol harvesting
+- `wsusscn2.cab` offline catalog の展開と streamed XML analysis
+- package manifest と CompDB の inspection
+- DISM による `install.wim`、`boot.wim`、`winre.wim` の offline servicing
+- WIM resource / metadata inspection と制御された metadata rewriting
+- Setup media file の比較（`setup.exe`、`setuphost.exe`、boot manager files）
+- Authenticode / X.509 signer-chain inspection
+- firmware Secure Boot variable collection
+- Microsoft `oscdimg.exe` による ISO reconstruction
+- Hyper-V Generation 2 UEFI / Secure Boot boot and installation tests
+- Windows Server VM 内での post-install evidence collection
+- 失敗している WinPE environment に対して競合仮説を個別検証する fault isolation
+
+## 6. ラボ運用上の規律
+
+次の実践は、調査結果の信頼性を実質的に高めました。
+
+- **解釈より先に取得する。** Raw HTTP/SOAP response と package identity を、正規化する前に保存する。
+- **物理 artifact を hash 化する。** Upstream service が SHA-1 を公開する場合でも、ローカルでは SHA-256 を記録する。
+- **論理 identity と container identity を分離する。** KB、Catalog `updateID`、MSU wrapper、inner CAB、UUP leaf、PSF は相互交換可能な identifier ではない。
+- **不存在の主張には高い証明基準を置く。** 「存在しない」と結論する前に、alternate title、Products value、classification、release token、update family を検索する。
+- **一度に1つの仮説を検証する。** 2026-07-11 の Setup failure は、まず UDF/ISO readability と storage enumeration を個別に除外し、その後 Setup binary identity に焦点を移すことで解決した。
+- **日付付き snapshot を保持する。** 具体的な KB、GUID、digest、file name は証拠であり、永久的な configuration ではない。
+- **以前の revision の成功から、将来の E2E 結果を推論しない。** 過去の successful build は provenance であり、後続 implementation の自動的な証明ではない。
+
+---
+
+# PART III — Microsoft update metadata surface
+
+## 7. 複数の metadata surface が重要な理由
+
+Microsoft は、異なる目的のために作られた複数の surface を通じて、相互に重なり合う servicing 情報を公開しています。本調査では、これらを相互交換可能なものとして扱ったときに繰り返し失敗が発生しました。
+
+有用な分解は次のとおりです。
+
+| 問い | 強い証拠となる surface |
+|---|---|
+| どの update artifact を download できるか。 | Microsoft Update Catalog |
+| WSUS が何を同期し、revision / bundle がどう関係するか。 | MS-WSUSSS |
+| offline scan 用にどの applicability / supersedence data が得られるか。 | `wsusscn2.cab` |
+| Microsoft が各 Server release にどの LCU/build を公開しているか。 | Microsoft release information + KB article |
+| package の中に実際に何が入っているか。 | MSU/CAB/WIM/PSF/CompDB inspection |
+| この source media が package を受け入れるか。 | DISM servicing experiment + package logs |
+| 再構築した installation media が boot/install できるか。 | Rebuilt ISO + VM/hardware validation |
+
+長期的に重要な教訓は**役割の分離**であり、ある1つの surface がすべての問いについて普遍的に権威である、という主張ではありません。
+
+## 8. MS-WSUSSS — プロトコル上の権威と関係性の証拠
+
+### 8.1 プロトコルの役割
+
+`[MICROSOFT-DOCUMENTED]` MS-WSUSSS は、Microsoft の SOAP ベースの server-to-server WSUS synchronization protocol です。Downstream update server は、この protocol を通じて upstream server から update metadata を取得します。
+
+Primary specification:
+
+https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-wsusss/f49f0c3e-a426-4b4b-b401-9aeb2892815c
+
+### 8.2 実測したデータモデル
+
+`[PROTOCOL-VERIFIED 2026-06]` 取得した update universe は、自然には次のように表現できます。
+
+```text
+bundle / revision identity
+        |
+        +--> category / product / classification relationships
+        +--> applicability / prerequisite / supersedence relationships
+        |
+        v
+leaf / payload metadata
+        |
+        v
+concrete file(s) + digest(s)
 ```
-Learn release-info (?accept=text/markdown)      → ビルドごとの現行 LCU KB を発見
-            |
-            v
-Microsoft Update Catalog  [C]  (PRODUCTION)     → KB を解決 → ダウンロードURL + SHA-1 digest
-            |                                       (Dynamic Update 含む全ライン; 認証不要)
-            v
-Download .msu / .cab  →  verify SHA-1
-            |
-            v
-DISM offline servicing  (SSU/baseline → LCU → .NET → SafeOS-DU(WinRE))
-            |
-            v
-PCA2023 media synthesis (_EX boot bins)  [DRAFT, §8]
-            |
-            v
-Rebuild ISO  →  signer-chain + boot verification
-```
-上流（発見＋解決）は到達可能で再現可能な Catalog に寄せ、正しさは [A] SOAP オラクルに対して証明し、[B] cab で相互チェックします。
 
-| | 面 | 概要 | エージェントのサンドボックスから到達可? | オフライン再現可? | **全**ライン網羅? | 本パイプラインでの役割 |
-|---|---|---|---|---|---|---|
-| **[A]** | MS-WSUSSS SOAP | サーバー間同期プロトコル（権威） | **No**（egress で TLS-MITM、Windows ホスト要） | No | Yes | **オラクル / answer-key のみ** |
-| **[B]** | `wsusscn2.cab` | オフライン適用性スキャンカタログ | Yes（DL + 解析） | Yes | **No**（クラシックOSの Dynamic Update を欠く） | **検証ソース** — 依存/適用性/オフライン検証DB |
-| **[C]** | Microsoft Update Catalog | 公開 HTML ウェブアプリ | **Yes**（HTTP, 認証不要） | Yes（全レスポンスをキャッシュ） | **Yes**（Dynamic Update 含む） | **本番ソース** |
+有用な identity field には、`UpdateID`、`RevisionNumber`、relationship edge、payload file name、size、SHA-1 digest が含まれます。
 
-**なぜ Catalog が勝つか — そして、なぜ権威が決定軸ではないか。** [A] は厳密に最も権威があります。実在の下流 WSUS サーバーが使う当のプロトコルであり、本書の ground-truth の出所です。「最も権威がある」が基準なら [A] が文句なしに勝ちます。しかし目的は **無人かつ再現可能に ISO をビルドするエージェント**であり、その目的に照らすと：
+### 8.3 Reachability に関する観測
 
-- [A] は **到達可能性のテストに落ちる。** サンドボックス→`sws.update.microsoft.com` の経路は、egress ゲートウェイの上流 TLS-MITM の証明書検証失敗で、こちらのリクエストが送られる前に切断されます。Microsoft 証明書をコンテナに取り込んでも解決しません（コンテナのトラストストアの不足ではない）。[A] は実在の Windows ホストと慎重なマルチコール同期シーケンスを要し、いずれもエージェント単独では再現できません。
-- [B] は **網羅性と扱いやすさのテストに落ちる。** 到達可能・再現可能で digest でオラクルに一致しますが、**設計上 Dynamic Update のラインを欠きます**（これは *稼働中OS向けのオフライン適用性スキャン* であり、SafeOS DU は別イメージである WinRE を対象とするためスコープ外 — §5.5）。さらに数GB規模で、素朴な扱いは確実に停止します。これを単一ソースにすると、結局 Dynamic Update のために Catalog へ寄る必要があり、利得なく2ソースを維持することになります。
-- [C] は **3つすべてに合格する。** 認証不要の素の HTTP で直接到達でき、Dynamic Update を含む **全** ラインを提供し、直接の CDN URL と SHA-1 digest を返します。エージェントは検索・解決・ダウンロードができ、全レスポンスをキャッシュして再実行をオフラインかつ冪等にできます。
+`[HISTORICAL 2026-06]` 当初の調査環境では、agent sandbox から upstream WSUSSS endpoint への直接アクセスは、有効な protocol exchange が完了する前に egress TLS path で失敗しました。そのため SOAP harvest には Windows host を使用しました。
 
-つまり判定は **自律エージェントにとっての操作性**で決まり、プロトコルの序列では決まりません。[A] をオラクルとして残すのは、それが最も権威があるからこそ — Catalog が正しい成果物を選んだことを *証明* できるから — であり、[B] は高速なオフライン依存チェックとして残します。しかしビルドが実際に消費する成果物は **[C]** から来ます。
+これは**環境固有の観測結果**であり、service が世界的に到達不能であるという主張ではありません。この経験は、「protocol authority」と「operational artifact source」を分離して扱う必要性を調査工程に強制した点で、現在も意味があります。
 
-### 2.1 Authority / Production / Verification は3つの異なる役割
+### 8.4 Handler / packaging era に関する観測
 
-最もよくある読者の誤りは、「権威がある」と「使うのに最適」を1つの軸に潰してしまうこと — *SOAP → Microsoft 公式 → 最も正しい → ゆえに使う* と推論することです。この連鎖は最後の一歩で誤っています。**「最も権威がある」は「最も使いやすい」ではありません。** 目的は自動 ISO ビルドであり、その目的に対して面は **単一の序列ではなく、3つの異なる役割**に分かれます。役割の定義を先に示します：
+`[PROTOCOL-VERIFIED]` 4つの Server 世代を通じて、classic servicing の CBS 系、OSInstaller/UUP era の data、command-line installation metadata など、複数の handler family が観測されました。表現方法は release ごとに変化しており、世代を跨いだ仮定が脆弱である理由の1つです。
 
-> - **権威ソース（Authority source）** — *構成上、正準的に正しい面*（実在の WSUS サーバーがそこからカタログ全体を毎日同期する）。ground truth を定義するために使い、ビルドには供給しません。
-> - **本番ソース（Production source）** — *自律ビルドパイプラインが直接消費するメタデータソース*で、適用する成果物（ダウンロードURL + 整合性 digest）を取得します。ビルドが実際に呼ぶのはこれだけです。
-> - **検証ソース（Verification source）** — *関係（依存 / 適用性 / supersedence）のオフラインDB*で、本番ソースが解決したセットを検証します。
+2026-06 の harvest sample では次が確認されました。
 
-- **権威ソース — MS-WSUSSS [A]。** ground truth。ビルドには消費されず、*本番ソースが正しいことを証明する*ために存在します。
-- **本番ソース — Microsoft Update Catalog [C]。** ビルドが実際に呼ぶ面。序列ではなく操作性で選定。
-- **検証ソース — `wsusscn2.cab` [B]。** Catalog とは *別の役割*。Catalog が **成果物**（URL + digest）を返すのに対し、cab は **関係**（依存・適用性・supersedence）を返します。Catalog が解決したセットを検証するもので、成果物のフォールバック格納庫ではありません。
+- Server 2016 は classic CBS update data と並んで standalone SSU relationship を公開していた。
+- Server 2019 と 2022 は、個別の monthly SSU line ではなく combined/embedded servicing model を通じて servicing-stack content を表現していた。
+- Server 2025 は UUP/checkpoint era packaging と CompDB-style image composition metadata を使用していた。
 
-> **命名規約（本書全体）。** 以降、アーキテクチャ上の **役割名を一次の指示対象**とし、具体的な面は実装詳細として扱います。本書は「SOAP が Catalog を証明する」より「**権威ソース**が**本番ソース**を検証する」を優先し、面の名前（SOAP / Catalog / cab）はメカニズムの説明で必要な箇所に後置します。読者が覚えるべきは役割名であり、面はその役割が 2026 年時点でどう実装されているかにすぎません。
+これらは特定時点の packaging snapshot であり、Microsoft が同じ外部表現を将来にわたり維持することを保証するものではありません。
 
-**Figure 2 — 三役モデル（Authority / Production / Verification）。**
+## 9. `wsusscn2.cab` — offline applicability と supersedence のコーパス
 
-```
-                 +------------------------------+
-                 |        AUTHORITY SOURCE       |
-                 |        MS-WSUSSS (SOAP)        |
-                 |  the protocol a real WSUS     |
-                 |  server syncs from daily      |
-                 +---------------+---------------+
-                                 |
-                      Digest verification  (SHA-1, schema-independent)
-                                 |  "Catalog is not trusted on faith —
-                                 v   it is SOAP-verified"
-                 +------------------------------+
-                 |       PRODUCTION SOURCE       |
-                 |   Microsoft Update Catalog    |
-                 |  reachable · complete · agent-|
-                 |  drivable · gives URLs+digests|
-                 +---------------+---------------+
-                                 |
-                          Download URL  →  ISO build pipeline
-                                 ^
-                      Applicability / dependency / supersedence
-                                 |
-                 +------------------------------+
-                 |      VERIFICATION SOURCE      |
-                 |        wsusscn2.cab           |
-                 |  offline dependency / applic- |
-                 |  ability / validation database|
-                 +------------------------------+
+### 9.1 何であるか
+
+`[MICROSOFT-DOCUMENTED / CAB-VERIFIED]` `wsusscn2.cab` は、Microsoft の offline Windows Update scan catalog です。本調査では、update identity、applicability、supersedence、package relationship を確認する独立したコーパスとして使用しました。
+
+調査で使用した安定した download entry point:
+
+https://go.microsoft.com/fwlink/?LinkID=74689
+
+### 9.2 安全な取り扱い
+
+2026-06 snapshot を展開すると非常に大きな XML corpus になりました。実務上有効だったルールは次のとおりです。
+
+- 展開前に CAB content を一覧化する。
+- Master XML を全量メモリへ読み込まず stream 処理する。
+- Detail CAB は選択的に展開する。
+- すべての child を一括展開するのではなく、identity / digest を使って revision/file を特定する。
+- 後続解析を正確な snapshot に結び付けられるよう、download した CAB の SHA-256 を記録する。
+
+### 9.3 2026-06 の SafeOS 観測 — 結論を狭く保つ
+
+`[CAB-VERIFIED 2026-06-24]` 取得した 2026-06 `wsusscn2.cab` corpus を網羅的に検索しましたが、Catalog/protocol 調査から独立に解決されていた特定の Server 2022 SafeOS Dynamic Update artifact は見つかりませんでした。
+
+長期的に妥当な結論は、**「`wsusscn2.cab` には Dynamic Update が一切含まれない」ではありません**。証拠から支持される結論は次です。
+
+> 2026-06 snapshot で検証対象とした Server 2022 SafeOS DU は、検索した正確な offline-scan corpus には存在しなかった。したがって、`wsusscn2.cab` がすべての installation-media Dynamic Update artifact を完全に含むと仮定してはならない。
+
+この限定的な表現であれば、その後の発見とも両立し、単一 snapshot の観測を製品全体の普遍則へ拡張する誤りを避けられます。
+
+## 10. Microsoft Update Catalog — 実用的な artifact 解決
+
+### 10.1 なぜ重要か
+
+本調査で確認した範囲では、Catalog は次の解決を行うための、公開された surface として最も実用的です。
+
+```text
+search / KB / product context
+          -> Catalog row (updateID)
+          -> one or more downloadable files
+          -> direct Microsoft CDN URL
+          -> upstream digest metadata
 ```
 
-この分離が表面的でなく決定的である理由は3つあります。
+したがって、自動化された研究 workflow または build workflow における推奨 **artifact-resolution surface** と位置付けられます。ただし、その解釈は独立した source で検証すべきです。
 
-1. **Catalog は唯一の *単一本番ソース（Single Production Source）*。** これがアーキテクチャ上の論拠であり、「到達可能」より強い主張です。本番ソースが有用なのは、パイプラインが必要な **すべて** のラインをそこ *単独* で取得でき、後付けの第2ソースが要らない場合だけです。これを満たすのは Catalog **のみ**：到達可能 *かつ* 全ライン（LCU, SSU, .NET CU, **そして Dynamic Update**）を提供します。SOAP は全ラインを持つが到達不可、cab は到達可能だが Dynamic Update を欠く — どちらも単独で成立しません。ゆえに Catalog は単に *到達可能なソースの一つ* ではなく、**単一本番ソース**として機能できる唯一のソースであり、本番アーキテクチャのデータ依存はちょうど1つで済みます。最小アーキテクチャは偶然ではなく特長です。
-2. **Catalog は信用でなく SOAP 検証済み — クロスソースのプライマリキーで結合。** Catalog が解決した各ラインは、**ファイル Digest（SHA-1, base64）** で [A] オラクルに照合済みです。Digest は単なる整合性チェックサムではなく、**3つの面すべてで共有されるプライマリキー**と捉えるのが適切です — 同じ物理ファイルは、それぞれの包み方に関係なく、SOAP でも Catalog でも `wsusscn2.cab` でも同じ Digest を持ちます。このプライマリキーで照合することで、主張は「Catalog はたぶん正しい」から「Catalog の成果物は、暗号学的に、権威プロトコルが提供する当のファイルと同一である」へ変わります（§12.3）。これが本書最大の保証です。
-3. **Catalog は Dynamic Update を持つ唯一の *到達可能* な面。** `wsusscn2.cab` は設計上 SafeOS DU の系統を欠き（§5.5）、SOAP は持つが到達不可。Catalog はそれを持ち **かつ** 認証不要で到達可能です。ISO が現に必要とする OS ライン（2022/2025 SafeOS DU）にとって、これは単独で決め手であり、事実1が成り立つ具体的理由でもあります。
+### 10.2 Catalog のデータモデル
 
-## 3. 評価マトリクス（判定を好みでなく設計判断にするために）
+`[CATALOG-VERIFIED 2026-06]` 調査で使用した traversal は次の3段階でした。
 
-§2 の比較は単一の「どれが最良か」ランキングではなく、複数の独立軸にわたるスコアです。マトリクスとして並べることで、判定は主観的な好みから、読者が再導出できる再現可能な設計判断に変わります。
+1. `Search.aspx?q=<query>` — update ID、title、Products、classification、date/version/size metadata を含む candidate row。
+2. `DownloadDialog.aspx` — file list、direct CDN URL、file name、SHA-1 digest、および場合によって SHA-256。
+3. `ScopedViewInline.aspx?updateid=<GUID>` — supersedence / KB relationship などの追加 row detail。
 
-| 軸 | 問い | [A] SOAP | [B] `wsusscn2.cab` | [C] Catalog |
+概念的には次の構造です。
+
+```text
+logical update identity
+      |
+      v
+Catalog updateID
+      |
+      v
+files[] = { filename, URL, digest, optional sha256 }
+      |
+      +--> download and local SHA-256
+      |
+      +--> packaging-aware cross-check against independent evidence
+```
+
+### 10.3 HTML と localization も問題の一部である
+
+`[MEASURED 2026-08]` Catalog の display string は localization/request context によって変化し得ます。Title と Classification の表示テキストが複数言語で観測された一方、KB ID、update GUID、file name、その他の構造的 identity field は比較的安定していました。
+
+したがって、次の原則を採用します。
+
+- 英語 display text を universal schema として扱わない。
+- Products、architecture、KB/update ID、file identity、role-specific discriminator を組み合わせて使用する。
+- HTTP status が 200 でも、返された page の意味的妥当性を検証する。
+- engineering decision に使用した raw response を保存する。
+
+### 10.4 「1回の検索」は完全性テストではない
+
+`[MICROSOFT-DOCUMENTED]` Microsoft の Dynamic Update guidance は、1回の Catalog search ですべての package type が表示されるとは限らず、異なる search term が必要になる場合があることを明示的に警告しています。
+
+この点は重要です。本調査自体でも、一時点の検索失敗を Setup Dynamic Update に関する誤った世代仮説へ昇格させてしまい、その後の live Catalog survey によって反証されました。
+
+## 11. Microsoft release information — 独立した LCU calendar evidence
+
+Microsoft release-information page は、Windows Server release に対して公開された LCU/build lineage を確認し、Catalog で選択した LCU が期待する servicing level に対応しているかを検証するために有用です。
+
+本調査の結論は意図的に限定しています。
+
+- release information は **独立した release/build evidence** として使用する。
+- exact artifact resolution には Catalog/package 自体を使用する。
+- いずれか一方を使って他方を循環的に自己検証させない。
+
+## 12. Cross-source identity: hash は物理ファイルの識別子であり、万能な論理キーではない
+
+当初の調査では、同じ物理ファイルを異なる source 間で結合するために SHA-1 Digest を非常に有効に利用しました。その成果自体は正しい一方、以前の文章では適用範囲を広く一般化し過ぎていました。
+
+### 12.1 同一ファイルの場合
+
+SOAP、Catalog、offline metadata が**同じ CAB/MSU object**を記述している場合、hash 一致は、それらが同じ byte 列を指していることの強い証拠です。
+
+### 12.2 Wrapper/container の場合
+
+ある surface が次のような構造を公開し、
+
+```text
+outer-update.msu
+    -> inner-update.cab
+```
+
+別の surface が `inner-update.cab` だけを記述している場合、2つの hash は**異なっていて当然です**。正しい join には、次のような複数要素が必要になる場合があります。
+
+- KB identity
+- Catalog update ID
+- bundle/leaf relationship
+- package manifest identity
+- file name / size
+- 対応する同一物理 sub-artifact の hash
+
+### 12.3 運用上の integrity
+
+Download した file については、upstream surface が SHA-256 を提供するかどうかにかかわらず、local SHA-256 を計算し保存します。これにより、upstream metadata が SHA-1 に依存していたり SHA-256 field を空欄にしていたりしても、耐久性のある local artifact identity を持てます。
+
+---
+
+# PART IV — インストールメディア servicing のメカニズム
+
+## 13. Installation media は相互依存する複数 servicing target の集合である
+
+`[MICROSOFT-DOCUMENTED]` 現在の Microsoft Dynamic Update media guidance は、次を別々の target として明示的に扱っています。
+
+- WinRE（`winre.wim`）
+- operating-system image（`install.wim`）
+- WinPE（`boot.wim`）
+- installation-media file tree（`sources`、boot files、Setup files、および関連 media content）
+
+Primary guidance:
+
+https://learn.microsoft.com/en-us/windows/deployment/update/media-dynamic-update
+
+文書化された sequence には、特に次の操作が含まれます。
+
+- WinRE に対する servicing-stack / LCU servicing
+- WinRE に対する Safe OS Dynamic Update
+- installed OS image に対する LCU servicing
+- WinPE に対する LCU servicing
+- new media に対する Setup Dynamic Update
+- serviced WinPE から media への `setup.exe` / `setuphost.exe` の copy
+- serviced WinPE から media への serviced boot-manager files の copy
+
+これは本調査の中心的な結論、すなわち **正しく更新された media は、image と loose media file を跨いで協調した状態である**ことを強く支持します。
+
+## 14. Dynamic Update の役割
+
+Dynamic Update は、汎用的な1つの「DU」switch ではなく、**目的と target** に基づいて model 化すべきです。
+
+### 14.1 Setup Dynamic Update
+
+役割: media file tree 内の Setup binaries/data と compatibility content を更新する。
+
+Catalog discriminator は release により変化します。Server 2022 era の row について、Microsoft は次の組み合わせを文書化しています。
+
+- `Dynamic Update for Microsoft server operating system, version 21H2` に類似する Title
+- Product `Windows 10 and later Dynamic Update`
+- Description `SetupUpdate`
+
+Server 2025 では、title 自体がより明示的に `Setup Dynamic Update` を識別します。
+
+### 14.2 Safe OS Dynamic Update
+
+役割: SafeOS / recovery environment path、主として WinRE を更新する。
+
+Server 2022 era の row について Microsoft は次を文書化しています。
+
+- Product `Windows Safe OS Dynamic Update`
+- Description `ComponentUpdate`
+
+Server 2025 では title がより明示的です（`Safe OS Dynamic Update ... 24H2`）。
+
+### 14.3 Servicing-stack / cumulative-update content
+
+2021年以降、Microsoft はサポート対象の modern branch において servicing-stack content を cumulative update と広く統合してきましたが、古い media や古い Server release では、依然として明示的な prerequisite が必要になる場合があります。Media builder は、一般化された「SSU は常に embedded である」というルールに依存するのではなく、実際の source-image servicing-stack floor と target package の requirement を評価しなければなりません。
+
+### 14.4 Latest available は必ずしも same month ではない
+
+`[MICROSOFT-DOCUMENTED]` Microsoft は、current LCU と同じ月の SafeOS DU または Setup DU が存在しない場合、その Dynamic Update の最新公開版を使用するよう説明しています。これは **release cadence** と **package role** の重要な違いです。
+
+## 15. Setup Dynamic Update は最新 Server 世代だけの機能ではない
+
+### 15.1 置き換えられた解釈
+
+`[HISTORICAL 2026-06]` 初期の query path では Server 2022 Setup DU が見つからず、Setup DU は実質的に Server 2025 / 24H2 era の構成要素であるという暫定的な記述につながりました。
+
+この解釈は**反証されています**。
+
+### 15.2 後続の Catalog evidence
+
+`[CATALOG-VERIFIED 2026-07/08]` 後続の live Catalog measurement では、調査対象の4世代すべてについて実在する Setup Dynamic Update row を解決できました。観測例は次のとおりです。
+
+- Server 2016 — Setup DU KB5068794 を観測
+- Server 2019 — Setup DU KB5068795 を観測
+- Server 2022 — Setup DU KB5079518 を観測
+- Server 2025 — modern 24H2 naming model 下の Setup DU row
+
+耐久的な結論は、各 branch が毎月新しい Setup DU を必ず公開する、というものではありません。次が結論です。
+
+> **Setup Dynamic Update は「Server 2025 専用機能」ではありません。利用可能性と newest applicable row は servicing branch と日付に基づいて解決する必要があります。**
+
+この訂正は、本調査記録を旧 implementation matrix から独立させておくべき主要な理由の1つです。
+
+## 16. SafeOS Dynamic Update: publication、discovery、applicability を分離する
+
+SafeOS DU にも同じ注意が必要です。過去の resolver や baseline が row を含んでいなかったとしても、Catalog にはその row が存在する場合があります。
+
+したがって、本調査では次の3つの問いを分離します。
+
+1. **Publication:** Microsoft はその servicing branch 用の SafeOS DU row を公開しているか。
+2. **Discovery:** Query と discriminator は正しい row を発見したか。
+3. **Applicability/use:** その package は再構築対象の specific source media と target image に適切か。
+
+Project 固有の「allowed/forbidden Kind matrix」は publication semantics の証拠ではありません。後続の live Catalog 調査により、generation-level の forbid が古い仮定を固定化する場合があることが判明しました。
+
+## 17. Servicing-stack prerequisite: source media の古さが重要
+
+### 17.1 Server 2016 の standalone SSU 挙動
+
+`[MEASURED / CATALOG-VERIFIED]` 2026年の調査期間において、テストした source media/current LCU の組み合わせでは、Server 2016 は依然として個別の servicing-stack prerequisite を必要としました。SSU が欠けると servicing path で `0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED` が発生しました。
+
+### 17.2 Server 2022 bridge-LCU incident
+
+`[MEASURED 2026-07-06]` 古い servicing stack を持つ Server 2022 Evaluation image に、当時の current LCU を直接適用すると失敗しました。調査により intermediate cumulative-update floor が必要であることが特定されました。Bridge LCU を先に適用すると image の servicing stack が十分に進み、その後 current LCU を適用できました。
+
+この campaign で記録された measured floor は servicing stack `20348.1960` であり、2026 era の current LCU 適用前に 2023-09 cumulative update KB5030216 を適用することで満たされました。
+
+`[MEASURED 2026-07-07]` 同じ floor 問題は、その後 `boot.wim` servicing 中にも再現し、prerequisite が単なる `install.wim` 固有の特殊性ではなく、**source-image servicing property** であることを示しました。
+
+### 17.3 Engineering implication
+
+Current LCU がその OS release に対する正しい最新 LCU であっても、古い installation media に直接適用できるとは限りません。Preflight では次を考慮する必要があります。
+
+```text
+source image build / servicing stack
+                +
+ target update prerequisite floor
+                +
+ package generation / checkpoint requirements
+```
+
+## 18. `boot.wim`: 普遍則ではなく、実測かつ package-aware な servicing として扱う
+
+### 18.1 古い「LCU を絶対に適用しない」という記述が強すぎる理由
+
+以前の調査では、特定の cumulative-update payload を一部 WinPE image に強制適用しようとした際に `0x80070032` と `0x8007371b` が発生しました。これにより、`boot.wim` には LCU servicing を行うべきではない、という暫定的な一般化が生まれました。
+
+しかし現在の Microsoft guidance は WinPE（`boot.wim`）への cumulative-update servicing を明示的に含み、その後、得られた Setup binary と boot-manager binary を media へ戻す手順を示しています。したがって、この普遍的禁止論は支持できません。
+
+### 18.2 実験が実際に支持していること
+
+`[MEASURED 2026-07]` Servicing behavior は、Server source media と update generation の組み合わせにより異なりました。
+
+- 一部の WinPE image は cumulative servicing path を受け入れた。
+- Campaign で使用した Server 2019 source media は、試行した LCU path を `0x80070032` で拒否した。
+- 古い Server 2022 media には、OS image で観測したものと同じ source prerequisite / bridge logic が必要だった。
+- Server 2025 では checkpoint/UUP package-layout constraint が導入され、package placement と invocation semantics が重要になった。
+
+耐久的な正しい記述は次です。
+
+> **WinPE servicing は release-aware かつ package-aware です。Microsoft が文書化した media-update sequence を baseline とし、実際の source media 上で applicability と prerequisite を検証してください。単一世代の結果から普遍的な「常に」「絶対にしない」ルールを符号化してはいけません。**
+
+## 19. Setup binary consistency — 実測した root cause と Microsoft が文書化した invariant
+
+これは、本調査活動全体の中でも特に強い知見の1つです。Troubleshooting と Microsoft guidance の双方から独立に成立しました。
+
+### 19.1 Failure record
+
+`[MEASURED 2026-07-11]` `boot.wim` を当時の current level まで servicing した Server 2016、Server 2022、Server 2025 の rebuilt ISO は、Hyper-V 上で edition 選択前に次の message で失敗しました。
+
+> `A media driver your computer needs is missing.`
+
+当初、この failure は ISO/UDF または storage-driver corruption に見えました。失敗中の WinPE session でこれらの仮説を検証し、除外しました。
+
+- 約 8.4 GB の `install.wim` は mounted ISO から読み取り可能だった。
+- `diskpart` は target disk を online として認識した。
+- したがって、基本的な UDF readability も storage enumeration も failure を説明できなかった。
+
+その後の直接比較により、Setup engine が mixed-version であることが判明しました。
+
+| File | Serviced WinPE (`X:\sources`) | Media (`D:\sources`) |
+|---|---:|---:|
+| `setup.exe` | 333,304 bytes, 2026-07-08 | 333,184 bytes, 2026-01-15 |
+| `setuphost.exe` | 910,824 bytes | 910,800 bytes |
+
+この test set では Server 2019 が例外でした。その WinPE は同じ新しい servicing state へ移行していなかったため、Setup engine と loose media file が偶然整合したままだったからです。
+
+### 19.2 Microsoft による独立した確認
+
+`[MICROSOFT-DOCUMENTED]` Microsoft Dynamic Update media guidance は、serviced WinPE から `setup.exe` と `setuphost.exe` を保存し、Setup DU overlay 後に media へ copy するよう指示しています。Microsoft は、これらの binary が同一でない場合 Windows Setup が installation 中に失敗すると明示的に警告しています。
+
+Primary source:
+
+https://learn.microsoft.com/en-us/windows/deployment/update/media-dynamic-update
+
+### 19.3 耐久的な結論
+
+**`boot.wim` を servicing すると Setup engine が変化する場合があります。Rebuilt media は、どちらか一方を上書きし得るすべての操作が完了した後、WinPE Setup binaries と media `sources\` Setup binaries を同期した状態に保つ必要があります。**
+
+これは implementation-specific phase requirement ではありません。Media-consistency invariant です。
+
+## 20. Setup DU overlay と Setup-binary synchronization は別の操作
+
+Microsoft が文書化した順序は重要です。
+
+```text
+service WinPE
+   |
+   +--> save Setup binaries / boot manager
+   |
+apply Setup Dynamic Update to media
+   |
+   v
+replace media Setup binaries with saved serviced-WinPE copies
+   |
+   v
+replace boot-manager files with serviced-WinPE copies
+```
+
+つまり「Setup DU を適用する」ことは、**「Setup binaries を coherent にする」ことと同義ではありません**。Overlay だけを行う実装では、writer order が誤っていれば、前後の処理によって version mismatch が残る可能性があります。
+
+## 21. `install.wim` と .NET servicing
+
+### 21.1 複数の image index
+
+Server ISO には複数の edition/index が含まれる場合があります。1つの index を servicing しただけでは、他の index も更新されたことにはなりません。Validation では、対象とするすべての index を列挙して確認すべきです。
+
+### 21.2 .NET は runtime-aware である
+
+Catalog は、複数の runtime-specific child file を持つ umbrella .NET Framework CU を公開する場合があります。関連する leaf は、source image にどの .NET runtime が存在するかによって異なります。
+
+本調査では、典型的な失敗を2種類確認しました。
+
+- umbrella KB を選択したものの、N-1 個の child file を黙って捨ててしまう。
+- その Server 世代の in-media runtime ではない、より新しい runtime leaf を選択してしまう。
+
+耐久的なルールは、resolution の段階ですべての candidate child artifact を保持し、applicability/runtime selection を明示することです。
+
+## 22. Server 2025 checkpoint cumulative update と WIM-format packaging
+
+`[MEASURED / MICROSOFT-DOCUMENTED]` Server 2025 は、本調査期間に重要な packaging change を導入しました。
+
+- checkpoint cumulative-update behavior
+- WIM-format MSU / UUP-style payload composition
+- target CU と必要な checkpoint を同じ package folder に置き、DISM が prerequisite を正しく発見できるようにする必要がある package layout
+- composition と target OS version を記述する CompDB metadata
+
+現在の Microsoft Dynamic Update guidance は、Windows 11 24H2 および Windows Server 2025 以降、latest cumulative update が1つ以上の prerequisite checkpoint cumulative update を必要とする場合があり、target CU を適用すると DISM が package folder から必要な checkpoint を発見することを説明しています。
+
+したがって、**checkpoint を「常に先に強制適用すべき generic standalone SSU」として model 化するのは安全ではありません**。
+
+---
+
+# PART V — Secure Boot / PCA2023 調査
+
+## 23. Secure Boot の media state が OS patch state と別である理由
+
+Secure Boot migration には、少なくとも4つの独立して観測可能な layer があります。
+
+1. firmware trust variables（`PK`、`KEK`、`db`、`dbx` と、それらが形成する実効的な certificate state）
+2. Windows boot-manager binaries とその signing chain
+3. bootable-media UEFI files / El Torito boot image
+4. installed OS の Secure Boot servicing state
+
+ある1つの layer の結果だけでは、他の layer を自動的に証明できません。
+
+## 24. Microsoft 2011-to-2023 certificate transition
+
+`[MICROSOFT-DOCUMENTED]` Microsoft の 2011 Secure Boot certificate は、2026年に expiration window へ入ります。移行に関する Microsoft guidance では、firmware 内の trust material を更新することと、新しい 2023 trust chain で署名された boot manager の双方が必要です。
+
+関連する Microsoft source は次のとおりです。
+
+- Enterprise deployment guidance for CVE-2023-24932:  
+  https://support.microsoft.com/en-au/topic/enterprise-deployment-guidance-for-cve-2023-24932-88b8f034-20b7-4a45-80cb-c6049b0f9967
+- Windows Secure Boot certificate expiration and CA updates:  
+  https://support.microsoft.com/en-us/servicing/os/secure-boot/2025/06/windows-secure-boot-certificate-expiration-and-ca-updates
+- Secure Boot certificate updates guidance for IT professionals and organizations:  
+  https://support.microsoft.com/en-us/servicing/os/secure-boot/2025/06/secure-boot-certificate-updates-guidance-for-it-professionals-and-organizations
+- Updating Windows bootable media to use the PCA2023-signed boot manager:  
+  https://support.microsoft.com/en-us/servicing/os/windows/2025/02/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager
+- Microsoft Secure Boot Objects repository:  
+  https://github.com/microsoft/secureboot_objects
+
+## 25. `_EX` / PCA2023-signed boot binaries
+
+`[MEASURED]` 本調査では、対象 release の servicing 済み media/image において、PCA2023-signed boot binary が `_EX` 形式の directory に staging されることを確認しました。その来歴は release に依存します。古い base media では、十分な cumulative servicing を行って初めて配置される場合がある一方、新しい media では必要な asset が最初から存在する場合があります。
+
+Verification 上の重要な教訓は次のとおりです。
+
+- `Get-AuthenticodeSignature` は immediate signer information を公開する。
+- PCA2023 trust の検証では immediate signer string だけを検索するのではなく、X.509 chain と実際の boot-critical target を確認すべきである。
+- bootable-media conversion は `install.wim` 内部だけではなく、最終的に出力された boot file 上で検証しなければならない。
+
+## 26. Static verification と boot verification
+
+有用な evidence ladder は次のように表現できます。
+
+```text
+file present
+  < hash/size identity
+  < Authenticode signature valid
+  < signer chain reaches intended 2023 trust
+  < ISO boot structure contains intended file
+  < Hyper-V Gen2 Secure Boot succeeds
+  < Windows Setup completes
+  < installed-OS evidence confirms expected state
+  < representative physical-firmware validation
+```
+
+上位の各段階は、下位の段階だけでは答えられない問いに答えます。
+
+過去の test campaign では、関連する media fix の後、選択した rebuilt Server 2016/2022/2025 media が Hyper-V Generation 2 上で正常に boot/install できました。これらの結果は**日付付き experimental provenance**として保持されますが、将来のすべての monthly ISO やすべての physical platform が検証済みであるという主張へ一般化してはいけません。
+
+---
+
+# PART VI — WIM metadata のメカニズム
+
+## 27. Image metadata が独立した調査テーマになった理由
+
+Offline servicing は WIM 内部の package/file state を変更しますが、ISO consumer が期待する形で、すべての human-facing timestamp や edition-list metadata field を更新するとは限りません。
+
+Windows Setup や Explorer が、最終適用 package の日付ではなく WIM XML 由来の metadata を表示する場合があるため、この差は実用上問題になります。
+
+## 28. 実測した WIM behavior
+
+`[MEASURED]` 本調査では次を確認しました。
+
+- WIM image XML は `CREATIONTIME` や `LASTMODIFICATIONTIME` などの field を持つ。
+- servicing によって、これらの field が rebuilt monthly ISO に望ましい presentation date へ更新されることは保証されない。
+- export/capture behavior により一部 metadata が変更される場合はあるが、必ずしも意図する意味上の日付になるとは限らない。
+- resource encoding/size/descriptor constraint を守り、WIM integrity table を再構築するなら、direct resource editing によって選択した日付を永続化できる。
+
+重要な分離は次です。
+
+> **Payload servicing state と presentation metadata は別の state variable です。**
+
+Display metadata の変更を、payload が正常に servicing されたことの証拠として使用してはいけません。Payload verification は独立して行う必要があります。
+
+## 29. WIM metadata を書き換える場合に推奨する証拠
+
+Workflow が WIM presentation date を意図的に書き換える場合、少なくとも次を保持します。
+
+- edit 前 WIM hash / metadata dump
+- target date と timezone convention
+- 変更した exact field
+- edit 後 WIM integrity verification
+- edit 後の `Get-WindowsImage` / equivalent metadata readback
+- edition index と payload hash/content が、それ以外の点で期待どおり保たれている証拠
+
+---
+
+# PART VII — ISO reconstruction と boot-media mastering
+
+## 30. `oscdimg` は trust boundary の一部である
+
+再構築した Windows installation tree は、BIOS/UEFI の期待と互換性のある boot structure で再出力する必要があります。Microsoft の `oscdimg.exe` は、BIOS と UEFI の boot entry を使用する multi-boot media をサポートしています。
+
+Primary Microsoft reference:
+
+https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/oscdimg-command-line-options
+
+Microsoft が文書化する典型的な multi-boot pattern は、`-bootdata` を通じて `etfsboot.com` と `efisys.bin` の双方を使用します。
+
+したがって本調査では、次を証拠として記録する価値があるものと扱います。
+
+- 使用した `oscdimg.exe` の exact identity/version
+- `-bootdata` に指定した boot image path
+- ISO volume label
+- 生成 ISO の SHA-256
+- ISO の extraction/readback
+- staging tree と emitted ISO の boot-critical file identity
+- 必要に応じた UEFI/Secure Boot boot test
+
+## 31. Setup failure を証拠なしに ISO corruption と診断しない
+
+2026-07-11 incident が典型例です。画面上の「media driver」message は storage または media corruption を示唆しましたが、WinPE 内の直接検査では次が確認されました。
+
+- 大きな `install.wim` を DVD から読み取れた。
+- target disk は認識されていた。
+- 実際の差分は mixed-version Setup binaries だった。
+
+一般的な教訓は、ISO mastering logic を変更する前に、失敗環境を instrument し、競合する仮説を反証することです。
+
+---
+
+# PART VIII — 日付付き世代間観測
+
+## 32. Packaging と servicing の snapshot
+
+次の表は、2026年の調査期間に**観測された**差異を要約します。意図的に記述的な表であり、永久的な support matrix ではありません。
+
+| 項目 | Server 2016 | Server 2019 | Server 2022 | Server 2025 |
 |---|---|---|---|---|
-| **到達可能性** | ビルド環境（エージェントのサンドボックス）から、特権サイドチャネル無しで取得できるか? | ✗（egress で TLS-MITM; Windows ホスト要） | ✓（CDN ダウンロード） | ✓（HTTP, 認証不要） |
-| **機械可読性** | レスポンスは通常ツールで解析できる安定した形か? | △（不透明な SOAP blob; 空 500 フォルト; `?wsdl` 無し） | ✓（XML だが 25 GB） | ✓（HTML, 予測可能なフォーム） |
-| **再現性** | 第三者が再実行して同一結果を得られ、全入力を固定可能か? | ✗（ライブのプロトコル/アンカー状態） | ✓（コンテンツアドレス可能; SHA-256 で固定） | ✓（全 HTML/HEAD レスポンスをキャッシュ） |
-| **自律エージェント親和性** | エージェントが反復的に *扱える* か（query → read → adjust → retry を HTTP/regex/CAB ツールのみで）? | ✗ | △（オフラインだが巨大; 素朴な扱いで停止） | ✓ |
-| **網羅性**（**Dynamic Update** 含む） | ISO が必要とする *すべて* のラインを公開しているか? | ✓ | ✗（クラシックOSの SafeOS DU 無し） | ✓ |
-| **安定性** | 識別子は Microsoft のリネームを越えて持続するか? | ✓（GUID） | ✓（GUID） | △（タイトル文字列はリネームする; **GUID/KB は不変** — §6.1） |
-| **クロス検証能力** | スキーマ非依存のキーで独立ソースと照合できるか? | n/a（自身がオラクル） | ✓（digest ↔ SOAP） | ✓（digest ↔ SOAP） |
-| **→ Decision（帰結する役割）** | 上記スコアが各面に確定させるもの | **権威ソース**（オラクルのみ） | **検証ソース**（依存/検証DB） | **本番ソース** ✅（単一・自律ビルド） |
+| Base build family | 14393 | 17763 | 20348 | 26100 |
+| 観測した servicing-stack model | standalone SSU が依然関連 | combined/embedded SSU model | combined LCU。古い media は bridge prerequisite が必要になり得る | checkpoint cumulative-update era |
+| 観測した LCU container behavior | classic large MSU/CAB | combined/UUP-derived classic container | combined/UUP-derived container | WIM/UUP/checkpoint packaging |
+| .NET update topology | runtime-specific behavior。古い media では差異あり | umbrella/child leaves | umbrella/child leaves | UUP-era .NET composition |
+| Setup DU publication | 後続 Catalog survey で row を確認 | 後続 Catalog survey で row を確認 | Microsoft が 21H2 Setup DU を文書化。Catalog row も観測 | 24H2 Setup DU として明示的に文書化 |
+| SafeOS DU | 世代単位で禁止せず publication/discovery を実測する必要あり | 同じ原則 | 明示的に文書化。2026-06 artifact を検証 | 明示的に文書化。UUP-era artifact を検証 |
+| WinPE/boot servicing | actual applicability/prereq の test が必要 | ある source-media campaign で LCU path が `0x80070032` | 古い media で servicing-stack floor problem を再現 | checkpoint/package-placement semantics が重要 |
+| PCA2023 asset provenance | 後続 servicing により配置され得る | 後続 servicing により配置され得る | media/update floor に依存 | 新しい media ほど staged asset を含む可能性が高い |
 
-マトリクスの読み方：**[C] は、無人ビルドに効くすべての軸 — 到達可能性、機械可読性、再現性、エージェント親和性、網羅性、クロス検証 — で良好な唯一の面**です。**[A]** は *権威*（この表とは直交する軸）で最高ですが、到達可能性とエージェント親和性で明確に落ちます — だからこそオラクルであってソースではありません。**[B]** は到達可能・再現可能・クロス検証可能ですが、網羅性（Dynamic Update 無し）に落ち、エージェント親和性も限界的です — だからこそ検証DBであって本番ソースではありません。
+この表は**command matrix ではありません**。誤った一般化を防ぐために存在します。
 
-マトリクスは記述で終わらず **決定**で終わります。最下行はスコアが強制する設計上の結論です。ビルドパイプラインが依存する全軸をクリアするのは **[C]** だけなので、これが **本番ソース**になります。**[A]** は権威で勝つが到達可能性/エージェント親和性に落ちるので **権威/オラクル**に限定。**[B]** は到達可能でクロス検証可能だが網羅性に欠けるので **検証ソース**に落ち着きます。§2.1 の役割は、このマトリクスに先んじて主張したものではなく、ここから *導出* したものです。
+## 33. 重要な superseded conclusion
 
-「自律エージェント親和性」軸について一言 — これは最も陳腐化しにくい軸だからです。Catalog の価値は、単に LLM が *読める* ことではなく、自律エージェントが **パイプライン全体**を、人手も特権サイドチャネルも無しに走らせられることにあります。
+以下の旧記述は、後続証拠により訂正されたものの、有用な仮説であったため意図的に保持します。
 
-```
-agent → HTTP GET Search.aspx → parse HTML → updateID
-      → HTTP POST DownloadDialog.aspx → parse JS → {URL, SHA-1 digest}
-      → HTTP GET CDN → download .msu/.cab → verify SHA-1
-      → DISM offline servicing → rebuild ISO
-```
-各矢印は通常の HTTP/parse/hash 操作です。基準を（狭い「LLM 親和性」ではなく）**Autonomous-Agent-Friendly** と表現することで、エージェントのツールが成熟しても結論は有効であり続けます。陳腐化しにくいのは *技術* 用語でなく *能力* 用語です。「LLM」「AI」は数年で呼び替えられますが、**Autonomous Resolver** が駆動する **Autonomous Build Pipeline** がメディアの **Autonomous Build** を行う、という記述はワークフロー自体の記述であり、何が走らせるかに依存しません。それら持続的な用語で言えば、Catalog の決定的特性は：完全に **自律的なビルドパイプライン**が端から端まで — 発見・解決・ダウンロード・検証・適用 — を、人手も特権サイドチャネルも無しに所有できる唯一の面である、ということです。
-
-### 3.1 アーキテクチャ意思決定記録（ADR サマリ）`[STABLE]`
-
-ソフトウェアアーキテクトが1ブロックで決定を読めるよう、標準的な ADR の形で示します。
-
-- **Context（背景）。** 自律パイプラインが、パッチ適用済み Windows Server LTSC ISO を、オフラインかつ再現可能にビルドする必要がある。パッチの識別子と依存関係は、到達可能性・網羅性・機械可読性で異なる複数の Microsoft の面に存在する（§2）。ビルド環境は、Windows ホストも特権サイドチャネルも持たない無人のエージェントサンドボックスである。
-- **Alternatives considered（検討した代替案）。** **(A) MS-WSUSSS SOAP** — 最も権威があり網羅的。だがサンドボックスから到達不可で再現困難。**(B) `wsusscn2.cab`** — 到達可能・再現可能・digest 一致。だが設計上 Dynamic Update を欠き、数GB規模。**(C) Microsoft Update Catalog** — 認証不要で到達可能、網羅的（Dynamic Update 含む）、エージェント駆動可能、digest 検証可能。（§3 のマトリクスで7軸採点済み。）
-- **Decision（決定）。** **本アーキテクチャは Microsoft Update Catalog を単一の本番ソースとして選定する。** 理由は *それが、到達可能性・網羅性・機械可読性を同時に満たす唯一の代替案 — すなわち **単一本番ソース**として機能できる唯一の選択肢 — でありながら、権威に対して暗号学的に検証可能だからである*。SOAP は **権威ソース**（オラクル）として、`wsusscn2.cab` は **検証ソース**として残す。
-- **Consequences（結果）。** *正の側面:* 本番アーキテクチャのデータ依存はちょうど **1つ**（最小アーキテクチャ）。解決された全成果物は Digest プライマリキーで権威に対し **証明**される。パイプライン全体が自律エージェント駆動可能。*負/受容するコスト:* Catalog は HTML（regex パーサーを隔離・保守する必要、§6.1）。タイトル文字列は OS 世代でリネームする（GUID/KB 不変で緩和）。クラシックOSの Dynamic Update は Catalog に *のみ* 存在するため、その1ラインにオフラインのフォールバックは無い。*残課題:* Secure Boot / `_EX` メディア作業（§8）は **`[DRAFT]`** で、同じ検証水準にはまだ達していない。
-
----
-
-# PART II — 技術的裏付け（各面がその評価を得た理由）
-
-この Part は Part I の「なぜ」です。判定を受け入れる読者は Part IV へ飛んで構いません。受け入れない読者は、各面のデータモデルをここで確認してください。
-
-## 4. [A] MS-WSUSSS — 権威あるオラクル（そしてなぜソースになれないか）
-
-### 4.1 正体と、アクセスの壁
-
-MS-WSUSSS は Microsoft の **サーバー間同期** SOAP プロトコル（「USS」/ upstream-server-sync 面）です。下流の WSUS サーバーがこれを呼んで更新カタログ全体を取得します。実在のクライアントOSは兄弟の **MS-WUSP** クライアント-サーバープロトコルを使います。いずれも完全かつ公開で仕様化されています（全リクエスト形・型・フィールド・シーケンス）。エンドポイント（`sws.update.microsoft.com`, `fe2cr.update.microsoft.com` …）は実働の本番サーバーで、実在の WSUS サーバーが毎日同期しています。
-
-この「公開仕様＋呼び出し可能エンドポイント＋実証済みサーバー」の三点が **クライアント先行ルール**の根拠です。観測される障害は既定では *こちらの* リクエストの欠陥であって、サーバーの制限ではありません。同時にアクセス判定の根拠でもあります。プロトコルは動くが、**ここからは動かない**。エージェントのサンドボックスは `sws` への TLS ハンドシェイクを完了できません — egress ゲートウェイが上流 TLS-MITM を行い、こちらのリクエストが送られる前に証明書検証が失敗します。Microsoft ルートをコンテナに取り込んでも直りません。よってメタデータ側は **Windows ホスト**（PowerShell 5.1, ja-JP）を要し、一方 **ペイロード CDN**（`dl.delivery.mp.microsoft.com`、`*.microsoft.com` に一致）はサンドボックスから到達可能 — メタデータは取れなくとも、小さなペイロードはコンテナ内で取得し `cabextract` できます。
-
-### 4.2 データモデル：bundle → leaf → payload
-
-`[VERIFIED]` WSUSSS 宇宙の各更新は3層オブジェクトです。
-
-- **Bundle** — `<Categories>`（Product GUID と Classification GUID）、`<Prerequisites>`（適用性 detectoid）、supersedence を持つ。これが *選択* する単位（「最新の live な Server 2025 Security バンドル」）。
-- **Leaf** — bundle の子（`BundledLeaf` / 逆方向 `BundledBy`）。実際の `<PayloadFiles>` と詳細な適用性を持つ。
-- **Payload files** — 具体的な `.cab` / `.msu` / `.psf`。各々 **Digest（SHA-1, base64）**・Size・解決可能なダウンロードURLを持つ。
-
-識別キーは `UpdateID`（GUID）+ `RevisionNumber`。**Digest はスキーマ非依存の結合キー**で、各面が物理ファイルをどう包んでも、[A]/[B]/[C] を横断して同一ファイルを特定できます。
-
-### 4.3 ハンドラ分類とエラ（era）モデル
-
-`[CONFIRMED-EMPIRICAL]` この面は3つの更新 **ハンドラ**を露出し、パッチラインは世代をまたいでそれらを移動します — 4つのOSに関する最重要の構造事実です。
-
-- **`UpdateHandlers/Cbs`** — 2016/2019/2022 のレガシー LCU / SSU / .NET。適用性は完全な CBS コンポーネントツリー（2016 で豊富、2022 で薄くなる）。
-- **`UpdateHandlers/OSInstaller`** — UUP（2025）：LCU・.NET・SafeOS DU。適用性は `ProductReleaseInstalled` + `DeviceAttribute`（薄い SOAP）に **CompDB**（§4.5）。
-- **`UpdateHandlers/CommandLineInstallation`** — **2022 SafeOS DU のみ**（レガシー DU モデル）。`HandlerSpecificData` は `InstallCommand Program="Windows10.0-KB5094157-x64.cab"`。適用性は自明（`IsInstalled=False` / `IsInstallable=True`）。DU は稼働中OSに依存せず DISM がセットアップメディア/WinRE へ無条件に適用するため。
-
-### 4.4 世代をまたぐ SSU と .NET — 「3つのエラ」パッケージング
-
-`[CONFIRMED-EMPIRICAL]` SSU の *パッケージ自体* は世代間で一貫します（`Handler=Cbs`、`selfUpdate="true" permanence="permanent"`、ペイロードは `.cab` + express/`.psf`）。変わるのは **パッケージングの形**です。
-
-| OS | SSU の配信 | SSU ビルド（2026-06） | LCU の servicing-stack floor |
-|---|---|---|---|
-| 2016 | **スタンドアロン**（独自 bundle/leaf, `KB5094141`） | 14393.9220 | 14393.7692（実値, `installerAssembly`） |
-| 2019 | LCU leaf に **埋め込み**（`KB5094143`） | ~17763.8880 | 17763.2090（実値） |
-| 2022 | LCU leaf に **埋め込み**（`KB5094147`） | 20348.5251 | プレースホルダ `6.0.0.0`（実値は埋め込みサブパッケージのみ） |
-| 2025 | **バンドルファイル** — LCU メガペイロード内の UUP checkpoint（`SSU-26100.32985`） | 26100.32985 | n/a（leaf に CBS floor 無し; checkpoint を LCU 本体より先に適用） |
-
-`0x800f0823 CBS_E_NEW_SERVICING_STACK_REQUIRED` 失敗は適用時の **数値バージョン比較**です。CBS はイメージの現行 servicing-stack バージョンを LCU の必要 floor と比較します。*実* floor を `installerAssembly` で宣言するのは **2016 と 2019** のみ。それを先に満たす *スタンドアロン* SSU を公開するのは **2016** のみです。（2019 の floor は LCU に埋め込まれた SSU で満たされます。）.NET も同じ legacy→UUP 勾配に従います。2016/2019/2022 は `Handler=Cbs` で単一の `NDP48`/`NDP481` cab、2025 は `Handler=OSInstaller` で小さな `DotNetServicingCompDB_*.cab` + NDP481 cab。
-
-### 4.5 2025 UUP CompDB 適用性モデル
-
-`[VERIFIED]` 2025 では深い適用性が **アセンブリ単位の CBS ツリーではなく**、**Composition Database（CompDB）**、スキーマ `http://schemas.microsoft.com/embedded/2004/10/ImageUpdate` — DISM `/Apply-Image` が使う当のイメージ合成システム — です。小さな CompDB cab（~11 KB）は CDN 到達可能でサンドボックス内で `cabextract` できます。各 CompDB は、更新クラス（`Type` = Standalone / BuildUpdate; `Feature Type` = **GDR** / **SetupDynamicUpdate** / **SafeOSUpdate**）、適用元ビルド（`OSVersion`）と生成ビルド（`TargetOSVersion`）、パッケージ＋ペイロード（cab + hash）を述べます。2025 ではこのモデルが LCU / .NET / Setup DU / SafeOS DU で統一されます。**SSU には CompDB が無く**、直接の checkpoint ペイロードとして配信され、（あらゆるエラと同様に）自己更新します（selfUpdate/permanent）。
-
-2025 限定の注記：**Setup DU は 23H2/24H2 エラの構成物**です。Server 2022 には Setup DU が **存在しません**（catalog 確認済み: 21H2 の Setup DU 件数 = 0）。その唯一の Dynamic Update は SafeOS DU です。よって 2022 の「Setup DU」マトリクスセルは未取得ではなく N/A です。
-
-### 4.6 [A] の結論 — そして、なぜ SOAP はそれでも不可欠だったか
-
-[A] は **完全で権威あるモデル**と、全世代・全ラインの ground-truth digest を与えます。オラクルとして代替不能です。しかしエージェントから到達不可、Windows ホストを要し、再現困難 — ゆえに本番ソースにはなれません。そのデータは、[B] と [C] を検証する per-OS `dataset/<os>.json` answer-key として生き続けます（§12）。
-
-**なぜ SOAP はそれでも必要だったか。** Catalog を本番ソースに選んだことで、SOAP 作業が後から見て不要に見えるかもしれません — そうではありません。Catalog は到達可能で網羅的ですが、**自分自身を検証できません**。返したファイルがその KB の *正準的* 成果物か、ある行の `updateID` が本当の WSUS バンドル識別子か、を Catalog 内部の何も教えてくれません。それに答えられるのは独立した権威面だけで、SOAP がその面です。依存はこう走ります。
-
-```
-Catalog がファイルを解決  →  (Catalog 単独では正準性を証明できない)
-        │
-        ▼
-SOAP オラクルの Digest  ==  Catalog の Digest      →  証明完了
-```
-
-ゆえに SOAP は、本番では **消費されない**にもかかわらず、**研究/検証フェーズでは不可欠**でした。§12.3 の各 Catalog 結果を *仮定* でなく *証明済み* と述べられるのは SOAP のおかげです。正しい読み方は「SOAP は使えないと判明した」ではなく、「SOAP は Catalog を信頼できるものにした計器であり、その役目を果たして本番経路から退いた」です。これはまさに §2.1 の Authority 対 Production の分離を、SOAP の側から見たものです。
-
-## 5. [B] `wsusscn2.cab` — オフライン依存関係DB（強力な次点、一次ではない）
-
-### 5.1 正体と、安全な取り扱いの問題
-
-`wsusscn2.cab` は **Windows Update のオフライン適用性スキャンカタログ** — Windows Update Agent がマシンをオフラインでスキャンする際に使うファイルです。約 650 MB の単一 CAB で、おおむね月2回再公開され、Windows Update CDN から認証不要でダウンロードできます。アクセス軸で [A] とは正反対：オフライン・静的・コンテンツアドレス可能・エージェント解析可能です。
-
-難点は規模です。展開すると 75 個の detail cab にわたる **25 GB** の XML になります。素朴な扱い（全ロード、`cat`、エディタで開く）は確実にエージェントのコンテキストを枯渇させ、セッションを停止させます。譲れない規律（すべて **MUST**）：抽出前に一覧する、選択的に抽出する、`lxml.iterparse` / `XmlReader` でストリームする、Digest で特定する、そして detail cab を一括抽出 **MUST NOT**。（§11 のリファレンス実装がこれをコード化しています。）
-
-### 5.2 物理構造：2層、RevisionId シャーディング
-
-`[CAB-VERIFIED 2026-06-24]`（スナップショット SHA-256 `5b075a6d…eec122`, 649,341,212 B, package.xml `CreationDate 2026-06-09`）：
-
-```
-wsusscn2.cab  (76 top-level entries)
-├── index.xml          <CABLIST>: RevisionId → どの packageN.cab か (RANGESTART 経由)。二分探索可能。
-├── package.cab  → package.xml = MASTER XML (114 MB)
-│      <OfflineSyncPackage PackageVersion=1.1 ProtocolVersion=1.0 xmlns=…/OfflineSync>
-│        <Updates>      <Update RevisionId=…> × 136,478 </Updates>
-│        <FileLocations><FileLocation Id="<digest>" Url="…"/> × 97,339</FileLocations>  ← トップレベル1セクション
-└── package2.cab … package75.cab   = DETAIL cabs; 計 136,478 個の `c/<RevisionId>` (Updates と 1:1)
-```
-
-Master XML のルート要素は **`<OfflineSyncPackage>`**、名前空間は `http://schemas.microsoft.com/msus/2004/02/OfflineSync` — 「offline sync package」はこの形式に対する Microsoft 自身の名称で、`wsusscn2.cab` は単なる配布ファイル名にすぎません。75 個の detail cab への分割は **コンテンツでサイズ調整した RevisionId 範囲シャーディング**です。`index.xml` の `<CABLIST>` が各 `packageN.cab` に連続した RevisionId 範囲を割り当て、蓄積コンテンツが新シャードを要する所に境界が来ます。`CreationDate ↑ ⇒ RevisionId ↑ ⇒ 後ろの cab` なので、**全OSの当月パッチセットは常に最新の 1〜2 cab に着地**します（本スナップショットでは package74/75）。
-
-### 5.3 キー/識別モデル — cab は [A] とどう違うか
-
-`[CAB-VERIFIED 2026-06-24]` cab は [A] と同じデータを別の形で持ち、その差分が肝心です。
-
-- **識別キー = `RevisionId`（int）。** 全クロスリンクがこれを使う（`<BundledBy><Revision Id=…>`, `<SupersededBy><Revision Id=…>`）。（`UpdateId`+`RevisionNumber` も存在するが、リンクは RevisionId 経由。）
-- **ファイルキー = Digest（SHA-1, b64）。** leaf の `<PayloadFiles><File Id="<digest>"/>` が、単一トップレベル `<FileLocations>` セクション経由で URL に解決される。**すべてを Digest で結合する。**
-- **[A] と方向が反転。** SOAP は bundle に順方向 `BundledLeaf` / `SupersededIds` を与える。cab の **Master** は対象に **逆方向** `BundledBy` / `SupersededBy` を、**順方向** `BundledUpdates` / `SupersededUpdates` は per-package **detail** cab に置く。
-- **Master 子要素に名前空間プレフィックス無し**（既定 xmlns）。SOAP は `upd:` を使った。
-- **Master は `KBArticleID` も Title も持たない。** KB は `<FileLocation Url>` 内の `kb(\d+)` トークンから導出する。
-
-`[CAB-VERIFIED 2026-06-24, セッション2訂正]` detail cab は1つでなく **3つ**のストリームを持つ：`c/<RevisionId>`（コア：識別子、関係、ApplicabilityRules、CBS ツリー）、`l/<lang>/<RevisionId>`（ローカライズ Title — つまり **Title は cab に存在する**、言語別）、`x/<RevisionId>`（ExtendedProperties: **FileName + 全ファイル variant + SHA-256**）。以前の「FileName は cab に無い」はセッション1で `c/` のみを見た誤りでした。3ストリームとも CAB 解凍後はプレーンテキスト XML です。
-
-### 5.4 supersedence の照合 — 「最新」の核心
-
-`[CAB-VERIFIED 2026-06-24]` 「どの LCU が現行か?」の成否を分ける問いは、cab の supersedence がオラクルと一致するかです。完全に一致します。
-
-- Master: 逆方向 `<SupersededBy>`（本スナップショットで 14,136 件）。
-- Detail（bundle `c/<RevisionId>`）: 順方向 `<Relationships><SupersededUpdates>`。
-- **2016 LCU bundle の順方向セット = 119 ID = SOAP `SupersededIds[]` と完全一致**（∩ = 119, cab のみ = 0, soap のみ = 0）。
-
-よって「live」= `<SupersededBy>` が空。ある Product GUID の最新 live bundle が現行です。これでオラクルの選択を 1:1 で再現します。
-
-### 5.5 唯一の真の欠落：SafeOS Dynamic Update は cab スコープ外
-
-`[CAB-VERIFIED 2026-06-24]` これは `wsusscn2.cab` が **持たない**唯一のラインで、その理由が一般化するため重要です。徹底的なスイープ（leaf UID `b20655a0`、bundle UID `c6476311`、SHA-1 と SHA-256 の両方、KB トークン、8段の supersedence チェーン全体 — すべて Master で 0；**かつ** 74 detail cab × {`c/`,`l/`,`x/`} の全スイープ = 0/74）の後、2つのエスカレーション（cab のどこにも埋め込み圧縮 blob は無い；ダウンロードした LCU の `update.mum` 191 パッケージに SafeOS-DU 参照ゼロ）も経て、**2022 SafeOS DU KB5094157 は cab とその参照ペイロードの真に外部**であると確定 — *証明された* 不在です。
-
-理由は二度訂正され、いまや正確です：**`wsusscn2.cab` は *稼働中OS* 向けのオフライン適用性スキャンカタログであり、SafeOS DU は別イメージである WinRE を対象とするためオフラインスキャンのスコープ外で、SafeOS-DU 更新カテゴリ全体が除外される。**（「WSUS=No」ではありません — そのチャネルの主張は WinRE *ラッパー* KB5098814 という別パッケージのものでした。KB5094157 自体は WU + Catalog + WSUS に出ています。）アーキテクチャ上の根本原因：クラシック servicing OS（2016/2019/2022）は SafeOS DU を **完全に別個の更新**として配信 ⇒ 決してバンドルされず、オフラインスキャン cab に入らない。UUP OS（2025）は SafeOS DU を単一マルチファイル LCU leaf 内に **同梱** ⇒ 存在し cab から導出可能。これが、2025 の SafeOS DU が cab から復元でき 2022 のはできない、まさにその理由です。
-
-### 5.6 OS別 cab ネイティブ resolver（と OS別の落とし穴）
-
-`[CAB-VERIFIED 2026-06-24]` 4つの独立した OS別 resolver が、cab 単独でオラクルを再現します（全ラインで digest 完全一致）。これらは設計上 **別個に保持**します — ロジックを早く共有しすぎるとデータのニュアンスが隠れるためです。共有 resolver なら静かに壊す落とし穴：
-
-- **2016** — SSU bundle は `ServicePacks` でなく `Security` 分類。LCU と SSU はオフラインではファイル名で区別不能で、**SelfContained `.cab` サイズ**で判別（SSU ~12.6 MB vs LCU ~1.83 GB, ~145倍。両者とも FileLocation URL への HEAD でオラクル Size に一致）。
-- **2019** — Product GUID は bundle 上で最頻のものではない；OS 固有の `f702a48c-…` を使う。.NET ラインは **LCU より古い**（5月 vs 6月）⇒ 最新-Security-全体でなく line ごとの最新を選ぶ。in-scope .NET leaf = **non-NDP48**（ベース 4.7.2; 3.5 は同梱）。
-- **2022** — 同じ KB が2つの Product GUID 下に存在（`71718f13` 一般 vs `97b08ca0` Azure Edition）；`71718f13` を使う。in-scope .NET は **2019 と反転**：**NDP48** が in-scope（2022 の in-box .NET = 4.8）、NDP481 は out-of-scope。SafeOS DU は cab に無い（§5.5）。
-- **2025** — LCU は SelfContained cab でなく **16ファイルの UUP メガペイロード1つ**；ファイル名で分類（`ssu-*`, `*-baseless*`/`*-x64.cab` = SafeOS, `.msu` の KB==LCU?LCU:GA baseline, `-ndp*` = .NET, `*.wim` = LP/FoD, `*metadata*` = meta）。SSU + SafeOS DU は leaf 埋め込み。in-scope .NET = **NDP481**（再び反転）。arm64 は .NET のみ存在 → スキップ。
-
-### 5.7 スコープフィルタ：タイトルでなく GUID ベース
-
-`[CAB-VERIFIED 2026-06-24]` 約 136,000 件の Master エントリを約 138 件の in-scope bundle に絞るフィルタは **GUID** を使います。GUID は WSUS のグローバル識別子で、（§6.1 の壊れやすいタイトル文字列と違い）表示名のリネームを越えて持続するからです。4つの **Server LTSC Product GUID**：2016 `569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5`, 2019 `f702a48c-919b-45d6-9aef-ca4248d50397`, 2022 `71718f13-7324-4b0f-8f9e-2ca9dc978e53`, 2025 `b256987d-4693-4c87-955d-dbb9341205eb`。観測された5つの **Classification GUID**：SecurityUpdates `0FA1201D-…`（LCU）, UpdateRollups `28BC880E-…`（.NET CU）, ServicePacks `68C5B0A3-…`（SSU）, CriticalUpdates `E6CF1350-…`, Updates `CD5FFD1E-…`（Dynamic Update）。EOS/ESU の OS GUID（2008/2008 R2/2012/2012 R2）は明示的な **deny-list**：サポート終了でも cab からデータが消えないためです。スコープ規則は **allow-overrides**（deny-list GUID が併存していても、allow-list GUID を *いずれか* 持てば採用 — 例：マルチOSの MSRT バンドル）。
-
-### 5.8 [B] の結論
-
-[B] は到達可能・再現可能・オラクルに対し digest 完全一致です。しかし **Catalog とは役割が異なり**、両者を混同するのが罠です。Catalog は **成果物ソース**（ファイル＝URL+digest を返す）。`wsusscn2.cab` は **関係データベース** — 成果物ソースが答えられない問いに答えます。
-
-- **依存** — この LCU は servicing-stack floor を宣言するか、セットはそれを満たすか?（`0x800f0823` 事前チェック）
-- **適用性** — この更新はオフライン WUA スキャンモデルで、この OS/ビルドに適用可能か?
-- **supersedence / 検証** — 選んだ LCU はこの Product GUID の最新の非 superseded ビルドか?
-
-ゆえに [B] は **オフラインの依存/適用性/検証データベース**と理解するのが最適で、*Catalog が解決したセットを検証* するために使います — 成果物のフォールバック格納庫ではありません。*単一* 本番ソースにはなれません：設計上 Dynamic Update を欠き（§5.5）、数GB規模で、停止回避にストリーミング規律を要します。§2.1 の三役モデルにおける本来の位置は **検証ソース**で、本番 Catalog の下に座し、Catalog が露出しない関係層を供給します。
-
-## 6. [C] Microsoft Update Catalog — 本番ソース
-
-### 6.1 正体と、扱うべき命名の癖
-
-`catalog.update.microsoft.com` の Catalog は、実際の `.msu`/`.cab` ダウンロード URL を公開する唯一の面で、認証不要でエージェントから直接到達できます。**JSON API ではなく HTML ウェブアプリ**なので、すべては HTML への regex に Microsoft Learn の companion Markdown 1つを加えたものです。クライアントはブラウザ `User-Agent` を送る SHOULD（素のライブラリ UA は拒否され得る）、リクエストを間隔（~0.6 s）あける SHOULD、再実行をオフライン・冪等にするため **全レスポンスをキャッシュする** SHOULD です。
-
-唯一の構造的な罠は Server 2019 と 2022 の間の **OS 命名変更**です。古い OS はタイトルでブランド名を使い（「Windows Server 2019」）、Server 2022 から Microsoft はコードネーム形に切り替えました（2022 は「Microsoft server operating system, version 21H2」、2025 は「…version 24H2」 — ブランド「Server 2025」はタイトルに一切現れない）。よってタイトルヒューリスティックは **両方** の命名規約を保持する MUST、そして（最もよくある静かな誤り）**Products 列で後フィルタする** MUST — `21H2` を含むクエリでも `24H2` 行が上位に来得る（逆も）。基底の **Product GUID はこれらのリネームで不変**（§5.7）であり、だからこそ cab の GUID フィルタはどんなタイトル照合より堅牢です。
-
-**実測による拡張（2026-08・r12シリーズ終端）。** r12 リバースエンジニアリング・シリーズ中に Catalog のさらなる挙動が2点実測され、終端で確認された。第一に、Catalog は Title と Classification の**表示文字列**をリクエスト文脈に応じてローカライズする（ドイツ語・フランス語・日本語ほかを観測）一方、Product 名・KB ID・update GUID・ファイル名は安定である — したがって英語表示テキストへの生一致は、上記の命名の罠に重なる第二の脆さとなる。頑健な照合は**セマンティック**でなければならない: 分類ごとの別名集合（ローカライズ形を含む）に加え、唯一の非曖昧行が残る場合に安定な同一性列をキーとする構造的フォールバックを備える。第二に、タイトル・ヒューリスティックの脆さというクラスへの構造的解答は、発見をコードではなく**宣言データ**にすることである: 終端実装は Kind ごとの検索プロファイル（クエリ戦略・タイトル許容/拒否制約・分類要件）を宣言ポリシーオブジェクトとして保持し、全ヒューリスティックが点検可能かつ宣言由来テストで保護され、その場しのぎの文字列述語の中に住まなくなる。
-
-### 6.2 4つの面
-
-`[CATALOG-VERIFIED 2026-06-24]`
-
-| # | 面 | メソッド | 得られるもの |
-|---|---|---|---|
-| 1 | `Search.aspx?q=<query>` | GET | 結果表: (updateID GUID, title, products, classification, date, version, size) |
-| 2 | `DownloadDialog.aspx` | POST `updateIDs=[{…"updateID":"<GUID>"}]` | 更新ごとのファイル一覧: fileName, **直接 CDN URL**, **digest (SHA-1 b64)**, sha256（多くは空） |
-| 3 | `ScopedViewInline.aspx?updateid=<GUID>` | GET | supersedence（`n/a` = 最新）+ KB 記事番号（任意の確認ゲート） |
-| 4 | Learn release-info `?accept=text/markdown` | GET | ビルドごとの現行 LCU KB（LCU の発見シード） |
-
-`DownloadDialog.aspx` が実 URL + digest を得る **唯一** の方法です。レスポンスは埋め込み JS 代入を持つ HTML（`downloadInformation[i].files[n].url/digest/sha256/fileName`）で、`files\[(\d+)\]\.(\w+)\s*=\s*'([^']*)'` で照合します。`digest` は **SHA-1 base64**（信頼できる整合性値）、`sha256` は頻繁に空、`fileName` は同ファイルの 40-hex SHA-1 で終わります。1つの更新が **複数ファイル**を返し得ます（2025 LCU = 2; .NET ロールアップ = 複数 leaf）— 常に `files[n]` を反復してください。
-
-### 6.2.1 Catalog はスクレイピングでなくデータモデル
-
-Catalog を「スクレイピングする HTML サイト」と片付けたくなりますが、それは実際の成果を過小評価します。§6.2 の4つの面は独立したページではなく、単一の決定論的たどり方を持つ **解決可能なデータモデル**に合成され、そのたどり方を復元したこと *自体* がリバースエンジニアリングの成果です。設計文書として読むと、モデルは **3層**を持ちます。
-
-**Figure 3 — Catalog のデータモデル（Identity / Artifact / Validation 層）。**
-
-```
-┌─ IDENTITY LAYER ────────────────────────────────────────────────┐
-│  KB (article number)                                            │
-│     │  Search.aspx?q=<KB>                                       │
-│     ▼                                                           │
-│  updateID (GUID)            ← the Catalog's per-row identity    │
-└──────────────────────────────┬──────────────────────────────────┘
-                               │  DownloadDialog.aspx (POST updateID)
-┌─ ARTIFACT LAYER ─────────────▼──────────────────────────────────┐
-│  files[]  →  { fileName, Digest (SHA-1 b64), sha256?, URL }     │
-│     │                                                           │
-│     ├─ URL     → direct CDN download                           │
-│     └─ Digest  → the cross-source PRIMARY KEY ───────────┐      │
-└──────────────────────────────────────────────────────────┼──────┘
-                                                            │
-┌─ VALIDATION LAYER ─────────────────────────────────────────▼─────┐
-│  Digest  ==  [A] SOAP oracle Digest      → proves the artifact   │
-│  Digest/RevisionId  ↔  [B] wsusscn2.cab  → proves applicability  │
-└──────────────────────────────────────────────────────────────────┘
-```
-
-- **Identity 層** — 人間可読の KB を Catalog の `updateID`（GUID）に解決。3つの識別子が連れ立って動き、混同してはいけません：**KB**（論理更新ごとに安定）、**updateID**（行ごとの GUID かつ DownloadDialog の POST キー）、**Digest**（ファイルの SHA-1 base64）。
-- **Artifact 層** — `updateID` を1つ以上のファイルに解決。各ファイルは直接 CDN **URL** と **Digest** を持つ。
-- **Validation 層** — Digest は **3つの面すべてで共有されるプライマリキー**：同じ物理ファイルは SOAP・Catalog・`wsusscn2.cab` で同じ Digest を持つ。これで照合することで、Catalog の成果物が権威ファイルと等しいこと（`==` [A] オラクル Digest）を証明し、[B] cab が Catalog の持たない適用性/依存事実を供給できる。
-
-この最後の層こそが Catalog を単なるスクレイピング対象でなく *検証可能* にします。Catalog をこの3層モデル（不透明な HTML でなく）として扱うことで、自律 resolver は **seed → KB → updateID → URL + Digest** を決定論的に算出し、その結果を Digest 等価で SOAP に対し *証明* できます（§6.4, §12.3）。
-
-### 6.3 シードのみの解決（KB をハードコードしない）
-
-`[CATALOG-VERIFIED 2026-06-24]` 設計目標は、将来の月が **KB を編集せずに**正しく解決されることです。OS ごとの唯一の入力は3項目の **seed**：
-
-```
-2016: { products:"Windows Server 2016",                    buildMajor:"14393", verToken: null  }
-2019: { products:"Windows Server 2019",                    buildMajor:"17763", verToken: null  }
-2022: { products:"Microsoft Server operating system-21H2", buildMajor:"20348", verToken:"21H2" }
-2025: { products:"Microsoft Server Operating System-24H2", buildMajor:"26100", verToken:"24H2" }
-```
-その他すべて（KB, UID, URL, digest）は **発見**されます — シードのみの性質は、全 resolver を空キャッシュに対して実行し各 KB を同一に再発見することで証明済みです。レシピ：
-
-- **LCU** — Learn release-info を取得；OS の `buildMajor` の最新マイナービルドを選ぶ → LCU KB；その KB で Catalog 検索；**Products で後フィルタ**；選んだ行を DownloadDialog（2025 = 2ファイルセット）。
-- **SSU** — 2016: `"Servicing Stack Update Windows Server 2016"` を検索、最新を選び、LCU の **前に適用**。2019/2022: スタンドアロン無し（埋め込み）。2025: LCU 2ファイルセット中の非 LCU `.msu`（GA baseline `KB5043080`、checkpoint SSU を運ぶ）。
-- **.NET CU** — OS ごとの .NET クエリを検索、Products で後フィルタ、x64 を保持；最新月の **superset ロールアップ**（runtime トークン最多）を選び；in-scope leaf = OS の in-media デフォルト runtime を `-ndp` タグで（2019 → `-ndp` タグ無し; 2022 → `-ndp48`; 2025 → `-ndp481`）。
-- **SafeOS DU** — 2022/2025 のみ。判別は命名エラで異なる：**2025** はタイトル自体に "Safe OS Dynamic Update"；**2022** はタイトルが単に "Dynamic Update …"（Setup DU と同一）なので **Products** 列 "Windows Safe OS Dynamic Update" で曖昧性解消。x64 `.cab`；最新を選ぶ。
-
-### 6.4 classic 対 UUP の結合 — 検証を誠実に保つ方法
-
-`[CATALOG-VERIFIED 2026-06-24]` 最重要の照合事実：Catalog の `updateID` は、classic と UUP のパッケージングで [A] オラクルの UID と **異なる**関係を持ちます。
-
-| line type | オラクルへの結合キー | digest の挙動 |
+| 置き換えられた記述 | 誤りまたは広すぎた理由 | 現在の結論 |
 |---|---|---|
-| classic LCU / .NET（`.msu`, 2016/2019/2022） | `updateID == オラクル UID`, + KB | 結合専用（`.msu` がオラクルの内側 `.cab` を *包む* ため SHA-1 が異なる） |
-| UUP LCU（2025） | **KB + digest** | **digest 一致** |
-| SafeOS DU `.cab`（2022/2025） | **KB + digest** | **digest 一致** |
-| 2025 .NET（`.msu`） | KB + leaf KB | 結合専用 |
-
-罠：UUP（2025）では Catalog `updateID` がオラクル UID と **異なる**（合成パイプラインが違う）ため、UID 等価の「検証」は不一致に見えます — 代わりに **KB + digest** で結合する必要があります。classic `.msu` ではラッパーの SHA-1 が内側 cab の SHA-1 *ではない*ことが想定挙動（「結合専用」）で、破損ではありません。
-
-### 6.5 [C] の結論
-
-[C] は §3 マトリクスのあらゆる軸で良好です：到達可能（HTTP, 認証不要）、機械可読（予測可能な HTML フォーム）、再現可能（全キャッシュ）、自律エージェント親和（シードのみ解決、通常の HTTP/regex）、網羅的（Dynamic Update 含む全ライン）、クロス検証可能。最後の性質が決定的で、最も強い形で言い直す価値があります：**Catalog は信用されているのではなく、SOAP 検証されている。** 解決された各ラインは、スキーマ非依存のキー **SHA-1 Digest** で [A] オラクルに照合済みです。Catalog とオラクルが同一物理ファイルを出すライン（UUP LCU, SafeOS DU `.cab`）では digest は **バイト同一**で、classic `.msu` ラッパーでは updateID+KB で結合が成立します。結果：**全4OSが全ラインで合格**（§12.3）。Catalog が本番ソースなのは、まさにその出力が権威プロトコルのそれと等しいと証明でき、なおかつエージェントが無人で到達・駆動できる唯一の面だからです。
+| 「Setup DU は Server 2025 era の構成要素である。」 | 後続の live Catalog search で 2016/2019/2022 の有効な Setup DU row が見つかり、Microsoft も 2022 Setup DU を明示的に文書化している。 | Setup DU は servicing branch/date で解決する。Publication を generation で gate しない。 |
+| 「Server 2022 には Setup DU がない。」 | Catalog measurement と Microsoft 21H2 guidance により反証。 | 21H2 では Setup DU と SafeOS DU を別々に識別する。 |
+| 「SafeOS DU は 2022/2025 だけの問題である。」 | 狭い 2026-06 resolver model と不完全な publication assumption から導かれていた。 | Publication、discovery、applicability を分離し、1 snapshot の欠落を generation rule にしない。 |
+| 「`boot.wim` に LCU servicing はできない。」 | 一部の media/package では失敗したが、現在の Microsoft guidance は WinPE を cumulative update で servicing し、別 branch では path が成立した。 | WinPE servicing は package/source-media specific として扱い、検証する。 |
+| 「Digest は cross-source の universal primary key である。」 | Outer MSU と inner CAB は別 file。 | Digest は same-file identity に使い、それ以外は composite/package-aware join を使う。 |
+| 「更新された `install.wim` があれば updated installation media といえる。」 | Setup/WinPE/media mismatch が実際の installation failure を引き起こし、Microsoft も複数 media target を文書化している。 | ISO を coupled multi-target servicing system として扱う。 |
+| 「有効な PCA2023 signature は bootability を証明する。」 | Signature は chain の1 layer に過ぎない。 | File signature、ISO structure、firmware trust、boot、install、post-install evidence を分離する。 |
 
 ---
 
-# PART III — ISO のための横断的関心事
+# PART IX — 再現性のため保持する 2026-06 metadata snapshot
 
-## 7. パッチライン × 世代マトリクス（統合ビュー）
+## 34. SOAP harvest summary
 
-`[VERIFIED]` §4〜§6 を束ねて — 各 OS が必要とするものと、選定した（Catalog）パイプラインでの出所：
+`[PROTOCOL-VERIFIED 2026-06]`
 
-| Line | 2016 | 2019 | 2022 | 2025 | 本番ソース |
-|---|---|---|---|---|---|
-| **LCU** | yes | yes | yes | yes（UUP, 2ファイル） | Catalog（KB は Learn 経由） |
-| **SSU** | **スタンドアロン**（先に適用） | LCU 埋め込み | LCU 埋め込み | GA-baseline `.msu`（checkpoint） | Catalog |
-| **.NET CU** | in-scope 無し（LCU 内） | rollup → non-NDP leaf | rollup → NDP48 leaf | rollup → NDP481 leaf | Catalog |
-| **SafeOS DU** | none | none | yes（cab には無い） | yes（cab に同梱） | Catalog |
+| OS | Records | Bundles | Live bundles | Captured dataset 内の newest LCU | 主な recorded kinds |
+|---|---:|---:|---:|---|---|
+| Server 2016 | 518 | 259 | 21 | KB5094122 | dotnet / LCU / SSU / other |
+| Server 2019 | 421 | 181 | 11 | KB5094123 | dotnet / LCU / SSU / other |
+| Server 2022 | 412 | 193 | 11 | KB5094128 | dotnet / LCU / other |
+| Server 2025 | 80 | 40 | 3 | KB5094125 | dotnet / LCU / other |
 
-読み方：**LCU が全4OSの背骨**。**SSU の形はエラごとに変わる**（separate → embedded → checkpoint file）。**.NET の in-scope NDP は反転する**（2019 non-NDP → 2022 NDP48 → 2025 NDP481）ので決してハードコードしない。
+Captured oracle 内の Server 2025 fragment は、LCU leaf、servicing-stack/checkpoint content、SafeOS payload 間の UUP-era relationship を示しました。
 
-**Dynamic Update 行がソース選定の決め手です。** Dynamic Update（SafeOS DU）は 2022 以降にのみ現れ、3つの面をきれいに分かちます。
+## 35. `wsusscn2.cab` snapshot identity
 
-```
-wsusscn2.cab  →  Dynamic Update 無し（オフラインスキャンのスコープ外, §5.5）
-MS-WSUSSS     →  Dynamic Update あり、ただしエージェントから到達不可
-Catalog       →  Dynamic Update あり、かつ 認証不要で到達可能
-```
+`[CAB-VERIFIED 2026-06-24]`
 
-ゆえに 2022/2025 の SafeOS DU — ISO が現に必要とするライン — について、Catalog は単に *1つの* ソースなのではなく、**そのデータを持つ唯一の到達可能な本番ソース**です。cab は Catalog への寄りを強い、SOAP は到達できません。この1行だけで、[B] を単独本番ソースから失格させ、[C] を確定させるのに十分です。Catalog は、オフライン cab が構造的に供給できない1行を含め、全ラインを一様に供給します。
-
-### 7.1 マトリクスへの実測拡張（2026-08・r12シリーズ終端）
-
-r12 シリーズ中に実測された2つの事実が、判定を変えることなく上のマトリクスを精緻化する。第一に、**Setup Dynamic Update の行は4つの Server 世代すべてに存在する** — uup 世代の OS だけではない: ライブ Catalog は 2016・2019・2022・2025 の各々に Setup DU を解決し、終端の OS 別構成はその行を保持する（2026-07/08 スナップショット値として KB5068794 / KB5068795 / KB5079518 / KB5095966。KB は月次で入れ替わり、世代ごとの存在が安定な主張である）。Setup DU は上で論じた SafeOS DU とは別系統であり、WinRE/Safe OS イメージではなくメディア上の Windows Setup 自身のソースを更新する。
-
-第二に、パッケージの**親子配送メカニズムが実測で使用中**である: Line モデルは `ParentKbId` を持ち、Server 2022 の .NET CU 子（KB5101010 と KB5101005）はともに親 KB5102206 を宣言する — 結合親パッケージの子であり、解決は親行を経由する。実機4 VM の post-install 証跡は 2022 への子 KB 実装着荷を裏付ける。出荷された **SSU** が親子配送を使う事例は未検証のままである — 実測された唯一の 2016 スタンドアロン SSU は直接解決（`ParentKbId` は null）— よって本メカニズムは .NET 子については確認済み、SSU については未解決の問いに留まる。
-
-## 8. Secure Boot（PCA2023）とメディア構造 — **DRAFT / 検証中**
-
-> **⚠️ ステータス: DRAFT。** パッチメタデータの素材（§4〜§7, §12）と異なり、以下の Secure Boot・メディア構造の知見は **構造的に推論され部分的に観測されているが、本書の他所と同じメタデータ基準の水準ではまだ厳密に検証されていません**。先行調査から方向付けとして引き継いだもので、ビルド＆ブート検証ループを同じ厳密さで回し次第 **改訂されます**。§8 のすべてを `[DRAFT]` として扱ってください。
-
-### 8.1 PCA2023 移行を一段落で `[DRAFT]`
-
-2024 サイクルは、Windows ブートバイナリに署名する CA を **PCA2011**（`Microsoft Windows Production PCA 2011`）から **PCA2023**（`Windows UEFI CA 2023`）へローテートします。Stage 1（現在）：ファームウェア更新が PCA2023 をプラットフォームの DB へ段階的にプロビジョニング；両チェーンが受理される。Stage 2（告知済み、2026 後半以降）：更新済みプラットフォームで PCA2011 が DBX へ移り、以後ブートマネージャが PCA2011 のみで署名されたメディアは起動しなくなる。よって前方互換メディアは、PCA2011 がまだ受理される今日であっても **PCA2023 署名のブートバイナリ**を同梱しなければなりません。Microsoft のリファレンスは `Make2023BootableMedia.ps1`（KB5053484 / `microsoft/secureboot_objects` リポジトリ）— **リリースタグまたはコミットハッシュ + 関数名**で固定すること、内部バージョン文字列（陳腐化済み）で固定しないこと。
-
-### 8.2 `_EX` 二重ステージングと世代非対称 `[DRAFT]`
-
-仕組みは **`install.wim` 内の二重ステージング**：`\Windows\Boot\{EFI,Fonts,DVD}\` に加え、更新済みイメージは PCA2023 で再署名した同じバイナリを持つ `{EFI,Fonts,DVD}_EX\` 兄弟を運びます。計画すべき非対称：
-
-| OS | GA install.wim の `EFI_EX` | LCU servicing 後 | 備考 |
-|---|---|---|---|
-| 2016 | ✗（LCU で合成） | EFI_EX ✓, Fonts_EX ✓, **DVD_EX ✗** | servicing 後も `efisys_EX.bin` のソース無し（open item） |
-| 2019 | ✗（LCU で合成） | full `_EX` ✓ | ブートマネージャは 2016 とバイト同一 |
-| 2022 | ✗（LCU で合成） | full `_EX` ✓ | — |
-| 2025 | ✓（GA で同梱） | n/a | `_EX` 既存；パッチのみ必要 |
-
-### 8.3 残しておく価値のある2つの検証上の落とし穴 `[DRAFT]`
-
-- **`Get-AuthenticodeSignature` は *直近の* 署名者を報告し、トラストアンカーを報告しない。** PCA2023 検出には `X509Chain.Build()` でチェーンを再構築し、root/intermediate を thumbprint で確認する必要がある — 直近の発行者名に "PCA 2011" を含むバイナリでも別のチェーンになり得る（逆も）。
-- **`boot.wim` は LCU で servicing されない。** WinPE は独自の servicing ライフサイクルを持つ縮小 OS で、LCU `.msu` を `boot.wim` に適用すると失敗（`0x80070032`）、ネスト CAB 経路でも LCU cab が失敗（`0x8007371b`、pseudo-locale メンバー欠落）。よって PCA2023 `_EX` コンテンツは、パッチ済み `boot.wim` でなく **servicing 済み `install.wim`** から得る。（マウントした `boot.wim` へファイルを *コピーする* ことは可能 — WinPE が拒むのは CBS パッケージトランザクション。）
-
-### 8.4 検証の到達範囲 `[DRAFT]`
-
-ビルド後チェックはブートテストより厳密に少ないことを証明し、レポートはそれを明言する必要があります。file-presence はレイアウトを、Authenticode-chain は署名者チェーンを、Hyper-V Gen2 ブートは仮想ファームウェアの受理を証明し、実 DB/DBX のトラスト判定を行使するのは **物理ハードウェア**だけです。署名者チェーン検証器の `Pass` は **必要だが十分ではなく**、いかなるファームウェアもメディアを受理することを証明しません。
-
-### 8.5 実測アップデート（2026-08・r12シリーズ終端）— DRAFT 内の検証済みサブセット
-
-r12 シリーズは本節が待っていたビルドループを実走し、実測されたサブセットを確定的に述べられるようになった。Server 2025 の PCA2023 署名ブートマネージャへの変換は、実 ja-jp メディア上で**完了・検証済み**である: 静的検証フェーズは 33/33 で合格し、5つの PCA2023 出力ターゲットすべてが有効だった。変換後メディアのルート `\bootmgr.efi` は **Microsoft のメディア変換設計により PCA2011 のまま**である — これは UEFI クリティカル・ブートパス上になく（ファームウェアは `\EFI\Boot\bootx64.efi` を起動する）、その PCA2011 チェーンは変換の欠陥ではない。
-
-さらに4つの Server VM からの実機 post-install 証跡（2026-08）は、サービス済みメディアから構築した 2016・2022・2025 上で Secure Boot 2023 証明書ロールアウトが**ファームウェア変数に対して直接検証**されたことを示し、2019 は既知の監視乖離（レジストリのロールアウト状態が遅延する一方、直接のファームウェア変数検査は既に 2023 証明書セットを検証済み）を呈する — 保守的な証跡格付けはこれを糊塗してはならない。PCA2023 専用ファームウェア上のブート挙動は §8.4 の述べる別ゲートのテストのままであり、§8 の残余は `[DRAFT]` に留まる。
-
-## 9. 解決から ISO へ
-
-`[ソース/順序メタデータは VERIFIED; DISM 機構は標準的な servicing ガイダンス]` Catalog は OS ごとに、ファイル（直接 URL + SHA-1 digest）と、どれが in-scope かを与えます。消費の仕方：
-
-1. **ダウンロード + 検証（MUST）。** 各ファイルは使用前に SHA-1 digest で検証する MUST；不一致はビルドを中止する MUST。
-2. **適用順序（MUST）。** `install.wim` へオフラインで、順序は **SSU/baseline → LCU → .NET（in-scope leaf）→ SafeOS DU（WinRE へ）→ /Cleanup-Image → recapture → rebuild ISO** とする MUST。
-   - 2016: スタンドアロン SSU（`KB5094141`）を LCU（`KB5094122`）の **前に**適用する MUST — SSU を飛ばすと `0x800f0823`。
-   - 2019/2022: 結合 LCU（SSU 埋め込み）。
-   - 2025: GA baseline（`KB5043080`, checkpoint SSU）が LCU（`KB5094125`）に先行する MUST。
-   - .NET: in-scope leaf `.msu`（2019 `KB5087061` / 2022 `KB5087068` / 2025 `KB5087051`）を適用；leaf は OS デフォルト runtime **と** 3.5 を運ぶ。（3.5 が別の有効化ステップを要するかは open item。）
-   - SafeOS DU（2022 `KB5094157` / 2025 `KB5094150`）：**WinRE / Safe OS** イメージ用の `.cab` — `install.wim` の OS でなく `winre.wim` に適用する MUST。
-
-よって ISO ビルドは **抽象的にのみ2ソース取得**（すべて Catalog、cab/SOAP は検証）です。実際にはエージェントは全4ラインに対し **1つ** の本番ソース — Catalog — を呼びます。
-
-### 9.1 WIM イメージ・メタデータの機構（実測・2026-08）
-
-サービシングは `install.wim` イメージのメタデータの物語を、標準的な DISM ガイダンスが扱わない形で変える。r12 シリーズはこれをエンドツーエンドで実測した。明示的な置換注記とともに畳み込む3つの事実: (1) Windows Setup のエディション一覧と Explorer は、実測した Server 2016・2022 メディアで WIM IMAGE の **CREATIONTIME** 日付を表示する — サービシング変更を反映した LASTMODIFICATIONTIME はユーザーの見る表示を変えないため、最新に*見える*べきサービス済みイメージは CREATIONTIME の書き換えを要する。(2) WIMGAPI の書込パスは**その書き換えに信頼できない**: `WIMSetImageInformation` は試験メディア上で、要求した image-XML 値を**永続化しないまま成功を返す**ことが実測された（サイレント非永続化）。これは API 経由で日付を書く計画を置換する。信頼できる経路は WIM の **raw XML リソースの直接編集** — バイト長・エンコーディング・BOM・終端子・リソース記述子を保存し、整合性テーブルを常に再計算する — であり、WIMGAPI は再読検証のみに退く。(3) 生き残った読取/検証パスで API は形式に厳格である: 再直列化した Unicode XML は **UTF-16LE BOM を欠くと拒否される**（Win32 エラー 203）— API は Unicode XML ファイルのメモリ表現を要求しており、BOM を剥がすシリアライザで XML を往復させるツールには容易な罠である。
-
----
-
-# PART IV — リファレンス実装（第三者再現性）
-
-この Part は、上記の各主張を生成・検証・再現するために使った全スクリプトの **完全なソース**を埋め込みます。散文の可読性を保つため、それらは文書 **末尾**（Appendix A〜E）に配置しています。本セクションはその索引と実行レシピです。各ツールは単一ファイルで自己完結します。
-
-## 10. 本番ツール — Microsoft Update Catalog `[C]`
-
-相互運用可能な単一ファイルツール2本が §6 を実装します（同一アクション、同一 JSON 形、共有 `findings/` キャッシュ）。**完全なソース: Appendix A（Python）と Appendix B（PowerShell）。**
-
-```
-catalog_patchset.py            # Python 3 (stdlib のみ)
-Resolve-CatalogPatchSet.ps1    # PowerShell 5.1+/7 (関数的移植)
-
-actions:
-  resolve    [2016 2019 2022 2025]   OS別 LCU/SSU/.NET/DU 解決（シードのみ、KB ハードコード無し）
-  inventory  [2016 2019 2022 2025]   .NET CU 完全インベントリ（collect-don't-drop）
-  verify     [2016 2019 2022 2025]   SOAP オラクルに対するクロスチェック（--oracle-dir / -OracleDir 要）
-```
-```bash
-# Python
-python3 catalog_patchset.py resolve 2016 2019 2022 2025 --cache findings
-# PowerShell
-pwsh ./Resolve-CatalogPatchSet.ps1 -Action resolve -Os 2016,2019,2022,2025 -CacheDir ./findings
-```
-両者は同じタグ（`search.<slug>.html`, `dl.<uid8>.html`, `scoped.<uid8>.html`, `learn.release-info.md`, `sizes.json`）にキャッシュし、相互にキャッシュ互換です — 第三者は一方を他方のキャッシュに対し再実行して同一結果を得られます。
-
-## 11. 検証ツール — オラクル生成器 `[A]` とオフライン・クロスチェック `[B]`
-
-これらは本番経路には使われず、**本番経路が正しいことを証明する**ために存在し、検証の主張を独立に再現できるよう埋め込んでいます。
-
-- **`Invoke-WuProtocolSurvey.ps1`**（Appendix C）— per-OS `dataset/<os>.json` オラクルを生成した MS-WSUSSS SOAP サーベイツール。PowerShell 5.1, ja-JP、`sws` エンドポイントへ到達可能な Windows ホストを要する（＝**エージェントサンドボックスでは実行不可** — §4.1 のアクセスの壁の具体化）。匿名ハンドシェイク、`GetRevisionIdList` アンカーデルタ列挙、`GetUpdateData` の bundle/leaf 追跡、blob 解凍を行う。`Expand-FsCompressedBlob` と `ConvertFrom-WuUpdateSegment` を正準的な XML 処理テンプレートとして読むこと。
-- **`wsusscn2_analyzer.py`**（Appendix D）と **`Resolve-Wsusscn2PatchSet.ps1`**（Appendix E）— オフライン cab アナライザ（スキーマ `wsusscn2-analysis/1.1`）。Master XML をストリーム（`lxml.iterparse` / `XmlReader`）し、4つの OS 別解決を cab から再現し、オラクルに対し `verify` し、cab が欠く1ライン（§5.5）のために Catalog の SafeOS-DU resolver（`safeos` / `-Action SafeOsDu`）を加える。
-
-```bash
-# cab アナライザ（オフライン・クロスチェック）
-python3 wsusscn2_analyzer.py download
-python3 wsusscn2_analyzer.py analyze --cab wsusscn2.cab --summary -o result.json
-python3 wsusscn2_analyzer.py verify Server2025 --cab wsusscn2.cab --oracle Server2025.json
-```
-
----
-
-# PART V — 収集データと付録
-
-## 12. 検証済みスナップショット（2026-06）— 主張の裏にある実データ
-
-> これらは Patch Tuesday ごとに入れ替わります。(a) 散文を実値に錨付けし、(b) 読者がツールを健全性チェックできるよう掲載します。UID は GUID の先頭 8 hex、`digest` = SHA-1 base64。
-
-### 12.1 [A] SOAP オラクル — OS別ハーベスト形 `[VERIFIED 2026-06]`
-
-収集した `dataset/<os>.json` answer-key（実 `GetUpdateData` レスポンス）：
-
-| OS | Records | Bundles | Live bundles | Newest LCU | Kinds |
-|---|---|---|---|---|---|
-| Server 2016 | 518 | 259 | 21 | KB5094122 | dotnet=81 LCU=73 SSU=51 other=313 |
-| Server 2019 | 421 | 181 | 11 | KB5094123 | dotnet=82 LCU=56 SSU=23 other=260 |
-| Server 2022 | 412 | 193 | 11 | KB5094128 | dotnet=40 LCU=116 other=256 |
-| Server 2025 | 80 | 40 | 3 | KB5094125 | dotnet=18 LCU=22 other=40 |
-
-オラクルからの実 Server 2025 レコード断片（抜粋）。leaf 埋め込みの SSU と SafeOS DU を示す：
-
-```json
-"Ssu":      { "Model":"uup-checkpoint-in-lcu-leaf", "Standalone":false, "Version":"26100.32985",
-              "Files":[{"FileName":"SSU-26100.32985-x64-express.cab","Digest":"yGhWECaSjm//sYUWJoQRo8zVw8k=","Size":112422}] },
-"SafeOsDu": { "Model":"co-bundled-in-lcu-leaf", "Standalone":false,
-              "Files":[{"FileName":"Windows11.0-KB5094150-x64-baseless.psf","Digest":"ORXQbDk0YK5ZUpmeQLToGOg2CdA=","Size":332819650}] }
-```
-
-### 12.2 [B] cab スナップショット同一性 `[CAB-VERIFIED 2026-06-24]`
-
-```
-Download : https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab  (via aka fwlink 74689)
+```text
+Download : https://catalog.s.download.windowsupdate.com/microsoftupdate/v6/wsusscan/wsusscn2.cab
 Size     : 649,341,212 bytes
 SHA-256  : 5b075a6d9fdaa1751b8c70bf164531163e6750444e9100453f96dce3a4eec122
-Master   : package.xml 114,221,784 B — 136,478 updates / 97,339 file-locations
-Root     : <OfflineSyncPackage> / http://schemas.microsoft.com/msus/2004/02/OfflineSync ; CreationDate 2026-06-09
+Master   : package.xml 114,221,784 bytes
+Root     : OfflineSyncPackage / http://schemas.microsoft.com/msus/2004/02/OfflineSync
+Creation : 2026-06-09
 ```
 
-### 12.3 OS別の解決セット + 三者一致 `[VERIFIED + CAB-VERIFIED + CATALOG-VERIFIED, 2026-06]`
+この identity は、後続研究者が「current `wsusscn2.cab`」と、本解析で実際に使用した exact file を区別できるよう、意図的に保存しています。
 
-| OS | LCU | SSU | .NET (in-scope leaf) | SafeOS DU | オラクル照合 |
-|---|---|---|---|---|---|
-| 2016 | KB5094122 (`e0284a61…`, `.msu`) | KB5094141（スタンドアロン, 先に適用） | n/a（LCU 内） | n/a | **OVERALL ✓** |
-| 2019 | KB5094123 (`786110c1…`) | LCU 埋め込み | KB5087061（non-NDP48） | n/a | **OVERALL ✓** |
-| 2022 | KB5094128 (`522273b0…`) | LCU 埋め込み | KB5087068（NDP48） | cab には無い → Catalog **KB5094157** | **OVERALL ✓** |
-| 2025 | KB5094125 (`c108488b…`, UUP) | 26100.32985（checkpoint） | KB5087051（NDP481） | KB5094150（cab 同梱 == Catalog） | **OVERALL ✓** |
+## 36. 2026-06 に解決したセット
 
-ここでの **Digest はクロスソースのプライマリキー**：同じ物理ファイルが提供される所では、値が SOAP・Catalog・cab でバイト同一です。
+`[CATALOG-VERIFIED + CAB-VERIFIED + PROTOCOL-VERIFIED, 2026-06]`
 
-**合格したクロスソース同一性チェック（無料の正しさシグナル）：**
-- 2025 LCU: Catalog `updateID ≠ オラクル UID`（UUP として想定通り）だが **digest `jon6SRff…` は一致**。
-- 2022 SafeOS DU KB5094157: Catalog 行の `updateID c6476311 == SOAP バンドル UID`、ダウンロードしたファイルの **SHA-1 `w+5dA…` と SHA-256 `1idumQ…` がオラクルと完全一致** — Catalog ファイルは暗号学的に、cab 解析が探していた当の成果物。
-- 2025 SafeOS DU: Catalog のスタンドアロンファイルは cab 同梱の `…KB5094150-x64.cab`（digest `icy52…`）と **バイトサイズ同一**。
-- Learn release-info の LCU/.NET KB が全4OSで解決 KB と一致（`CrossCheck.Match = true`）。
+| OS | LCU | Servicing-stack form | 当時の調査で使用した .NET leaf | 当時の SafeOS DU evidence |
+|---|---|---|---|---|
+| 2016 | KB5094122 | standalone SSU KB5094141 | 当時の 2016 model で処理 | original SafeOS recipe では未解決 |
+| 2019 | KB5094123 | embedded/combined | KB5087061 | original SafeOS recipe では未解決 |
+| 2022 | KB5094128 | embedded/combined | KB5087068 (`NDP48`) | Catalog KB5094157。検索した cab snapshot には存在せず |
+| 2025 | KB5094125 | checkpoint/UUP | KB5087051 (`NDP481`) | KB5094150 / co-bundled UUP-era evidence |
 
-### 12.4 Catalog DownloadDialog レスポンス形（実例）`[CATALOG-VERIFIED 2026-06]`
+**重要:** 「未解決」の cell は 2026-06 research recipe を記述しているのであり、**Microsoft がその release 用 update family を一度も公開していないことの証拠ではありません**。後続の Catalog 調査があったからこそ、この区別を現在は明示しています。
+
+## 37. 実際の Catalog `DownloadDialog` shape
+
+`[CATALOG-VERIFIED 2026-06]`
 
 ```js
 downloadInformation[0].files[0].url      = 'https://catalog.s.download.windowsupdate.com/.../windows10.0-kb5094122-x64_<sha1hex>.msu'
-downloadInformation[0].files[0].digest   = 'Nr3Up4Pt5vYXS4++EEbo46YTrUQ='   // SHA-1, base64 (信頼できる)
-downloadInformation[0].files[0].sha256   = ''                               // 頻繁に空 — 依存しない
+downloadInformation[0].files[0].digest   = 'Nr3Up4Pt5vYXS4++EEbo46YTrUQ='   // SHA-1, base64
+downloadInformation[0].files[0].sha256   = ''                               // may be empty
 downloadInformation[0].files[0].fileName = 'windows10.0-kb5094122-x64_<sha1hex>.msu'
 ```
 
-## 13. 確信度・GUIDレジスタ・用語集・open items
-
-### 13.1 確信度レベル
-
-| 主張クラス | 確信度 | 根拠 |
-|---|---|---|
-| OS別 LCU/SSU/.NET 現行セット（2026-06） | **高** | 三者一致（オラクル + cab digest + Catalog digest） |
-| SSU 三エラ・パッケージングモデル | **高** | 実 blob + cab から世代横断でデコード |
-| `wsusscn2.cab` 構造（RevisionId, 3ストリーム, digest 結合） | **高** | 2026-06 cab の完全ストリーミングプロファイル |
-| 2022 SafeOS DU の cab 不在 + 理由 | **高** | Master + 74 cab × 3 ストリーム + 2 エスカレーションを尽くした |
-| Catalog シードのみ解決 | **高** | 空キャッシュ再発見、全4OSをオラクルに対し検証 |
-| 適用時の .NET 3.5 有効化ステップ | **未解決** | 未確定；ビルドセッションの問い |
-| §8 Secure Boot / `_EX` / ブート検証 | **DRAFT** | 構造的に推論、未だ厳密検証なし |
-
-### 13.2 GUID レジスタ（唯一の持続的シード）
-
-**Server LTSC Product GUID:** 2016 `569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5` · 2019 `f702a48c-919b-45d6-9aef-ca4248d50397` · 2022 `71718f13-7324-4b0f-8f9e-2ca9dc978e53`（一般; `97b08ca0-…` = Azure Edition） · 2025 `b256987d-4693-4c87-955d-dbb9341205eb`。
-**Classification GUID:** SecurityUpdates `0FA1201D-4330-4FA8-8AE9-B877473B6441` · UpdateRollups `28BC880E-0592-4CBF-8F95-C79B17911D5F` · ServicePacks `68C5B0A3-D1A6-4553-AE49-01D3A7827828` · CriticalUpdates `E6CF1350-C01B-414D-A61F-263D14D133B4` · Updates `CD5FFD1E-E932-4E3A-BF74-18BF0B1BBD83`。
-**EOS/ESU deny-list:** 2008 `ba0ae9cc-…` · 2008 R2 `fdfe8200-…` · 2012 `a105a108-…` · 2012 R2 `d31bd4c3-…`。
-**2022 SafeOS DU カテゴリノード:** `e4b04398-adbd-4b69-93b9-477322331cd3`（+ `dd1aa213-…`）, DU-product `abc45868-…`。
-
-### 13.3 用語集
-
-**LCU** Latest Cumulative Update · **SSU** Servicing Stack Update · **.NET CU** .NET Framework 累積更新 · **DU** Dynamic Update（Setup DU と SafeOS DU）· **UUP** Unified Update Platform（2025 / Win11 24H2 の合成パイプライン）· **CompDB** Composition Database（UUP のビルドレベル適用性）· **CBS** Component-Based Servicing · **MSU/CAB/PSF** パッケージコンテナ形式 · **WIM** Windows Imaging Format（`install.wim`, `boot.wim`, `winre.wim`）· **WinRE / SafeOS** SafeOS DU が対象とする回復イメージ · **PCA2011 / PCA2023** ブートバイナリ署名 CA。
-
-### 13.4 Open items
-
-- §8 Secure Boot のエンドツーエンド・ビルド＆ブート検証（DRAFT → 検証済み）。
-- DISM の .NET 3.5 適用性 / OS別の有効化ステップ。
-- Server 2016 の `DVD_EX` / `efisys_EX.bin` の正準ソース。
-- Catalog resolver の URL を実 ISO ビルダー（`Update-WindowsServerIso.ps1`）へ配線。
-
-### 13.5 来歴（Provenance）
-
-本書は3つのソース調査を統合します。各々が自己完結状態ファイル＋収集データセットとして引き継がれました：MS-WSUSSS SOAP サーベイ（オラクル）、`wsusscn2.cab` リバースエンジニアリング（オフライン・クロスチェック）、Microsoft Update Catalog 解決作業（本番ソース）。本文中の 2026-06 スナップショット値は日付付きの例で、埋め込みツール（Appendix A〜E）が実行のたびに現行セットを再発見します。
-
-### 13.6 改訂履歴 `[STABLE]`
-
-本書は living document です。構造は安定とみなします（今後の変更は再構成でなく内容であるべき）。
-
-| リビジョン | 焦点 | 概要 |
-|---|---|---|
-| r1.x | 調査 | 初期のマルチサーフェス調査（SOAP / wsusscn2 / Catalog）、月次サイクルで事実収集。 |
-| r2.0 | 改稿 | ゼロベース改稿；結論先出しの3ソース比較；Catalog を本番ソースに選定；全検証ツール埋め込み。 |
-| r2.1 | 役割 | Authority/Production/Verification 三役モデル；7軸評価マトリクス；"Autonomous-Agent-Friendly"；Catalog をスクレイピングでなくデータモデルとして提示；SOAP 検証済みの強調。 |
-| r2.2 | 洗練 | "Single Production Source"；本番ソースの定義を先出し；Digest をクロスソース・プライマリキーに；Identity/Artifact/Validation データモデル層；マトリクスに Decision 行；"Why we still needed SOAP"；研究対本番アーキテクチャの要約。 |
-| r2.3 | ADR | リファレンスアーキテクチャ化；ADR 形式の決定（§3.1）；Stable/Snapshot 凡例；Abstract を圧縮；一行アーキテクチャチェーン；役割名を一次の指示対象に。 |
-| r2.4 | 編集 | Non-goals（§1.1）；改訂履歴（本表）；図の識別子（Figure 1〜6）；RFC-2119 規範言語；1ページの "Architecture at a glance"（Figure 1）。最後の *構造* 改訂と宣言。 |
-
-## 14. アーキテクチャ要約 — 研究フェーズ対本番フェーズ
-
-調査全体は2つのアーキテクチャに収束します：本番ソースが信頼できることを *確立した* **研究/検証アーキテクチャ**と、以後 自律ビルドパイプラインが回す **本番アーキテクチャ**です。両者を分けることが、本書の主題を最も簡潔に1画面で述べたものになります。
-
-**Figure 4 — 研究/検証アーキテクチャ**（source-of-truth 監査ごとに一度実行；正しさを確立）：
-
-```
-            ┌──────────────────────────────────────────────┐
-            │  RESEARCH / VERIFICATION PHASE                │
-            └──────────────────────────────────────────────┘
-
-  MS-WSUSSS SOAP  ──(harvest on a Windows host)──►  dataset/<os>.json   [A] oracle
-        │                                                    │
-        │                                          ground-truth Digest
-        ▼                                                    │
-  Microsoft Update Catalog  ──(resolve seed→KB→updateID→file)│
-        │                                                    │
-        ▼                                                    ▼
-     Catalog Digest  ═══════════ EQUAL? (Primary Key) ═══════╡  →  PROVEN
-        │                                                    │
-        ▼                                                    ▼
-  wsusscn2.cab  ──(applicability / dependency / supersedence)┘   cross-check
-```
-
-**Figure 5 — 本番アーキテクチャ**（Patch Tuesday ごとに自律ビルドパイプラインが実行；証明済みソースのみ消費）：
-
-```
-            ┌──────────────────────────────────────────────┐
-            │  PRODUCTION PHASE  (Single Production Source) │
-            └──────────────────────────────────────────────┘
-
-  Learn release-info  ──►  current LCU KB per build           (discovery seed)
-        │
-        ▼
-  Microsoft Update Catalog  ──►  URL + SHA-1 Digest per line  (the ONE data dependency)
-        │                         LCU · SSU · .NET · SafeOS DU
-        ▼
-  Download  ──►  verify SHA-1 against Digest
-        │
-        ▼
-  DISM offline servicing   (SSU/baseline → LCU → .NET → SafeOS-DU→WinRE)
-        │
-        ▼
-  PCA2023 _EX media synthesis   [DRAFT, §8]
-        │
-        ▼
-  Rebuild ISO  ──►  patched, bootable Windows Server media
-```
-
-合わせて読むと：**研究アーキテクチャが Digest で Catalog が権威に等しいことを証明し**、**本番アーキテクチャは以後ちょうど1つのデータ依存**（Catalog）で済みます。Catalog が唯一の **単一本番ソース**だからです。SOAP と `wsusscn2.cab` は上の図にのみ現れます — 下の図を信頼できるものにしてから、そこから退場しました。この非対称こそが設計の全体です：*権威ある-が-到達不可な面で一度検証し、到達可能で-網羅的な面から永続的にビルドする。*
-
-### 14.1 本書全体を一行で
-
-読者が他の何も覚えなくても、このチェーンだけは覚えてください — これが本書のエンドツーエンドです。
-
-**Figure 6 — 本書全体を一行で。**
-
-```
-   Research
-      │
-      ▼
-   Authority source        (MS-WSUSSS SOAP)        — defines ground truth
-      │   verifies, by Digest primary key
-      ▼
-   Verification source     (wsusscn2.cab)          — confirms applicability/dependency
-      │   cross-checks
-      ▼
-   Production design       (Microsoft Update Catalog = Single Production Source)
-      │   reachable · complete · proved
-      ▼
-   Autonomous Build Pipeline   (discover → resolve → download → verify → DISM)
-      │
-      ▼
-   Offline Patched Windows Server ISO
-```
-
-続く Appendix は、まさにこのチェーンの **リファレンス実装**です — 本番ソースを実行可能コードとして（A〜B）、そしてそれを証明した権威/検証ソースを（C〜E）。アーキテクチャ *こそが* メッセージであり、コードはその証明です。
+`sha256` field が空の場合があるため、workflow は download 後に独自の SHA-256 を計算します。
 
 ---
 
-# Appendices — リファレンス実装ソース（全文）
+# PART X — Engineering implication（project 非依存）
 
-> 以下のスクリプトは、第三者再現性のため逐語で埋め込んでいます。本書の各主張を生成・検証するために使った **完全な**ツールです。本番経路: Appendix **A〜B**（Catalog）。検証: Appendix **C**（SOAP オラクル生成器）、Appendix **D〜E**（オフライン cab クロスチェック）。コードは言語非依存のため英語のまま掲載しています。
+## 38. 防御可能な offline-media update workflow
 
-## Appendix A — `catalog_patchset.py`（Catalog 本番 resolver, Python）
+本レポートは実装を強制しませんが、証拠は次の generic sequence を支持します。
 
-**役割:** 本番ソース `[C]`。Microsoft Update Catalog からの OS別 LCU/SSU/.NET/SafeOS-DU のシードのみ解決。`verify` は SOAP オラクルに対しクロスチェック。stdlib のみ。
+```text
+1. identify source media exactly (OS, build, language, edition/indexes, hashes)
+2. resolve current/required update artifacts from Microsoft sources
+3. independently verify LCU/build and package-family interpretation
+4. evaluate source prerequisites / servicing-stack / checkpoint needs
+5. service WinRE according to package applicability and SafeOS guidance
+6. service each intended install.wim index
+7. service WinPE according to Microsoft guidance and actual applicability
+8. save serviced WinPE Setup + boot-manager binaries
+9. apply Setup Dynamic Update to the media tree when applicable
+10. restore/synchronize serviced WinPE Setup + boot-manager binaries to media
+11. perform PCA2023/Secure Boot media work when required by the target trust policy
+12. rebuild ISO with a known oscdimg toolchain and recorded boot entries
+13. inspect hashes, WIM state, package state, Setup-media identity, and signatures
+14. boot and install under the intended validation environment
+15. collect post-install evidence
+```
+
+この sequence は**研究から導いた skeleton**として扱うべきです。Package application の詳細は、release、source-media age、現在の Microsoft servicing guidance に依存します。
+
+## 39. Research claim における「fully patched ISO」の定義
+
+技術的に有用な記述には、少なくとも次を含める必要があります。
+
+- Windows Server release と source-media build
+- architecture
+- language(s)
+- observation/build date
+- target LCU/build
+- 使用した servicing-stack/checkpoint prerequisite
+- .NET handling
+- SafeOS DU と Setup DU の handling
+- `boot.wim` と `winre.wim` を servicing したか
+- Setup binary synchronization の有無
+- Secure Boot/PCA2023 policy と evidence class
+- ISO-mastering tool/version
+- static verification result
+- boot/install validation environment
+- post-install validation result
+
+この scope がなければ、「fully patched」という表現は experiment 間で比較するには曖昧すぎます。
+
+## 40. Rebuilt ISO に対する最小 evidence bundle
+
+推奨する独立 evidence には次が含まれます。
+
+- source ISO SHA-256
+- output ISO SHA-256
+- KB/update ID/file name/local SHA-256 を含む exact package list
+- 対象とするすべての index の pre/post WIM inventory
+- servicing-stack/build evidence
+- WinPE と media 上の Setup binary hash
+- boot-manager file hash と signer chain
+- `oscdimg` identity と command line
+- boot/install result
+- post-install OS/build/update evidence
+- warning と non-applicable-package result。黙って破棄せず保持する。
+
+---
+
+# PART XI — 利用する実装との関係
+
+## 41. Research report と implementation documentation の違い
+
+この区別は意図的なものです。
+
+| Document class | 主に答える問い |
+|---|---|
+| **本 research report** | Windows/Microsoft servicing は、何をすることが観測または文書化されており、その確信度はどの程度か。 |
+| **Implementation specification** | この実装は、どの挙動を support または enforce することを選択するか。 |
+| **Implementation code/config** | この version は実際に何を実行するか。 |
+| **Test documentation** | この実装が意図どおり動作したことを示すどの evidence が存在するか。 |
+
+4つすべてが同時に「正しい」ことは可能です。答えている問いが異なるためです。
+
+### 41.1 不一致がある場合
+
+- 不一致が **implementation policy choice** なら、その rationale を記録する。本 research report がそれを上書きするものではない。
+- 不一致が **Windows の挙動に関する主張** なら、research evidence を再実行または再確認する。
+- Research claim が確認された場合、implementation 側が変更すべきかを判断する。
+- Research claim が反証された場合、新しい evidence に基づいて本レポートを訂正し、歴史的に有用であれば superseded interpretation も残す。
+
+### 41.2 Known consumer
+
+本調査の知見を利用し、同時に本調査へ experiment を提供してきた実装の1つは次です。
+
+https://github.com/usui-tk/ai-generated-artifacts/tree/main/projects/powershell-update-windows-server-iso
+
+この project は **consumer かつ experimental contributor** であり、本ドキュメントの normative source ではありません。Project phase name や現在の config structure は、上記の research conclusion を定義するためには意図的に使用していません。
+
+---
+
+# PART XII — 再現性、未解決事項、参照資料
+
+## 42. Historical research tooling
+
+Appendix には、証拠 provenance の一部として original research tool を保持しています。
+
+- Appendix A — Python Microsoft Update Catalog resolver
+- Appendix B — PowerShell Microsoft Update Catalog resolver
+- Appendix C — MS-WSUSSS / MS-WUSP protocol survey と oracle generator
+- Appendix D — Python `wsusscn2.cab` analyzer
+- Appendix E — PowerShell `wsusscn2.cab` analyzer
+
+これらの script は**historical research instrument**です。内部 comment には、本文で後に superseded と判断された assumption が残っている場合があります。Original investigation を再現するために保持しているのであり、現在の Windows servicing behavior を定義するものではありません。
+
+## 43. 調査から保持する耐久的 identifier
+
+### 43.1 2026 source study で使用した Server product GUID
+
+- Server 2016: `569e8e8f-c6cd-42c8-92a3-efbb20a0f6f5`
+- Server 2019: `f702a48c-919b-45d6-9aef-ca4248d50397`
+- Server 2022 general: `71718f13-7324-4b0f-8f9e-2ca9dc978e53`
+- Server 2025: `b256987d-4693-4c87-955d-dbb9341205eb`
+
+これらは research seed として保持します。Microsoft taxonomy が変更された場合、または異なる product/SKU branch を対象にする場合は再検証すべきです。
+
+### 43.2 調査で使用した Classification GUID
+
+- Security Updates: `0FA1201D-4330-4FA8-8AE9-B877473B6441`
+- Update Rollups: `28BC880E-0592-4CBF-8F95-C79B17911D5F`
+- Service Packs: `68C5B0A3-D1A6-4553-AE49-01D3A7827828`
+- Critical Updates: `E6CF1350-C01B-414D-A61F-263D14D133B4`
+- Updates: `CD5FFD1E-E932-4E3A-BF74-18BF0B1BBD83`
+
+## 44. Open questions / future research
+
+- 4つの Server 世代すべてについて、統一した live-Catalog methodology で SafeOS DU publication/discovery survey を再実施し、raw row を archive する。
+- Setup DU discovery は title/Product naming が変化する interface であるため、定期的に再実施する。
+- 同じ source-media age と同月 package set を使用した clean な cross-generation `boot.wim` servicing matrix を維持し、**package applicability** と **implementation policy** を分離する。
+- Hyper-V を超えて、代表的な hardware/virtual-firmware implementation 上で physical-firmware PCA2023 validation を拡張する。
+- Microsoft `secureboot_objects` / bootable-media guidance と、monthly Windows update が実際に配布する signed binary の比較を継続する。
+- `wsusscn2.cab` の Dynamic Update coverage について、より新しい snapshot で再検証してから corpus 全体に関する強い主張を行う。
+- WIM metadata experiment と servicing-attainment test を分離し続け、display-date work が payload failure を隠すことがないようにする。
+
+## 45. 改訂履歴
+
+| Revision | 性質 | 概要 |
+|---|---|---|
+| r1.x | research memo | SOAP / WSUS / Catalog / `wsusscn2.cab` のリバースエンジニアリングと、初期 package-source 調査。 |
+| r2.x | reference-architecture phase | Metadata-source decision を ADR 的 architecture に昇格し、research tooling 全文を埋め込んだ。再現性は向上したが、徐々に implementation recommendation と research fact が混在した。 |
+| r2.5 | measured extensions | r12-series experiment、Setup DU observation、PCA2023/WIM finding を追加したが、前半 section に矛盾した “stable” statement が残った。 |
+| **r3.0** | **independent research re-baseline** | 本ドキュメントを独立調査記録として再定義。Evidence と implementation policy を分離し、後続 Catalog correction、Setup-binary failure root cause、source-prerequisite finding、package-aware WinPE servicing、Secure Boot evidence layering、packaging-aware identity rule を統合しつつ、historical snapshot と tool を保持。 |
+
+## 46. Primary references
+
+### Microsoft servicing / Dynamic Update
+
+- **Update Windows installation media with Dynamic Update**  
+  https://learn.microsoft.com/en-us/windows/deployment/update/media-dynamic-update
+- **Microsoft Update Catalog**  
+  https://www.catalog.update.microsoft.com/
+- **Windows Server release information**  
+  https://learn.microsoft.com/en-us/windows/release-health/windows-server-release-info
+
+### Microsoft update protocols / offline scan
+
+- **MS-WSUSSS — Windows Update Services: Server-Server Protocol**  
+  https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-wsusss/f49f0c3e-a426-4b4b-b401-9aeb2892815c
+- **MS-WUSP — Windows Update Services: Client-Server Protocol**  
+  https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-wusp/b8a2ad1d-11c4-4b64-a2cc-12771fcb079b
+- **`wsusscn2.cab` offline scan entry point**  
+  https://go.microsoft.com/fwlink/?LinkID=74689
+
+### Secure Boot / bootable media
+
+- **Enterprise deployment guidance for CVE-2023-24932**  
+  https://support.microsoft.com/en-au/topic/enterprise-deployment-guidance-for-cve-2023-24932-88b8f034-20b7-4a45-80cb-c6049b0f9967
+- **Windows Secure Boot certificate expiration and CA updates**  
+  https://support.microsoft.com/en-us/servicing/os/secure-boot/2025/06/windows-secure-boot-certificate-expiration-and-ca-updates
+- **Secure Boot certificate updates guidance for IT professionals and organizations**  
+  https://support.microsoft.com/en-us/servicing/os/secure-boot/2025/06/secure-boot-certificate-updates-guidance-for-it-professionals-and-organizations
+- **Updating Windows bootable media to use the PCA2023-signed boot manager**  
+  https://support.microsoft.com/en-us/servicing/os/windows/2025/02/updating-windows-bootable-media-to-use-the-pca2023-signed-boot-manager
+- **Microsoft `secureboot_objects`**  
+  https://github.com/microsoft/secureboot_objects
+
+### ISO mastering
+
+- **Oscdimg Command-Line Options**  
+  https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/oscdimg-command-line-options
+- **Create an ISO image for UEFI platforms**  
+  https://learn.microsoft.com/en-us/troubleshoot/windows-server/setup-upgrade-and-drivers/create-iso-image-for-uefi-platforms
+
+### Research provenance / known consuming implementation
+
+- **Repository research tree**  
+  https://github.com/usui-tk/ai-generated-artifacts/tree/main/documents/research/windows-servicing
+- **Windows Server ISO update implementation that consumed and contributed experiments**  
+  https://github.com/usui-tk/ai-generated-artifacts/tree/main/projects/powershell-update-windows-server-iso
+
+---
+
+# Appendices — Historical Research Implementation Source（全文）
+
+> **Historical-tooling boundary.** 以下の script は、以前の revision の根拠となった source investigation を第三者が再現できるよう保持しています。これらは**research artifact であり、normative servicing specification ではありません**。内部の comment や resolver assumption は、歴史的に認識可能な状態を意図的に保持しています。上記の evidence-based narrative と競合する場合、本文側が後続の裁定結果を記録しています。
+
+## Appendix A — `catalog_patchset.py`（historical Catalog resolver, Python）
+
+**Historical role:** 2026 source investigation で使用した Catalog artifact resolver。LCU/SSU/.NET/SafeOS-DU を OS ごとの seed のみから解決し、`verify` で SOAP oracle と cross-check します。Stdlib only。Superseded となった assumption も provenance のため source 内に保持されています。
+
 
 ```python
 #!/usr/bin/env python3
@@ -1412,9 +1665,9 @@ if __name__ == "__main__":
 
 ```
 
-## Appendix B — `Resolve-CatalogPatchSet.ps1`（Catalog 本番 resolver, PowerShell）
+## Appendix B — `Resolve-CatalogPatchSet.ps1`（historical Catalog resolver, PowerShell）
 
-**役割:** 本番ソース `[C]`、Appendix A の関数的移植。PowerShell 5.1+/7；同一アクション・同一 JSON 形・共有 `findings/` キャッシュ。
+**Historical role:** 2026 source investigation で使用した Catalog artifact resolver の PowerShell port。PowerShell 5.1+/7、同一 action、同一 JSON shape、共有 `findings/` cache を使用します。Superseded resolver assumption は provenance のため source 内に残しています。
 
 ```powershell
 #Requires -Version 5.1
@@ -1968,9 +2221,9 @@ switch ($Action) {
 
 ```
 
-## Appendix C — `Invoke-WuProtocolSurvey.ps1`（MS-WSUSSS SOAP オラクル生成器）
+## Appendix C — `Invoke-WuProtocolSurvey.ps1`（MS-WSUSSS SOAP oracle generator）
 
-**役割:** 検証オラクル `[A]`。MS-WSUSSS SOAP プロトコル経由で per-OS `dataset/<os>.json` answer-key を生成。**`sws` エンドポイントへ到達可能な Windows ホストを要し、エージェントサンドボックスでは実行不可（§4.1 のアクセスの壁）。** `Expand-FsCompressedBlob` / `ConvertFrom-WuUpdateSegment` を正準的な XML 処理テンプレートとして読むこと。
+**Historical role:** MS-WSUSSS を介して OS ごとの `dataset/<os>.json` protocol-harvest answer key を生成します。Original research environment では、agent sandbox の egress path から protocol exchange を完了できなかったため、`sws` endpoint へ到達可能な Windows host が必要でした。`Expand-FsCompressedBlob` / `ConvertFrom-WuUpdateSegment` は、この調査で取得した XML handling method として参照してください。
 
 ```powershell
 ﻿#requires -Version 5.1
@@ -5493,9 +5746,9 @@ Write-Host '==================================================================='
 
 ```
 
-## Appendix D — `wsusscn2_analyzer.py`（オフライン cab クロスチェック, Python）
+## Appendix D — `wsusscn2_analyzer.py`（offline cab cross-check, Python）
 
-**役割:** オフライン依存クロスチェック `[B]`。`wsusscn2.cab` の Master XML をストリーム（`lxml.iterparse`）し、4つの OS別解決を再現、オラクルに対し `verify`、cab が欠く SafeOS DU を Catalog から解決。スキーマ `wsusscn2-analysis/1.1`。
+**Historical role:** 2026 study で使用した offline-catalog cross-check。`wsusscn2.cab` Master XML を stream 処理（`lxml.iterparse`）し、当時の OS ごとの resolution を再現して protocol harvest と照合します。また、特定の 2026-06 cab snapshot には存在しなかった SafeOS DU は Catalog を使用して解決します。Schema `wsusscn2-analysis/1.1`。
 
 ```python
 #!/usr/bin/env python3
@@ -6801,9 +7054,9 @@ if __name__ == "__main__":
 
 ```
 
-## Appendix E — `Resolve-Wsusscn2PatchSet.ps1`（オフライン cab クロスチェック, PowerShell）
+## Appendix E — `Resolve-Wsusscn2PatchSet.ps1`（offline cab cross-check, PowerShell）
 
-**役割:** オフライン依存クロスチェック `[B]`、Appendix D の PowerShell 移植。ストリーミング `XmlReader`；7-Zip 抽出；2016 の LCU-vs-SSU 判別のための HEAD サイズプローブ。
+**Historical role:** 2026 offline-catalog cross-check の PowerShell port。Streaming `XmlReader`、7-Zip extraction、および当時 Server 2016 LCU-vs-SSU discriminator に使用した HEAD size-probe を含みます。
 
 ```powershell
 #Requires -Version 7.0
@@ -7889,4 +8142,4 @@ switch ($Action) {
 ```
 
 ---
-*メモ終わり。正本は英語版で、本日本語版はそこから派生。スナップショット値は 2026-06 の例 — Appendix A〜E のツールが実行のたびに現行セットを再発見します。*
+*メモ終わり。本日本語版の編集上の正本は英語版です。Snapshot 値は 2026-06 の例です。Appendix A〜E の tooling は実行時に対象集合を再発見する historical research instrument として保持されています。*
