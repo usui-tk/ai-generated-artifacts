@@ -59,7 +59,7 @@ a build identifier plus a calendar date. Pending items are marked
 | P07 PatchInstallWim — SSU → LCU → .NET sequence | _pending operator confirmation_ | last successful real run not recorded in this revision |
 | P08 PatchBootWim — boot.wim + winre.wim | _pending operator confirmation_ | last successful real run not recorded in this revision |
 | P09 AssembleIso — Dynamic Update overlay + `oscdimg` | _pending operator confirmation_ | (requires `oscdimg.exe` on a Windows runner) |
-| P10 ConvertPca2023BootManager — PCA2023 conversion (opt-in) | _pending operator confirmation_ | (requires LCU 2024-4B+ source ISO) |
+| P10 ConvertPca2023BootManager — PCA2023 conversion (default-on, readiness-driven) | _pending operator confirmation on the current branch_ (the r12.75-terminal E2E validation is preserved as historical provenance and is not inferred forward) | (requires LCU 2024-4B+ source ISO) |
 | P11 StaticVerify — output ISO mount + KB-package presence check | _pending operator confirmation_ | (requires P07-P09 success) |
 | P12 VerifyPca2023Readiness — `pca2023_readiness.json` + `.md` emission | ✓ structurally validated; runs unconditionally | r09.0 step2b3-real-data-parser-correction build / 2026-05-28 |
 | P13 FinalReport — end-of-run summary + ISO hash | _pending operator confirmation_ | (requires P07-P11 success) |
@@ -231,7 +231,7 @@ Verification checklist:
 - [x] P01 – P06 banner blocks each have a complete header + footer
 - [x] P07, P08, P09, P10, P11, P12, P13 all log SKIPPED with reason "DryRun"
 - [x] No DISM mount call appears in the log
-- [x] Phase Timing Summary at the end of the run lists all 13 phases with their state
+- [x] Phase Timing Summary at the end of the run lists every executed phase of the selected Action with its state
 
 ### 2.5 SyntheticTestMode — CI full pipeline
 

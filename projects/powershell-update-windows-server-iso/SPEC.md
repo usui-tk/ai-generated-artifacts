@@ -284,7 +284,7 @@ checks are consumer-specific (Part B).
 
 `psa.py` (the canon's PowerShell static analyzer; canonical home in the tool canon) is the
 **mandatory static-analysis gate**. Every consumer runs it with a project-local
-`.psa.config.json` and MUST be **clean (0 errors / 0 warnings / 0 info)** before each commit.
+`.psa.config.json` under the **adjudicated-debt governance**: no UNADJUDICATED finding at any severity before a commit; adjudicated findings may remain as declared debt with documented cause and a non-regression baseline (the current baseline lives in TESTING.md §0).
 The `.psa.config.json` **follows-latest** from the analyzer's canonical home (ADR 0009); it is
 tool-owned, not part of this doc canon. Which rules a consumer suppresses (with justification)
 and any project-specific false-positive dispositions are recorded in the consumer's own SPEC,
@@ -314,7 +314,7 @@ items) and are **not restated here**.
 ### A.13 Development workflow
 
 Changes follow an **iterate-to-green** cycle: edit; run the static-analysis gate (A.11) to
-**0/0/0**; run the consumer's verification/tests where present; then commit. Revision history
+the adjudicated-debt baseline (no new/increased unexplained findings); run the consumer's verification/tests where present; then commit. Revision history
 is recorded in **CHANGELOG** (Keep a Changelog format); the SPEC records the current design,
 not a change log. Doc-touching changes keep the doc-set in sync (AGENTS.md §5): a SPEC change
 that alters behaviour updates README / README.ja / TESTING in the same change. CI workflow
@@ -836,7 +836,7 @@ entry in `Common.SupportedLanguages`; no changes are required in
 
 **Status**: normative.
 
-The pipeline consists of 13 phases organised into 5 groups:
+The pipeline's canonical phase model is P01-P14 (including the inserted P08S build phase), organised into 5 groups:
 
 | Phase | Group | Purpose |
 |:---:|:---:|:---|
@@ -1673,9 +1673,11 @@ excludes the signature region).
   media + delegate to Microsoft `Make2023BootableMedia.ps1` + ADK) is
   **under real-environment verification** (see the Secure-Boot
   campaign; the final mechanism text lands once verified).
-- For Server 2025, P10 can short-circuit via the
-  `RequiredByDefault=false` policy, since the install.wim already
-  contains the assets natively.
+- For Server 2025, the historical `RequiredByDefault=false`
+  short-circuit was removed by the r12-series default-enable
+  reshape; under the current policy P10 runs by default on Server
+  2025 exactly as on the other OS (§B.17.3), while the install.wim
+  still contains the staging assets natively.
 
 ## B.17 PCA2023 boot manager support
 
@@ -2664,7 +2666,9 @@ T40.
 
 **Status**: normative. **Policy ID**: SPEC-WSI-030.
 
-Two static analysers MUST report zero findings before commit:
+Two static analysers gate every commit under the adjudicated-debt
+governance (no unadjudicated finding; declared debt is documented in
+TESTING.md §0 with a non-regression baseline):
 
 ### C.1.1 psa.py (the project's primary analyser)
 
@@ -2704,7 +2708,7 @@ Invoke-ScriptAnalyzer `
   -Recurse
 ```
 
-Expected: zero findings under the project `PSScriptAnalyzerSettings.psd1`.
+Expected: no unadjudicated findings under the project `PSScriptAnalyzerSettings.psd1` (declared-debt baseline in TESTING.md §0).
 The settings file matches the strict baseline; rule suppressions
 require justification per the §C.1 inline-suppression policy.
 
@@ -2848,7 +2852,7 @@ Runs on Linux pwsh 7.4.6 (CI Stage 1) and Windows PowerShell 5.1
 
 | # | Command | Expected outcome |
 |:---:|:---|:---|
-| 1 | `.\Update-WindowsServerIso.ps1 -Action ListPhases` | exit 0; 13 phases + 11 actions printed |
+| 1 | `.\Update-WindowsServerIso.ps1 -Action ListPhases` | exit 0; the registered phases (P01-P14 + P08S + A00-A03) and the full Action set pretty-printed |
 | 2 | `.\Update-WindowsServerIso.ps1 -EnvironmentInfoOnly` | exit 0; environment dump |
 | 3 | `.\Update-WindowsServerIso.ps1 -Action PrepareBuildVerify -SyntheticTestMode -DryRun -OsKey Server2019` | exit 0; P01–P03 complete, P04 reaches `New-SyntheticTestIso` |
 | 4 | `.\Update-WindowsServerIso.ps1 -Action DumpFieldClassification` | exit 0; JSON written to stdout |
@@ -2947,63 +2951,16 @@ candidate Future enhancement. Today, the gate is a manual review.
 
 **Status**: normative. **Policy ID**: SPEC-WSI-033.
 
-The `tests/` subdirectory ships a Python-based self-verification
-suite of **seventeen numbered tools (sparse T-numbering, T1 through
-T31; numbers of retired tools are never reused)** plus three
-unnumbered gates (the canonical JSON format gate, the config schema
-gate and the seed contract gate). They probe the script's
-external dependencies and unit-test its PowerShell functions. They
-use only the Python standard library — no `pip install` required.
-The canonical T-numbering is maintained in
-[`tests/README.md`](./tests/README.md) "Tool inventory"; this section
-mirrors that authoritative table.
+The `tests/` subdirectory ships the repository-native
+self-verification suite (sparse T-numbering; numbers of retired
+tools are never reused) plus the unnumbered format / schema / seed
+gates. The normative inventory is NOT mirrored here — mirrored
+inventories are exactly the drift mechanism this specification
+avoids. The authoritative per-contract inventory, execution-tier
+declaration and current verification state live in
+[`TESTING.md`](./TESTING.md) §0 and §5; retirements are recorded in
+§B.15.4 of this document.
 
-### C.9.1 Tool inventory (T1 – T31, sparse + format / schema / seed gates)
-
-| Tool | Type | Assertions | Network | Run when |
-|:---|:---|:---|:---:|:---|
-| **T1** `catalog_probe.py` | Live Microsoft Update Catalog probe (search + per-OS title formats + supersedence panel) | ~7 live checks | Yes | Before/after Catalogue-related code change; monthly CI |
-| **T2** `catalog_fixture_test.py` | Offline HTML fixture regression against `fixtures/<patch-month>/` | 13 | No  | Every commit that touches parsers or TitleTokens |
-| **T3** `powershell_harness.py` | PS function unit tests via `-Action TestHarness` | **7** | No  | Every commit that touches a PS scrape helper |
-| **T4** `eval_iso_probe.py` | Evaluation ISO endpoint check (HTTP Range-GET; 4 OS × 2 lang) | live (4 OS) | Yes | Before release; on Microsoft Evaluation Center snapshot rotation |
-| **T6** `release_info_parser_test.py` | Offline regression for `ConvertFrom-ReleaseInfoMarkdown` against the PoC fixture | 13 | No | Every commit that touches the release-info parser |
-| **T7** `dotnet_cu_parser_test.py` | Offline regression for `ConvertFrom-DotNetCuIndexMarkdown` / `ConvertFrom-DotNetCuMarkdown` against `snapshots/dotnet_cu/` | 16 | No | Every commit touching the .NET CU parsers or the fetch/cache pipeline |
-| **T11** `canonical_json_test.py` | Offline byte-level parity test between `ConvertTo-CanonicalJson` / `Save-CanonicalJsonFile` (PowerShell) and `canonical_json_dumps` / `save_canonical_json_file` (Python) per SPEC Part B.23 | 26 | No | Every commit touching the canonical JSON helpers (PS or Python) |
-| **T20** `removed_live_wua_guard_test.py` | Offline static guard: the removed live-WUA functions / parameters stay absent and the P06 gate stays wired | 20 | No | Every commit touching P06 or the WUA-adjacent surface |
-| **T23** `config_required_ssu_downloadurl_test.py` | Offline data-contract guard on the committed configs: SSU `DownloadUrl` non-empty, `PatchModel` ⇔ SSU-line consistency, negative fixture rejected | 20 | No | Every commit touching `data/config-Server*.json` |
-| **T24** `dism_cleanup_args_test.py` | `Get-DismCleanupArgumentList` argument-vector unit test (ResetBase / ScratchDir variants) | 6 | No | Every commit touching the P07 cleanup path |
-| **T25** `dism_export_args_test.py` | `Get-DismExportArgumentList` argument-vector unit test | 6 | No | Every commit touching the P07 export path |
-| **T26** `defender_exclusion_plan_test.py` | The three pure helpers behind `-UseDefenderExclusions` (managed set / plan / fail-closed decision) | 13 | No | Every commit touching the Defender-exclusion feature |
-| **T27** `catalog_patchset_builder_test.py` | Offline b3 dataset builder: `ConvertTo-ConfigLines` from the committed raw capture to `PatchBaseline.Lines[]`, incl. the SetupDU line and the in-model starvation hard-fail | 16 | No | Every commit touching `ConvertTo-ConfigLines` or the raw fixture |
-| **T28** `setup_du_forbid_test.py` | `Resolve-SetupDu` Forbid-branch guard for the non-uup-checkpoint OSes | 12 | No | Every commit touching the SetupDU resolver |
-| **T29** `patch_integrity_digest_test.py` | Digest-format boundary: `ConvertTo-HexDigestString` base64↔hex vs an independent Python implementation + static wiring guards | 11 | No | Every commit touching the integrity layer |
-| **T30** `setup_du_discriminator_test.py` | `Select-SetupDuCandidate` against verbatim live-Catalog rows (title discriminator; Products-filter resurrection guard) | 8 | No | Every commit touching the SetupDU discriminator |
-| **T31** `lcu_target_verify_test.py` | `TargetBuildAfterUpdate` derived-field contract: comparator behavior, committed-data consistency, single-writer wiring, P11 hard-Fail row | 24 | No | Every commit touching the TBAU derivation or P11 |
-| **seed contract gate** `seed_contract_test.py` | `data/seed/seed-Server*.json` vs `schema/config-seed.schema.json` + structural seed rules (the SEED contract for the offline dataset rebuild). (No T number; gate convention.) | 17 | No | Every commit touching seeds or the seed schema |
-| **canonical JSON format gate** `canonical_json_format_check.py` | Offline format-compliance check: re-serialises every `*.json` under `data/`, `tests/fixtures/`, `tests/snapshots/` and fails on byte divergence. Implements SPEC §C.3.4. (No T number; format gate.) | 29 files | No | Every commit that adds or modifies a JSON file in the three scanned directories |
-| **config schema gate** `config_schema_test.py` | Offline schema-conformance check: a stdlib-only draft-07-subset validator that checks every `data/config-Server*.json` against `schema/config.schema.json`, with a targeted regression guard against the legacy `Patches` property (r10.4). (No T number; schema gate, mirrors the format-gate convention.) | 14 | No | Every commit touching `data/config-Server*.json` or `schema/config.schema.json` |
-
-**Determinism categories**:
-
-- **Offline-deterministic** (the local gate battery for every change; CI Stage 1 runs the config schema gate): T2, T3, T6, T7, T11, T20, T23, T24, T25, T26, T27, T28, T29, T30, T31, plus the canonical JSON format gate, the config schema gate and the seed contract gate.
-- **Live-network** (monthly CI + ad-hoc): T1, T4.
-
-### C.9.2 Adjunct: retired r06 Phase 2 PoCs
-
-The original Phase 2 PoC scripts (`poc_release_info_*.py`,
-`poc_dotnet_cu_*.py`, `poc_dynamic_update_*.py`) shipped with r06.0
-Phase 2 and were retired in r07.0 Step 5 once their findings were
-integrated into the production parsers. Their reports remain under
-the development archive outside the repository tree for archaeological reference (see Appendix F).
-
-### C.9.3 Refreshing fixtures
-
-The `tests/fixtures/<patch-month>/` HTML files are captured per
-patch month. To refresh for a new month:
-
-```bash
-# 1. Confirm Catalog is queryable for the new month
-python3 catalog_probe.py --check all --patch-month 2026-06
 
 # 2. Re-collect the HTML files via the bundled helper
 #    (see tests/README.md "Refreshing fixtures")

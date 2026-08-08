@@ -313,7 +313,7 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
 | 権限 | Administrator（DISM マウントは管理者権限が必須）|
 | Windows ADK | Deployment Tools 機能（`oscdimg.exe` を提供）。不在時に自動インストール（スイッチ不要）|
 | Windows SDK Signing Tools | 埋め込み PCA2023/PCA2011 ブート署名検証用の `signtool.exe` を提供（P10/P12 readiness）。不在時に自動インストール（スイッチ不要）|
-| ディスク空き容量 | `-WorkRoot` ドライブに 100 GB 以上（最低 60 GB、Workspace プリフライトが 100 GB を強制チェック）|
+| ディスク空き容量 | `-WorkRoot` ドライブに最低 100 GB の空き（Workspace プリフライトが強制）|
 | ネットワーク | ISO とパッチのダウンロード用インターネットアクセス（オフライン時は `-IsoPath` + `<WorkRoot>/patches/<OsVersion>/` へのパッチ事前配置。LCU とチェックポイント MSU は `cu/` サブフォルダへ）|
 | 静的解析 | `python3` + 正規配置の `psa.py`（後述「静的解析」を参照）|
 
@@ -324,14 +324,14 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
 | Server 2016 | en-us, ja-jp | PCA2023 変換には LCU 2024-4B 以降が必要 |
 | Server 2019 | en-us, ja-jp | PCA2023 変換には LCU 2024-4B 以降が必要 |
 | Server 2022 | en-us, ja-jp | PCA2023 変換には LCU 2025-2B（build 20348.2227）以降が必要 |
-| Server 2025 | en-us, ja-jp | デフォルトでは PCA2023 変換不要（ファームウェアに 2023 証明書が同梱されている）|
+| Server 2025 | en-us, ja-jp | PCA2023 変換は既定で実行（現行ポリシー）。認証済みプラットフォームはファームウェアにも 2023 証明書を同梱 |
 
 新規言語の追加は、該当 `data/config-Server<N>.json` の `LanguageSpecific`
 配下にノードを 1 つ追加するだけで完結します（SPEC.md §B.4.5 参照）。
 
 ## フェーズ一覧
 
-13 個のフェーズによるパイプライン：
+パイプライン（正規フェーズモデル P01-P14・挿入 P08S ビルドフェーズを含む）：
 
 | ID：| 名称：| グループ：| 処理内容：|
 |:---|:---|:---|:---|
@@ -374,7 +374,10 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
 - **Server 2025**：P10 はこの OS でも既定実行です（現行ポリシーで
   `RequiredByDefault=true`）— 認証済みプラットフォームのファームウェア
   内容に依存せず、PCA2023 専用ファームウェアで起動できるメディアを生成
-  し、変換は実測で E2E 検証済みです。残存する `-ForcePca2023OnServer2025`
+  します。変換メカニズムの E2E 検証は r12.75 終端実装で完了しており
+  （歴史的証跡として保存）、現行ブランチ自身の未完了検証ゲートは
+  TESTING.md に列挙され、歴史的証跡から閉鎖を推定しません。残存する
+  `-ForcePca2023OnServer2025`
   は非推奨の no-op 互換スロットです（指定時は caution を出力）。
 - **既存 ISO のフォレンジック検査**：`-Pca2023OnlyMode -IsoPath <existing.iso>`
   で全ビルドパイプラインをスキップし、P12 のみを ISO に対して実行。
@@ -459,7 +462,7 @@ P03 RefreshPatchBaseline（ベースラインが古いとき、または -AutoDe
         - Config 駆動の title-token 絞り込みで SSU + LCU + DynamicUpdate(.Setup/.Component/.SafeOs)
           + .NET CU を識別
         - ScopedViewInline.aspx を取得して Supersedes / SupersededBy を確認
-        - PatchBaseline.Lines を Config JSON にアトミックに書き戻し
+        - 有効なインメモリ PatchBaseline は常時更新。Config JSON への（アトミックな）永続化は AutoRefreshPolicy.WritebackToConfig が許可する場合のみ
 P04   FetchAssets（新しく解決された URL と SHA-256 を使用）
 P05   ExpandIso
 P06 ValidatePatchServicing

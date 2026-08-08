@@ -22,7 +22,65 @@ the script and follows the
 
 ## [Unreleased]
 
+### Fixed
+
+- **Standalone `-Pca2023OnlyMode` readiness artifact now emits the
+  declared `.md` filename** (re-audit F-06, re-opened and CONFIRMED
+  by measurement). The standalone branch constructed its
+  human-readable report path as `pca2023_readiness.txt` — in a
+  variable named `$mdPath` — while every contract surface (help,
+  P12, the pipeline writers) declares `pca2023_readiness.json` +
+  `pca2023_readiness.md`. The one-token fix aligns the standalone
+  output with the declared artifact contract; T35 gains two
+  filename pins (the declared set present; the `.txt` variant
+  absent — 11 assertions). ScriptVersion
+  `update-wsi-2026.08.08-r12.84`, tag `doc-contract-r4`; the T40
+  release pin advances in the same change set.
+
 ### Documentation
+
+- **Provenance correction to the R1 remediation record (re-audit
+  F-16; the R1 entry below is preserved unrewritten as history).**
+  Follow-up independent re-measurement showed three R1-era
+  statements were too broad: (1) the claim that F-06 was "refuted by
+  measurement" was WRONG — the earlier verification read a
+  truncated search listing as complete, and the standalone
+  readiness branch did still emit `.txt` (fixed above); (2)
+  "every current-facing document" was not fully synchronized to the
+  PCA2023 policy — an OS-support table row (both languages), a SPEC
+  B.16-area passage and a TESTING pipeline row retained old-policy
+  wording; (3) static-analysis governance was not fully unified —
+  SPEC's quality-requirement and analyzer-gate sections still
+  required strict 0/0/0. All three are remediated in this R4 batch;
+  the earlier claims stand corrected here rather than being
+  rewritten in place.
+- **Documentation-contract remediation R4** (re-audit; every finding
+  re-measured before action — all ten active findings confirmed
+  real). F-01 residuals: the README OS-support rows (en+ja), SPEC's
+  historical `RequiredByDefault=false` short-circuit passage
+  (historicalized to the current default-on policy) and TESTING's
+  "(opt-in)" pipeline row now state the current contract. F-03
+  residuals: SPEC's quality-requirement, canon-consumption and
+  analyzer-gate sections (four sites) are unified on the
+  adjudicated-debt governance with TESTING §0 as the baseline
+  record. F-15: README's Server-2025 bullet (en+ja) and TESTING's
+  P10 row now separate the r12.75-terminal historical E2E
+  validation (preserved provenance) from the current branch's own
+  outstanding verification gates, which are never inferred closed
+  from historical evidence. F-02 residuals: the fragile
+  "thirteen phases"/"13 個のフェーズ"/"13 phases" counts in README
+  (en+ja), SPEC §B.5 intro and the SPEC smoke row are re-stated as
+  the canonical P01-P14 (+P08S) model, and TESTING's timing-summary
+  checklist line is made Action-relative. F-04 residual: the
+  hard-coded "All 34 parameters" heading defers to the `param()`
+  block as the authoritative surface. F-05 residual: the P03
+  workflow narratives (en+ja) use the canonical conditional-
+  writeback sentence. F-07 residual: the README prerequisites rows
+  (en+ja) state the single enforced 100 GB contract. F-14: SPEC's
+  §C.9 mirrored seventeen-tool/T31-era inventory — the drift
+  mechanism itself — is replaced by a durable pointer to
+  TESTING.md §0/§5 as the authoritative inventory, and the stale
+  §C.9.1 mirror table is removed.
 
 - **Documentation-contract remediation R3 (hygiene batch)** (audit
   findings F-11, F-12, F-13). F-11: the `docs/history/` references

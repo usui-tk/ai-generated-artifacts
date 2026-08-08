@@ -323,7 +323,7 @@ groups for newly-added languages).
 | Privileges | Administrator (DISM Mount requires elevation) |
 | Windows ADK | Deployment Tools feature (provides `oscdimg.exe`); auto-installed when missing (no switch) |
 | Windows SDK Signing Tools | Provides `signtool.exe` for embedded PCA2023/PCA2011 boot-signature verification (P10/P12 readiness); auto-installed when missing (no switch) |
-| Disk space | 100 GB free on the `-WorkRoot` drive (60 GB minimum, 100 GB enforced by Workspace preflight) |
+| Disk space | 100 GB minimum free on the `-WorkRoot` drive, enforced by the Workspace preflight |
 | Network | Internet access for ISO / patch downloads (offline: `-IsoPath` + pre-staged patch files under `<WorkRoot>/patches/<OsVersion>/`, LCU + checkpoint MSUs in the `cu/` subfolder) |
 | Static analysis | `python3` + the canonical `psa.py` for static analysis (see "Static analysis" below) |
 
@@ -334,7 +334,7 @@ groups for newly-added languages).
 | Server 2016 | en-us, ja-jp | LCU 2024-4B or later required for PCA2023 conversion |
 | Server 2019 | en-us, ja-jp | LCU 2024-4B or later required for PCA2023 conversion |
 | Server 2022 | en-us, ja-jp | LCU 2025-2B (build 20348.2227) or later required for PCA2023 conversion |
-| Server 2025 | en-us, ja-jp | PCA2023 not required by default; firmware-provided 2023 certificates |
+| Server 2025 | en-us, ja-jp | PCA2023 conversion default-on (current policy); firmware also provides the 2023 certificates on certified platforms |
 
 Adding a new language is a single-node addition under
 `LanguageSpecific` in the relevant `data/config-Server<N>.json`. See
@@ -342,7 +342,7 @@ SPEC.md §B.4.5.
 
 ## Phase reference
 
-Pipeline of thirteen phases:
+Pipeline (canonical phase model P01-P14, incl. the inserted P08S build phase):
 
 | ID | Name | Group | What it does |
 |:---|:---|:---|:---|
@@ -385,8 +385,12 @@ Common operator decisions:
   PCA2011-signed boot manager for older-firmware targets.
 - **Server 2025**: P10 also runs by default (`RequiredByDefault=true`
   under the current policy) — media must boot on PCA2023-only
-  firmware regardless of what certified platforms carry, and the
-  measured conversion is verified end-to-end. The retained
+  firmware regardless of what certified platforms carry. The
+  conversion mechanism was validated end-to-end on the r12.75
+  terminal implementation (historical evidence preserved as
+  provenance); the current branch's own outstanding verification
+  gates are listed in TESTING.md and are not inferred closed from
+  that historical evidence. The retained
   `-ForcePca2023OnServer2025` switch is a deprecated no-op
   compatibility slot (a caution is emitted when it is supplied).
 - **Forensic inspection** of an existing ISO: pass `-Pca2023OnlyMode
@@ -398,7 +402,8 @@ manager support) and §B.18 (Output ISO verification).
 
 ## Parameters (complete)
 
-All 34 parameters are listed below, grouped by typical use. The table is
+Every public parameter is listed below, grouped by typical use (the
+authoritative surface is the script's `param()` block). The table is
 a documentation-time snapshot; the authoritative, always-current list is
 `Get-Help .\Update-WindowsServerIso.ps1 -Full`.
 
@@ -473,7 +478,7 @@ P03 RefreshPatchBaseline (if baseline is stale OR -AutoDetectLatestPatches)
         - Identify SSU + LCU + DynamicUpdate(.Setup/.Component/.SafeOs)
           + .NET CU using config-driven title-token narrowing
         - Fetch ScopedViewInline.aspx for Supersedes / SupersededBy lists
-        - Write back PatchBaseline.Lines to Config JSON (atomically)
+        - Always refresh the effective in-memory PatchBaseline; persist to Config JSON (atomically) only when AutoRefreshPolicy.WritebackToConfig allows
 P04   FetchAssets (uses the freshly resolved patch URLs and SHA-256s)
 P05   ExpandIso
 P06 ValidatePatchServicing

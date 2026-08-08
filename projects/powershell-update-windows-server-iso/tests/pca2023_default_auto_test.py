@@ -64,6 +64,14 @@ def main() -> int:
         "[switch]   $ForcePca2023OnServer2025," in text,
         "declared", passed, failed)
     passed, failed = check(
+        "standalone readiness artifacts use the declared filenames",
+        "'pca2023_readiness.json'" in text and text.count("'pca2023_readiness.md'") >= 3,
+        "declared readiness artifact filename set incomplete", passed, failed)
+    passed, failed = check(
+        "no readiness artifact writes a .txt variant",
+        "pca2023_readiness.txt" not in text,
+        "a readiness writer still emits the undeclared .txt filename", passed, failed)
+    passed, failed = check(
         "P10 gate reads the opt-out switch",
         "if ($Script:SkipPca2023BootManager) {" in text,
         "gate present", passed, failed)
