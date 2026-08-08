@@ -150,7 +150,7 @@ projects/powershell-update-windows-server-iso/
 │   ├── config.schema.json            # Config Schema v3.0 (retained-compatibility)
 │   ├── config.schema.v4.json         # Config Schema v4.0 (canonical, r12.00)
 │   └── config-seed.schema.json       # SEED projection (SPEC B.14.2)
-└── tests/                            # Self-verification suite (sparse T1-T52 + gates)
+└── tests/                            # Self-verification suite (sparse T1-T55 + gates)
 ```
 
 The PowerShell static analyzer (`psa.py`) used to verify this script
@@ -542,14 +542,16 @@ TESTING.md §0.
 ## Self-verification tools
 
 The `tests/` subdirectory ships the Python-based self-verification
-suite (sparse T-numbering, T1 – T52; numbers of retired tools are never
+suite (sparse T-numbering, T1 – T55; numbers of retired tools are never
 reused) plus three format / schema / seed gates. The set includes six
 declaration-derived contracts (T41 – T46) that read their expected
 values from the config under test rather than hardcoding them, and the
 six series-end contracts (T47 – T52) covering the evidence Collector,
 the declared oscdimg reference, the Catalog boundary and collection
 shapes, the Generic.List binder guard, and the final-writer authority
-model. The suite is declared in three execution tiers in TESTING.md §5
+model. T54 and T55 hold the source-file format contract and the
+analyzer debt-baseline gate; the whole offline tier now runs in CI
+Stage 1, not only in the local gate battery. The suite is declared in three execution tiers in TESTING.md §5
 (offline-deterministic / live-network / user-side evidence); the
 offline tier is **all green — no declared red**. Offline tools use the
 Python standard library, and most contracts additionally drive the

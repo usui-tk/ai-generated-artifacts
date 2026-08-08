@@ -13,7 +13,7 @@ This document consolidates everything needed to verify and evaluate
 2. **Synthetic smoke tests** — read-only Actions executable in CI
 3. **Live Catalogue verification** — probes that catch Microsoft-side schema drift
 4. **Operator-pending verification** — full `-Execute` builds (requires Windows + ADK + ≥ 100 GB disk + admin)
-5. **Self-verification tool suite** — T1 through T52 (canonical inventory in [`tests/README.md`](./tests/README.md); since r12.00 this includes the declaration-derived T41 – T46 set and eight retirements recorded in SPEC §B.15.4; since the series-end test re-implementation campaign it includes the T47 – T52 contracts re-authored from the external implementation's terminal regression set)
+5. **Self-verification tool suite** — T1 through T55 (canonical inventory in [`tests/README.md`](./tests/README.md); since r12.00 this includes the declaration-derived T41 – T46 set and eight retirements recorded in SPEC §B.15.4; since the series-end test re-implementation campaign it includes the T47 – T52 contracts re-authored from the external implementation's terminal regression set; T53 is reserved for the contract-surface sync test still under adjudication, and T54 – T55 hold the source-file format contract and the analyzer debt-baseline gate)
 6. **Continuous integration** — four GitHub Actions stages
 
 > **Documentation language policy**: This document is maintained in
@@ -98,9 +98,11 @@ a build identifier plus a calendar date. Pending items are marked
 | T51 generic_list_binder_test.py (17 assertions, the PowerShell 7.4+ Generic.List binder and collection-materialization guard over the r12.17/r12.64 incident class: no New-Object Generic.List construction in the active script; P11 evidence RowCount from the List Count property directly; the oscdimg resolvers use constructor-created typed lists with explicit ToArray() materialization; behavioral pins under the pinned pwsh confirm the exact incident shapes materialize correctly) | ✓ all pass | r12.75 series terminal / 2026-08-07 |
 | T52 media_authority_test.py (50 assertions, the P09/P10/P11 final-writer authority model exercised via AST-extracted functions with the DISM boundary mocked: the retained r12.62 media-sync surface and WinPE media-sync runtime (the standard boot-manager target set pinned in platform-invariant normalized form), the r12.72 P10 write-set authority binding, P11 final-identity evidence gating (tampered-ISO and stale-evidence states rejected), the measured Server 2022 reviewed-pinned Catalog identity shape, the measured Server 2019 final Setup-binary authority, and the Setup-DU final manifest validation guards) | ✓ all pass | r12.75 series terminal / 2026-08-07 |
 | Part C §C.3.4 — `canonical_json_format_check.py` (28 JSON files canonicalised, format gate) | ✓ all pass | r12.75 series terminal / 2026-08-07 |
+| T54 source_format_test.py (16 assertions, the SPEC §A.2 source-file format contract for BOTH deliverables: UTF-8 BOM present, at least one CRLF pair, no bare LF and no stray CR measured by exact byte counts, a clean parse under the pinned pwsh, and every character above U+007F classified by the PowerShell tokenizer as lying inside a string-literal token. Replaces the CI step that rejected any byte above 0x7F, which was stricter than SPEC and rejected the ja-jp Catalog display-name aliases the script legitimately carries; PSA7003 cannot substitute because it reports one finding anchored at a file's FIRST non-ASCII occurrence, so a suppression there silences every later occurrence) | ✓ all pass | CI alignment / 2026-08-08 |
+| T55 psa_debt_baseline_test.py (16 assertions, the adjudicated-debt gate: reads the declared per-deliverable counts from `.psa-baseline.json` and asserts the analyzer's measured summary equals them exactly. An increase is a regression; a decrease means the declaration has gone stale and must be lowered in the same change set. No count is hardcoded in the test or in any workflow, so a debt change is always a reviewed diff on the declared file) | ✓ all pass | CI alignment / 2026-08-08 |
 | Config schema gate — `config_schema_test.py` (20 assertions, declaration-based selection: each config's `Schema` field selects `config.schema.json` (3.0) or `config.schema.v4.json` (4.0); 2020-12 keyword coverage self-tested) | ✓ all pass | r12.00 schema-v4-role-planner / 2026-08-01 |
 | Seed contract gate — `seed_contract_test.py` (17 assertions, `data/seed/seed-Server*.json` vs `schema/config-seed.schema.json` + structural seed rules; the SEED contract for the offline dataset rebuild) | ✓ all pass | r11.51 audit-residue-sweep build (re-verified) / 2026-07-02 |
-| Stage 1 (Linux: BOM/CRLF/ASCII format check + config schema gate + psa.py text/SARIF + PSScriptAnalyzer/SARIF; the full offline T-suite runs in the local gate battery, not in Stage 1) | ✓ green | CI continuous |
+| Stage 1 (Linux: T54 source-format contract + config schema gate + the full offline contract suite incl. T55 + psa.py text/SARIF reporting + PSScriptAnalyzer/SARIF) | ✓ green | CI continuous |
 | Stage 2 (Windows PSScriptAnalyzer + parse + read-only smoke) | ✓ green | CI continuous |
 | Stage 3 (synthetic full pipeline with ADK install) | ✓ green | CI on push-to-main |
 | Stage 4 (monthly baseline refresh + auto-PR) | ✓ green | CI 2026-05-15 (last scheduled run) |
@@ -469,7 +471,7 @@ categorisation.
 
 | Tier | Contracts | Environment | Cadence |
 |---|---|---|---|
-| **1 — Offline-deterministic** | T2, T3, T6, T7, T11, T20, T24 – T26, T29, T32, T35, T36, T38 – T52, plus the config-schema, seed-contract and canonical-format gates | Python 3 + the pinned pwsh (7.4.6) on PATH; runs on Linux; no network. Many contracts drive the script or the Collector through the TestHarness REPL or AST-extraction drivers, so pwsh is a tier-level dependency; a handful (e.g. T20) are pure text scans | Local gate battery on every change; the offline portion of CI |
+| **1 — Offline-deterministic** | T2, T3, T6, T7, T11, T20, T24 – T26, T29, T32, T35, T36, T38 – T52, T54, T55, plus the config-schema, seed-contract and canonical-format gates | Python 3 + the pinned pwsh (7.4.6) on PATH; runs on Linux; no network. Many contracts drive the script or the Collector through the TestHarness REPL or AST-extraction drivers, so pwsh is a tier-level dependency; a handful (e.g. T20) are pure text scans | Local gate battery on every change; the offline portion of CI |
 | **2 — Live-network** | T1, T4 | Unrestricted egress to Microsoft endpoints | Stage 4 monthly + ad-hoc before releases. The design of an expanded live-network tier is a standing consolidation item |
 | **3 — Evidence (user-side)** | G2: the required regression set executed on real Windows PowerShell 5.1 against the distribution ZIP. G3: Collector r12 real-machine evidence from the four Server VMs. Plus every `_pending operator confirmation_` pipeline row in §0 | Real Windows hosts / real media; outside the sandbox by nature | At the user's cadence; results recorded in §0 when delivered |
 
@@ -521,22 +523,31 @@ separate bounded sweep is ordered.
 Four GitHub Actions workflows together provide automated coverage of
 §1, §2, §3, and §5 above.
 
-### 6.1 Stage 1 — Linux psa.py + PSScriptAnalyzer + offline T-suite
+### 6.1 Stage 1 — Linux source format + offline contract suite + analyzers
 
 File: `.github/workflows/projects__powershell-update-windows-server-iso__stage1__linux.yml`
 
 | Step | Tool | Purpose |
 |---|---|---|
-| 1 | `psa.py` | Static analysis on `Update-WindowsServerIso.ps1` |
-| 2 | `Invoke-ScriptAnalyzer` (pwsh 7) | PSScriptAnalyzer with project `PSScriptAnalyzerSettings.psd1` |
-| 3 | T2 | `catalog_fixture_test.py` (13 assertions) |
-| 4 | T3 | `powershell_harness.py` (7 assertions) |
-| 5 | T6 – T10 | Five offline parser / cache / resolver regression tests |
-| 6 | T11 | `canonical_json_test.py` — PS/Python byte-level parity (26 assertions, SPEC §B.23) |
-| 7 | Part C §C.3.4 gate | `canonical_json_format_check.py` — every `data/*.json` / `tests/fixtures/*.json` / `tests/snapshots/*.json` re-serialised byte-identical |
-| 8 | config schema gate | `config_schema_test.py` — every `data/config-Server*.json` validated against the schema its `Schema` field declares: `config.schema.json` (3.0) or `config.schema.v4.json` (4.0) (20 assertions) |
+| 1 | T54 | `source_format_test.py` — SPEC §A.2 source-file format for both deliverables; fails before any analyzer runs |
+| 2 | config schema gate | `config_schema_test.py` — every `data/config-Server*.json` validated against the schema its `Schema` field declares: `config.schema.json` (3.0) or `config.schema.v4.json` (4.0) |
+| 3 | offline contract suite | every `tests/*_test.py` plus `canonical_json_format_check.py`, run by glob so a newly added contract needs no workflow edit. This is the whole tier-1 set of §5, including the Collector contracts and the T55 analyzer debt gate |
+| 4 | `psa.py` | Text and SARIF output for **both** deliverables. Reporting only: the analyzer exits non-zero on any finding, so its exit code cannot gate a project that runs on declared debt. The gate is T55 in step 3 |
+| 5 | `Invoke-ScriptAnalyzer` (pwsh 7) | PSScriptAnalyzer on the main script with the project `PSScriptAnalyzerSettings.psd1`, uploaded as SARIF |
 
-Triggers: every push, every PR. Required to merge.
+Triggers: push and pull request against `main`, filtered to the paths
+that can affect the above — both deliverables, `data/`, `schema/`,
+`tests/`, the analyzer config and baseline, the analyzer itself, and
+this workflow file. A change confined to project documentation does not
+run Stage 1.
+
+Two properties of this stage are deliberate and should not be
+"simplified" away. The suite is invoked by glob rather than by an
+enumerated list of tests, because an enumerated list is what allowed
+the declared step table and the executed steps to diverge. And the
+analyzer's exit code is explicitly not the gate, because treating it as
+one is a strict-zero gate that contradicts the adjudicated-debt
+governance in §0.
 
 ### 6.2 Stage 2 — Windows PSScriptAnalyzer + parse + read-only smoke
 

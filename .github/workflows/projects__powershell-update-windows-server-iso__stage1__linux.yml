@@ -18,11 +18,20 @@ name: 'projects/powershell-update-windows-server-iso - STAGE 1: Linux checks'
 on:
   push:
     branches: [main]
+    # Path list covers BOTH deliverables (the ISO updater and the
+    # post-install Collector) and every input the offline contract
+    # suite reads. Earlier revisions listed only the main script and
+    # data/, so a change confined to tests/, schema/ or the Collector
+    # never triggered this workflow.
     paths:
       - 'projects/powershell-update-windows-server-iso/Update-WindowsServerIso.ps1'
+      - 'projects/powershell-update-windows-server-iso/Collect-WindowsServerPostInstallEvidence.ps1'
       - 'projects/powershell-update-windows-server-iso/.psa.config.json'
+      - 'projects/powershell-update-windows-server-iso/.psa-baseline.json'
       - 'projects/powershell-update-windows-server-iso/PSScriptAnalyzerSettings.psd1'
       - 'projects/powershell-update-windows-server-iso/data/**'
+      - 'projects/powershell-update-windows-server-iso/schema/**'
+      - 'projects/powershell-update-windows-server-iso/tests/**'
       - 'quality-tools/powershell-static-analyzer/psa.py'
       - 'quality-tools/powershell-static-analyzer/VERSION'
       - '.github/workflows/projects__powershell-update-windows-server-iso__stage1__linux.yml'
@@ -30,9 +39,13 @@ on:
     branches: [main]
     paths:
       - 'projects/powershell-update-windows-server-iso/Update-WindowsServerIso.ps1'
+      - 'projects/powershell-update-windows-server-iso/Collect-WindowsServerPostInstallEvidence.ps1'
       - 'projects/powershell-update-windows-server-iso/.psa.config.json'
+      - 'projects/powershell-update-windows-server-iso/.psa-baseline.json'
       - 'projects/powershell-update-windows-server-iso/PSScriptAnalyzerSettings.psd1'
       - 'projects/powershell-update-windows-server-iso/data/**'
+      - 'projects/powershell-update-windows-server-iso/schema/**'
+      - 'projects/powershell-update-windows-server-iso/tests/**'
       - 'quality-tools/powershell-static-analyzer/psa.py'
       - 'quality-tools/powershell-static-analyzer/VERSION'
       - '.github/workflows/projects__powershell-update-windows-server-iso__stage1__linux.yml'
@@ -115,29 +128,19 @@ jobs:
           echo "===== Repository top-level layout ====="
           ls -la "$GITHUB_WORKSPACE" | head -20
 
-      # --- Source-file format guard: BOM + CRLF + ASCII only ---
-      # See SPEC §A.2 and Part C.2 for the contract. This catches
-      # encoding regressions before any analyzer is invoked.
-      - name: '[Format] Validate UTF-8 BOM + CRLF + ASCII-only'
-        run: |
-          python3 - <<'PY'
-          import sys
-          from pathlib import Path
-          p = Path('projects/powershell-update-windows-server-iso/Update-WindowsServerIso.ps1')
-          data = p.read_bytes()
-          if data[:3] != b'\xef\xbb\xbf':
-              print('FAIL: UTF-8 BOM missing (expected EF BB BF)', file=sys.stderr)
-              sys.exit(1)
-          payload = data[3:]
-          if b'\r\n' not in payload[:200]:
-              print('FAIL: CRLF line endings not detected', file=sys.stderr)
-              sys.exit(1)
-          non_ascii = sum(1 for b in payload if b > 0x7F)
-          if non_ascii:
-              print(f'FAIL: {non_ascii} non-ASCII byte(s) outside the BOM', file=sys.stderr)
-              sys.exit(1)
-          print(f'OK: BOM + CRLF + ASCII-only ({len(data):,} bytes)')
-          PY
+      # --- Source-file format guard: BOM + CRLF + literal-scoped ASCII ---
+      # The contract is SPEC §A.2: UTF-8 BOM, CRLF, and non-ASCII
+      # confined to intentional data/string literals. An earlier inline
+      # version of this step rejected ANY byte above 0x7F, which is
+      # stricter than SPEC and rejects the ja-jp Catalog display-name
+      # aliases the script legitimately carries. The check now lives
+      # once, in tests/source_format_test.py (T54), where the PowerShell
+      # parser classifies each occurrence -- same rule as the 2026-07-02
+      # audit C1 lesson recorded on the schema step below: validation
+      # logic lives in tests/, never inlined here.
+      - name: '[Format] Source-file format contract (T54)'
+        working-directory: projects/powershell-update-windows-server-iso
+        run: python3 tests/source_format_test.py
 
       # --- Tool group: config schema conformance ---
       # Validates data/config-Server*.json against schema/config.schema.json
@@ -151,25 +154,84 @@ jobs:
         working-directory: projects/powershell-update-windows-server-iso
         run: python3 tests/config_schema_test.py
 
+      # --- Tool group: the offline contract suite ---
+      # Every `*_test.py` in tests/ plus the Part C format gate. These
+      # are the contracts TESTING §0 inventories; they are all offline
+      # and deterministic, and several drive pwsh (present on the
+      # ubuntu-latest image and already required by the PSScriptAnalyzer
+      # steps below). Until this step existed, Stage 1 ran exactly one
+      # of them, so the declaration-derived and behavioural contracts --
+      # including every Collector contract -- were invisible to CI and
+      # only ever ran in the local gate battery.
+      #
+      # No test is named individually here on purpose: the glob makes a
+      # newly added contract run without a workflow edit, which is the
+      # failure mode that let the inventory drift in the first place.
+      - name: '[Suite] Offline contract suite'
+        working-directory: projects/powershell-update-windows-server-iso/tests
+        run: |
+          set -o pipefail
+          rc=0
+          for t in *_test.py canonical_json_format_check.py; do
+            echo "===== $t ====="
+            if python3 "$t"; then
+              echo "----- $t: rc=0"
+            else
+              echo "----- $t: rc=$? FAILED"
+              rc=1
+            fi
+          done
+          exit $rc
+
       # --- Tool group: psa.py ---
       # NOTE: psa.py auto-loads .psa.config.json from CWD (implicit config).
       # Running from the project directory enables the psa2010_known_cmdlets
       # list documented in the project-level .psa.config.json. Do not refactor
       # to run from repo root without explicitly passing --config.
-      - name: '[psa.py] Run text analysis'
+      # Reporting only. psa.py exits non-zero whenever it reports any
+      # finding, so treating its exit code as the gate is a strict-zero
+      # gate by construction. This project runs under the adjudicated-
+      # debt governance (TESTING §0): the gate is the declared baseline
+      # in `.psa-baseline.json`, asserted by tests/psa_debt_baseline_test.py
+      # (T55) inside the suite step above, which fails on any increase
+      # AND on a stale (over-stated) declaration. Do not reintroduce
+      # exit-code gating here.
+      - name: '[psa.py] Run text analysis (report only; the gate is T55)'
         if: ${{ inputs.scope == 'all' || inputs.scope == 'psa-only' || github.event_name != 'workflow_dispatch' }}
         working-directory: projects/powershell-update-windows-server-iso
         run: |
-          # pipefail: without it the pipe into tee masks psa.py's exit code and
-          # this step stays green on findings -- the run then dies later at the
-          # SARIF step with no readable finding list (observed 2026-07-02).
-          set -o pipefail
-          python3 ../../quality-tools/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1 | tee psa.log
+          set +e
+          # Both deliverables report into the single `psa.log` basename.
+          # /SPEC.md §12.2 allowlists artifact basenames, and adding a
+          # new one would require amending that repository-wide policy
+          # in this change set; sectioning one file avoids that while
+          # still surfacing the Collector.
+          {
+            echo '===== Update-WindowsServerIso.ps1 ====='
+          } > psa.log
+          python3 ../../quality-tools/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1 >> psa.log 2>&1
+          echo "psa.py (main) exit code: $? (findings are expected; T55 is the gate)"
+          {
+            echo
+            echo '===== Collect-WindowsServerPostInstallEvidence.ps1 ====='
+          } >> psa.log
+          python3 ../../quality-tools/powershell-static-analyzer/psa.py Collect-WindowsServerPostInstallEvidence.ps1 >> psa.log 2>&1
+          echo "psa.py (collector) exit code: $?"
+          cat psa.log
+          exit 0
 
       - name: '[psa.py] Generate SARIF'
         if: ${{ inputs.scope == 'all' || inputs.scope == 'psa-only' || github.event_name != 'workflow_dispatch' }}
         working-directory: projects/powershell-update-windows-server-iso
-        run: python3 ../../quality-tools/powershell-static-analyzer/psa.py --format sarif Update-WindowsServerIso.ps1 > psa.sarif
+        run: |
+          set +e
+          python3 ../../quality-tools/powershell-static-analyzer/psa.py --format sarif Update-WindowsServerIso.ps1 > psa.sarif
+          rc=$?
+          echo "psa.py --format sarif exit code: $rc (non-zero on findings; expected)"
+          if [ ! -s psa.sarif ]; then
+            echo 'FAIL: psa.sarif was not produced' >&2
+            exit 1
+          fi
 
       - name: '[psa.py] Upload SARIF to Code Scanning'
         if: ${{ always() && (inputs.scope == 'all' || inputs.scope == 'psa-only' || github.event_name != 'workflow_dispatch') }}
@@ -317,9 +379,9 @@ jobs:
           {
             echo "## STAGE 1 - Linux checks results"
             echo ""
-            echo "### psa.py"
+            echo "### psa.py (both deliverables; sectioned)"
             if [ -f projects/powershell-update-windows-server-iso/psa.log ]; then
-              tail -20 projects/powershell-update-windows-server-iso/psa.log
+              tail -40 projects/powershell-update-windows-server-iso/psa.log
             fi
             echo ""
             echo "### PSScriptAnalyzer (pwsh 7)"

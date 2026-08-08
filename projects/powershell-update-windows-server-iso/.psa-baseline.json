@@ -1,0 +1,27 @@
+{
+  "SchemaVersion": "psa-debt-baseline/1.0",
+  "_meta": {
+    "purpose": "Declared per-deliverable psa.py finding counts under the adjudicated-debt governance. The gate (tests/psa_debt_baseline_test.py) reads this declaration instead of hardcoding counts in a workflow or a test body, so a debt change is always a reviewed diff on this file.",
+    "governance": "TESTING.md section 0 -- adjudicated-debt model: no unadjudicated finding at any severity; adjudicated findings remain as declared debt with a documented cause; new or increased findings block.",
+    "adjudications": "CHANGELOG entries r12.76 through r12.82 (PSA debt drain, batches 1-7 and the Collector batch).",
+    "declaredAt": "update-wsi-2026.08.08-r12.85",
+    "updated": "2026-08-08",
+    "maintenance": "When a change legitimately alters a count, update the matching row in the SAME change set and record the cause in CHANGELOG. Both an increase and a decrease fail the gate: an increase is a regression, a decrease means this declaration has gone stale."
+  },
+  "Targets": [
+    {
+      "Path": "Update-WindowsServerIso.ps1",
+      "Error": 1,
+      "Warning": 120,
+      "Info": 0,
+      "Adjudication": "The single error is the measured PSA2001 analyzer false positive (top-level param() declarations are not harvested into the assigned set), pinned inside a canonical frame with no out-of-frame remediation available by design. Of the warnings, 87 are measured analyzer false positives (77 PSA2009 double-cast, 10 PSA6005 parameter-boundary) awaiting the registered central analyzer fixes, and 33 are naming findings deferred to the refactoring campaign."
+    },
+    {
+      "Path": "Collect-WindowsServerPostInstallEvidence.ps1",
+      "Error": 0,
+      "Warning": 4,
+      "Info": 0,
+      "Adjudication": "Four naming findings deferred to the refactoring campaign, the same deferral as the main script's naming debt."
+    }
+  ]
+}

@@ -22,7 +22,68 @@ the script and follows the
 
 ## [Unreleased]
 
+### Added
+
+- **Source-file format contract, T54**
+  (`tests/source_format_test.py`, 16 assertions). Mechanises SPEC
+  §A.2 for **both** deliverables: UTF-8 BOM, CRLF with no bare LF and
+  no stray CR (measured by exact byte counts), a clean parse under the
+  pinned pwsh, and every character above U+007F classified by the
+  PowerShell tokenizer as lying inside a string-literal token.
+  Positive and negative paths were both proven: a non-ASCII character
+  injected into a comment is reported with line, column and code
+  point; the same character inside a string literal is accepted; a
+  stripped BOM and a single bare LF are each detected.
+
+- **Analyzer adjudicated-debt gate, T55**
+  (`tests/psa_debt_baseline_test.py`, 16 assertions) over the new
+  declared surface `.psa-baseline.json`. The declaration carries the
+  per-deliverable Error/Warning/Info counts and a written adjudication
+  for each; the gate asserts the measured analyzer summary equals the
+  declaration exactly. An increase is a regression; a decrease means
+  the declaration has gone stale and must be lowered in the same
+  change set. No count is duplicated into the test body or into any
+  workflow, so changing the debt is always a reviewed diff on the
+  declared file.
+
 ### Fixed
+
+- **CI Stage 1 rejected the deliverable it was meant to protect.** The
+  source-format step failed any byte above 0x7F anywhere in the main
+  script. That rule is stricter than SPEC §A.2, which confines
+  non-ASCII to intentional data and string literals, and the script
+  legitimately carries 113 such characters — the Japanese Catalog
+  display-name aliases, the Japanese oscdimg qualification case name,
+  and the Japanese ReAgentc status pattern. The step now calls T54.
+  The analyzer rule PSA7003 was not adopted as the substitute because
+  it reports a single finding anchored at a file's FIRST non-ASCII
+  occurrence: a suppression on that one line silences the rule for
+  every later occurrence, so its silence is not evidence.
+
+- **CI Stage 1 gated the analyzer at strict zero.** Both the text and
+  the SARIF step let `psa.py`'s exit code decide, and the analyzer
+  exits non-zero on any finding — so both steps fail against the
+  declared adjudicated debt (main 1E/120W/0I, Collector 0E/4W/0I).
+  Both are now reporting steps, with the gate moved to T55, and the
+  text step covers the Collector as well as the main script. Both
+  analyses report into the single `psa.log` basename: adding a second
+  basename would require amending the repository-wide artifact
+  allowlist in `/SPEC.md` §12.2, which is out of scope for this
+  project's change set.
+
+- **CI Stage 1 ran one contract out of the suite.** Only
+  `config_schema_test.py` executed, leaving every declaration-derived
+  and behavioural contract — including all six Collector and
+  series-end contracts — invisible to CI and covered solely by the
+  local gate battery. Stage 1 now runs the whole offline tier by glob
+  over `tests/*_test.py` plus the Part C format gate, so a newly added
+  contract needs no workflow edit. Enumeration is what let the
+  declared step table drift from the executed steps.
+
+- **CI Stage 1 path filters missed most of what it verifies.** The
+  trigger list named the main script and `data/` only. It now also
+  covers the Collector, `schema/`, `tests/`, and `.psa-baseline.json`,
+  so a change confined to any of them triggers the stage.
 
 - **`ListPhases` introspection now prints the complete Action
   surface** (re-audit F-04, measured: `Show-PhaseList` enumerated
@@ -34,6 +95,22 @@ the script and follows the
   and mapping only; no pipeline behavior change. ScriptVersion
   `update-wsi-2026.08.08-r12.85`, tag `doc-contract-r5`; the T40
   release pin advances in the same change set.
+
+### Documentation
+
+- **TESTING §6.1 and §2 declared Stage 1 differently, and neither
+  matched the workflow.** §6.1 listed eight steps including T2, T3,
+  T6 – T10, T11 and the Part C gate; §2 stated that the offline suite
+  runs only in the local gate battery. Both are re-authored against
+  the implemented stage, and the two properties that must not be
+  "simplified" away — glob invocation of the suite, and the analyzer
+  exit code deliberately not being the gate — are stated with their
+  reasons. Stage 2 and Stage 3 comments citing the retired `r05.0+` /
+  `r04.x` phase numbering are re-stated against the durable
+  P01 – P14 (+P08S) model. The T-range declarations in TESTING,
+  `tests/README.md` and the README pair advance to T55, with T53
+  recorded as reserved for the contract-surface sync test still under
+  adjudication.
 
 ### Documentation
 

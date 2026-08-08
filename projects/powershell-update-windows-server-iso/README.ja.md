@@ -143,7 +143,7 @@ projects/powershell-update-windows-server-iso/
 │   ├── config.schema.json            # Config Schema v3.0（互換保持）
 │   ├── config.schema.v4.json         # Config Schema v4.0（正準・r12.00）
 │   └── config-seed.schema.json       # SEED 射影（SPEC B.14.2）
-└── tests/                            # 自己検証スイート（疎番号 T1-T52 + ゲート）
+└── tests/                            # 自己検証スイート（疎番号 T1-T55 + ゲート）
 ```
 
 本スクリプトの検証に使用する PowerShell 静的解析ツール（`psa.py`）は、
@@ -524,13 +524,15 @@ python3 ../../quality-tools/powershell-static-analyzer/psa.py Update-WindowsServ
 ## 自己検証ツール
 
 `tests/` サブディレクトリには Python 自己検証スイート（疎番号
-T1 – T52。退役したツールの番号は再利用しません）に加え、
+T1 – T55。退役したツールの番号は再利用しません）に加え、
 フォーマット／スキーマ／シードの 3 ゲートが同梱されています。
 期待値をハードコードせず検証対象 config の宣言から読み取る
 declaration-derived 契約 6 本（T41 – T46）と、シリーズ終端の 6 契約
 （T47 – T52：証跡 Collector・宣言済み oscdimg リファレンス・Catalog
 境界とコレクション形状・Generic.List バインダガード・final-writer
-権威モデル）を含みます。スイートは TESTING.md §5 の 3 実行ティア
+権威モデル）を含みます。T54・T55 はソースファイル形式契約とアナライザ
+債務基線ゲートを担い、オフラインティア全体はローカルのゲートバッテリ
+だけでなく CI Stage 1 でも実行されます。スイートは TESTING.md §5 の 3 実行ティア
 （オフライン決定的／ライブネットワーク／ユーザー側証跡）で宣言され、
 オフラインティアは**全緑 — 宣言赤なし**です。オフラインツールは
 Python 標準ライブラリを利用し、多くの契約は加えて PATH 上のピン留め

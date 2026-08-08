@@ -152,10 +152,10 @@ jobs:
           }
 
       # --- Full -SyntheticTestMode pipeline ---
-      # -SyntheticTestMode implicitly skips P03 (Catalog refresh) and
-      # P06 (patch-servicing validation) in r05.0+ phase numbering (was
-      # P02.5/P04.5 in r04.x; the P06 wsusscn2.cab scan was retired with
-      # the D1/D2 migration to the Microsoft Update Catalog). This keeps
+      # -SyntheticTestMode skips the Catalog refresh and the
+      # patch-servicing validation phases (the wsusscn2.cab scan that
+      # once backed the latter was retired with the migration to the
+      # Microsoft Update Catalog). This keeps
       # Stage 3 self-contained: no Catalog connectivity and no patch
       # downloads. Real-world dependency validation is exercised in
       # production runs, not in CI.
