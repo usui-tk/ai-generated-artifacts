@@ -95,7 +95,7 @@ remain unambiguous.
 | SPEC-WSI-030 | Static analysis gate (psa.py + PSScriptAnalyzer) | §C.1 |
 | SPEC-WSI-031 | Source file format gate | §C.2 |
 | SPEC-WSI-032 | Documentation cross-checks | §C.8 |
-| SPEC-WSI-033 | Self-verification tool suite (T1–T13 + gates) | §C.9 |
+| SPEC-WSI-033 | Self-verification tool suite (repository-native T-series + gates; inventory in TESTING.md) | §C.9 |
 
 ---
 
@@ -111,7 +111,7 @@ remain unambiguous.
   - [B.1 Script identity and entry point](#b1-script-identity-and-entry-point)
   - [B.2 Inputs and outputs](#b2-inputs-and-outputs)
   - [B.3 Workspace layout](#b3-workspace-layout)
-  - [B.4 OS profile (Config Schema v2.1)](#b4-os-profile-config-schema-v21)
+  - [B.4 OS profile (Config Schema v4.0; v3.0 retained for compatibility)](#b4-os-profile-config-schema-v40-v30-retained-for-compatibility)
   - [B.5 Phase contracts (P01–P14)](#b5-phase-contracts-p01p14)
   - [B.6 Action → Phase mapping](#b6-action--phase-mapping)
   - [B.7 ISO filename detection patterns](#b7-iso-filename-detection-patterns)
@@ -1265,8 +1265,10 @@ Stages, in order:
 3. **Config build** — for each seed, assemble the full
    `data/config-Server*.json` = seed + DERIVED (B.14.2) + generated
    `_meta`.
-4. **Verification** — validate each built config against
-   `schema/config.schema.json` and run the currency gates.
+4. **Verification** — validate each built config against the schema
+   selected by its declared schema version (`"3.0"` →
+   `config.schema.json`, `"4.0"` → `config.schema.v4.json`; §B.4)
+   and run the currency gates.
 
 Because stage 2 performs network acquisition, the whole action is
 long-running / hang-prone and MUST be run detached + polled, never
@@ -2683,9 +2685,8 @@ Expected output:
 ==== psa.py: PowerShell Static Analyzer ====
 File   : Update-WindowsServerIso.ps1
 Lines  : N
-Issues : 0 errors, 0 warnings, 0 info
-
-  (no issues found)
+Issues : <matches the declared adjudicated-debt baseline in TESTING.md §0;
+          no unadjudicated finding, no unexplained increase>
 ```
 
 The local `.psa.config.json` opts the script into the strict-mode

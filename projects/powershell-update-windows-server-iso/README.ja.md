@@ -259,7 +259,7 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 ### Admin アクション（Config ベースライン管理）
 
 `data/config-<OsKey>.json` ファイル群がスクリプトの利用するベースラインデータを
-保持します。5 つの Admin Action により、ISO に触れずにこのデータを更新・点検
+保持します。4 つの Admin Action により、ISO に触れずにこのデータを更新・点検
 できます。**更新は 2 段階** で行います：`RefreshSnapshots` が Microsoft Learn と
 Microsoft Update Catalog から上流の `data/raw-*` / `data/cache-*` を取得し、
 `RefreshAllBaselines` が各 `data/config-Server*.json` の
@@ -499,7 +499,7 @@ P07+  Build / Verify / Report
 | シナリオ：| 挙動：|
 |:---|:---|
 | ベースライン新鮮（前回検証から Patch Tuesday が更新されていない）| P03 は no-op |
-| ベースライン陳腐、スクレイプ成功 | Config を更新し新しいパッチを使用 |
+| ベースライン陳腐、スクレイプ成功 | 有効なインメモリ・ベースラインを更新し新しいパッチを使用。Config JSON への永続化は `AutoRefreshPolicy.WritebackToConfig` が許可する場合のみ |
 | ベースライン陳腐、スクレイプ失敗、既存ベースライン使用可能 | 警告 + 既存ベースラインで継続 |
 | ベースライン陳腐、スクレイプ失敗、ベースラインが空または使用不可 | 中断 |
 | `-UseBaselineOnly` 指定 | P03 を無条件でスキップ（オフラインモード）|

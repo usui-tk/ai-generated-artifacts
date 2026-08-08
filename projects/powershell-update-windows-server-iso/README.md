@@ -268,7 +268,7 @@ by purpose. The default is `PrepareBuildVerify`.
 ### Admin Actions (Config baseline management)
 
 The `data/config-<OsKey>.json` files hold the baseline data the script
-uses. Five Admin Actions let you refresh and inspect that data without
+uses. Four Admin Actions let you refresh and inspect that data without
 touching any ISO. **The refresh path is two-stage**: `RefreshSnapshots`
 populates the upstream `data/raw-*` / `data/cache-*` files from
 Microsoft Learn + Microsoft Update Catalog, then `RefreshAllBaselines`
@@ -515,7 +515,7 @@ For troubleshooting a run, these are the files to look at:
 | Scenario | Behaviour |
 |:---|:---|
 | Baseline fresh (Patch Tuesday unchanged since last verify) | P03 is a no-op |
-| Baseline stale, scrape succeeds | Config is updated and the new patches are used |
+| Baseline stale, scrape succeeds | The effective in-memory baseline is updated and the new patches are used; Config JSON is persisted only when `AutoRefreshPolicy.WritebackToConfig` allows |
 | Baseline stale, scrape fails, existing baseline usable | Warning + continue with existing baseline |
 | Baseline stale, scrape fails, baseline empty/unusable | ABORT |
 | `-UseBaselineOnly` set | P03 skipped unconditionally (offline mode) |

@@ -24,6 +24,39 @@ the script and follows the
 
 ### Fixed
 
+- **`ListPhases` introspection now prints the complete Action
+  surface** (re-audit F-04, measured: `Show-PhaseList` enumerated
+  only twelve of the fourteen `ValidateSet` Actions).
+  `RebuildDataset` and `TestHarness` are added to the introspection
+  enumeration, and `Get-PhaseListByAction` gains the missing
+  `TestHarness` arm (an empty phase list — the action is an
+  early-exit REPL mode that never reaches phase execution). Display
+  and mapping only; no pipeline behavior change. ScriptVersion
+  `update-wsi-2026.08.08-r12.85`, tag `doc-contract-r5`; the T40
+  release pin advances in the same change set.
+
+### Documentation
+
+- **Documentation-contract remediation R5** (post-R4 re-audit; all
+  seven active findings re-measured and confirmed, including the two
+  new ones). F-03 (the last High): the TESTING "Required gate"
+  strict-zero table/paragraph and SPEC's analyzer expected-output
+  sample are re-stated on the single adjudicated-debt governance —
+  no current-facing surface still declares the 0/0/0 model. F-02/
+  F-04 residuals: TESTING's ListPhases section now expects the
+  pretty-printed console inventory (not JSON) and the durable
+  P01–P14 (+P08S) phase-ID wording, matched by the introspection
+  completion above. F-05 residual: the README refresh-policy
+  scenario row (both languages) uses the canonical conditional-
+  writeback sentence. F-17 (new, confirmed): SPEC's TOC entry for
+  §B.4 no longer carries the obsolete "Config Schema v2.1" label,
+  and the A00 verification step validates each built config against
+  the schema selected by its declared version rather than a single
+  hard-coded schema file. F-14 residual: the SPEC policy-index row
+  drops the "T1–T13" era label. F-18 (new, confirmed): the README
+  Admin-Actions count (both languages) now matches the four-row
+  table and the A00–A03 grouping.
+
 - **Standalone `-Pca2023OnlyMode` readiness artifact now emits the
   declared `.md` filename** (re-audit F-06, re-opened and CONFIRMED
   by measurement). The standalone branch constructed its

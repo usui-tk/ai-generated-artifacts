@@ -140,15 +140,13 @@ python3 ../../quality-tools/powershell-static-analyzer/psa.py Update-WindowsServ
 
 ### Required gate
 
-| Severity | Threshold |
-|:---|:---|
-| Errors | 0 |
-| Warnings | 0 |
-| Info | 0 |
-
-Any finding at any severity blocks the commit. The current build
-satisfies the gate; verified count: see the §0 row "`psa.py` (latest
-mainline)".
+The gate is the **adjudicated-debt governance** (single canonical
+policy; see §0): no UNADJUDICATED finding at any severity is
+permitted before a commit; adjudicated findings remain only as
+declared debt with documented cause and a non-regression baseline;
+any new, unexplained or increased finding blocks integration. The
+current declared baseline and per-class causes: see the §0 row
+"`psa.py` (latest mainline)".
 
 ### Suppression policy
 
@@ -171,12 +169,12 @@ form the per-commit gate alongside §1.
 .\Update-WindowsServerIso.ps1 -Action ListPhases
 ```
 
-Expected: JSON document on stdout containing the registered Phase and
+Expected: a pretty-printed console inventory of the registered Phase and
 Action registries. Exits 0. No filesystem writes.
 
 Verification checklist:
 
-- [x] 13 phase IDs P01 – P13 present
+- [x] the registered pipeline phase IDs present (canonical model P01 – P14, incl. the inserted P08S)
 - [x] 14 Actions present (Prepare / Build / Verify / PrepareBuildVerify / BootTest / All / Cleanup / ListPhases / GenerateManifest / RefreshSnapshots / RefreshAllBaselines / RebuildDataset / DumpFieldClassification / TestHarness)
 - [x] 4 Admin phases A00 – A03 present
 

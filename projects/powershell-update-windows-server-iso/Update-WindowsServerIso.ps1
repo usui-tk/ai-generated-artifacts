@@ -742,10 +742,10 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.08-r12.84'
+$Script:ScriptVersion = 'update-wsi-2026.08.08-r12.85'
 # Validation history: the per-revision validation markers formerly kept
 # here live in CHANGELOG.md (chronological log) and SPEC.md Part D (rationale).
-$Script:ScriptTag     = 'doc-contract-r4'
+$Script:ScriptTag     = 'doc-contract-r5'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -26352,6 +26352,7 @@ function Get-PhaseListByAction {
         'RefreshAllBaselines'      { return [string[]]@('A01') }
         'DumpFieldClassification'  { return [string[]]@('A02') }
         'RefreshSnapshots'         { return [string[]]@('A03') }
+        'TestHarness'              { return [string[]]@() }
         default                   { throw ('Unknown action: {0}' -f $ActionName) }
     }
 }
@@ -26370,7 +26371,7 @@ function Show-PhaseList {
     }
     Write-Host ''
     Write-Host ' Actions:' -ForegroundColor Cyan
-    foreach ($a in @('Prepare','Build','Verify','PrepareBuildVerify','BootTest','All','Cleanup','ListPhases','GenerateManifest','RefreshSnapshots','RefreshAllBaselines','DumpFieldClassification')) {
+    foreach ($a in @('Prepare','Build','Verify','PrepareBuildVerify','BootTest','All','Cleanup','ListPhases','GenerateManifest','RefreshSnapshots','RefreshAllBaselines','RebuildDataset','DumpFieldClassification','TestHarness')) {
         $list = Get-PhaseListByAction -ActionName $a
         if ($list.Count -gt 0) {
             Write-Host ('  {0,-22} : {1}' -f $a, ($list -join ',')) -ForegroundColor DarkCyan
