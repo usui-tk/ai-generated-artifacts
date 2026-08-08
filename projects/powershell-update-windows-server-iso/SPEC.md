@@ -30,7 +30,9 @@ doc-provenance:
 > [`README.md`](./README.md); verification procedures and verified
 > findings live in [`TESTING.md`](./TESTING.md); per-revision change
 > history lives in [`CHANGELOG.md`](./CHANGELOG.md); long-form
-> investigation reports live in [`docs/history/`](./docs/history/).
+> investigation narratives are preserved in the development archive
+> kept outside the repository tree (CHANGELOG carries the durable
+> rationale).
 
 ---
 
@@ -1995,7 +1997,7 @@ carries semantic meaning that operators and reviewers rely on:
 | `config-` | `data/` | Operator-edited configuration (the `data/config-Server*.json` family). One per OS. |
 | `raw-` | `data/` | Mirrored upstream content (Microsoft release-notes Markdown, .NET CU index JSON, etc.). Refresh-only via `-Action RefreshSnapshots`; no operator edit expected. |
 | `cache-` | `data/` | Parsed cache derived from the corresponding `raw-` source, in machine-friendly JSON form. Re-generated whenever the `raw-` source is refreshed. |
-| `r<NN>.<MM>-` | `docs/history/` | Per-revision investigation reports. Filename also carries the topic in kebab-case. |
+| `r<NN>.<MM>-` | development archive (outside the repository tree) | Per-revision investigation reports. Filename also carries the topic in kebab-case. |
 
 The current `data/` layout uses individual files for each upstream
 source (`raw-release-info.md`, `raw-dotnet-cu.json`) rather than
@@ -2009,7 +2011,7 @@ of the upstream HTTP fetch so re-runs can skip unchanged content.
 |:---|:---|:---|
 | `data/config-Server2025.json` | Operator config | One per OS |
 | `data/raw-release-info.md` | Mirrored upstream | Refreshed by RefreshSnapshots |
-| `docs/history/r08.0-step2-installwim-symmetry-check.md` | Per-revision investigation | Cycle (r08.0), step (step2), topic kebab-case |
+| `r08.0-step2-installwim-symmetry-check.md` (development archive) | Per-revision investigation | Cycle (r08.0), step (step2), topic kebab-case |
 | `tests/fixtures/2026-05/server2025-lcu.html` | Test fixture | Per-month, per-OS HTML captures |
 
 ### B.20.4 What this section does NOT cover
@@ -2992,7 +2994,7 @@ The original Phase 2 PoC scripts (`poc_release_info_*.py`,
 `poc_dotnet_cu_*.py`, `poc_dynamic_update_*.py`) shipped with r06.0
 Phase 2 and were retired in r07.0 Step 5 once their findings were
 integrated into the production parsers. Their reports remain under
-`docs/history/` for archaeological reference (see Appendix F).
+the development archive outside the repository tree for archaeological reference (see Appendix F).
 
 ### C.9.3 Refreshing fixtures
 
@@ -3072,7 +3074,7 @@ only. The current canonical T-set ends at T10.
 > - **D.1 – D.23**: inherited from the r02 – r08.0 cycles. Each entry
 >   has a stable ID and a compact recall of root cause + mitigation;
 >   the full forensic record is preserved in CHANGELOG.md and the
->   relevant `docs/history/` finding reports.
+>   relevant finding reports in the development archive (outside the repository tree).
 > - **D.24 – D.30**: added in this r09.0 SPEC rewrite. These entries
 >   distil meta-lessons about engineering and design judgement that the
 >   r07.0 / r08.0 / r09.0 cycles surfaced. They are by nature less
@@ -3489,7 +3491,7 @@ is documented at §B.3. The pattern also helps with disk-space
 isolation per OS and with parallel multi-OS work.
 
 **Forensic notes**: the full investigation log is in
-`docs/history/mojibake-investigation-note.md`. The investigation
+`mojibake-investigation-note.md` in the development archive. The investigation
 was deliberately deferred to focus on shipping milestones; the
 workaround is empirically sufficient. The root-cause hypothesis is
 "DISM mount-cache state corruption from prior aborted P10 runs" but
@@ -3814,7 +3816,7 @@ upstream fix path.
 ### G.2 Roadmap (next cycles)
 
 This section deliberately stays short. Per
-[`docs/history/r07.0-followups.md`](./docs/history/r07.0-followups.md)
+`r07.0-followups.md` (development archive, outside the repository tree)
 and the per-cycle finding documents, the active follow-up tasks are
 tracked there with P0/P1/P2 priority tags. Roadmap-level
 forward-looking content lives in those documents, not in this SPEC.

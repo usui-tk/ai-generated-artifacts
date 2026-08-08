@@ -26,7 +26,9 @@ analysis or pure unit test could have detected:
   Catalogue's authoritative Type bucket was being thrown away.
 
 To catch the next variant of these classes of bug before they reach
-production, this directory ships five tools, summarised below.
+production, this directory ships the repository-native offline and
+targeted regression suite summarised below (see TESTING.md §0 for
+the authoritative per-contract inventory).
 
 ## Tool inventory
 
@@ -82,7 +84,7 @@ python3 removed_live_wua_guard_test.py     # T20: 20 removed-live-WUA static-gua
 # ...or run the whole offline suite (every *_test.py is offline-deterministic):
 for t in *_test.py canonical_json_format_check.py; do python3 "$t" || break; done
 python3 canonical_json_format_check.py     # Part C: every JSON file in canonical format
-python3 config_schema_test.py              # config schema gate: data/config-Server*.json vs v2.1 schema
+python3 config_schema_test.py              # config schema gate: data/config-Server*.json vs the schema declared by the current repository contract
 python3 seed_contract_test.py              # seed contract gate: SEED/DERIVED boundary coordinated with the schema
 
 # Live tests - require network access to Microsoft endpoints
@@ -264,7 +266,7 @@ parser / resolver logic was promoted into
 `ConvertFrom-DotNetCuMarkdown`; the release-info discovery/resolver
 pair was later removed in the data-source migration), regression
 coverage moved to T6/T7 above, and the historical reports were moved to
-`docs/history/`. The `poc_<topic>_*` naming convention itself is
+the development archive (outside the repository tree). The `poc_<topic>_*` naming convention itself is
 preserved in SPEC.md §B.22.2 as a reserved pattern for any future
 PoC investigation.
 

@@ -313,7 +313,7 @@ evaluation ISO) cannot be automated by CI because:
 
 The operator-pending verification is **out-of-band**. The expected
 procedure is below; results from past real runs are recorded in
-[`CHANGELOG.md`](./CHANGELOG.md) and the `docs/history/` cycle reports.
+[`CHANGELOG.md`](./CHANGELOG.md) and the development-archive cycle reports (outside the repository tree).
 
 ### 4.1 Procedure
 
@@ -597,21 +597,21 @@ operations workflow, not a quality gate).
 The per-revision pitfall catalogue with stable IDs (`D.1` – `D.30`)
 lives in [`SPEC.md`](./SPEC.md) Part D. Each entry records: the
 revision where the bug was observed, the symptom, the root cause, the
-fix applied, and any cross-references to `docs/history/` cycle reports.
+fix applied, and any cross-references to cycle reports in the development archive (outside the repository tree).
 
 This document does not duplicate that catalogue. Two highlights from
 the current cycle:
 
 - **D.25 Mojibake investigation**: P05 WIM-index banner produced doubled
   Japanese characters in r08.0 Step 16; the cycle report
-  [`docs/history/mojibake-investigation-note.md`](./docs/history/mojibake-investigation-note.md)
+  `mojibake-investigation-note.md` (development archive)
   captures the investigation. Working conclusion: DISM mount-cache
   state corruption from prior aborted P10 runs, mitigated by using a
   fresh `-WorkRoot` per OS family.
 - **r08.0 Step 4 KB5088064 SSU finding**: Server 2016 `-Execute` builds
   failed with `0x800f0823 — CBS_E_NEW_SERVICING_STACK_REQUIRED` because
   the LCU's prerequisite SSU was not in the baseline. Investigation in
-  [`docs/history/r08.0-step4-findings-and-dependency-investigation.md`](./docs/history/r08.0-step4-findings-and-dependency-investigation.md)
+  `r08.0-step4-findings-and-dependency-investigation.md` (development archive)
   motivated the r09.0 servicing-dependency design (`SPEC.md` §B.19, now the
   per-`PatchModel` consistency check); since r12.00 the prerequisite
   contract is declared in `PatchBaseline.SourcePrerequisites[]` and

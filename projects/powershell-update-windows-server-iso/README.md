@@ -150,8 +150,7 @@ projects/powershell-update-windows-server-iso/
 │   ├── config.schema.json            # Config Schema v3.0 (retained-compatibility)
 │   ├── config.schema.v4.json         # Config Schema v4.0 (canonical, r12.00)
 │   └── config-seed.schema.json       # SEED projection (SPEC B.14.2)
-├── tests/                            # Self-verification suite (sparse T1-T52 + gates)
-└── docs/history/                     # Per-cycle investigation reports
+└── tests/                            # Self-verification suite (sparse T1-T52 + gates)
 ```
 
 The PowerShell static analyzer (`psa.py`) used to verify this script
@@ -616,9 +615,10 @@ enforces this per repository SPEC.md §12 (SPEC-CI-081).
 | Stale WIM mount blocks new run | Previous run crashed mid-mount | Run `dism /Get-MountedImageInfo` then `dism /Cleanup-Mountpoints`. See SPEC.md §D.1 |
 | ISO SHA-256 mismatch on download | Microsoft rotated the Evaluation Center snapshot URL | Update `data/config-<OsKey>.json` `LanguageSpecific.<lang>.Iso.Sha256` to the new value. See SPEC.md §D.11 |
 
-For broader investigation context, the per-cycle finding reports under
-[`docs/history/`](./docs/history/) carry deep-dive narratives of the
-issues that motivated each Pitfall entry in SPEC.md Part D.
+For broader investigation context, the historical rationale behind
+each Pitfall entry in SPEC.md Part D is preserved in CHANGELOG.md
+(the strongest provenance source in this project) and in the
+development archive kept outside the repository tree.
 
 ## Acknowledgements
 

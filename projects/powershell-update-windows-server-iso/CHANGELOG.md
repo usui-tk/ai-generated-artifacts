@@ -24,6 +24,22 @@ the script and follows the
 
 ### Documentation
 
+- **Documentation-contract remediation R3 (hygiene batch)** (audit
+  findings F-11, F-12, F-13). F-11: the `docs/history/` references
+  are re-pointed to the actual retained provenance — CHANGELOG.md
+  and the development archive kept outside the repository tree — in
+  the README project-layout tree and prose (both languages) and in
+  SPEC's header pointer, Part-C prefix table, Appendix-F pointers and
+  historical-note links, and the TESTING / tests-README
+  cross-references; the directory is
+  deliberately NOT created, per the audit's own guidance, because
+  keeping the large development archive outside the canonical tree
+  is the intended design. F-12: tests/README.md's introduction no
+  longer hard-codes a tool count ("five tools") and points to
+  TESTING.md §0 as the authoritative inventory. F-13: the quick-run
+  schema-gate line no longer embeds the obsolete v2.1 schema number
+  and defers to the schema declared by the current repository
+  contract. Docs-only; no version bump.
 - **Documentation-contract remediation R2** (audit findings F-04,
   F-05, F-07, F-08, F-09, F-10; each re-measured before action).
   F-04: the README parameter tables (both languages) gain the eight

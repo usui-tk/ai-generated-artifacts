@@ -143,8 +143,7 @@ projects/powershell-update-windows-server-iso/
 │   ├── config.schema.json            # Config Schema v3.0（互換保持）
 │   ├── config.schema.v4.json         # Config Schema v4.0（正準・r12.00）
 │   └── config-seed.schema.json       # SEED 射影（SPEC B.14.2）
-├── tests/                            # 自己検証スイート（疎番号 T1-T52 + ゲート）
-└── docs/history/                     # サイクル別の調査レポート
+└── tests/                            # 自己検証スイート（疎番号 T1-T52 + ゲート）
 ```
 
 本スクリプトの検証に使用する PowerShell 静的解析ツール（`psa.py`）は、
@@ -600,10 +599,9 @@ Stage 4 は `workflow_dispatch` の 4 入力（`mode`、`onlyOs`、`onlyLanguage
 | 古い WIM マウントが新規実行を阻害 | 過去の実行がマウント途中でクラッシュ | `dism /Get-MountedImageInfo` 実行後に `dism /Cleanup-Mountpoints` を実行（SPEC.md §D.1 参照）|
 | ダウンロード後の ISO SHA-256 不一致 | Microsoft が Evaluation Center スナップショット URL を更新 | `data/config-<OsKey>.json` の `LanguageSpecific.<lang>.Iso.Sha256` を新しい値に更新（SPEC.md §D.11 参照）|
 
-調査の広いコンテキストとしては、各サイクルの finding レポートが
-[`docs/history/`](./docs/history/) に格納されており、SPEC.md Part D の
-各 Pitfall エントリの背景となった issue の deep-dive ナラティブを
-提供しています。
+調査の広いコンテキストとして、SPEC.md Part D の各 Pitfall エントリの
+背景となった歴史的経緯は CHANGELOG.md（本プロジェクト最強の来歴情報源）
+と、リポジトリツリー外に保管された開発アーカイブに保存されています。
 
 ## 謝辞
 
