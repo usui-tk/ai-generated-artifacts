@@ -24,6 +24,35 @@ the script and follows the
 
 ### Documentation
 
+- **Documentation-contract remediation R2** (audit findings F-04,
+  F-05, F-07, F-08, F-09, F-10; each re-measured before action).
+  F-04: the README parameter tables (both languages) gain the eight
+  implementation parameters they were missing (`-ResumeFromPhase`,
+  `-ResumePreflightOnly`, `-PatchRefreshMode`, `-ImageDisplayDate`,
+  `-RunHyperVValidation`, `-HyperVValidationMode`,
+  `-BootTestIsoPath`, `-BootEvidenceApprovalPath`), and the four
+  P14-related parameters gain the `.PARAMETER` help blocks they
+  lacked, authored from the measured param-block contracts. F-05
+  (confirmed): P03 writeback is documented precisely — the refresh
+  always updates the in-memory profile, persistence to the Config
+  JSON occurs only when `AutoRefreshPolicy.WritebackToConfig` allows
+  — in the README phase rows (both languages) and the
+  `-AutoDetectLatestPatches` help. F-07: the comment-based help now
+  states the enforced 100 GB workspace requirement (the stale
+  60/30 GB wording removed). F-08: the T47/T48 verification stamps
+  are split current-vs-historical — current = the Collector r13
+  standalone re-verification (29/29, 42/42, 2026-08-08); the
+  Collector r12 four-VM run is retained explicitly as historical
+  E2E provenance. F-09 (confirmed by measurement:
+  the action runs the P01–P03 resolution then emits a placeholder
+  caution): `GenerateManifest` is marked **Placeholder** in the
+  README action tables (both languages) and SPEC §B.6.2 rather than
+  silently documented as complete. F-10: SPEC's status line is now a
+  rolling-specification marker with a last-contract-review date
+  instead of the stale `r09.0 baseline` label. ScriptVersion
+  `update-wsi-2026.08.08-r12.83`, tag `doc-contract-r2` (help-text
+  edits only; no behavior change); the T40 release pin advances in
+  the same change set.
 - **Documentation-contract remediation R1 (blocking batch)** — driven
   by the user-directed staleness audit and an independently verified
   third-party consistency review (each finding re-measured against

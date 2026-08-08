@@ -6,7 +6,10 @@ doc-provenance:
 ---
 # Update-WindowsServerIso.ps1 — Developer Specification (SPEC)
 
-> **Status**: r09.0 baseline (rewritten 2026-05-27). This document is the
+> **Status**: rolling specification — the implementation contract is
+> synchronized through the r12-series consolidation (last contract
+> review: 2026-08-08; original baseline r09.0, rewritten 2026-05-27).
+> This document is the
 > authoritative developer / LLM specification for
 > `Update-WindowsServerIso.ps1`. It is structured so that an LLM agent
 > can be dropped into the project mid-stream without having to re-derive
@@ -929,7 +932,7 @@ The default is `PrepareBuildVerify`. The full list, grouped by purpose:
 | Action | Phases run | Description |
 |:---|:---|:---|
 | `BootTest` | P14 | Stand-alone run of the P14 HyperVValidation phase against the output ISO. Mutually exclusive with `-SyntheticTestMode` (parameter-exclusivity guard block) |
-| `GenerateManifest` | P01-P03 | Compute a manifest of resolved patches without proceeding to Fetch / Build / Verify |
+| `GenerateManifest` | P01-P03 | **Placeholder**: runs the P01-P03 resolution, then emits a placeholder caution; the manifest-file emission step is not implemented in this revision (Part H.2) |
 | `Cleanup` | (custom; `Invoke-CleanupAction`) | Clean up workspace and stale DISM mounts |
 | `ListPhases` | (none) | Pretty-print the phase + action registry to the console (`Show-PhaseList`; no execution) |
 | `TestHarness` | (JSON-over-stdin REPL hook, the `TestHarness` short-circuit before phase dispatch) | Eval-PS-function mode used by `tests/powershell_harness.py` (T3); not for human invocation |

@@ -252,7 +252,7 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 | Action | 説明 |
 |:---|:---|
 | `BootTest` | 出力 ISO に対する Hyper-V Gen2 セキュアブート起動スモークテスト。コンソールのスクリーンショットを保存しオペレータが合否判定（`-SyntheticTestMode` と排他。失効ファームウェアを含む本格マトリクスは `tools/boot-verification/` 参照）|
-| `GenerateManifest` | 解決済みパッチのマニフェストを算出（P01-P03 のみ）|
+| `GenerateManifest` | **Placeholder**：P01-P03 の解決を実行後、placeholder caution を出力 — マニフェストファイル出力ステップは本リビジョン未実装（SPEC Part H.2）|
 | `Cleanup` | ワークスペースと残留 DISM マウントの清掃 |
 | `ListPhases` | フェーズとアクションのレジストリを JSON で出力 |
 | `TestHarness` | `tests/powershell_harness.py`（T3）が利用する PS 関数評価 REPL モード。人間からは呼び出さない |
@@ -338,7 +338,7 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
 |:---|:---|:---|:---|
 | P01 | Initialize | Setup | PowerShell 環境、管理者権限、ADK、ディスク、Hyper-V のチェック |
 | P02 | ResolveInputs | Setup | ISO / パッチソースの解決、Config JSON のロード |
-| P03 | RefreshPatchBaseline | Setup | Microsoft Update Catalogue スクレイプ、`data/config-<OsKey>.json` への書き戻し |
+| P03 | RefreshPatchBaseline | Setup | Microsoft Update Catalogue スクレイプ。更新後ベースラインはインメモリ・プロファイルに反映され、`data/config-<OsKey>.json` への永続化は `AutoRefreshPolicy.WritebackToConfig` が許可する場合のみ |
 | P04 | FetchAssets | Fetch | ISO + パッチのダウンロード（ハッシュ検証付き）|
 | P05 | ExpandIso | Plan | ソース ISO のマウント、ワークスペースへのコピー、WIM インデックスの列挙 |
 | P06 | ValidatePatchServicing | Plan | PatchModel 整合チェック＋適用前の全 WIM インデックス検査（`logs/inspection_pre.json`。マウント時の準備性検証は引き続き P07/P08）|
@@ -412,6 +412,14 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
 | `-UseBaselineOnly` | patch | switch（OFF）| PatchBaseline をそのまま使用。Catalog アクセスなし |
 | `-SkipPca2023BootManager` | secure-boot | switch（OFF）| 既定で実行される P10 PCA2023 ブートマネージャ変換をオプトアウト（出荷時の PCA2011 署名 boot manager を維持）|
 | `-ForcePca2023OnServer2025` | secure-boot | switch（OFF）| **非推奨 no-op** 互換スロット（Server 2025 でも P10 は既定実行。指定時は caution を出力）|
+| `-ResumeFromPhase` | resume | string | 中断ビルドを `P08`/`P09` から再開：P01/P02 がランタイム状態を再構築し、既存 WorkRoot を検証、実測済みパッチ資産を復元 |
+| `-ResumePreflightOnly` | resume | switch（OFF）| P08/P09 再開ワークスペースの検証と資産再水和のみ実行し、ビルドフェーズ前で停止（`-ResumeFromPhase` 必須）|
+| `-PatchRefreshMode` | patch-selection | string | パッチ選択モードの明示指定：`PinAll` は OS・補助 KB の同一性を固定、`PinOs` はレビュー済み OS LCU/SSU/checkpoint を固定しつつ月次補助を解決 |
+| `-ImageDisplayDate` | media | string（yyyy-MM-dd）| サービス済み install.wim インデックスへ書き込む表示日付（Windows Setup は WIM IMAGE CREATIONTIME を表示）|
+| `-RunHyperVValidation` | boot-test | switch（OFF）| 標準パイプラインの P13 前に P14 を挿入（`BootTest`/`All` は本スイッチと無関係に P14 を実行）|
+| `-HyperVValidationMode` | boot-test | string（BootOnly）| `BootOnly` はコンソールサムネイルを取得し operator 裁定へ。`Install` は無人評価インストールを行い PowerShell Direct 経由で証跡収集 |
+| `-BootTestIsoPath` | boot-test | string | 出力ディレクトリ外へ移動済み ISO を単独 `-Action BootTest` で検証（SHA-256 は P11/P12 証跡インデックスと一致必須）|
+| `-BootEvidenceApprovalPath` | boot-test | string | operator 管理の JSON 承認ファイル。後続 BootTest 実行で既存の identity 束縛 BootOnly 証跡を ReleaseReady へ昇格 |
 | `-Pca2023OnlyMode` | secure-boot | switch（OFF）| 既存 ISO の P12 単独検査（`-IsoPath` 必須）|
 | `-Pca2023ScriptPath` | secure-boot | （なし）| 内部ヘルパーの代わりに外部 `Make2023BootableMedia.ps1` を使用 |
 | `-Mode` | admin | `Monthly`（または `Initial`/`Force`）| `RefreshAllBaselines` の更新モード |

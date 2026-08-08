@@ -20,7 +20,7 @@
       - Windows 10/11 Pro/Enterprise/Education or Windows Server 2016+
       - Administrator (DISM Mount requires elevation)
       - Qualified AMD64 oscdimg.exe (signed ADK or exact-hash Microsoft Symbol Server WorkRoot cache)
-      - 60 GB free disk space on the WorkRoot drive (30 GB minimum)
+      - 100 GB free disk space on the WorkRoot drive (enforced by the workspace preflight)
       - Internet access for ISO/patch downloads (offline runs: pass
         -IsoPath and pre-stage the baseline patch files under
         <WorkRoot>/patches/<OsVersion>/ -- P04 skips verified files)
@@ -101,8 +101,10 @@
 
 .PARAMETER AutoDetectLatestPatches
     Force a refresh of the patch baseline by scraping Microsoft Update
-    Catalog regardless of staleness. Result is written back to the
-    Config JSON (PatchBaseline). Requires internet access..
+    Catalog regardless of staleness. The refreshed baseline always
+    updates the effective in-memory profile; persistence back to the
+    Config JSON (PatchBaseline) occurs only when
+    AutoRefreshPolicy.WritebackToConfig allows it. Requires internet access.
 
 .PARAMETER PatchMonth
     Target patch month in yyyy-MM format (e.g. '2026-06'). Used by the
@@ -210,6 +212,28 @@
 .PARAMETER Execute
     Required for Build phases to actually mount and modify WIMs. Without it,
     Build phases run in Sandbox mode (plan only, no DISM writes).
+
+.PARAMETER RunHyperVValidation
+    Optional P14. PrepareBuildVerify runs P14 only when this switch is
+    set (inserted before P13); -Action BootTest and -Action All run P14
+    regardless of this switch.
+
+.PARAMETER HyperVValidationMode
+    BootOnly (default) captures console thumbnails for operator
+    adjudication. Install creates an Autounattend answer ISO, performs
+    an unattended evaluation install, and collects build / WinRE /
+    Secure Boot evidence through PowerShell Direct.
+
+.PARAMETER BootTestIsoPath
+    Standalone -Action BootTest can validate an ISO moved from its
+    original output directory. The SHA-256 must still match the
+    P11/P12 evidence index.
+
+.PARAMETER BootEvidenceApprovalPath
+    BootOnly screenshots are evidence capture, not release approval.
+    Supply an operator-controlled JSON approval file on a subsequent
+    BootTest invocation to promote the same identity-bound evidence to
+    ReleaseReady.
 
 .EXAMPLE
     .\Update-WindowsServerIso.ps1 -Action ListPhases
@@ -718,10 +742,10 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.08-r12.82'
+$Script:ScriptVersion = 'update-wsi-2026.08.08-r12.83'
 # Validation history: the per-revision validation markers formerly kept
 # here live in CHANGELOG.md (chronological log) and SPEC.md Part D (rationale).
-$Script:ScriptTag     = 'consolidation-fold'
+$Script:ScriptTag     = 'doc-contract-r2'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'

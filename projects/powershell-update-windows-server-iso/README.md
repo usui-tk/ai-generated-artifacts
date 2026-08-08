@@ -261,7 +261,7 @@ by purpose. The default is `PrepareBuildVerify`.
 | Action | Description |
 |:---|:---|
 | `BootTest` | Hyper-V Gen2 Secure Boot smoke test against the output ISO: console screenshots for operator review (mutually exclusive with `-SyntheticTestMode`; the full revoked-firmware matrix lives in `tools/boot-verification/`) |
-| `GenerateManifest` | Compute a manifest of resolved patches (P01-P03 only) |
+| `GenerateManifest` | **Placeholder**: runs the P01-P03 resolution, then emits a placeholder caution — the manifest-file emission step is not implemented in this revision (SPEC Part H.2) |
 | `Cleanup` | Clean up workspace and stale DISM mounts |
 | `ListPhases` | Dump phase + action registry as JSON |
 | `TestHarness` | Eval-PS-function REPL mode used by `tests/powershell_harness.py` (T3); not for human invocation |
@@ -349,7 +349,7 @@ Pipeline of thirteen phases:
 |:---|:---|:---|:---|
 | P01 | Initialize | Setup | PowerShell environment, admin, ADK, disk, Hyper-V |
 | P02 | ResolveInputs | Setup | ISO / patch source resolution, Config JSON load |
-| P03 | RefreshPatchBaseline | Setup | Microsoft Update Catalogue scrape; writeback to `data/config-<OsKey>.json` |
+| P03 | RefreshPatchBaseline | Setup | Microsoft Update Catalogue scrape; the refreshed baseline updates the in-memory profile, persisted to `data/config-<OsKey>.json` only when `AutoRefreshPolicy.WritebackToConfig` allows |
 | P04 | FetchAssets | Fetch | ISO + patch downloads with hash verification |
 | P05 | ExpandIso | Plan | Mount source ISO; copy to workspace; enumerate WIM indexes |
 | P06 | ValidatePatchServicing | Plan | PatchModel consistency + pre-servicing inspection of every WIM index (`logs/inspection_pre.json`; on-mount readiness still via P07/P08) |
@@ -426,6 +426,14 @@ a documentation-time snapshot; the authoritative, always-current list is
 | `-UseBaselineOnly` | patch | switch (OFF) | Use PatchBaseline strictly as-is; no Catalog access |
 | `-SkipPca2023BootManager` | secure-boot | switch (OFF) | Opt OUT of the default-on P10 PCA2023 boot-manager conversion (keep the shipped PCA2011-signed boot manager) |
 | `-ForcePca2023OnServer2025` | secure-boot | switch (OFF) | **Deprecated no-op** compatibility slot (P10 is default-on for Server 2025; a caution is emitted when supplied) |
+| `-ResumeFromPhase` | resume | string | Resume an interrupted build from `P08` or `P09`: P01/P02 reconstruct runtime state, the existing WorkRoot is validated, measured patch assets are restored |
+| `-ResumePreflightOnly` | resume | switch (OFF) | Validate a P08/P09 resume workspace and rehydrate assets, stopping before any build phase (requires `-ResumeFromPhase`) |
+| `-PatchRefreshMode` | patch-selection | string | Explicit patch-selection mode: `PinAll` pins OS and auxiliary KB identities; `PinOs` pins the reviewed OS LCU/SSU/checkpoint while resolving monthly auxiliaries |
+| `-ImageDisplayDate` | media | string (yyyy-MM-dd) | Display date rewritten into the serviced install.wim indexes (Windows Setup surfaces the WIM IMAGE CREATIONTIME field) |
+| `-RunHyperVValidation` | boot-test | switch (OFF) | Insert P14 before P13 in the standard pipeline (`BootTest`/`All` run P14 regardless) |
+| `-HyperVValidationMode` | boot-test | string (BootOnly) | `BootOnly` captures console thumbnails for operator adjudication; `Install` performs an unattended evaluation install and collects evidence via PowerShell Direct |
+| `-BootTestIsoPath` | boot-test | string | Validate an ISO moved from its output directory with standalone `-Action BootTest` (SHA-256 must match the P11/P12 evidence index) |
+| `-BootEvidenceApprovalPath` | boot-test | string | Operator-controlled JSON approval file promoting existing identity-bound BootOnly evidence to ReleaseReady on a subsequent BootTest invocation |
 | `-Pca2023OnlyMode` | secure-boot | switch (OFF) | Standalone P12 inspection of an existing ISO (`-IsoPath` required) |
 | `-Pca2023ScriptPath` | secure-boot | (none) | External `Make2023BootableMedia.ps1` instead of the internal helper |
 | `-Mode` | admin | `Monthly` (or `Initial`/`Force`) | `RefreshAllBaselines` refresh mode |
