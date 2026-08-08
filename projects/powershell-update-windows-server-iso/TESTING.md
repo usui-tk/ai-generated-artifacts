@@ -102,10 +102,10 @@ a build identifier plus a calendar date. Pending items are marked
 | T55 psa_debt_baseline_test.py (16 assertions, the adjudicated-debt gate: reads the declared per-deliverable counts from `.psa-baseline.json` and asserts the analyzer's measured summary equals them exactly. An increase is a regression; a decrease means the declaration has gone stale and must be lowered in the same change set. No count is hardcoded in the test or in any workflow, so a debt change is always a reviewed diff on the declared file) | ✓ all pass | CI alignment / 2026-08-08 |
 | Config schema gate — `config_schema_test.py` (20 assertions, declaration-based selection: each config's `Schema` field selects `config.schema.json` (3.0) or `config.schema.v4.json` (4.0); 2020-12 keyword coverage self-tested) | ✓ all pass | r12.00 schema-v4-role-planner / 2026-08-01 |
 | Seed contract gate — `seed_contract_test.py` (17 assertions, `data/seed/seed-Server*.json` vs `schema/config-seed.schema.json` + structural seed rules; the SEED contract for the offline dataset rebuild) | ✓ all pass | r11.51 audit-residue-sweep build (re-verified) / 2026-07-02 |
-| Stage 1 (Linux: T54 source-format contract + config schema gate + the full offline contract suite incl. T55 + psa.py text/SARIF reporting + PSScriptAnalyzer/SARIF) | ✓ green | CI continuous |
-| Stage 2 (Windows PSScriptAnalyzer + parse + read-only smoke) | ✓ green | CI continuous |
-| Stage 3 (synthetic full pipeline with ADK install) | ✓ green | CI on push-to-main |
-| Stage 4 (monthly baseline refresh + auto-PR) | ✓ green | CI 2026-05-15 (last scheduled run) |
+| STAGE 1 (Linux: T54 source-format contract + config schema gate + the full offline contract suite incl. T55 + psa.py text/SARIF reporting + PSScriptAnalyzer/SARIF) | ✓ green | CI continuous, push and pull request, no path filter |
+| STAGE 2 (Windows PS 5.1: PSScriptAnalyzer + parse of both deliverables + side-effect-free smoke incl. planning phases P01/P02) | ✓ green | CI continuous, push and pull request |
+| STAGE 3 (synthetic full pipeline with ADK install) | **red — known defect** (P04 evidence-manifest contradiction under `-SyntheticTestMode`; §6.3) | manual dispatch only / measured 2026-08-08 |
+| STAGE 4 (monthly baseline refresh + auto-PR; operations, not a gate) | ✓ green | CI 2026-05-15 (last scheduled run) |
 
 The full offline suite was re-measured at the r12.75 series terminal
 (tree `e39c12c8…`) on 2026-08-07: **30 test files PASS + the declared
@@ -520,84 +520,149 @@ separate bounded sweep is ordered.
 
 ## 6. Continuous integration coverage
 
-Four GitHub Actions workflows together provide automated coverage of
-§1, §2, §3, and §5 above.
+Four GitHub Actions workflows cover the tiers declared in §5. The
+mapping is deliberate and is the thing to preserve when either side
+changes:
 
-### 6.1 Stage 1 — Linux source format + offline contract suite + analyzers
+| Workflow | Purpose | Tier (§5) | Trigger |
+|---|---|---|---|
+| STAGE 1 (Linux) | Regression net | Tier 1, in full | every push and pull request |
+| STAGE 2 (Windows) | Evidence the Linux sandbox cannot produce | — (runtime verification) | every push and pull request |
+| STAGE 3 (Windows + ADK) | Toolchain integration against a real ADK | — (integration) | manual dispatch only |
+| STAGE 4 (Windows) | Scheduled maintenance, **not a gate** | Tier 2, in part | monthly cron + manual |
+
+Tier 3 (evidence, user-side) has no CI representation by nature: G2 and
+the operator-pending rows in §0 require real Windows hosts and real
+media.
+
+Three properties of this arrangement are load-bearing.
+
+**The tier is the authority, not the workflow.** STAGE 1 invokes the
+suite by glob over `tests/*_test.py`, so a contract added to tier 1
+runs in CI without a workflow edit. An enumerated step list is a second
+model of the same thing, and it is what allowed this section and the
+workflow to describe different Stage 1s for several releases.
+
+**Analyzer exit codes do not gate.** `psa.py` exits non-zero on any
+finding, so using its exit code as the gate is a strict-zero gate,
+which contradicts the adjudicated-debt governance in §0. The blocking
+gate is T55 over `.psa-baseline.json`, inside the suite.
+
+**Windows evidence arrives before the merge decision.** STAGE 2 is
+triggered directly rather than by `workflow_run` from STAGE 1. A
+`workflow_run`-triggered workflow does not run on a pull request and
+can never be a required status check (repository `SPEC.md` §6), so the
+previous chain structurally withheld Windows evidence until after the
+merge.
+
+### 6.1 STAGE 1 — Linux contract suite
 
 File: `.github/workflows/projects__powershell-update-windows-server-iso__stage1__linux.yml`
 
 | Step | Tool | Purpose |
 |---|---|---|
-| 1 | T54 | `source_format_test.py` — SPEC §A.2 source-file format for both deliverables; fails before any analyzer runs |
-| 2 | config schema gate | `config_schema_test.py` — every `data/config-Server*.json` validated against the schema its `Schema` field declares: `config.schema.json` (3.0) or `config.schema.v4.json` (4.0) |
-| 3 | offline contract suite | every `tests/*_test.py` plus `canonical_json_format_check.py`, run by glob so a newly added contract needs no workflow edit. This is the whole tier-1 set of §5, including the Collector contracts and the T55 analyzer debt gate |
-| 4 | `psa.py` | Text and SARIF output for **both** deliverables. Reporting only: the analyzer exits non-zero on any finding, so its exit code cannot gate a project that runs on declared debt. The gate is T55 in step 3 |
-| 5 | `Invoke-ScriptAnalyzer` (pwsh 7) | PSScriptAnalyzer on the main script with the project `PSScriptAnalyzerSettings.psd1`, uploaded as SARIF |
+| 1 | T54 | `source_format_test.py` — SPEC §A.2 source-file format for both deliverables; runs before any install so an encoding regression fails fast |
+| 2 | config schema gate | `config_schema_test.py` — each config validated against the schema its `Schema` field declares |
+| 3 | offline contract suite | every `tests/*_test.py` plus `canonical_json_format_check.py`, by glob. The whole of tier 1, including the Collector contracts and the T55 analyzer debt gate |
+| 4 | `psa.py` | Text and SARIF output for **both** deliverables, reporting only (see above); both analyses section into the single allowlisted `psa.log` |
+| 5 | `Invoke-ScriptAnalyzer` (pwsh 7) | PSScriptAnalyzer on the main script with the project settings, uploaded as SARIF under category `psa-py` / `pssa-pwsh7` |
 
-Triggers: push and pull request against `main`, filtered to the paths
-that can affect the above — both deliverables, `data/`, `schema/`,
-`tests/`, the analyzer config and baseline, the analyzer itself, and
-this workflow file. A change confined to project documentation does not
-run Stage 1.
+Steps 1 and 2 also run inside step 3; the duplication is intentional
+and costs seconds, buying a named early failure.
 
-Two properties of this stage are deliberate and should not be
-"simplified" away. The suite is invoked by glob rather than by an
-enumerated list of tests, because an enumerated list is what allowed
-the declared step table and the executed steps to diverge. And the
-analyzer's exit code is explicitly not the gate, because treating it as
-one is a strict-zero gate that contradicts the adjudicated-debt
-governance in §0.
+Triggers: every push and every pull request against `main`, with **no
+path filter**. The suite's inputs are effectively the whole project, a
+path list is a hand-maintained second model of that (the previous one
+had drifted, missing `tests/`, `schema/` and the Collector), and
+running unconditionally is what makes the workflow eligible as a
+required status check without deadlocking documentation-only pull
+requests. Measured cost: the offline suite is about two minutes.
 
-### 6.2 Stage 2 — Windows PSScriptAnalyzer + parse + read-only smoke
+### 6.2 STAGE 2 — Windows PowerShell 5.1 runtime verification
 
 File: `.github/workflows/projects__powershell-update-windows-server-iso__stage2__windows.yml`
 
 | Step | Tool | Purpose |
 |---|---|---|
-| 1 | `Invoke-ScriptAnalyzer` (Windows PS 5.1) | PSScriptAnalyzer against the Windows 5.1-specific rule subset |
-| 2 | `[System.Management.Automation.Language.Parser]::ParseFile` | Confirm the script parses cleanly under Windows PowerShell |
-| 3 | `-Action ListPhases` | Read-only inventory dump |
+| 1 | `Invoke-ScriptAnalyzer` (Windows PS 5.1) | PSScriptAnalyzer under the 5.1 runtime, SARIF category `pssa-pwsh51` |
+| 2 | `Parser::ParseFile` | Both deliverables parse under Windows PowerShell — PS 7-only syntax would pass on Linux and fail here |
+| 3 | `-Action ListPhases` | Introspection dispatch; no side effects |
 | 4 | `-EnvironmentInfoOnly` | P01-only environment dump |
+| 5 | `-OnlyPhases P01,P02` | Planning phases under PS 5.1: OS-profile load, patch-list resolution, PatchPlan construction |
 
-Triggers: every push, every PR.
+Scope boundary. Only phases without irreversible side effects run here.
+Asset fetching, DISM servicing and media assembly depend on real
+payloads, a real DISM and a real ADK; as a per-commit gate they yield
+environment-driven false failures rather than signal. That work is
+STAGE 3 and the user-side gates.
 
-### 6.3 Stage 3 — Synthetic full pipeline (Windows + ADK)
+Triggers: every push and every pull request against `main`.
+
+### 6.3 STAGE 3 — Synthetic full pipeline (manual)
 
 File: `.github/workflows/projects__powershell-update-windows-server-iso__stage3__synthetic.yml`
 
 | Step | Tool | Purpose |
 |---|---|---|
 | 1 | ADK installer | Install Windows ADK Deployment Tools on the runner |
-| 2 | `-Action PrepareBuildVerify -SyntheticTestMode -Execute` | Full P01 – P13 pipeline against synthetic inputs |
-| 3 | Post-run assertions | Verify the synthetic output ISO exists, is non-zero, and parses |
+| 2 | `-Action PrepareBuildVerify -SyntheticTestMode -Execute` | Full pipeline against synthetic inputs |
+| 3 | Post-run assertion | An output ISO exists under the WorkRoot |
 
-Triggers: push to `main`, manual dispatch. **No artifact upload** of
-the synthetic ISO (consistent with the evaluation-licence boundary
-documented in §B.18 and repository SPEC.md §12).
+Triggers: `workflow_dispatch` only. It previously also ran on
+`release/published` with no tag filter, so publishing a release for any
+sub-project in this monorepo started this 240-minute job.
 
-### 6.4 Stage 4 — Monthly baseline refresh + auto-PR
+No artifact upload. The previous step used wildcard paths, which
+repository `SPEC.md` §12.4 forbids, and the files it collected are not
+on the §12.2 allowlist and cannot be enumerated without a wildcard
+because their names carry timestamps. Diagnostics come from the job log
+and the Step Summary; an operator is present by construction.
+
+**Known defect — this workflow currently fails in P04.** Under
+`-SyntheticTestMode` the phase writes the resolved-patch evidence
+manifest, and that writer requires a local SHA-256 for every
+non-metadata patch. Synthetic mode never downloads payloads, and P02
+explicitly declares that none are required in that mode, so the two
+halves contradict each other. Measured 2026-08-08 on the r12.85 tree.
+The script is not weakened to accommodate CI; the workflow is retained
+unchanged so the fix can be verified here when it lands. See §7.
+
+### 6.4 STAGE 4 — Monthly baseline refresh (operations)
 
 File: `.github/workflows/projects__powershell-update-windows-server-iso__stage4__monthly-refresh.yml`
 
 | Step | Action | Purpose |
 |---|---|---|
-| 1 | `-Action RefreshSnapshots` | Refresh upstream `data/raw-*` + `data/cache-*` |
-| 2 | `-Action RefreshAllBaselines` | Regenerate `data/config-Server*.json` from caches |
-| 3 | T1 + T4 | Live Catalogue / ISO endpoint probes |
-| 4 | `peter-evans/create-pull-request` | If `data/config-*.json` changed, open a PR (restricted via `add-paths`) |
+| 1 | Resolve dispatch inputs | Apply cron defaults when not dispatched manually |
+| 2 | `-Action RefreshAllBaselines` | Regenerate `data/config-Server*.json` against the live Catalog |
+| 3 | Detect config diffs | Compare against the committed baseline |
+| 4 | `peter-evans/create-pull-request` | Open a PR when the configs changed, restricted via `add-paths` |
 
-Triggers: `cron: 0 2 15 * *` (02:00 UTC on the 15th of each month;
-3 days after the second-Tuesday Patch Tuesday), manual dispatch.
-Manual dispatch accepts four inputs: `mode`, `onlyOs`, `onlyLanguage`,
-`dryRun`. Failed runs do not block other workflows (this is an
-operations workflow, not a quality gate).
+Triggers: `cron: 0 2 15 * *` (02:00 UTC on the 15th, after the
+second-Tuesday release window) and manual dispatch with `mode`,
+`onlyOs`, `onlyLanguage` and `dryRun` inputs.
+
+**Not a quality gate.** A red run means the refresh could not complete
+— a Catalog-side or network condition — not that the project is
+broken. Exit code 2 (fields requiring manual fill) is accepted; only
+exit code 1 and above fail the job.
+
+This workflow uploads `A01_RefreshAllBaselines_report.csv` and
+`debugtrace.jsonl`, neither of which is on the repository `SPEC.md`
+§12.2 artifact allowlist. The behaviour predates this project's current
+change sets and is retained deliberately: removing it would lose the
+refresh evidence, and amending a repository-wide policy from inside
+this project is out of scope. Registered as a central-reflux candidate
+together with the STAGE 3 diagnostic question.
 
 ### 6.5 What CI does NOT cover
 
 - Real `-Execute` builds against downloaded Microsoft evaluation ISOs (see §4)
 - Hyper-V `-Action BootTest` (requires nested virtualisation; no CI runner has this)
-- Operator-side Microsoft Update Catalogue scraping outside of CI Stage 4
+- The live Catalog and ISO-endpoint probes T1 and T4 (tier 2), which run
+  operator-side; STAGE 4 exercises the live Catalog only through
+  `RefreshAllBaselines`
+- G2 and G3, and every `_pending operator confirmation_` row in §0
 
 ---
 
@@ -608,8 +673,48 @@ lives in [`SPEC.md`](./SPEC.md) Part D. Each entry records: the
 revision where the bug was observed, the symptom, the root cause, the
 fix applied, and any cross-references to cycle reports in the development archive (outside the repository tree).
 
-This document does not duplicate that catalogue. Two highlights from
-the current cycle:
+This document does not duplicate that catalogue.
+
+### 7.0 Open defect — `-SyntheticTestMode` cannot complete P04
+
+Measured 2026-08-08 on the r12.85 tree, on a Windows CI runner, by the
+STAGE 2 smoke step in its previous full-pipeline form.
+
+**Symptom.** `-Action PrepareBuildVerify -SyntheticTestMode` fails in
+P04 with `Resolved patch manifest cannot be persisted because local
+SHA-256 is missing for SSU/KB5005112`. P01 – P03 complete normally; the
+synthetic ISO is built; the failure is in the phase's closing step.
+
+**Root cause.** The synthetic branch of `Invoke-FetchPhase04_FetchAssets`
+calls `Write-ResolvedPatchEvidenceManifest` unconditionally, and that
+writer fails closed unless every non-metadata patch row carries a
+64-character local SHA-256. Synthetic mode does not download payloads —
+P02 states this explicitly, logging *"no real patches required"* on the
+same run. The manifest requirement and the mode's own contract
+therefore contradict each other, and no input can satisfy both.
+
+**Scope.** Any invocation with `-SyntheticTestMode`, with or without
+`-DryRun`. This includes STAGE 3, whose only trigger before this change
+set was `release/published` — so the defect had never been observed.
+
+**Status.** Recorded, not worked around. The evidence manifest was
+introduced to make P08/P09 resume possible after a P11 failure (r12.33),
+which is a real requirement; the fix has to preserve it while
+recognising the synthetic mode, and that is a script change with its
+own design-first proposal and ScriptVersion bump, not a test or CI
+change. STAGE 2 stops at P02 so the defect neither blocks the gate nor
+is hidden by it; STAGE 3 is retained unchanged so the fix can be
+verified there.
+
+**Two adjacent observations from the same run**, recorded without
+adjudication: the step announcing *"Build synthetic ISO (no downloads)"*
+downloaded `oscdimg.exe` from the Microsoft public symbol server; and
+oscdimg functional qualification reported
+`functional=NotPerformed` followed by *"No qualified AMD64 oscdimg.exe
+candidate is available"*, after which the documented raw-copy fallback
+produced the synthetic ISO.
+
+Two highlights from the current cycle:
 
 - **D.25 Mojibake investigation**: P05 WIM-index banner produced doubled
   Japanese characters in r08.0 Step 16; the cycle report

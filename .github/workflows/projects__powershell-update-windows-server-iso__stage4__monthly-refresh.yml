@@ -1,6 +1,14 @@
 # ============================================================================
 # CI workflow for projects/powershell-update-windows-server-iso/
-# STAGE 4 - Monthly Baseline Refresh.
+# STAGE 4 - Monthly baseline refresh (OPERATIONS, not a quality gate).
+#
+# This workflow does not verify the deliverables. It performs scheduled
+# maintenance: it re-resolves the monthly patch baseline against the
+# live Microsoft Update Catalog and opens a pull request when the
+# result differs from what is committed. A red run here means the
+# refresh could not complete -- a Catalog-side or network condition --
+# not that the project is broken. Regression cover is STAGE 1; Windows
+# evidence is STAGE 2.
 #
 # Runs `-Action RefreshAllBaselines` on a schedule (the 15th of every
 # month, three to six days after the second Tuesday "Patch Tuesday"
@@ -21,7 +29,7 @@
 # Governance: /SPEC.md
 # Change history: projects/powershell-update-windows-server-iso/CHANGELOG.md
 # ============================================================================
-name: 'projects/powershell-update-windows-server-iso - STAGE 4: Monthly Baseline Refresh'
+name: 'projects/powershell-update-windows-server-iso — STAGE 4: Monthly baseline refresh (operations)'
 
 on:
   schedule:
@@ -85,7 +93,11 @@ jobs:
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: windows-latest
-    timeout-minutes: 30
+    # T2 - Medium baseline (see /SPEC.md §4 [SPEC-CI-020]). Live
+    # Catalog round-trips for four OS families make the wall clock
+    # dependent on an external service, which is outside the T1
+    # profile (Linux, no large install, under five minutes).
+    timeout-minutes: 60
     # Defaults per the github-actions Windows PowerShell guidance:
     # the outer dispatcher uses pwsh (cross-platform JSON parsing); the
     # core script invocation switches to 'powershell' (PS 5.1) inline.

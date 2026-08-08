@@ -22,7 +22,99 @@ the script and follows the
 
 ## [Unreleased]
 
-_No unreleased changes._
+### Changed
+
+- **CI redesigned against the r12 artifact set.** The four STAGE
+  workflows were still written for the pre-r12 project: one deliverable,
+  no repository-side regression net, and a strict-zero analyzer gate.
+  The r12 project has two deliverables, 32 offline contracts carrying
+  roughly 1,300 assertions, and a declared adjudicated-debt baseline.
+  Each STAGE is re-derived from the tier model in TESTING §5 rather
+  than from its own history, and TESTING §6 is re-authored from the
+  implemented workflows. The STAGE naming, numbering and file paths are
+  unchanged, so repository `SPEC.md` §3 conformance and the root README
+  badge references are untouched.
+
+  - **STAGE 1 — Linux contract suite.** The path filter is removed. The
+    suite's inputs are effectively the whole project, and the filter was
+    a hand-maintained second model of that dependency graph which had
+    already drifted, omitting `tests/`, `schema/` and the Collector.
+    Running unconditionally also makes the workflow eligible as a
+    required status check without deadlocking documentation-only pull
+    requests, which is what a path-filtered required check produces.
+    Affordable by measurement: the suite is about two minutes. Timeout
+    drops from the 90-minute T2 extension to the T2 baseline of 60.
+
+  - **STAGE 2 — Windows PowerShell 5.1 runtime verification.** The
+    trigger moves from `workflow_run` (main only) to `push` and
+    `pull_request`. A `workflow_run`-triggered workflow does not run on
+    a pull request and can never be a required status check
+    (repository `SPEC.md` §6), so the previous chain structurally
+    withheld Windows evidence until after the merge decision. The
+    parse check now covers both deliverables. The smoke scope is
+    restated as side-effect-free work only: the introspection Actions
+    plus the planning phases via `-OnlyPhases P01,P02`. Timeout drops
+    from the 120-minute T2 extension to the T2 baseline of 60; the job
+    measured 1m40s on 2026-08-08.
+
+  - **STAGE 3 — Synthetic full pipeline, manual only.** The
+    `release/published` trigger is removed. It carried no tag filter, so
+    publishing a GitHub Release for **any** sub-project in this monorepo
+    started this 240-minute Windows job. The wildcard artifact upload is
+    removed as well: repository `SPEC.md` §12.4 forbids wildcard paths
+    outright, and the files it collected are not on the §12.2 allowlist
+    and cannot be enumerated without one because their names carry
+    timestamps. Diagnostics come from the job log and the Step Summary,
+    and this workflow is now operator-initiated by construction.
+
+  - **STAGE 4 — Monthly baseline refresh.** Restated as operations, not
+    a quality gate: a red run means the refresh could not complete, not
+    that the project is broken. Timeout moves from T1 to the T2
+    baseline, since live Catalog round-trips for four OS families sit
+    outside the T1 profile.
+
+  - Workflow `name:` fields adopt the em-dash form repository
+    `SPEC.md` §3.1 requires; all four had used a hyphen.
+
+### Documentation
+
+- **TESTING §6 re-authored from the implemented workflows**, replacing
+  a section that had drifted on every stage: §6.1 enumerated eight
+  steps that no longer matched, §6.3 named triggers the workflow did
+  not have, and §6.4 listed a `RefreshSnapshots` step and live probes
+  that STAGE 4 does not run. The section now leads with the
+  tier-to-workflow mapping and states the three load-bearing
+  properties — the tier is the authority (hence glob invocation), the
+  analyzer exit code is deliberately not the gate, and Windows evidence
+  arrives before the merge decision. The §2 status rows follow.
+
+- **New TESTING §7.0 records an open defect**: `-SyntheticTestMode`
+  cannot complete P04. The synthetic branch of
+  `Invoke-FetchPhase04_FetchAssets` calls
+  `Write-ResolvedPatchEvidenceManifest` unconditionally, and that writer
+  fails closed unless every non-metadata patch carries a local SHA-256
+  — payloads synthetic mode never downloads, and which P02 explicitly
+  logs as not required in that mode. Measured 2026-08-08 on a Windows
+  runner. The script is **not** weakened to accommodate CI: the
+  manifest exists so P08/P09 can resume after a P11 failure (r12.33),
+  and a fix that preserves that while recognising synthetic mode is a
+  script change with its own design-first proposal and ScriptVersion
+  bump. STAGE 2 stops at P02 so the defect neither blocks the gate nor
+  is hidden by it; STAGE 3 is retained unchanged so the fix can be
+  verified there. Two adjacent observations from the same run are
+  recorded without adjudication: a step announcing "no downloads"
+  fetched `oscdimg.exe` from the Microsoft public symbol server, and
+  oscdimg functional qualification reported `NotPerformed` before the
+  documented raw-copy fallback produced the ISO.
+
+- **Two artifact-policy gaps recorded as central-reflux candidates**:
+  STAGE 4 uploads `A01_RefreshAllBaselines_report.csv` and
+  `debugtrace.jsonl`, neither on the repository `SPEC.md` §12.2
+  allowlist, and STAGE 3 has no conforming way to publish its
+  timestamped diagnostics. Both predate this change set. Amending a
+  repository-wide policy from inside this project is out of scope, so
+  the behaviour is retained for STAGE 4, dropped for STAGE 3, and the
+  question is registered for the governance stream.
 
 
 ## [update-wsi-2026.08.08-r12.85] - 2026-08-08

@@ -3,8 +3,26 @@
 # STAGE 3 - Windows synthetic full pipeline (ADK install +
 # -SyntheticTestMode -Execute end-to-end).
 #
-# Runs on release publication (release/published event) or manual dispatch.
-# Independent of the STAGE 1 -> 2 workflow_run chain.
+# Manual dispatch ONLY. It previously also ran on release/published
+# with no tag filter, which meant publishing a GitHub Release for ANY
+# sub-project in this monorepo started this 240-minute Windows job --
+# including releases that have nothing to do with this project. That
+# was an accident of trigger design, not a decision.
+#
+# It is also not a per-commit gate. The run depends on a real ADK
+# install, real DISM and real oscdimg, so its failures are frequently
+# environmental rather than regressions. Per-commit regression cover is
+# STAGE 1; per-commit Windows evidence is STAGE 2.
+#
+# KNOWN DEFECT (2026-08-08, measured): the synthetic pipeline cannot
+# currently complete P04. Under -SyntheticTestMode the phase writes the
+# resolved-patch evidence manifest, whose writer requires a local
+# SHA-256 for every non-metadata patch -- payloads that synthetic mode
+# never downloads, and that P02 explicitly declares are not required.
+# Until that contradiction is resolved in the script, a dispatch of
+# this workflow is expected to fail in P04. The defect is recorded in
+# CHANGELOG and TESTING; the workflow is kept, unweakened, so that the
+# fix can be verified here when it lands.
 #
 # Performs an end-to-end pipeline run (P01 through P13) in
 # -SyntheticTestMode, exercising DISM mount, Add-WindowsPackage
@@ -23,11 +41,9 @@
 # Governance: /SPEC.md
 # Change history: projects/powershell-update-windows-server-iso/CHANGELOG.md
 # ============================================================================
-name: 'projects/powershell-update-windows-server-iso - STAGE 3: Synthetic full pipeline'
+name: 'projects/powershell-update-windows-server-iso — STAGE 3: Synthetic full pipeline (manual)'
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
       reason:
@@ -210,15 +226,19 @@ jobs:
       # The exclude rule below is belt-and-braces against a future
       # regression where the path glob accidentally grows to cover
       # the output/ folder.
-      - name: '[Artifacts] Upload diagnostic logs (NO ISO)'
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: uwsi-stage3-${{ github.run_id }}
-          path: |
-            C:\Temp\Workspace_UpdateWsi_CI\logs\**
-            C:\Temp\Workspace_UpdateWsi_CI\diag\**
-            !C:\Temp\Workspace_UpdateWsi_CI\output\**
-            !**/*.iso
-          if-no-files-found: warn
-          retention-days: 14
+      # Artifact upload intentionally removed. The previous form used
+      # wildcard paths (`logs\**`, `diag\**`), which /SPEC.md §12.4
+      # forbids outright, and the files it collected -- per-invocation
+      # transcripts with generated names, debugtrace.jsonl, phase CSVs
+      # -- are not on the §12.2 allowlist and cannot be enumerated
+      # without a wildcard because their names carry timestamps.
+      #
+      # Removing the step is the only option that conforms without
+      # amending a repository-wide policy from inside this project's
+      # change set. It costs little here: this workflow is manual-only,
+      # so an operator is present, and the full diagnostic output
+      # remains in the job log and the Step Summary above.
+      #
+      # Revisit if /SPEC.md §12.2 is amended to admit a per-project
+      # diagnostic allowlist (registered as a central-reflux candidate
+      # together with the STAGE 4 artifact question).

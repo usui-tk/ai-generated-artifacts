@@ -1,9 +1,18 @@
 # ============================================================================
 # CI workflow for projects/powershell-update-windows-server-iso/
-# STAGE 1 - Linux checks (psa.py + PSScriptAnalyzer on PowerShell 7.x)
+# STAGE 1 - Linux contract suite (tier 1 of TESTING.md section 5)
 #
-# This is the first stage of the Update-WindowsServerIso.ps1 CI chain.
-# On success it triggers STAGE 2 (Windows checks) via workflow_run.
+# STAGE 1 is the regression net. It runs the project's whole
+# offline-deterministic tier -- every contract in tests/ -- on every push
+# and every pull request. The tier is the authority for what runs here:
+# when TESTING.md section 5 gains or loses a tier-1 contract, this
+# workflow follows automatically, because the suite is invoked by glob
+# rather than by an enumerated list of test names.
+#
+# STAGE 1 no longer triggers STAGE 2. STAGE 2 is triggered directly by
+# push and pull_request so that Windows evidence is available BEFORE a
+# merge, and so that STAGE 2 can qualify as a required status check
+# (a workflow_run-triggered workflow cannot -- /SPEC.md section 6).
 #
 # PSScriptAnalyzer is run inline (Install-Module + Invoke-ScriptAnalyzer
 # + ConvertTo-SARIF) rather than via the unmaintained Marketplace action
@@ -13,42 +22,27 @@
 # Governance: /SPEC.md
 # Change history: projects/powershell-update-windows-server-iso/CHANGELOG.md
 # ============================================================================
-name: 'projects/powershell-update-windows-server-iso - STAGE 1: Linux checks'
+name: 'projects/powershell-update-windows-server-iso — STAGE 1: Linux contract suite'
 
 on:
+  # No path filter, deliberately. The suite is the regression net for
+  # every artifact in the project -- the two deliverables, the declared
+  # data and schema surfaces, the contracts themselves, the analyzer
+  # baseline and the documentation the contracts read. A path list is a
+  # second, hand-maintained model of that dependency graph, and the one
+  # this workflow carried had already drifted: a change confined to
+  # tests/, schema/ or the Collector never triggered it.
+  #
+  # Running unconditionally also makes STAGE 1 eligible as a required
+  # status check without deadlocking documentation-only pull requests,
+  # which is the failure mode a path-filtered required check produces
+  # (the check never reports, so the PR can never satisfy it).
+  #
+  # Affordable by measurement: the offline suite is ~2 minutes.
   push:
     branches: [main]
-    # Path list covers BOTH deliverables (the ISO updater and the
-    # post-install Collector) and every input the offline contract
-    # suite reads. Earlier revisions listed only the main script and
-    # data/, so a change confined to tests/, schema/ or the Collector
-    # never triggered this workflow.
-    paths:
-      - 'projects/powershell-update-windows-server-iso/Update-WindowsServerIso.ps1'
-      - 'projects/powershell-update-windows-server-iso/Collect-WindowsServerPostInstallEvidence.ps1'
-      - 'projects/powershell-update-windows-server-iso/.psa.config.json'
-      - 'projects/powershell-update-windows-server-iso/.psa-baseline.json'
-      - 'projects/powershell-update-windows-server-iso/PSScriptAnalyzerSettings.psd1'
-      - 'projects/powershell-update-windows-server-iso/data/**'
-      - 'projects/powershell-update-windows-server-iso/schema/**'
-      - 'projects/powershell-update-windows-server-iso/tests/**'
-      - 'quality-tools/powershell-static-analyzer/psa.py'
-      - 'quality-tools/powershell-static-analyzer/VERSION'
-      - '.github/workflows/projects__powershell-update-windows-server-iso__stage1__linux.yml'
   pull_request:
     branches: [main]
-    paths:
-      - 'projects/powershell-update-windows-server-iso/Update-WindowsServerIso.ps1'
-      - 'projects/powershell-update-windows-server-iso/Collect-WindowsServerPostInstallEvidence.ps1'
-      - 'projects/powershell-update-windows-server-iso/.psa.config.json'
-      - 'projects/powershell-update-windows-server-iso/.psa-baseline.json'
-      - 'projects/powershell-update-windows-server-iso/PSScriptAnalyzerSettings.psd1'
-      - 'projects/powershell-update-windows-server-iso/data/**'
-      - 'projects/powershell-update-windows-server-iso/schema/**'
-      - 'projects/powershell-update-windows-server-iso/tests/**'
-      - 'quality-tools/powershell-static-analyzer/psa.py'
-      - 'quality-tools/powershell-static-analyzer/VERSION'
-      - '.github/workflows/projects__powershell-update-windows-server-iso__stage1__linux.yml'
   workflow_dispatch:
     inputs:
       scope:
@@ -73,13 +67,12 @@ jobs:
       github.event_name != 'pull_request' ||
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
-    # T2 - Medium (extended): 90 minutes (see /SPEC.md §4 [SPEC-CI-020])
-    # Rationale: inline PSScriptAnalyzer install pulls PSScriptAnalyzer
-    # and ConvertToSARIF from PSGallery (~2-3 min on Linux pwsh 7) plus
-    # analysis of a 4000+ LOC PowerShell script (~5-10 min). Buffer for
-    # transient PSGallery latency, retry backoff (up to 3 attempts), and
-    # runner warm-up.
-    timeout-minutes: 90
+    # T2 - Medium baseline (see /SPEC.md §4 [SPEC-CI-020]). Measured
+    # budget: PSGallery install 2-3 min, offline contract suite ~2 min,
+    # PSScriptAnalyzer over the 27k-line deliverable 5-10 min. The
+    # previous 90-minute extension predates those measurements and is
+    # dropped, which also removes the extension-rationale requirement.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
 
