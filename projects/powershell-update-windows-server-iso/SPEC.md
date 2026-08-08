@@ -6,7 +6,10 @@ doc-provenance:
 ---
 # Update-WindowsServerIso.ps1 — Developer Specification (SPEC)
 
-> **Status**: r09.0 baseline (rewritten 2026-05-27). This document is the
+> **Status**: rolling specification — the implementation contract is
+> synchronized through the r12-series consolidation (last contract
+> review: 2026-08-08; original baseline r09.0, rewritten 2026-05-27).
+> This document is the
 > authoritative developer / LLM specification for
 > `Update-WindowsServerIso.ps1`. It is structured so that an LLM agent
 > can be dropped into the project mid-stream without having to re-derive
@@ -27,7 +30,9 @@ doc-provenance:
 > [`README.md`](./README.md); verification procedures and verified
 > findings live in [`TESTING.md`](./TESTING.md); per-revision change
 > history lives in [`CHANGELOG.md`](./CHANGELOG.md); long-form
-> investigation reports live in [`docs/history/`](./docs/history/).
+> investigation narratives are preserved in the development archive
+> kept outside the repository tree (CHANGELOG carries the durable
+> rationale).
 
 ---
 
@@ -59,7 +64,7 @@ without breaking on cosmetic edits:
 |:---|:---|:---|
 | **Section reference** | `B.N`, `B.N.M`, `D.NN` | Cross-references inside this document |
 | **Policy identifier** | `SPEC-WSI-NNN` | Repository-wide policy IDs (parallel to `SPEC-CI-NNN` in the repository-level SPEC) |
-| **Phase identifier** | `P01`–`P13`, `A00`–`A03` | Pipeline phases (see §B.5) and stand-alone actions (see §B.6) |
+| **Phase identifier** | `P01`–`P14` (incl. `P08S`), `A00`–`A03` | Pipeline phases (see §B.5) and stand-alone actions (see §B.6) |
 
 A section's identifier is stable across revisions. If a section is
 deleted, its identifier is **never reused** for a different purpose;
@@ -90,7 +95,7 @@ remain unambiguous.
 | SPEC-WSI-030 | Static analysis gate (psa.py + PSScriptAnalyzer) | §C.1 |
 | SPEC-WSI-031 | Source file format gate | §C.2 |
 | SPEC-WSI-032 | Documentation cross-checks | §C.8 |
-| SPEC-WSI-033 | Self-verification tool suite (T1–T13 + gates) | §C.9 |
+| SPEC-WSI-033 | Self-verification tool suite (repository-native T-series + gates; inventory in TESTING.md) | §C.9 |
 
 ---
 
@@ -106,8 +111,8 @@ remain unambiguous.
   - [B.1 Script identity and entry point](#b1-script-identity-and-entry-point)
   - [B.2 Inputs and outputs](#b2-inputs-and-outputs)
   - [B.3 Workspace layout](#b3-workspace-layout)
-  - [B.4 OS profile (Config Schema v2.1)](#b4-os-profile-config-schema-v21)
-  - [B.5 Phase contracts (P01–P13)](#b5-phase-contracts-p01p13)
+  - [B.4 OS profile (Config Schema v4.0; v3.0 retained for compatibility)](#b4-os-profile-config-schema-v40-v30-retained-for-compatibility)
+  - [B.5 Phase contracts (P01–P14)](#b5-phase-contracts-p01p14)
   - [B.6 Action → Phase mapping](#b6-action--phase-mapping)
   - [B.7 ISO filename detection patterns](#b7-iso-filename-detection-patterns)
   - [B.8 Patch integrity check (three-layer)](#b8-patch-integrity-check-three-layer)
@@ -279,7 +284,7 @@ checks are consumer-specific (Part B).
 
 `psa.py` (the canon's PowerShell static analyzer; canonical home in the tool canon) is the
 **mandatory static-analysis gate**. Every consumer runs it with a project-local
-`.psa.config.json` and MUST be **clean (0 errors / 0 warnings / 0 info)** before each commit.
+`.psa.config.json` under the **adjudicated-debt governance**: no UNADJUDICATED finding at any severity before a commit; adjudicated findings may remain as declared debt with documented cause and a non-regression baseline (the current baseline lives in TESTING.md §0).
 The `.psa.config.json` **follows-latest** from the analyzer's canonical home (ADR 0009); it is
 tool-owned, not part of this doc canon. Which rules a consumer suppresses (with justification)
 and any project-specific false-positive dispositions are recorded in the consumer's own SPEC,
@@ -309,7 +314,7 @@ items) and are **not restated here**.
 ### A.13 Development workflow
 
 Changes follow an **iterate-to-green** cycle: edit; run the static-analysis gate (A.11) to
-**0/0/0**; run the consumer's verification/tests where present; then commit. Revision history
+the adjudicated-debt baseline (no new/increased unexplained findings); run the consumer's verification/tests where present; then commit. Revision history
 is recorded in **CHANGELOG** (Keep a Changelog format); the SPEC records the current design,
 not a change log. Doc-touching changes keep the doc-set in sync (AGENTS.md §5): a SPEC change
 that alters behaviour updates README / README.ja / TESTING in the same change. CI workflow
@@ -560,17 +565,92 @@ family** (e.g. `D:\UpdateWsi_2016`, `D:\UpdateWsi_2019`, …). This
 side-steps the DISM mount-cache poisoning class of failure
 documented in §D.25.
 
-## B.4 OS profile (Config Schema v3.0)
+## B.4 OS profile (Config Schema v4.0; v3.0 retained for compatibility)
 
 **Status**: normative. **Policy ID**: SPEC-WSI-011 (Patch integrity
 three-layer is built on this schema).
 
 Each `data/config-Server<OsKey>.json` file is a per-OS configuration
-profile that the script reads at P02 (ResolveInputs). Schema 3.0 is
-the current shape; older revisions are documented in §B.22 for
-historical reference.
+profile that the script reads at P02 (ResolveInputs). **Schema 4.0
+(r12.00) is the current shape**, described in §B.4.0; the v3.0 shapes
+documented in §B.4.1–§B.4.5 remain valid as the retained-compatibility
+surface declared by `Compatibility.LegacyFieldsRetained`. Older
+revisions are documented in §B.22 for historical reference.
+
+### B.4.0 Config Schema v4.0 (r12.00) — declared servicing policy
+
+Schema 4.0 moves servicing truth out of hand-authored per-OS matrices
+in code and tests, and into **machine-readable declarations inside each
+config**. The machine contract is `schema/config.schema.v4.json`
+(JSON Schema draft 2020-12); `data/config-template-v4.json` is the
+template for adding a new OS. Every config's top-level `Schema` field
+declares which schema it satisfies (`"3.0"` → `config.schema.json`,
+`"4.0"` → `config.schema.v4.json`); the schema gate selects by that
+declaration rather than assuming a single global schema.
+
+The v4 additions, per surface:
+
+- **`ServicingModel`** — the canonical servicing model, replacing the
+  `PatchModel` discriminated union as the source of truth.
+  `MonthlyServicingStyle` (`SeparateSSU` / `CombinedSSULCU` /
+  `CheckpointCU`) declares the monthly delivery form;
+  `ServicingModel.ApplyPlans` declares the apply sequence per WIM
+  target as data (replacing the in-code `$applyMap`);
+  `PackageRoleModel`, `DotNetPolicy`, `DynamicUpdatePolicy` and
+  `SourcePrerequisitePolicy` declare the remaining per-axis stances.
+- **`DiscoveryPolicy`** — how patches are discovered from the live
+  Microsoft Update Catalog: `CatalogAliases`, `SearchProfiles` (per
+  Kind: `QueryStrategy`, title accept/reject constraints,
+  classification requirements), `ReleaseChannel`, `OobPolicy`,
+  `ExcludePreview`, `DotNetSelection`, `DynamicUpdateSelection`,
+  `SourcePriority`.
+- **`ValidationPolicy`** — what must be proven before freeze/approval
+  (flag set; grows across the series, e.g. r12.04 adds
+  `FailOnPca2023ComplianceFailure`, `SuppressRedundantCombinedLcuReapply`,
+  `VerifyAllInstallIndexes`, `VerifySetupDuManifest`,
+  `VerifyWinRePackageState`). `FailOnBootWimServicingFailure` is where
+  the boot.wim servicing stance now lives (superseding the per-OS
+  `Common.BootWimLcuPolicy` matrix; see §B.15).
+- **`PatchBaseline.SourcePrerequisites[]`** — one uniform shape for
+  what the *source ISO* requires before servicing, independent of the
+  monthly delivery form, with a `Condition.Mode` discriminator (e.g.
+  `IfImageOrServicingStackBelowFloor` with `MinimumImageBuild` /
+  `MinimumServicingStack` for the Server 2022 bridge LCU;
+  `IfServicingStackBelow` for the Server 2016 legacy-SSU
+  prerequisite). This replaces both the standalone
+  `PatchBaseline.BridgeLcu` block and the hardcoded per-OS build
+  floors.
+- **`PatchBaseline.Lines[]` extensions** — `Roles` (servicing roles,
+  e.g. `ServicingStackCarrier` / `FinalLCU`, distinct from the
+  distribution-file `Kind`), `TargetsByRole` (per-role WIM targets),
+  `Applicability`, `RuntimeSelector`, `Integrity` (canonical
+  per-algorithm integrity nodes `Integrity.<Alg>.Value`, superseding
+  the flat `Digest` / `Sha256` fields), `State` (baseline lifecycle:
+  `Discovered` → `Resolved` → `Frozen` → `E3Validated` →
+  `E4Validated` → `E5Validated` → `Approved`; a Line at `Frozen` or
+  later must carry a SHA-256), `Evidence`, and `ParentKbId` (an asset
+  modelled as a child of a combined parent is resolvable through that
+  parent and need not carry its own `DownloadUrl`).
+- **`Compatibility`** — the config's own migration map:
+  `LegacySchema`, `LegacyFieldsRetained` (`Common.InstallWimIndex`,
+  `Common.BootWimLcuPolicy`, `PatchBaseline.Lines[].Digest`,
+  `PatchBaseline.Lines[].Sha256`, `PatchBaseline.Lines[].ApplyOrder`,
+  `PatchModel`) and `CanonicalV4Fields`. A test or code path that
+  asserts a `LegacyFieldsRetained` entry is by definition asserting
+  the superseded model; the canonical successor is listed in
+  `CanonicalV4Fields`.
+
+Discovery-time URL policy: under `DiscoveryPolicy`, download URLs are
+resolved at runtime; a committed `DownloadUrl` on a Line is a
+compatibility convenience, not a requirement — committing one is
+exactly the staleness hazard the discovery model exists to avoid.
 
 ### B.4.1 Top-level structure
+
+> **Compatibility note (r12.00)**: §B.4.1–§B.4.5 document the v3.0
+> shapes. Under Schema 4.0 these remain present as the
+> retained-compatibility surface (`Compatibility.LegacyFieldsRetained`);
+> the canonical v4 surfaces are described in §B.4.0.
 
 ```jsonc
 {
@@ -735,7 +815,7 @@ Per-OS Secure Boot conversion defaults consumed by P10 / P12:
 | Server2016 | `true`  | `2024-04-09` | "2024-4B (April 2024 LCU) or later" |
 | Server2019 | `true`  | `2024-04-09` | "2024-4B (April 2024 LCU) or later" |
 | Server2022 | `true`  | `2025-02-11` | "2025-2B (February 2025 LCU, 20348.2227 baseline) or later" |
-| Server2025 | `false` | `""`         | "n/a (firmware-provided 2023 certs)" |
+| Server2025 | `true`  | `2024-04-09` | "2024-4B (April 2024 LCU) or later" |
 
 Server 2022 has a later baseline date because the `EFI_EX` staging
 directories appeared in cumulative updates only from the 2025-2B LCU
@@ -752,11 +832,11 @@ language is a one-node addition under `LanguageSpecific` plus an
 entry in `Common.SupportedLanguages`; no changes are required in
 `PatchBaseline` or `Pca2023` (both are language-neutral).
 
-## B.5 Phase contracts (P01–P13)
+## B.5 Phase contracts (P01–P14)
 
 **Status**: normative.
 
-The pipeline consists of 13 phases organised into 5 groups:
+The pipeline's canonical phase model is P01-P14 (including the inserted P08S build phase), organised into 5 groups:
 
 | Phase | Group | Purpose |
 |:---:|:---:|:---|
@@ -791,8 +871,11 @@ P08:  Common.BootWimLcuPolicy governs the boot.wim loop only
 P08S: -SyntheticTestMode (boot.wim absent) OR sandbox mode (no
       -Execute); otherwise always runs (identical files are recorded
       as already-identical, never blindly copied)
-P10:  default-ON, readiness-driven; -SkipPca2023BootManager opts out;
-      Server 2025 additionally requires -ForcePca2023OnServer2025
+P10:  default-ON, readiness-driven, for every supported OS incl.
+      Server 2025; -SkipPca2023BootManager opts out
+P14:  runs only when selected (-Action BootTest / All, or
+      -RunHyperVValidation inserting it before P13); mutually
+      exclusive with -SyntheticTestMode
 P12:  none (always runs)
 P13:  none (always runs)
 ```
@@ -802,6 +885,32 @@ when `-Verbose` is set or on failure. Each phase reports an
 elapsed-time tuple to the `$Script:PhaseTimingSummary` collection
 that `Show-PhaseSummary` (idempotent since r07.0 Step 19) renders at
 script exit.
+
+### B.5.1 P14 HyperVValidation (Group: Verify)
+
+`Invoke-VerifyPhase14_HyperVValidation` validates the produced ISO on
+a Hyper-V Generation 2 VM (virtual UEFI Secure Boot) and binds the
+result to the exact media it validated. Contract facts (derived from
+the implementation phase registry and function):
+
+- **Selection.** P14 is never part of the bare standardFull sequence.
+  It runs via `-Action BootTest` (P14 alone), `-Action All`
+  (standardFull with P14 inserted before P13), or
+  `-RunHyperVValidation` (same insertion for the default Action). It
+  is mutually exclusive with `-SyntheticTestMode`.
+- **Evidence.** The phase writes an identity-bound
+  `P14_hyperv_validation.json` (the boot evidence carries the output
+  ISO identity, so evidence cannot be re-used against different
+  media), plus the boot-console capture artifacts.
+- **Approval.** Operator approval is a second, explicit operation
+  over already-captured BootOnly evidence via
+  `-BootEvidenceApprovalPath`: the phase validates the existing
+  identity-bound evidence and artifact set, never re-running or
+  silently replacing evidence, and records the verdict as
+  `P14_boot_evidence_approval.json`.
+- **Release eligibility.** P14 evidence participates in the
+  release-validation model; a VM state alone is never a verdict
+  (Success derives from guest evidence or forces operator review).
 
 ## B.6 Action → Phase mapping
 
@@ -817,17 +926,17 @@ The default is `PrepareBuildVerify`. The full list, grouped by purpose:
 | `Prepare` | P01-P06 | Stage only (no patching, no DISM mount) |
 | `Build` | P07-P10 | Patch and assemble; presumes Prepare already staged the workspace |
 | `Verify` | P11-P13 | Verify an existing output ISO (presumes a prior Build -Execute produced it) |
-| `PrepareBuildVerify` (default) | P01-P13 | Combined full pipeline (the standardFull sequence in `Get-PhaseListByAction`) |
-| `All` | P01-P13 + post-pipeline extras | StandardFull plus the additional steps gated by `if ($Action -in @('BootTest','All'))` |
+| `PrepareBuildVerify` (default) | P01-P13 (P08S included; P14 inserted before P13 when `-RunHyperVValidation` is set) | Combined full pipeline (the standardFull sequence in `Get-PhaseListByAction`) |
+| `All` | standardFull + P14 (inserted before P13) | The full pipeline with the Hyper-V validation phase always included |
 
 ### B.6.2 Specialty Actions
 
 | Action | Phases run | Description |
 |:---|:---|:---|
-| `BootTest` | (empty Phase array; Hyper-V smoke test) | Stand-alone Hyper-V Gen2 boot smoke test against the output ISO. Mutually exclusive with `-SyntheticTestMode` (parameter-exclusivity guard block) |
-| `GenerateManifest` | P01-P03 | Compute a manifest of resolved patches without proceeding to Fetch / Build / Verify |
+| `BootTest` | P14 | Stand-alone run of the P14 HyperVValidation phase against the output ISO. Mutually exclusive with `-SyntheticTestMode` (parameter-exclusivity guard block) |
+| `GenerateManifest` | P01-P03 | **Placeholder**: runs the P01-P03 resolution, then emits a placeholder caution; the manifest-file emission step is not implemented in this revision (Part H.2) |
 | `Cleanup` | (custom; `Invoke-CleanupAction`) | Clean up workspace and stale DISM mounts |
-| `ListPhases` | (none) | Dump phase + action registry as JSON to stdout |
+| `ListPhases` | (none) | Pretty-print the phase + action registry to the console (`Show-PhaseList`; no execution) |
 | `TestHarness` | (JSON-over-stdin REPL hook, the `TestHarness` short-circuit before phase dispatch) | Eval-PS-function mode used by `tests/powershell_harness.py` (T3); not for human invocation |
 
 ### B.6.3 Admin Actions (A00 - A01 - A03 - A02)
@@ -1156,8 +1265,10 @@ Stages, in order:
 3. **Config build** — for each seed, assemble the full
    `data/config-Server*.json` = seed + DERIVED (B.14.2) + generated
    `_meta`.
-4. **Verification** — validate each built config against
-   `schema/config.schema.json` and run the currency gates.
+4. **Verification** — validate each built config against the schema
+   selected by its declared schema version (`"3.0"` →
+   `config.schema.json`, `"4.0"` → `config.schema.v4.json`; §B.4)
+   and run the currency gates.
 
 Because stage 2 performs network acquisition, the whole action is
 long-running / hang-prone and MUST be run detached + polled, never
@@ -1262,7 +1373,34 @@ PowerShell.
 
 ## B.15 Update type matrix per OS generation
 
-**Status**: normative. **Policy ID**: SPEC-WSI-017.
+**Status**: **superseded at r12.00 (Schema 4.0) — retained as the
+historical record of the v3 model.** **Policy ID**: SPEC-WSI-017.
+
+> **Supersession (r12.00).** The Require/Forbid matrix in §B.15.1
+> encoded the assumption that Microsoft publishes .NET, SafeOS DU and
+> Setup DU rows only for specific OS generations. Measured against the
+> live Microsoft Update Catalog at r12.00, that assumption is factually
+> wrong: all four supported generations resolve real Catalog rows for
+> the "forbidden" kinds — e.g. Setup Dynamic Update KB5068794
+> (Server 2016), KB5068795 (Server 2019) and KB5079518 (Server 2022),
+> where the matrix declared the empty no-line marker. Microsoft's own
+> guidance ("Update Windows installation media with Dynamic Update",
+> Microsoft Learn) describes Dynamic Update packages generically per
+> media, not as a per-generation entitlement; the checkpoint-cumulative
+> model is likewise documented per servicing branch ("Checkpoint
+> cumulative updates and the Microsoft Update Catalog", Microsoft
+> Learn), not as a Kind-forbidding contract. Under Schema 4.0 the
+> per-OS stance therefore lives in **declared data** —
+> `DiscoveryPolicy.SearchProfiles` (what is discovered),
+> `ServicingModel.ApplyPlans` (what applies where, in what order) and
+> `Lines[].Roles` / `Applicability` (what a resolved asset is for) —
+> and the runtime `Test-PatchModelConsistency` keeps only the Require
+> axis plus the State-driven integrity requirement. The Forbid axis is
+> retired everywhere; §B.15.4 records the contract retirements this
+> implies. §B.15.1–§B.15.3 below are kept verbatim as the historical
+> statement of the superseded model (in particular, the Forbid
+> enforcement §B.15.3 attributes to `Test-PatchModelConsistency` no
+> longer exists at r12.00).
 
 ### B.15.1 The matrix
 
@@ -1329,6 +1467,128 @@ models forbid one (`Test-PatchModelConsistency` enforces this at P06).
 The pre-v3.0 `Test-IsCombinedLcuTitle` Title-matching helper that set a
 per-entry `IsCombined` flag is legacy and no longer drives
 `Build-PatchPlan`.
+
+### B.15.4 Contract retirements at r12.00 — what each contract asserted, and how that reading of Microsoft's servicing model was wrong
+
+Eight repository contracts were retired with the Schema 4.0 landing.
+Per the series rule, a test may not be deleted without a record of what
+it asserted and why that reading of Microsoft's servicing model was
+wrong; this section is that record. Where the underlying concern
+survives, the successor contract is named (the successors are the
+declaration-derived T41–T46 set; see TESTING.md).
+
+**T28 `setup_du_forbid_test.py` — the Setup DU Forbid matrix.**
+Asserted that Setup Dynamic Update is published only for the
+uup-checkpoint generation and that 2016/2019/2022 resolve the empty
+no-line marker. Wrong because Microsoft publishes Setup DU per
+servicing branch, not per "generation entitlement": the live Catalog
+resolves KB5068794 (2016), KB5068795 (2019) and KB5079518 (2022). The
+contract had generalised a point-in-time absence of rows into a
+publishing rule. Successor: T46 `discovery_policy_declaration_test.py`
+(declared `DiscoveryPolicy.SearchProfiles` conformance), with the
+behavioural half scheduled for the live-network tier alongside T1/T4.
+
+**T23 `config_required_ssu_downloadurl_test.py` — the SSU DownloadUrl
+guard.** Asserted every `Kind=SSU` line carries a non-empty
+`DownloadUrl` and that `PatchModel` ⇔ SSU-line presence is consistent
+per OS. Wrong because an SSU can be delivered as a child of a combined
+parent package (`ParentKbId`), in which case a standalone download URL
+is not meaningful — the asset is resolvable through its parent; and
+because under a live-discovery model a committed URL is a staleness
+hazard, not a guarantee. `PatchModel` itself is
+`Compatibility.LegacyFieldsRetained`. Successor: T43
+`line_integrity_declaration_test.py` (an SSU-role asset is resolvable
+either by its own URL or through its parent, and carries `Integrity`
+either way).
+
+**T27 `catalog_patchset_builder_test.py` — the in-code apply map.**
+Asserted `ConvertTo-ConfigLines` reproduces a hand-written `$applyMap`
+keyed by `PatchModel`. Wrong because the apply sequence is not a
+property of the builder's source code but of the servicing model, and
+Microsoft's model is expressible as data: r12 declares it as
+`ServicingModel.ApplyPlans`, which the builder must conform to rather
+than restate. The earlier "2016/2019 fail closed" rows additionally
+encoded the staleness of the `resolve-2026-06.json` capture as designed
+behaviour. Successor: T41 `apply_plan_conformance_test.py` (built Lines
+conform to the config's declared ApplyPlans).
+
+**T31 `lcu_target_verify_test.py` — per-OS comparator forks.**
+Asserted Server 2016 verifies the post-update build by KB-id /
+`KbIdsAtBuild` membership while RollupFix OSes verify by measured
+build. Wrong because the fork mistook an implementation workaround for
+a Microsoft-side distinction: 2016's registry surface also exposes a
+measurable RollupFix, and r12.46 measures 2016 joining the unified
+`LcuEvidenceMode=RollupFixAndMeasuredBuild`. Successor: T42/T43 over
+the declared `LcuEvidenceMode` and `Lines[].Evidence` /
+`Applicability`.
+
+**T32 `checkpoint_placement_test.py` — the PatchModel Forbid axis
+(partial retirement).** The Forbid/Require assertion mirrored the v3
+discriminated union, forbidding e.g. `SSU` on `uup-checkpoint`. The
+Forbid half is wrong for the same reason as the §B.15.1 matrix: it
+encoded per-generation publishing assumptions the Catalog disproves.
+The landing-layout and routing rows (a genuinely Microsoft-mandated
+concern: only the target CU and its checkpoints may sit in the DISM
+discovery folder) survive unchanged, and the test now guards the
+Forbid axis's *absence* plus the r12.00 State-driven integrity rule.
+
+**T33 `bridge_lcu_contract_test.py` — the Server 2022 bridge
+envelope.** Asserted a standalone `PatchBaseline.BridgeLcu` block and
+pinned "no other OS carries a bridge". Wrong because the bridge is not
+a Server 2022 peculiarity but one instance of a general fact —
+Microsoft media below a floor needs a source prerequisite before
+current servicing — which r12 expresses uniformly as
+`PatchBaseline.SourcePrerequisites[]` with `Condition.Mode`
+discriminators; Server 2016 carries
+`Server2016-KB4132216-legacy-prerequisite` under the same structure,
+directly falsifying the scope pin. Successor: T42
+`servicing_model_declaration_test.py` (SourcePrerequisites
+declaration).
+
+**T34 `bootwim_policy_test.py` — the per-OS BootWimLcuPolicy matrix.**
+Asserted 2016 enabled / 2019 disabled / 2022 tolerate / 2025 enabled.
+Wrong twice over: (1) the boot.wim servicing stance is a validation
+policy, not a per-OS capability, and r12.04 declares every OS
+`enabled` under `ValidationPolicy.FailOnBootWimServicingFailure`;
+(2) the research knowledge base establishes that boot.wim cannot be
+LCU-serviced at all — WinPE rejects the `.msu` with `0x80070032` and
+the extracted LCU CAB fails with `0x8007371b` — so a per-OS *policy*
+matrix over a structurally impossible operation encoded a distinction
+that does not exist. `Common.BootWimLcuPolicy` is
+`LegacyFieldsRetained`. Successor: T42 (ValidationPolicy declaration).
+
+**T37 `per_os_evidence_test.py` — forked resolvers and hardcoded
+2024-4B floors.** Asserted four per-OS evidence resolvers and the
+hardcoded floors 14393.6897 / 17763.5696 / 20348.2402 / 26100.1.
+Wrong because the floors are not code constants of this script but
+per-prerequisite facts of Microsoft's servicing timeline, and r12
+declares them per prerequisite in
+`PatchBaseline.SourcePrerequisites[].Condition` (e.g. Server 2022:
+`MinimumImageBuild: 20348.1970`, `MinimumServicingStack: 20348.1960`,
+`Mode: IfImageOrServicingStackBelowFloor`; Server 2016:
+`Mode: IfServicingStackBelow`). This is the clearest single instance
+of the epistemology change: one uniform declared structure now
+expresses what used to be four hand-written per-OS branches.
+Successor: T42 (SourcePrerequisites conformance) plus the declared
+`Detection` list.
+
+**T30 `setup_du_discriminator_test.py` — the title-heuristic Setup-DU
+discriminator (retired 2026-08-08 at the consolidation fold, user
+adjudication).** The ninth contract stayed SUPERSEDED-PENDING — the
+declared red on the integration branch — through the whole r12 series.
+It asserted title-based candidate selection over Catalog rows captured
+verbatim from the live service in July 2026, and its pinned capture
+aged into a permanent 6/8 red (three candidates where one is
+expected). It was not wrong about Microsoft's model so much as pinned
+to a superseded selection mechanism: the structural answer it awaited
+— the declared per-Kind `DiscoveryPolicy.SearchProfiles` — landed and
+is guarded declaratively by T46 (112 assertions) with the current
+selection behaviour covered by T50 (Setup-DU scalar identity pins and
+the measured context-window row-filter semantics). Keeping a
+permanently red historical instrument added no protection beyond that
+pair. Successors: T46 + T50; the retained title-heuristic code path
+remains behaviourally covered by T50 until any future removal, which
+would be its own adjudication.
 
 ### B.15.4 Hotpatch is out of scope
 
@@ -1415,9 +1675,11 @@ excludes the signature region).
   media + delegate to Microsoft `Make2023BootableMedia.ps1` + ADK) is
   **under real-environment verification** (see the Secure-Boot
   campaign; the final mechanism text lands once verified).
-- For Server 2025, P10 can short-circuit via the
-  `RequiredByDefault=false` policy, since the install.wim already
-  contains the assets natively.
+- For Server 2025, the historical `RequiredByDefault=false`
+  short-circuit was removed by the r12-series default-enable
+  reshape; under the current policy P10 runs by default on Server
+  2025 exactly as on the other OS (§B.17.3), while the install.wim
+  still contains the staging assets natively.
 
 ## B.17 PCA2023 boot manager support
 
@@ -1458,7 +1720,9 @@ Two functions cooperate to gate P10:
   `Healthy` / `Warning` / `Critical` / `Unknown`.
 
 P10 runs unless `Get-Pca2023ReadinessSnapshot` returns `Critical`
-(skip-with-warn); for Server 2025 it also requires `-ForcePca2023OnServer2025`.
+(skip-with-warn); this applies uniformly to every supported OS
+including Server 2025 (`-ForcePca2023OnServer2025` is a deprecated
+no-op compatibility slot).
 
 Both readiness paths classify a UEFI boot file's signer through the
 shared `Test-Pca2023AuthenticodeChain` helper, which prefers the EMBEDDED
@@ -1478,9 +1742,12 @@ Per the matrix in §B.4.4:
 - Server 2016/2019/2022: `RequiredByDefault=true`. P10 runs whenever
   `EnableInstallWimUpdate=true` and the LCU is at the configured
   minimum date.
-- Server 2025: `RequiredByDefault=false`. P10 short-circuits with
-  rationale "firmware already includes 2023 certs" unless
-  `-ForcePca2023OnServer2025` is set.
+- Server 2025: `RequiredByDefault=true` under the current policy
+  (`Mode=ConvertByDefault`, minimum date 2024-04-09). The historical
+  default-skip and its `-ForcePca2023OnServer2025` force-gate were
+  removed by the r12-series default-enable reshape; the switch
+  survives only as a deprecated no-op compatibility slot with a
+  wired caution (see CHANGELOG for the historical contract).
 
 ### B.17.4 Microsoft Support reference
 
@@ -1490,6 +1757,19 @@ signed boot manager", 2025-02-04) lists Server 2012, 2012 R2,
 Server 2025 is omitted because the article predates Server 2025
 GA; Server 2025 ships with PCA2023 staging assets in install.wim
 natively (§B.16.2).
+
+**Upstream reference pin (tracked by file identity, not release
+tag).** The P10 conversion is a PSA-clean re-implementation of the
+`Copy-2023BootBins` function from `Make2023BootableMedia.ps1` in
+`microsoft/secureboot_objects` (`scripts/windows/`). The pinned
+upstream file identity is git blob `09dd906d28ed1c7e8c7a1860b6c3f63b54d9680c`
+— measured byte-identical across the `v1.6.4`/`v1.6.4-signed` and
+`v1.6.5`/`v1.6.5-signed` release tags (verified 2026-08-08), so
+upstream releases that do not change this blob require no
+re-implementation review. Re-review triggers when the blob hash of
+that file changes upstream. README deliberately carries no version
+numbers for this dependency; this subsection is the single pin
+record.
 
 ## B.18 Output ISO verification
 
@@ -1721,7 +2001,7 @@ carries semantic meaning that operators and reviewers rely on:
 | `config-` | `data/` | Operator-edited configuration (the `data/config-Server*.json` family). One per OS. |
 | `raw-` | `data/` | Mirrored upstream content (Microsoft release-notes Markdown, .NET CU index JSON, etc.). Refresh-only via `-Action RefreshSnapshots`; no operator edit expected. |
 | `cache-` | `data/` | Parsed cache derived from the corresponding `raw-` source, in machine-friendly JSON form. Re-generated whenever the `raw-` source is refreshed. |
-| `r<NN>.<MM>-` | `docs/history/` | Per-revision investigation reports. Filename also carries the topic in kebab-case. |
+| `r<NN>.<MM>-` | development archive (outside the repository tree) | Per-revision investigation reports. Filename also carries the topic in kebab-case. |
 
 The current `data/` layout uses individual files for each upstream
 source (`raw-release-info.md`, `raw-dotnet-cu.json`) rather than
@@ -1735,7 +2015,7 @@ of the upstream HTTP fetch so re-runs can skip unchanged content.
 |:---|:---|:---|
 | `data/config-Server2025.json` | Operator config | One per OS |
 | `data/raw-release-info.md` | Mirrored upstream | Refreshed by RefreshSnapshots |
-| `docs/history/r08.0-step2-installwim-symmetry-check.md` | Per-revision investigation | Cycle (r08.0), step (step2), topic kebab-case |
+| `r08.0-step2-installwim-symmetry-check.md` (development archive) | Per-revision investigation | Cycle (r08.0), step (step2), topic kebab-case |
 | `tests/fixtures/2026-05/server2025-lcu.html` | Test fixture | Per-month, per-OS HTML captures |
 
 ### B.20.4 What this section does NOT cover
@@ -2388,7 +2668,9 @@ T40.
 
 **Status**: normative. **Policy ID**: SPEC-WSI-030.
 
-Two static analysers MUST report zero findings before commit:
+Two static analysers gate every commit under the adjudicated-debt
+governance (no unadjudicated finding; declared debt is documented in
+TESTING.md §0 with a non-regression baseline):
 
 ### C.1.1 psa.py (the project's primary analyser)
 
@@ -2403,9 +2685,8 @@ Expected output:
 ==== psa.py: PowerShell Static Analyzer ====
 File   : Update-WindowsServerIso.ps1
 Lines  : N
-Issues : 0 errors, 0 warnings, 0 info
-
-  (no issues found)
+Issues : <matches the declared adjudicated-debt baseline in TESTING.md §0;
+          no unadjudicated finding, no unexplained increase>
 ```
 
 The local `.psa.config.json` opts the script into the strict-mode
@@ -2428,7 +2709,7 @@ Invoke-ScriptAnalyzer `
   -Recurse
 ```
 
-Expected: zero findings under the project `PSScriptAnalyzerSettings.psd1`.
+Expected: no unadjudicated findings under the project `PSScriptAnalyzerSettings.psd1` (declared-debt baseline in TESTING.md §0).
 The settings file matches the strict baseline; rule suppressions
 require justification per the §C.1 inline-suppression policy.
 
@@ -2572,7 +2853,7 @@ Runs on Linux pwsh 7.4.6 (CI Stage 1) and Windows PowerShell 5.1
 
 | # | Command | Expected outcome |
 |:---:|:---|:---|
-| 1 | `.\Update-WindowsServerIso.ps1 -Action ListPhases` | exit 0; 13 phases + 11 actions printed |
+| 1 | `.\Update-WindowsServerIso.ps1 -Action ListPhases` | exit 0; the registered phases (P01-P14 + P08S + A00-A03) and the full Action set pretty-printed |
 | 2 | `.\Update-WindowsServerIso.ps1 -EnvironmentInfoOnly` | exit 0; environment dump |
 | 3 | `.\Update-WindowsServerIso.ps1 -Action PrepareBuildVerify -SyntheticTestMode -DryRun -OsKey Server2019` | exit 0; P01–P03 complete, P04 reaches `New-SyntheticTestIso` |
 | 4 | `.\Update-WindowsServerIso.ps1 -Action DumpFieldClassification` | exit 0; JSON written to stdout |
@@ -2671,63 +2952,16 @@ candidate Future enhancement. Today, the gate is a manual review.
 
 **Status**: normative. **Policy ID**: SPEC-WSI-033.
 
-The `tests/` subdirectory ships a Python-based self-verification
-suite of **seventeen numbered tools (sparse T-numbering, T1 through
-T31; numbers of retired tools are never reused)** plus three
-unnumbered gates (the canonical JSON format gate, the config schema
-gate and the seed contract gate). They probe the script's
-external dependencies and unit-test its PowerShell functions. They
-use only the Python standard library — no `pip install` required.
-The canonical T-numbering is maintained in
-[`tests/README.md`](./tests/README.md) "Tool inventory"; this section
-mirrors that authoritative table.
+The `tests/` subdirectory ships the repository-native
+self-verification suite (sparse T-numbering; numbers of retired
+tools are never reused) plus the unnumbered format / schema / seed
+gates. The normative inventory is NOT mirrored here — mirrored
+inventories are exactly the drift mechanism this specification
+avoids. The authoritative per-contract inventory, execution-tier
+declaration and current verification state live in
+[`TESTING.md`](./TESTING.md) §0 and §5; retirements are recorded in
+§B.15.4 of this document.
 
-### C.9.1 Tool inventory (T1 – T31, sparse + format / schema / seed gates)
-
-| Tool | Type | Assertions | Network | Run when |
-|:---|:---|:---|:---:|:---|
-| **T1** `catalog_probe.py` | Live Microsoft Update Catalog probe (search + per-OS title formats + supersedence panel) | ~7 live checks | Yes | Before/after Catalogue-related code change; monthly CI |
-| **T2** `catalog_fixture_test.py` | Offline HTML fixture regression against `fixtures/<patch-month>/` | 13 | No  | Every commit that touches parsers or TitleTokens |
-| **T3** `powershell_harness.py` | PS function unit tests via `-Action TestHarness` | **7** | No  | Every commit that touches a PS scrape helper |
-| **T4** `eval_iso_probe.py` | Evaluation ISO endpoint check (HTTP Range-GET; 4 OS × 2 lang) | live (4 OS) | Yes | Before release; on Microsoft Evaluation Center snapshot rotation |
-| **T6** `release_info_parser_test.py` | Offline regression for `ConvertFrom-ReleaseInfoMarkdown` against the PoC fixture | 13 | No | Every commit that touches the release-info parser |
-| **T7** `dotnet_cu_parser_test.py` | Offline regression for `ConvertFrom-DotNetCuIndexMarkdown` / `ConvertFrom-DotNetCuMarkdown` against `snapshots/dotnet_cu/` | 16 | No | Every commit touching the .NET CU parsers or the fetch/cache pipeline |
-| **T11** `canonical_json_test.py` | Offline byte-level parity test between `ConvertTo-CanonicalJson` / `Save-CanonicalJsonFile` (PowerShell) and `canonical_json_dumps` / `save_canonical_json_file` (Python) per SPEC Part B.23 | 26 | No | Every commit touching the canonical JSON helpers (PS or Python) |
-| **T20** `removed_live_wua_guard_test.py` | Offline static guard: the removed live-WUA functions / parameters stay absent and the P06 gate stays wired | 20 | No | Every commit touching P06 or the WUA-adjacent surface |
-| **T23** `config_required_ssu_downloadurl_test.py` | Offline data-contract guard on the committed configs: SSU `DownloadUrl` non-empty, `PatchModel` ⇔ SSU-line consistency, negative fixture rejected | 20 | No | Every commit touching `data/config-Server*.json` |
-| **T24** `dism_cleanup_args_test.py` | `Get-DismCleanupArgumentList` argument-vector unit test (ResetBase / ScratchDir variants) | 6 | No | Every commit touching the P07 cleanup path |
-| **T25** `dism_export_args_test.py` | `Get-DismExportArgumentList` argument-vector unit test | 6 | No | Every commit touching the P07 export path |
-| **T26** `defender_exclusion_plan_test.py` | The three pure helpers behind `-UseDefenderExclusions` (managed set / plan / fail-closed decision) | 13 | No | Every commit touching the Defender-exclusion feature |
-| **T27** `catalog_patchset_builder_test.py` | Offline b3 dataset builder: `ConvertTo-ConfigLines` from the committed raw capture to `PatchBaseline.Lines[]`, incl. the SetupDU line and the in-model starvation hard-fail | 16 | No | Every commit touching `ConvertTo-ConfigLines` or the raw fixture |
-| **T28** `setup_du_forbid_test.py` | `Resolve-SetupDu` Forbid-branch guard for the non-uup-checkpoint OSes | 12 | No | Every commit touching the SetupDU resolver |
-| **T29** `patch_integrity_digest_test.py` | Digest-format boundary: `ConvertTo-HexDigestString` base64↔hex vs an independent Python implementation + static wiring guards | 11 | No | Every commit touching the integrity layer |
-| **T30** `setup_du_discriminator_test.py` | `Select-SetupDuCandidate` against verbatim live-Catalog rows (title discriminator; Products-filter resurrection guard) | 8 | No | Every commit touching the SetupDU discriminator |
-| **T31** `lcu_target_verify_test.py` | `TargetBuildAfterUpdate` derived-field contract: comparator behavior, committed-data consistency, single-writer wiring, P11 hard-Fail row | 24 | No | Every commit touching the TBAU derivation or P11 |
-| **seed contract gate** `seed_contract_test.py` | `data/seed/seed-Server*.json` vs `schema/config-seed.schema.json` + structural seed rules (the SEED contract for the offline dataset rebuild). (No T number; gate convention.) | 17 | No | Every commit touching seeds or the seed schema |
-| **canonical JSON format gate** `canonical_json_format_check.py` | Offline format-compliance check: re-serialises every `*.json` under `data/`, `tests/fixtures/`, `tests/snapshots/` and fails on byte divergence. Implements SPEC §C.3.4. (No T number; format gate.) | 29 files | No | Every commit that adds or modifies a JSON file in the three scanned directories |
-| **config schema gate** `config_schema_test.py` | Offline schema-conformance check: a stdlib-only draft-07-subset validator that checks every `data/config-Server*.json` against `schema/config.schema.json`, with a targeted regression guard against the legacy `Patches` property (r10.4). (No T number; schema gate, mirrors the format-gate convention.) | 14 | No | Every commit touching `data/config-Server*.json` or `schema/config.schema.json` |
-
-**Determinism categories**:
-
-- **Offline-deterministic** (the local gate battery for every change; CI Stage 1 runs the config schema gate): T2, T3, T6, T7, T11, T20, T23, T24, T25, T26, T27, T28, T29, T30, T31, plus the canonical JSON format gate, the config schema gate and the seed contract gate.
-- **Live-network** (monthly CI + ad-hoc): T1, T4.
-
-### C.9.2 Adjunct: retired r06 Phase 2 PoCs
-
-The original Phase 2 PoC scripts (`poc_release_info_*.py`,
-`poc_dotnet_cu_*.py`, `poc_dynamic_update_*.py`) shipped with r06.0
-Phase 2 and were retired in r07.0 Step 5 once their findings were
-integrated into the production parsers. Their reports remain under
-`docs/history/` for archaeological reference (see Appendix F).
-
-### C.9.3 Refreshing fixtures
-
-The `tests/fixtures/<patch-month>/` HTML files are captured per
-patch month. To refresh for a new month:
-
-```bash
-# 1. Confirm Catalog is queryable for the new month
-python3 catalog_probe.py --check all --patch-month 2026-06
 
 # 2. Re-collect the HTML files via the bundled helper
 #    (see tests/README.md "Refreshing fixtures")
@@ -2798,7 +3032,7 @@ only. The current canonical T-set ends at T10.
 > - **D.1 – D.23**: inherited from the r02 – r08.0 cycles. Each entry
 >   has a stable ID and a compact recall of root cause + mitigation;
 >   the full forensic record is preserved in CHANGELOG.md and the
->   relevant `docs/history/` finding reports.
+>   relevant finding reports in the development archive (outside the repository tree).
 > - **D.24 – D.30**: added in this r09.0 SPEC rewrite. These entries
 >   distil meta-lessons about engineering and design judgement that the
 >   r07.0 / r08.0 / r09.0 cycles surfaced. They are by nature less
@@ -3215,7 +3449,7 @@ is documented at §B.3. The pattern also helps with disk-space
 isolation per OS and with parallel multi-OS work.
 
 **Forensic notes**: the full investigation log is in
-`docs/history/mojibake-investigation-note.md`. The investigation
+`mojibake-investigation-note.md` in the development archive. The investigation
 was deliberately deferred to focus on shipping milestones; the
 workaround is empirically sufficient. The root-cause hypothesis is
 "DISM mount-cache state corruption from prior aborted P10 runs" but
@@ -3540,7 +3774,7 @@ upstream fix path.
 ### G.2 Roadmap (next cycles)
 
 This section deliberately stays short. Per
-[`docs/history/r07.0-followups.md`](./docs/history/r07.0-followups.md)
+`r07.0-followups.md` (development archive, outside the repository tree)
 and the per-cycle finding documents, the active follow-up tasks are
 tracked there with P0/P1/P2 priority tags. Roadmap-level
 forward-looking content lives in those documents, not in this SPEC.

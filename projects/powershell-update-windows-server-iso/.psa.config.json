@@ -41,6 +41,8 @@
 //                         --recursive)
 //     - Storage (rig)   : Initialize-Disk, New-Partition,
 //                         Format-Volume (EVIDENCE data VHDX build)
+//     - ServerManager   : Get-WindowsFeature (Collector role/feature
+//                         census; scanned via --recursive)
 //
 // No PSAxxxx rule is disabled at project level. All findings are
 // addressed in the script source via either a fix or a line-local
@@ -53,6 +55,7 @@
   ],
   "disable": [],
   "psa2010_known_cmdlets": [
+    "Get-WindowsFeature",
     "Get-WindowsImage",
     "Mount-WindowsImage",
     "Dismount-WindowsImage",

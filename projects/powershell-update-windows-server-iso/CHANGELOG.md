@@ -22,6 +22,3726 @@ the script and follows the
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+
+## [update-wsi-2026.08.08-r12.85] - 2026-08-08
+
+Tag: `doc-contract-r5`. **This release closes the r12 series.** It
+folds the entire documentation-contract remediation arc (R1 through
+R5, driven by three independent third-party audit cycles and ending in
+a Critical 0 / High 0 verdict scoped to the documentation contract),
+the introspection completion that closed re-audit F-04 in code, and
+the CI alignment that brings Stage 1 back onto the r12 contract
+surface. With it the external-implementation merge, consolidation and
+documentation arcs are all closed, and the branch is ready to merge to
+`main`; maintenance continues on `main`, and any further restructuring
+opens its own branch. Entries below are folded verbatim from
+[Unreleased]; the three `Documentation` subsections it had accumulated
+are merged into one, entry text unchanged.
+
+### Added
+
+- **Source-file format contract, T54**
+  (`tests/source_format_test.py`, 16 assertions). Mechanises SPEC
+  §A.2 for **both** deliverables: UTF-8 BOM, CRLF with no bare LF and
+  no stray CR (measured by exact byte counts), a clean parse under the
+  pinned pwsh, and every character above U+007F classified by the
+  PowerShell tokenizer as lying inside a string-literal token.
+  Positive and negative paths were both proven: a non-ASCII character
+  injected into a comment is reported with line, column and code
+  point; the same character inside a string literal is accepted; a
+  stripped BOM and a single bare LF are each detected.
+
+- **Analyzer adjudicated-debt gate, T55**
+  (`tests/psa_debt_baseline_test.py`, 16 assertions) over the new
+  declared surface `.psa-baseline.json`. The declaration carries the
+  per-deliverable Error/Warning/Info counts and a written adjudication
+  for each; the gate asserts the measured analyzer summary equals the
+  declaration exactly. An increase is a regression; a decrease means
+  the declaration has gone stale and must be lowered in the same
+  change set. No count is duplicated into the test body or into any
+  workflow, so changing the debt is always a reviewed diff on the
+  declared file.
+
+### Fixed
+
+- **CI Stage 1 rejected the deliverable it was meant to protect.** The
+  source-format step failed any byte above 0x7F anywhere in the main
+  script. That rule is stricter than SPEC §A.2, which confines
+  non-ASCII to intentional data and string literals, and the script
+  legitimately carries 113 such characters — the Japanese Catalog
+  display-name aliases, the Japanese oscdimg qualification case name,
+  and the Japanese ReAgentc status pattern. The step now calls T54.
+  The analyzer rule PSA7003 was not adopted as the substitute because
+  it reports a single finding anchored at a file's FIRST non-ASCII
+  occurrence: a suppression on that one line silences the rule for
+  every later occurrence, so its silence is not evidence.
+
+- **CI Stage 1 gated the analyzer at strict zero.** Both the text and
+  the SARIF step let `psa.py`'s exit code decide, and the analyzer
+  exits non-zero on any finding — so both steps fail against the
+  declared adjudicated debt (main 1E/120W/0I, Collector 0E/4W/0I).
+  Both are now reporting steps, with the gate moved to T55, and the
+  text step covers the Collector as well as the main script. Both
+  analyses report into the single `psa.log` basename: adding a second
+  basename would require amending the repository-wide artifact
+  allowlist in `/SPEC.md` §12.2, which is out of scope for this
+  project's change set.
+
+- **CI Stage 1 ran one contract out of the suite.** Only
+  `config_schema_test.py` executed, leaving every declaration-derived
+  and behavioural contract — including all six Collector and
+  series-end contracts — invisible to CI and covered solely by the
+  local gate battery. Stage 1 now runs the whole offline tier by glob
+  over `tests/*_test.py` plus the Part C format gate, so a newly added
+  contract needs no workflow edit. Enumeration is what let the
+  declared step table drift from the executed steps.
+
+- **CI Stage 1 path filters missed most of what it verifies.** The
+  trigger list named the main script and `data/` only. It now also
+  covers the Collector, `schema/`, `tests/`, and `.psa-baseline.json`,
+  so a change confined to any of them triggers the stage.
+
+- **`ListPhases` introspection now prints the complete Action
+  surface** (re-audit F-04, measured: `Show-PhaseList` enumerated
+  only twelve of the fourteen `ValidateSet` Actions).
+  `RebuildDataset` and `TestHarness` are added to the introspection
+  enumeration, and `Get-PhaseListByAction` gains the missing
+  `TestHarness` arm (an empty phase list — the action is an
+  early-exit REPL mode that never reaches phase execution). Display
+  and mapping only; no pipeline behavior change. ScriptVersion
+  `update-wsi-2026.08.08-r12.85`, tag `doc-contract-r5`; the T40
+  release pin advances in the same change set.
+
+### Documentation
+
+- **TESTING §6.1 and §2 declared Stage 1 differently, and neither
+  matched the workflow.** §6.1 listed eight steps including T2, T3,
+  T6 – T10, T11 and the Part C gate; §2 stated that the offline suite
+  runs only in the local gate battery. Both are re-authored against
+  the implemented stage, and the two properties that must not be
+  "simplified" away — glob invocation of the suite, and the analyzer
+  exit code deliberately not being the gate — are stated with their
+  reasons. Stage 2 and Stage 3 comments citing the retired `r05.0+` /
+  `r04.x` phase numbering are re-stated against the durable
+  P01 – P14 (+P08S) model. The T-range declarations in TESTING,
+  `tests/README.md` and the README pair advance to T55, with T53
+  recorded as reserved for the contract-surface sync test still under
+  adjudication.
+
+
+- **Documentation-contract remediation R5** (post-R4 re-audit; all
+  seven active findings re-measured and confirmed, including the two
+  new ones). F-03 (the last High): the TESTING "Required gate"
+  strict-zero table/paragraph and SPEC's analyzer expected-output
+  sample are re-stated on the single adjudicated-debt governance —
+  no current-facing surface still declares the 0/0/0 model. F-02/
+  F-04 residuals: TESTING's ListPhases section now expects the
+  pretty-printed console inventory (not JSON) and the durable
+  P01–P14 (+P08S) phase-ID wording, matched by the introspection
+  completion above. F-05 residual: the README refresh-policy
+  scenario row (both languages) uses the canonical conditional-
+  writeback sentence. F-17 (new, confirmed): SPEC's TOC entry for
+  §B.4 no longer carries the obsolete "Config Schema v2.1" label,
+  and the A00 verification step validates each built config against
+  the schema selected by its declared version rather than a single
+  hard-coded schema file. F-14 residual: the SPEC policy-index row
+  drops the "T1–T13" era label. F-18 (new, confirmed): the README
+  Admin-Actions count (both languages) now matches the four-row
+  table and the A00–A03 grouping.
+
+- **Standalone `-Pca2023OnlyMode` readiness artifact now emits the
+  declared `.md` filename** (re-audit F-06, re-opened and CONFIRMED
+  by measurement). The standalone branch constructed its
+  human-readable report path as `pca2023_readiness.txt` — in a
+  variable named `$mdPath` — while every contract surface (help,
+  P12, the pipeline writers) declares `pca2023_readiness.json` +
+  `pca2023_readiness.md`. The one-token fix aligns the standalone
+  output with the declared artifact contract; T35 gains two
+  filename pins (the declared set present; the `.txt` variant
+  absent — 11 assertions). ScriptVersion
+  `update-wsi-2026.08.08-r12.84`, tag `doc-contract-r4`; the T40
+  release pin advances in the same change set.
+
+
+- **Provenance correction to the R1 remediation record (re-audit
+  F-16; the R1 entry below is preserved unrewritten as history).**
+  Follow-up independent re-measurement showed three R1-era
+  statements were too broad: (1) the claim that F-06 was "refuted by
+  measurement" was WRONG — the earlier verification read a
+  truncated search listing as complete, and the standalone
+  readiness branch did still emit `.txt` (fixed above); (2)
+  "every current-facing document" was not fully synchronized to the
+  PCA2023 policy — an OS-support table row (both languages), a SPEC
+  B.16-area passage and a TESTING pipeline row retained old-policy
+  wording; (3) static-analysis governance was not fully unified —
+  SPEC's quality-requirement and analyzer-gate sections still
+  required strict 0/0/0. All three are remediated in this R4 batch;
+  the earlier claims stand corrected here rather than being
+  rewritten in place.
+- **Documentation-contract remediation R4** (re-audit; every finding
+  re-measured before action — all ten active findings confirmed
+  real). F-01 residuals: the README OS-support rows (en+ja), SPEC's
+  historical `RequiredByDefault=false` short-circuit passage
+  (historicalized to the current default-on policy) and TESTING's
+  "(opt-in)" pipeline row now state the current contract. F-03
+  residuals: SPEC's quality-requirement, canon-consumption and
+  analyzer-gate sections (four sites) are unified on the
+  adjudicated-debt governance with TESTING §0 as the baseline
+  record. F-15: README's Server-2025 bullet (en+ja) and TESTING's
+  P10 row now separate the r12.75-terminal historical E2E
+  validation (preserved provenance) from the current branch's own
+  outstanding verification gates, which are never inferred closed
+  from historical evidence. F-02 residuals: the fragile
+  "thirteen phases"/"13 個のフェーズ"/"13 phases" counts in README
+  (en+ja), SPEC §B.5 intro and the SPEC smoke row are re-stated as
+  the canonical P01-P14 (+P08S) model, and TESTING's timing-summary
+  checklist line is made Action-relative. F-04 residual: the
+  hard-coded "All 34 parameters" heading defers to the `param()`
+  block as the authoritative surface. F-05 residual: the P03
+  workflow narratives (en+ja) use the canonical conditional-
+  writeback sentence. F-07 residual: the README prerequisites rows
+  (en+ja) state the single enforced 100 GB contract. F-14: SPEC's
+  §C.9 mirrored seventeen-tool/T31-era inventory — the drift
+  mechanism itself — is replaced by a durable pointer to
+  TESTING.md §0/§5 as the authoritative inventory, and the stale
+  §C.9.1 mirror table is removed.
+
+- **Documentation-contract remediation R3 (hygiene batch)** (audit
+  findings F-11, F-12, F-13). F-11: the `docs/history/` references
+  are re-pointed to the actual retained provenance — CHANGELOG.md
+  and the development archive kept outside the repository tree — in
+  the README project-layout tree and prose (both languages) and in
+  SPEC's header pointer, Part-C prefix table, Appendix-F pointers and
+  historical-note links, and the TESTING / tests-README
+  cross-references; the directory is
+  deliberately NOT created, per the audit's own guidance, because
+  keeping the large development archive outside the canonical tree
+  is the intended design. F-12: tests/README.md's introduction no
+  longer hard-codes a tool count ("five tools") and points to
+  TESTING.md §0 as the authoritative inventory. F-13: the quick-run
+  schema-gate line no longer embeds the obsolete v2.1 schema number
+  and defers to the schema declared by the current repository
+  contract. Docs-only; no version bump.
+- **Documentation-contract remediation R2** (audit findings F-04,
+  F-05, F-07, F-08, F-09, F-10; each re-measured before action).
+  F-04: the README parameter tables (both languages) gain the eight
+  implementation parameters they were missing (`-ResumeFromPhase`,
+  `-ResumePreflightOnly`, `-PatchRefreshMode`, `-ImageDisplayDate`,
+  `-RunHyperVValidation`, `-HyperVValidationMode`,
+  `-BootTestIsoPath`, `-BootEvidenceApprovalPath`), and the four
+  P14-related parameters gain the `.PARAMETER` help blocks they
+  lacked, authored from the measured param-block contracts. F-05
+  (confirmed): P03 writeback is documented precisely — the refresh
+  always updates the in-memory profile, persistence to the Config
+  JSON occurs only when `AutoRefreshPolicy.WritebackToConfig` allows
+  — in the README phase rows (both languages) and the
+  `-AutoDetectLatestPatches` help. F-07: the comment-based help now
+  states the enforced 100 GB workspace requirement (the stale
+  60/30 GB wording removed). F-08: the T47/T48 verification stamps
+  are split current-vs-historical — current = the Collector r13
+  standalone re-verification (29/29, 42/42, 2026-08-08); the
+  Collector r12 four-VM run is retained explicitly as historical
+  E2E provenance. F-09 (confirmed by measurement:
+  the action runs the P01–P03 resolution then emits a placeholder
+  caution): `GenerateManifest` is marked **Placeholder** in the
+  README action tables (both languages) and SPEC §B.6.2 rather than
+  silently documented as complete. F-10: SPEC's status line is now a
+  rolling-specification marker with a last-contract-review date
+  instead of the stale `r09.0 baseline` label. ScriptVersion
+  `update-wsi-2026.08.08-r12.83`, tag `doc-contract-r2` (help-text
+  edits only; no behavior change); the T40 release pin advances in
+  the same change set.
+- **Documentation-contract remediation R1 (blocking batch)** — driven
+  by the user-directed staleness audit and an independently verified
+  third-party consistency review (each finding re-measured against
+  the repository before action; one audit claim was refuted by
+  measurement and left unchanged: the standalone readiness flow
+  writes `pca2023_readiness.json` + `.md` exactly as documented).
+  F-01: every current-facing document now states the measured
+  PCA2023 contract — conversion is default-on for every supported OS
+  including Server 2025 (`Mode=ConvertByDefault`,
+  `RequiredByDefault=true`, min date 2024-04-09), and
+  `-ForcePca2023OnServer2025` is a deprecated no-op compatibility
+  slot; corrected in README worked example / per-OS bullets /
+  parameter table (both languages), SPEC §B.5 gating, §B.17.3,
+  §B.4.4 matrix, and the TESTING worked example. F-02: SPEC's
+  normative phase model is now P01–P14 (incl. P08S): heading, TOC,
+  identifier table, the B.6 Action→Phase rows re-derived from
+  `Get-PhaseListByAction` (BootTest = P14; All = standardFull with
+  P14 before P13; ListPhases = pretty-printed console, not JSON),
+  and a new §B.5.1 P14 contract subsection authored from the
+  implementation (selection, identity-bound evidence, two-step
+  operator approval, release-eligibility); the README phase tables
+  gain the P14 row (both languages). F-03: static-analysis
+  governance is unified on the adjudicated-debt model (user ruling)
+  in README (both languages) and TESTING §0 — whose psa row now
+  carries the post-drain declared baseline (main 1E/120W/0I with
+  causes, collector 0E/4W/0I) — and the G3 standing-gates row is
+  re-stated as no-regression-from-baseline. Acknowledgements
+  (user-directed): in-house reuse entries removed and the upstream
+  Microsoft reference made version-free in README; the pin moves to
+  SPEC §B.17.4 as a file-identity record (blob `09dd906d…`,
+  measured byte-identical across the v1.6.4 and v1.6.5 release
+  tags on 2026-08-08, so no re-implementation review is required
+  for v1.6.5; re-review triggers on a future blob change).
+
+## [update-wsi-2026.08.08-r12.82] - 2026-08-08
+
+Tag: `consolidation-fold`. **This release folds the entire series-end
+consolidation** — the test re-implementation campaign (T47 – T52 and
+the T40/T45 reworks; phases 0 – E), the PSA debt drain (batches 1 – 7
+and the Collector r13 batch), the G3 evidence-gate closure, the
+knowledge-ledger sweep (research doc r2.5), the canon-frame incident
+remediation with its adopted prevention controls, and the T30
+retirement that takes the offline suite all green. With it the
+external-implementation merge / consolidation / maintainability arc
+is closed. Entries below are folded verbatim from [Unreleased].
+
+### Governance
+
+- **Series-end consolidation stream opened.** The r12 merge campaign
+  is complete (r12.00 through r12.75 landed verbatim; the series is
+  closed). From this commit onward, commits on this branch are
+  Claude-authored under the normal design-first governance: every
+  commit is individually proposed, approved and manifest-gated. The
+  campaign's verbatim-landing rules (including the pass-through
+  pre-approval) no longer apply.
+- **Test re-implementation campaign opened.** The external
+  implementation's test corpus — including its terminal required
+  regression suite — remains input-only and is not adopted verbatim
+  (user ruling, 2026-08-07). Its specifications are absorbed by
+  re-authoring repository-governed contracts in the existing test
+  idiom, declaration-derived where a declared surface exists, with
+  every source assertion group tracked to an explicit disposition in
+  an out-of-repo re-implementation ledger. The real-environment-
+  validated r12.75 code is the specification baseline: test authoring
+  does not drive code changes, and any clearly-improving code change
+  is raised as a separate proposal with its own version bump.
+  Re-examination of the refactoring plan is deferred until this
+  campaign completes.
+
+### Tests
+
+- **T47 `collector_artifact_test.py` added** (test re-implementation
+  campaign, phase A, first half): the Collector's first
+  repository-side regression coverage. Pins the deliverable identity
+  (supported filename present, retired project-context filename
+  absent), the exact CollectorVersion/SchemaVersion pair
+  (`r12` / `windows-server-post-install-evidence/1.10`, advanced
+  deliberately per Collector release in place of the external suite's
+  floor pins), the project-neutral evidence contract (error schema,
+  artifact prefix, OS-tokenized naming, no E2E terminology), the
+  pre-r9 retirement guards with cross-version baseline comparison
+  explicitly disabled, the collection posture (ESP/MSInfo32
+  default-on, C:\Temp output contract, OutputRoot restriction,
+  mountvol-based read-only ESP access, the eight-function evidence
+  inventory), the no-network invariant, and a Collector parse gate
+  that extends the battery beyond the main script. 29 assertions;
+  fault-detection verified by mutation on a disposable copy
+  (schema drift and an injected network surface both fail closed).
+  Specification source: distribution axes R1269/R1270/R1275,
+  re-authored; dispositions tracked in the out-of-repo
+  re-implementation ledger.
+- **T48 `collector_semantics_test.py` added** (phase A, second half):
+  behavioral coverage of the Collector's r10→r12 hardening arc. The
+  functions under test are extracted from the Collector's own AST and
+  exercised against fixtures whose values are measured post-install
+  facts from the four-OS ja-jp runs: pending-reboot discrimination
+  (measured Server 2022/2025 updater-cleanup PFRO shapes classify
+  Advisory; unknown operations, rename/move pairs and malformed data
+  stay Blocking; CBS / Windows Update always override; read errors
+  yield Unknown without asserting a pending reboot), Secure Boot
+  event-field parsing (blank 1801/1808 label fields stay null instead
+  of consuming the next label; populated fields retained), the r11
+  restart-preflight decision matrix (explicit confirmation with
+  provenance; Advisory/Blocking/Unknown startup states fail closed;
+  boot history corroborates but is never authoritative; pending state
+  captured at startup and rechecked; preflight precedes Secure Boot
+  collection), and the r12 Secure Boot evidence semantics
+  (WindowsUEFICA2023Capable reference-only; measured WinCS shape
+  parses and Disabled-under-Updated means not-required with
+  UEFICA2023Status as the status authority; a stale historical 1808
+  cannot override a newer 1801; the measured 2022/2025 Updated shape
+  confirms with its three evidence sources; the measured 2019
+  monitoring divergence stays conservative; Authenticode
+  primary-signer observations remain diagnostic-only). 42 assertions;
+  fault detection verified by mutation on a disposable copy (an
+  allow-list regression and a removed precondition banner both fail
+  closed). Specification source: distribution axes R1273/R1274/R1275,
+  re-authored. With T47 this closes the Collector coverage gap;
+  offline suite is now 26 PASS + the declared T30 red.
+- **T49 `oscdimg_reference_test.py` added** (phase B): first contract
+  protecting the declared tool-reference file adopted at r12.63.
+  D-half, anchored on `data/tool-references/oscdimg-reference.json`:
+  the file's SchemaVersion pinned exactly, ExpectedAdkFamily /
+  ExpectedAdkServicingKb asserted by FORMAT only, at least two AMD64
+  repository references each with a 64-hex digest and a Microsoft
+  Symbol Server URL, and at least two qualified identities with valid
+  digests — the concrete declared values are deliberately NOT
+  duplicated into the test, because the declared file is the value
+  authority and duplicating values is the staleness hazard the
+  declaration model exists to avoid. B-half, AST-verified: the legacy
+  ADK fallback executes nothing and states its non-modification
+  behavior, the installer-URL variable and adksetup.exe constants and
+  the retired advisory messages are gone from executable code,
+  New-BootableIso requires functional qualification and records the
+  functional status and resolver evidence path, P01 preserves
+  machine-readable resolver-failure evidence, the five oscdimg schema
+  identities and three reference names and qualification evidence
+  keys are declared, and the Microsoft-script reference parser is
+  exercised behaviorally on a synthetic fixture (symbol-store key,
+  lowercased hash, version, date). 44 assertions; fault detection
+  verified by mutation on a disposable copy (an invalid declared
+  digest and a re-introduced retired advisory message both fail
+  closed). Specification source: distribution axes R1263/R1264,
+  re-authored; the R1264 collection-shape rows are deferred to the
+  T51 binder guard per the ledger. Offline suite is now 27 PASS + the
+  declared T30 red.
+- **T52 `media_authority_test.py` added** (phase C, first half):
+  behavioral coverage of the P09/P10/P11 final-writer authority model.
+  The functions under test are extracted from the script's own AST and
+  exercised against measured fixtures, with the DISM boundary mocked
+  for the WinPE media-sync runtime group: the retained r12.62
+  media-sync surface (sync/identity/export functions, their schema
+  versions, the P08/P09/P11 evidence artifact names, the cleanup defer
+  wiring, and the r12.72 explicit creation of the standard EFI boot
+  manager and root bootmgr.efi), the r12.62 WinPE media-sync runtime
+  (boot.wim index 2 mocked at build 26100: zero-failure sync,
+  setuphost.exe required, all seven semantic media targets
+  byte-matched to their WinPE source, authority categories correct,
+  and the separator-normalized standard boot-manager target set
+  exactly the four Microsoft alias paths — pinned in platform-
+  invariant form because the Windows case-insensitive alias de-dup
+  collapses the raw record list to 4 rows while Linux pwsh keeps both
+  separator forms of one alias, raw 5), the r12.72 P10 write-set
+  authority binding (a byte-changed firmware boot manager binds to
+  P10Pca2023Overlay, an unchanged root bootmgr.efi retains
+  P09WinPeSyncRetained, boot.stl always binds to P10BootStlSync,
+  exactly two override authorities), the P11 final-identity evidence
+  gating (valid explicit P10 evidence consumed with both overrides;
+  absent, required-but-missing, tampered-ISO and stale-evidence states
+  all rejected), the measured Server 2022 reviewed-pinned Catalog
+  identity shape (Verified in PinnedReviewedIdentity mode with the
+  ExactConfiguredFileNameDigest binding; a digest-less filename stays
+  fail-closed; the P04 selector emits the explicit
+  ConfiguredSha1OrFileNameDigest token; the full Setup-DU package
+  authority gate reaches Trusted with the pinned-identity success
+  status), the measured Server 2019 final Setup-binary authority
+  (P09 WinPE authority governs setup binaries over the earlier DU
+  hash with the three authority classes counted; byte tampering after
+  P09 rejected; a boot.wim override claim without matching successful
+  P09 evidence rejected), and the Setup-DU final manifest validation
+  guards (unsupported P09 evidence schema and traversal RelativePath
+  both rejected). 50 assertions; fault detection verified by mutation
+  on a disposable copy (a corrupted P10 authority label, a weakened
+  stale-evidence guard and a weakened filename-digest binding all
+  fail closed). Specification source: distribution axes
+  R1262/R1271/R1272, re-authored; the P11 chain is exercised through
+  explicitly authored P09 evidence because the distribution's
+  chain-through of raw sync output relies on the Windows alias de-dup
+  (the Windows-side chain remains covered by the user-side G2 gate);
+  the R1262/R1271/R1272 revision-floor rows are DROP (T40 pins the
+  exact ScriptVersion); dispositions tracked in the out-of-repo
+  re-implementation ledger. Offline suite is now 28 PASS + the
+  declared T30 red.
+- **T40 `setup_binaries_sync_test.py` P08S wiring pin reworked**
+  (phase C, second half — the O7-deferred option B): the global
+  token-count proxy (`code.count("'P08','P08S','P09'") == 5`, whose
+  expected value broke at r12.35 when the resume layer legitimately
+  added a fifth wiring site) is replaced by a structural invariant
+  plus per-site pins. The invariant: every quoted phase-ID list
+  literal of three or more elements that contains both P08 and P09
+  must wire P08S strictly between them (two-element constructs such
+  as parameter ValidateSets are exempt by the length discriminator —
+  the measured code has seven such two-element constructs and five
+  conforming pipeline lists). The per-site pins name the five known
+  lists individually: both standardFull pipeline variants, the Build
+  action list, the r12.05 ResumeFromPhase P08 list, and the r12.35
+  resume downstream-cleanup prefix list. A legitimately added new
+  pipeline list that wires P08S correctly no longer breaks the
+  contract (verified by positive control), while a list that drops or
+  misorders P08S fails with a line-diagnosed message (verified by
+  mutation on a disposable copy at two sites, including the exact
+  r12.35 shape that triggered O7). The supersession is documented in
+  the test header; the release-pin row and the r12.72
+  build-independent Setup-binary plan rows (the R1272 plan contract,
+  which the r12.72 T39 revision had already landed in this test) are
+  unchanged. T40 is now 21 assertions (was 17). Note for the
+  re-implementation ledger: the R1272 "build-independent plan" rows
+  map to the pre-existing T40 section 1 rows; the option-B subject
+  drained here was the wiring proxy.
+- **T50 `catalog_semantics_test.py` added** (phase D, first part):
+  behavioral coverage of the r12.52 -> r12.67 Catalog hardening arc.
+  The functions under test are extracted from the script's own AST and
+  exercised against measured Catalog shapes (the user-observed Server
+  2016 four-row Setup DU query and the KB4132216 HTTP-200 page shape):
+  the merged R1252 + R1265 + R1267 catalog/collection function
+  inventory (48 functions exactly once — also the future input to the
+  refactoring plan's static duplicate-function check), the horizontal
+  static invariants (no GetNewClosure validator, no scriptblock
+  ContentValidator parameter or call site, no nested sorted return,
+  the three typed semantic modes plus ExactKbSearch declared,
+  transport evidence carrying the validation context, the unvalidated
+  POST cache helper gone, collision-resistant cache identity and flat
+  PatchBaseline contracts present), the typed validator wiring
+  (legacy search helper and Search-Catalog select the exact-KB
+  contract; cache and transport both flow through the centralized
+  semantic validator; CATALOG_VALIDATOR_EXECUTION_FAILED
+  distinguished and excluded from transient retries), the legacy
+  helper containment (no direct Invoke-WebRequest -Uri; supplied
+  validated HTML reused before networking), the Setup-DU scalar
+  identity pins (flat selector returns; UpdateId validated before
+  POST body construction; nested candidate rows rejected; selected
+  uid validated), and the runtime groups: semantic retry (invalid
+  HTTP-200 retried with Failure/transient/200 then Success transport
+  events; invalid cache discarded after exactly one revalidated
+  fetch; supplied HTML parsed with zero network requests), typed
+  endpoint semantics (each active mode accepts its measured shape and
+  rejects the mismatch; a malformed exact-KB context fails the
+  contract — the exact-KB row filter is pinned on a single-anchor
+  page because the measured filter is a context-window heuristic,
+  ±1800 chars), cache identity tags (distinct digest-bearing search
+  tags; full-UpdateId download/legacy/scoped tags), scalar boundaries
+  (arrays, Generic.List values and space-joined multi-GUID strings
+  rejected at the UpdateId/KbId/query boundaries), and flat
+  collection shapes (four flat candidates from the measured 2016
+  shape with the single KB5068794 row selected;
+  Select-SetupDuCandidate / Get-X64Rows / ConvertTo-ConfigLines flat;
+  language-pack template and WIM inventory materialized). 104
+  assertions; fault detection verified by mutation on a disposable
+  copy (a transient-reclassified validator failure, a weakened
+  UpdateId cardinality guard, and the reintroduced historical r12.65
+  nested-return bug all fail closed, the last at both the static and
+  runtime layers). Specification source: distribution axes
+  R1252/R1265/R1266/R1267, re-authored; the R1252 servicing-contract
+  component-hash rows are ADOPT-D in T45; revision-floor rows are
+  DROP. Offline suite is now 29 PASS + the declared T30 red.
+- **T51 `generic_list_binder_test.py` added** (phase D, second part):
+  the r12.17/r12.64 incident class — PowerShell 7.4+ throwing
+  'Argument types do not match' when a Generic.List[object] holding
+  PSCustomObject rows is materialized through the array subexpression
+  or constructed through New-Object. Static pins: no New-Object
+  Generic.List construction anywhere in the active script; P11
+  evidence takes RowCount from the List Count property directly with
+  the failing subexpression form absent; the r12.64 oscdimg
+  repository-reference resolver uses constructor-created
+  List[object]/List[string] with explicit typed ToArray()
+  materialization for records and errors (forbidden subexpression
+  forms absent, repository-resolution schema advanced to
+  secureboot-objects-oscdimg-resolution/1.1); the local-candidate
+  resolver constructs via ::new() and returns a typed ToArray() with
+  the subexpression return absent. Behavioral pins under the pinned
+  pwsh: constructor-created List[object] of PSCustomObjects
+  materializes with order and properties preserved and groups
+  correctly (the exact r12.64 repository-record shape); List[string]
+  paths survive typed materialization; the exact r12.17 P11 evidence
+  shape builds with RowCount from .Count. 17 assertions; fault
+  detection verified by mutation on a disposable copy (the r12.63
+  @()-materialization failure shape and a reintroduced New-Object
+  construction both fail closed). Specification source: distribution
+  axes R1217/R1264 plus the R1264 collection-shape rows deferred from
+  T49, re-authored; oscdimg function uniqueness stays pinned in T49.
+  Offline suite is now 30 PASS + the declared T30 red.
+- **T45 `servicing_contract_baseline_test.py` extended** (phase D,
+  third part): a script-computed component-hash cross-check closes
+  the loop the declaration-shape assertions leave open — that the
+  declared file matches itself is necessary but not sufficient; the
+  new pin is that the *script* still computes what the file declares.
+  The canonical-JSON contract constructors (14 functions) are
+  extracted from the script's own AST under the pinned pwsh,
+  `Get-ServicingContractComponentHashes` is evaluated for every OS,
+  and each of the eight component digests must equal the declared
+  baseline value (4 OS x 8 fields). T45 is now 26 assertions (was
+  21) and gains a pwsh dependency for the extension section (same
+  dependency class as T40/T47/T48/T50/T51/T52); the
+  declaration-shape sections remain pure Python. Fault detection
+  verified by mutation on a disposable copy: a single semantic line
+  changed inside the Server2016 contract definition
+  (Install.PendingPolicy) is detected as a Server2016
+  ContractSha256 divergence with every other OS and component still
+  green. Specification source: distribution axis R1252, ADOPT-D —
+  the assertion is anchored on the declared instrument
+  (`data/servicing-contract-baselines.json`), not on distribution
+  test code.
+
+### Documentation
+
+- **TESTING.md tier re-baseline** (test re-implementation campaign,
+  phase E — docs-only): the suite documentation is re-baselined to
+  the measured r12.75 series-terminal state. §0 gains rows for the
+  six campaign contracts (T47 – T52) and re-measured rows for T30
+  (still the declared SUPERSEDED-PENDING red, 6/8; the series closed
+  with the discovery model declared in T46 and behaviorally covered
+  in T50, while the terminal retained the title-heuristic selector —
+  the final supersession disposition is a consolidation-stream
+  adjudication), T35 (9 after the r12.57 default-enable reshape), T40
+  (21 after the option-B structural-invariant rework), T41/T42/T43
+  (139/37/128 at r12.75 — the counts track the declaration), T45
+  (26; the anchor exists, the NOT-YET path is dormant) and the
+  canonical-format gate (28 files); a suite-level re-measure
+  statement records the baseline (30 test files PASS + the declared
+  T30 red only). §5's quick-run reference is rewritten to the
+  current suite — the stale pre-r12.00 rows referencing the retired
+  and deleted T23/T27/T28/T31/T33/T34/T37 files are removed — and the
+  two-bucket determinism categorisation is replaced by the three-tier
+  execution model: tier 1 offline-deterministic (Python + the pinned
+  pwsh), tier 2 live-network (T1/T4; the expanded live-network tier
+  design remains a standing consolidation item), tier 3 evidence
+  (user-side G2/G3 and the operator-pending pipeline rows). The
+  E-DEFER register is declared explicitly EMPTY with the measured
+  reason: no re-authored assertion group required real-machine
+  execution, including the WinPE media-sync runtime, which phase C
+  measured as fully runnable under Linux pwsh with only a
+  platform-invariant normalization. An absorption-boundary section
+  records that the input-only required regression set was fully
+  dispositioned in the out-of-repo ledger and that the external
+  historical corpus stays out of scope absent a separate order.
+  `tests/README.md` (the canonical inventory) is synced in the same
+  change set: T47 – T52 inventory and file-layout rows added, the
+  T30/T35/T40/T45/T46 rows and the stale counts re-measured, and the
+  stdlib-only wording corrected to name the pwsh dependency. Stale T3
+  assertion counts in TESTING.md §2.3/§6.1 are corrected to the
+  measured 7.
+- **Test re-implementation campaign closed** (phase E is the final
+  phase). Every disposition in the out-of-repo re-implementation
+  ledger is landed; the repository suite is the operative regression
+  net going forward. The standing consolidation items now resume
+  in this stream: PSA declared-debt drain (with ScriptVersion bumps),
+  knowledge-ledger sweep, live-network tier design, and — at the
+  release conversation — the fold of this [Unreleased] section into
+  a release heading together with the README.md/README.ja.md
+  both-language sync and heading lock-step check. Re-examination of
+  the refactoring plan begins only after those items complete, per
+  the standing work order.
+
+### Fixed
+
+- **P14 BootTest answer-ISO oscdimg resolution** (PSA error-debt
+  drain, batch 1): the Hyper-V answer-ISO creation step called
+  `Resolve-OscdimgPath`, a function that has never existed in any
+  revision — the call was authored dangling at r12.04 and survived to
+  the series terminal because the path is only reached by
+  `-Action BootTest` on a Windows/Hyper-V host, outside the
+  real-environment validation runs. When reached it raised
+  CommandNotFoundException before the site's own guard could fire.
+  Corrected to the plain `Resolve-OscdimgExe` form (the P01 preflight
+  pattern): the answer ISO is data-only, so the
+  T49-pinned functional-qualification form (which needs BIOS/EFI boot
+  images) does not apply; the resolver returns the selected path and
+  throws with full candidate reasons on failure, so the retained
+  null-guard is defensive only. ScriptVersion
+  `update-wsi-2026.08.08-r12.76`, tag `psa-error-debt-drain`; the T40
+  release pin advances in the same change set.
+
+### Static analysis
+
+- **PSA error debt drained to zero on both deliverables** (batch 1 of
+  the standing consolidation drain). Main script: the undefined
+  `$osversion` finding (PSA2001) is resolved by referencing the
+  script parameter explicitly as `$Script:OsVersion` in the debug
+  trace header (behavior-preserving clarification of the dynamic-scope
+  read); the four PSA2012 findings on `Save-CanonicalJsonFile` call
+  sites are measured analyzer false positives — every site passes
+  `-Path` and `-Depth` after the multi-line `-InputObject` argument —
+  and carry line-local `# psa-disable-line` justifications per the
+  suppression policy. Collector: the PSA2010 finding on
+  `Get-WindowsFeature` (a ServerManager in-box cmdlet used by the
+  role/feature census) is resolved by adding it to
+  `psa2010_known_cmdlets` in `.psa.config.json` with the module noted
+  in the config rationale — no code change. Declared debt is now
+  main 0E/229W/27I and collector 0E/13W/44I; the warning/info drain
+  continues in subsequent reviewed batches.
+
+### Tests
+
+- **T30 retired** (user adjudication at the consolidation fold; the
+  series rule's retirement record — what it asserted, why that
+  reading is superseded, and the successors — is SPEC §B.15.4). The
+  declared SUPERSEDED-PENDING red carried since r12.00 is closed by
+  retirement rather than revision: the declared per-Kind
+  `DiscoveryPolicy.SearchProfiles` model the contract awaited is
+  landed and guarded by T46, and the current Setup-DU selection
+  behaviour is covered by T50's scalar identity pins and measured
+  row-filter semantics, so a permanently red title-heuristic
+  instrument added no protection beyond that pair. The offline suite
+  is now **30 test files, ALL PASS — no declared red**; TESTING.md's
+  §0 row, quick-run reference, tier table and suite-declaration
+  baseline and the tests/README.md inventory are updated in the same
+  change set.
+
+### Governance
+
+- **Canon-frame restoration (incident remediation, user ruling).** The
+  PSA error-drain batch 1 resolved the PSA2001 finding by qualifying
+  `$OsVersion` as `$Script:OsVersion` inside the debug-trace header —
+  an edit that, unrecognized at the time, landed inside the vendored
+  canonical region `pwsh.helper.enable-debugtracefileoutput`. The
+  root cause was a self-authored marker-search pattern used instead
+  of the authoritative marker definitions in the canon tooling; the
+  zero-hit result was then rationalized against the governance
+  documents instead of triggering a stop-and-verify. Per the adopted
+  prevention controls, the in-frame token is reverted and the unit
+  body is proven byte-identical to its pre-campaign state; the
+  improvement routes through central reflux instead (canon unit
+  candidate: `$Script:` qualification of the dynamically-read
+  consumer-scope variable). The returning PSA2001 finding is
+  adjudicated as a fourth measured analyzer false-positive class —
+  the rule harvests only top-level assignments into its
+  script-scope set and does not recognize top-level `param()`
+  declarations, so the declared `$OsVersion` script parameter is
+  reported undefined — registered as a central-reflux candidate and
+  retained as declared debt at its native ERROR severity (main is
+  1E/120W/0I, the 1E being this pinned false positive; frame
+  integrity outranks analyzer appeasement, and no out-of-frame
+  remediation exists by design). Prevention controls adopted with
+  this commit's session: canon-region pre-edit guard derived from
+  the authoritative marker definitions (session instrument), the
+  full canon battery (drift scanner, restamp check,
+  governance-state validator) standing in every code-touching
+  commit's gate set, an authoritative-pattern-source rule, a
+  stop-on-contradiction rule, a negative-evidence reporting rule,
+  and a fixed incident-handling order. Verified with this change:
+  restamp 58/58 IN SYNC and the central-drift count unchanged at
+  the three r12-inherited debug-trace units (the campaign introduced
+  no new central drift). ScriptVersion
+  `update-wsi-2026.08.08-r12.81`, tag `canon-frame-restoration`;
+  the T40 release pin advances in the same change set.
+
+### Changed
+
+- **Collector r13 — PSA debt drain and the Skip-form opt-out
+  surface.** The Collector's PSA debt is drained to 0E/4W/0I in a
+  dedicated batch with a deliberate `CollectorVersion` advance
+  r12 → r13 (SchemaVersion unchanged at 1.10; evidence output is
+  identical). The two PSA6006 default-`$true` switches are inverted
+  to the Skip-form opt-outs established by the sister
+  Deploy-Drivers project — `-InspectEsp`/`-IncludeMsInfo32` become
+  `-SkipEspInspection`/`-SkipMsInfo32` — preserving the T47-pinned
+  default-on collection posture exactly (skip switches default to
+  `$false`, so ESP and MSInfo32 collection remain on by default);
+  the comment-based help is rewritten accordingly and T47's posture
+  pins are revised T39-style to assert the Skip-form declarations
+  and the absence of the legacy switches, with the exact
+  version-pair pin advanced to r13/1.10. The
+  `Get-SecureBootEventFieldValue` `$Event` parameter (PSA2007) is
+  renamed `$EventRecord` with all seven call sites updated. Three
+  PSA2003 null-pattern findings are measured
+  impossible-by-construction (literal regex sets, literal year
+  tokens, literal caller arrays) and suppressed with reasons; the
+  three PSA3004 empty catches already carried best-effort rationale
+  comments and are suppressed citing them. The 44 PSA6007 functions
+  gain `[OutputType]` attributes via the same AST return-expression
+  extraction used for the main script (evidence records as
+  pscustomobject; string/byte[]/object[] surfaces as measured). The
+  four remaining PSA6003 naming findings are declared debt deferred
+  to the refactoring campaign alongside the main script's.
+
+### Static analysis
+
+- **PSA info-debt drain, batch 7 — [OutputType] declarations.** The
+  26 advanced functions flagged by PSA6007 (the Catalog client core,
+  the oscdimg reference/resolution family, the release-evidence
+  writers, and the resume-state initialiser) gain `[OutputType]`
+  attributes derived from an AST extraction of every return
+  expression per function (pscustomobject evidence records for the
+  evidence writers and resolvers, `[bool]` for the row predicate,
+  `[string[]]`/`[object[]]` for the candidate enumerators,
+  `[string]` for the evidence-path saver, `[void]` for the interop
+  initialiser, `[object]` where the surface is a web response or
+  parsed-JSON union). Advisory metadata only — no behavior change.
+  Main-script debt is now 0E/120W/0I: the INFO class is fully
+  drained, and the 120 remaining warnings are all documented
+  declared-debt classes. ScriptVersion
+  `update-wsi-2026.08.08-r12.80`, tag `psa-outputtype-drain`; the
+  T40 release pin advances in the same change set.
+- **PSA warning-debt drain, batches 5+6 — naming adjudication and
+  timeless comments.** Batch 5 (adjudication, no code change):
+  PSA6005 (10) is adjudicated as analyzer false positives — the
+  rule's regex spans parameter boundaries on a line, flagging any
+  param line where a Mandatory parameter merely PRECEDES an optional
+  parameter with a default (minimal-repro proven; a rigorous
+  adjacency re-scan confirmed no Mandatory parameter in the script
+  carries its own default); registered as the third central-reflux
+  candidate and retained as declared debt. PSA6003 (31 plural nouns)
+  and PSA6001 (2 non-approved verbs `Throw-`/`Ensure-`) are genuine
+  style findings whose fixes are public-surface renames; deferred by
+  the standing numbering adjudication to the r13.xx refactoring
+  campaign and retained as declared debt. Batch 6 (PSAP0005, 29):
+  the per-revision validation-marker block in the script header (13
+  lines) is relocated per the rule's own guidance — CHANGELOG.md
+  keeps the chronological record, SPEC.md Part D the rationale — and
+  replaced by a two-line pointer; the sixteen remaining
+  revision-anchored comments are reworded timelessly, replacing
+  revision numbers with the structural discriminator they stood for
+  (e.g. legacy flat-hash resume manifests, pre-final-boundary P08
+  runs, earlier workspace generations lacking the final all-index
+  Export) while preserving every engineering rule and incident
+  rationale. Main-script debt is now 0E/120W/26I, and every
+  remaining warning is a documented declared-debt class (77 PSA2009
+  + 10 PSA6005 analyzer false positives pending the central fixes;
+  33 naming findings pending r13). ScriptVersion
+  `update-wsi-2026.08.08-r12.79`, tag `psa-comment-drain`; the T40
+  release pin advances in the same change set.
+- **PSA warning-debt drain, batch 4 — shadowing renames** (reviewed
+  batch; behavior-preserving local renames with every in-scope
+  reference mapped by AST/function-bounds scan before editing).
+  PSA2002 (13): nine local `$matches` variables shadowing the
+  automatic `$Matches` renamed to intent-revealing names
+  (`$regexMatches`/`$creationMatches`/`$updatedMatches` in the WIM
+  XML editors, `$versionMatches` in the identity parser, `$isMatch`
+  for the three boolean uses in the media-sync/P10/Setup-DU evidence
+  functions, `$matchedFiles`/`$matchedRows` in the resume layer);
+  three local `$args` variables renamed (`$dismArgs` in the two DISM
+  export wrappers, `$oscdimgArgs` incl. its `@args` splat in the
+  oscdimg qualification build). PSA2007/PSA2002 on parameters: the
+  `Write-DismRollbackEvidence` `$Error` parameter renamed
+  `$ErrorText` (JSON evidence field name unchanged) with both
+  `-Error` call sites updated; the
+  `Assert-ServicingContractProfileCompatibility` `$Profile` parameter
+  renamed `$OsProfile` with its call site updated — the analyzer's
+  PSA2012 caught the initially missed call site during the batch's
+  own gate run (a true positive; fixed before commit and recorded
+  here as the drain working as intended). PSA2003 (2): both `-match`
+  null-pattern findings measured as impossible-by-construction (a
+  literal pattern array; an explicit empty-pattern early return) and
+  suppressed with the measured reasons. Main-script debt is now
+  0E/149W/26I. ScriptVersion `update-wsi-2026.08.08-r12.78`, tag
+  `psa-shadowing-drain`; the T40 release pin advances in the same
+  change set.
+- **PSA warning-debt drain, batch 2** (justified suppressions +
+  trivial fixes; every disposition measured, no behavior change).
+  PSA5003 (47 findings, 34 lines): all sites verified as legitimate
+  domain-required SHA-1 handling and suppressed line-locally with the
+  measured reason — the Microsoft Update Catalog publishes SHA-1
+  digests in its download metadata and embeds them in payload file
+  names (the resume path re-verifies retained payloads against them),
+  and the WIM integrity table is SHA-1 by the format specification
+  (`Get-WimFileRangeSha1`); the integrity model itself remains
+  SHA-256-first per the T29/T43 boundary. PSA3004 (15 findings): each
+  empty catch individually reviewed and confirmed as a deliberate
+  best-effort/degradation contract (transport probes, evidence
+  side-file writes, cache reads, version probes); suppressed with
+  per-site reasons. PSA7003 (1 aggregated finding, 116 characters):
+  nine of the ten non-ASCII lines are functionally required string
+  literals (Japanese Catalog display-string aliases, the
+  Japanese-path oscdimg qualification fixtures, reagentc ja output
+  matching) and conform to the project convention of ASCII-only
+  OUTSIDE literals; the single outside-literal case — a comment
+  quoting the ja-localized column label — is rewritten in ASCII, and
+  the aggregated finding is suppressed at its anchor line with the
+  limitation noted (the analyzer has no literal-context exemption, so
+  the suppression is file-wide in effect until the central analyzer
+  gains one). PSA4004: the one redundant trailing semicolon removed.
+  Main-script debt is now 0E/166W/26I. ScriptVersion
+  `update-wsi-2026.08.08-r12.77`, tag `psa-warning-debt-drain`; the
+  T40 release pin advances in the same change set. Collector
+  warnings are deliberately untouched in this batch: suppression
+  comments are code edits, and the Collector version-bump discipline
+  (the T47 exact pair pin) makes them a separate adjudicated batch.
+- **PSA2009 (77 warnings) adjudicated as analyzer false positives —
+  zero real defects.** Measured verdict: PowerShell throws on
+  assignment to an undeclared PSCustomObject property regardless of
+  strict mode, so genuine instances would be runtime crashes; an AST
+  sweep of all 77 sites proved every flagged property IS declared in
+  its governing initialiser. The false positives are caused by the
+  analyzer's initialiser regex recognising only the single-cast
+  `[pscustomobject]@{` form and missing the double-cast
+  `[pscustomobject][ordered]@{` form this script uses in 13 of its 16
+  `$result` initialisers (proven by minimal repro). The 77 findings
+  are retained as declared debt with this documented cause — not
+  suppressed — and clear automatically once the central analyzer fix
+  lands.
+- **Central-reflux candidates registered** (quality-tools changes are
+  out of scope for this maintenance stream and route through the
+  governance project): (1) PSA2009 initialiser recognition for the
+  `[pscustomobject][ordered]@{` double-cast form; (2) PSA7003
+  literal-context exemption so string-literal content is exempted per
+  the repository's stated ASCII-only-outside-literals convention.
+
+### Verification
+
+- **G3 evidence gate closed** (user adjudication, 2026-08-08):
+  Collector r12 / schema 1.10 real-machine evidence delivered from
+  all four Server VMs; every run Overall=Pass (21/21 items) with
+  checksum-complete artifact sets. Recorded in TESTING.md's evidence
+  tier; the archives stay input-only outside the repository. The
+  first three Server 2025 attempts stopped at the startup preflight
+  by design (`PreconditionNotMet`): a Microsoft EdgeUpdate cleanup
+  entry in PendingFileRenameOperations classified Advisory, and the
+  T48-pinned startup matrix fails closed on Advisory; one further
+  restart consumed the PFRO entry and an immediate re-run collected
+  cleanly — a live confirmation of the collector's preflight
+  semantics and of the measured updater-cleanup PFRO shape.
+
+## [update-wsi-2026.08.07-r12.75] - 2026-08-07
+
+Tag retained: `post-install-evidence-collector-r9-merge`.
+**This revision is the r12-series terminal** (user adjudication,
+2026-08-07): the external r12 implementation ended here, and every
+snapshot from r12.00 through r12.75 has now been landed verbatim
+onto this branch (r12.02 lost upstream; r12.36 landed twice per the
+double-work rule). The series is CLOSED; consolidation work
+(declared-debt drain, knowledge-ledger sweep) follows as separately
+governed commits.
+
+### Changed
+
+- **Collector hardened to r12 / schema 1.10 — Secure Boot evidence
+  semantics** (ISO servicing pipeline unchanged from r12.72): the
+  current/latest rollout state is authoritative; a historical event
+  1808 can no longer override newer state; WinCS is treated as
+  deployment-configuration evidence only; and the
+  WindowsUEFICA2023Capable / Authenticode signer observations are
+  explicitly scoped as diagnostics. A startup-preflight evidence
+  record (`windows-server-post-install-startup-preflight/1.0`)
+  accompanies the main schema. This is the collector revision the
+  distribution's acceptance gates expect for the four-VM re-run.
+  Collector delta +236 lines net (round-trip criterion verified
+  both directions); main-script delta is the identity and the
+  validation-marker comment (+2 net lines). The staged main script
+  is byte-identical to the terminal-evaluation specimen whose ZIP
+  and script SHA-256 were verified against the published plan
+  identity. `data/*` and `schema/*` are byte-identical to r12.74.
+
+### Tests
+
+- **T40**: release pin advanced to the terminal
+  `update-wsi-2026.08.07-r12.75` (the tag is retained). No terminal
+  D-contract required an edit anywhere in the r12.57–r12.75 stretch;
+  the contract set closes exactly as derived at r12.00.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. Main script PSA committed 6E/229W/27I
+  (raw sweep 6E/230W/27I: +1W is the PSA7002 LF artefact); the
+  collector r12 measures 1E/13W/44I standalone as a reference
+  figure. All PSA findings across both deliverables are declared
+  series debt, scheduled for the post-terminal drain. Snapshot form: main script
+  BOM + LF; collector BOM + CRLF; committed checkout form BOM+CRLF
+  for both.
+
+## [update-wsi-2026.08.07-r12.74] - 2026-08-07
+
+Tag retained: `post-install-evidence-collector-r9-merge`.
+
+### Changed
+
+- **Collector hardened to r11 / schema 1.9** (ISO servicing pipeline
+  unchanged from r12.72): full evidence collection now requires an
+  explicit post-install restart confirmation plus a clean startup
+  pending-reboot gate, records boot-history corroboration, and
+  re-checks the pending-reboot state immediately before the final
+  assessment. This is the collector revision that produced the
+  four-OS post-install evidence sets accompanying the distribution.
+  Collector delta +362 lines net (round-trip criterion verified both
+  directions); main-script delta is the identity and the
+  validation-marker comment (+2 net lines). `data/*` and `schema/*`
+  are byte-identical to r12.73.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.07-r12.74`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. Main script PSA committed 6E/229W/27I
+  (raw sweep 6E/230W/27I: +1W is the PSA7002 LF artefact) —
+  unchanged from r12.73. Snapshot form: main script BOM + LF;
+  collector BOM + CRLF; committed checkout form BOM+CRLF for both.
+
+## [update-wsi-2026.08.07-r12.73] - 2026-08-07
+
+Tag retained: `post-install-evidence-collector-r9-merge`.
+
+### Changed
+
+- **Collector hardened to r10 / schema 1.8** (ISO servicing pipeline
+  unchanged from r12.72): pending-reboot evidence now distinguishes
+  genuinely blocking servicing state from narrowly recognized
+  Microsoft updater cleanup activity, and Secure Boot event message
+  parsing is line-safe when BucketId/Confidence fields are blank.
+  Collector delta +287 lines net (round-trip criterion verified both
+  directions per the r12.70 rule); on the main script the delta is
+  the identity and the validation-marker comment (+1 net line, date
+  component moves to 08.07). `data/*` and `schema/*` are
+  byte-identical to r12.72.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.07-r12.73`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. Main script PSA committed 6E/229W/27I
+  (raw sweep 6E/230W/27I: +1W is the PSA7002 LF artefact; +1W on the
+  marker line, declared series debt). Snapshot form: main script
+  BOM + LF; collector BOM + CRLF; committed checkout form BOM+CRLF
+  for both.
+
+## [update-wsi-2026.08.05-r12.72] - 2026-08-07
+
+Tag retained: `post-install-evidence-collector-r9-merge`.
+
+### Changed
+
+- **Final-writer authority is hardened horizontally**: the r12.58+
+  lesson (the file firmware actually consumes must be proven, not
+  inferred) is applied across the final-media pipeline. P08S plans
+  `setup.exe` AND `setuphost.exe` for every supported OS (the sync
+  SET is build-independent; the 26100 threshold now lives in the
+  REQUIREMENT — a missing `setuphost.exe` throws on 26100+ and is
+  tolerated below only when genuinely absent from `boot.wim` index
+  2), P09 explicitly creates and verifies the required standard
+  boot-manager targets, P10 emits an identity-bound media
+  write-set (`Get-P10MediaWriteSnapshot` /
+  `New-P10MediaWriteSetEvidence` with safe relative-path
+  resolution), and P11 accepts later P10 bytes only through that
+  successful evidence. Setup DU final verification validates
+  schema, path safety, uniqueness, and source/after hash-size
+  binding. The collector is unchanged (r9, schema 1.7).
+  Script-only change (+289 lines net); `data/*` and `schema/*` are
+  byte-identical to r12.71.
+
+### Tests
+
+- **T39-style pin relocation on T40** (reserved at the session-7
+  terminal evaluation; verified green at the r12.72 frame and
+  re-verified at the r12.75 terminal frame, 17/17): the
+  "26100+ only" plan pin and the "unknown build → setup.exe only"
+  pin are replaced by the measured successor surface — every build
+  (including unknown) plans both files, and a NEW row pins the
+  relocated threshold (`SetupHostRequired` at 10.0.26100.0 with the
+  required-but-missing failure text).
+- **T40**: release pin advanced to `update-wsi-2026.08.05-r12.72`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 6E/228W/27I (raw sweep
+  6E/229W/27I: +1W is the PSA7002 LF artefact; +8W on the new
+  evidence code, declared series debt). Snapshot form: BOM + LF
+  (main script); committed checkout form BOM+CRLF.
+
+## [update-wsi-2026.08.05-r12.71] - 2026-08-07
+
+Tag retained: `post-install-evidence-collector-r9-merge`.
+
+### Fixed
+
+- **The four-OS clean-E2E failures on Server 2019 / Server 2022 are
+  corrected**: P11 now verifies the Setup DU records against the
+  authoritative FINAL P09 WinPE setup-binary synchronization state
+  (rather than an earlier intermediate), and the reviewed pinned
+  Catalog identity accepts an exact digest-bearing configured
+  filename as the SHA-1 binding while remaining fail-closed on the
+  UpdateId, filename, architecture, metadata and review-basis
+  checks. The collector is unchanged at this revision (r9, schema
+  1.7). Script-only change (+168 lines net); `data/*` and
+  `schema/*` are byte-identical to r12.70.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.05-r12.71`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 6E/220W/27I (raw sweep
+  6E/221W/27I: +1W is the PSA7002 LF artefact; +10W on the revised
+  verification code, declared series debt). Snapshot form: BOM + LF
+  (main script); committed checkout form BOM+CRLF.
+
+## [update-wsi-2026.08.05-r12.70] - 2026-08-07
+
+Tag: `post-install-evidence-collector-r9-merge`.
+
+### Changed
+
+- **Collector r9 is merged as the supported post-install evidence
+  collector**: `Collect-WindowsServerPostInstallEvidence.ps1` grows
+  from the r2 seed (630 lines) to the full r9 implementation (3,253
+  lines) — the read-only installed-OS evidence surface that the
+  distribution's four-VM validation runs use. On the main script the
+  delta is the identity and the validation-marker comment (+1 net
+  line); ISO servicing behavior is unchanged. `data/*` and
+  `schema/*` are byte-identical to r12.69.
+- **Collector snapshot form is CRLF (recorded)**: unlike every other
+  archive deliverable (pure BOM+LF), the r12.70 Collector snapshot
+  is pure BOM+CRLF, so Git's `*.ps1` check-in normalization stores
+  an LF blob whose SHA differs from the snapshot by design.
+  Round-trip identity was proven in both directions
+  (LF-normalized snapshot == staged blob; blob re-expanded to CRLF
+  == snapshot byte-for-byte), so the committed CHECKOUT canonical
+  form (BOM+CRLF) equals the snapshot exactly and verbatim landing
+  holds at the canonical level. This two-way check is the standing
+  blob-verification criterion for the collector from this revision
+  on.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.05-r12.70`
+  (date component moves to 08.05) with the measured tag
+  `post-install-evidence-collector-r9-merge`. No terminal D-contract
+  required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. Main script PSA committed 6E/210W/27I
+  (raw sweep 6E/211W/27I: +1W is the PSA7002 LF artefact) —
+  unchanged from r12.69. The collector r9 measures 1E/13W/35I
+  standalone as a reference figure, carried verbatim as declared
+  series debt. Snapshot form: main script BOM + LF; collector
+  BOM + CRLF (see above); committed checkout form BOM+CRLF for
+  both via `.gitattributes`.
+
+## [update-wsi-2026.08.04-r12.69] - 2026-08-07
+
+Tag: `post-install-evidence-artifact-naming`.
+
+### Added
+
+- **The post-install evidence collector joins the repository as a
+  second committed deliverable** (path adopted by user adjudication
+  this session, option A):
+  `Collect-WindowsServerPostInstallEvidence.ps1` (Collector r2, 630
+  lines) lands verbatim at the project root and will track the
+  snapshot state revision-by-revision through the series terminal,
+  exactly like the main script. The revision gives the collector a
+  purpose-based, project-neutral artifact contract — the
+  `Collect-WindowsServerPostInstallEvidence.ps1` name itself,
+  post-install-evidence schema/output names, and a
+  `WindowsServerEvidence` default output root. Distribution
+  checksum companions (`*.sha256`, `checksums.sha256`) remain
+  input-only, consistent with existing practice for the main
+  script. On the main script the delta is the identity and the
+  validation-marker comment (+1 net line); ISO servicing behavior
+  is unchanged. `data/*` and `schema/*` are byte-identical to
+  r12.68.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.04-r12.69`
+  with the measured tag `post-install-evidence-artifact-naming`. No
+  terminal D-contract required an edit (the D-contracts target the
+  main script; the collector is outside their frame).
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. Main script PSA committed 6E/210W/27I
+  (raw sweep 6E/211W/27I: +1W is the PSA7002 LF artefact). The
+  collector measures 1E/2W/9I standalone as a reference figure —
+  carried verbatim as declared series debt per the no-fix-forward
+  rule. Snapshot form: BOM + LF on both scripts;
+  committed checkout form BOM+CRLF via `.gitattributes`.
+
+## [update-wsi-2026.08.04-r12.68] - 2026-08-07
+
+Tag: `e2e-distribution-finalization`.
+
+### Changed
+
+- **Distribution-layout finalization (identity-and-marker change on
+  the committed surface)**: the snapshot finalizes the clean-E2E
+  distribution layout — the supported post-install evidence
+  collector ships as a stable top-level distribution artifact and
+  the oscdimg qualification lab is retained under the
+  distribution's `tests/` — without changing any ISO servicing
+  behavior. On the committed script the delta is the version/tag
+  identity and the validation-marker comment only (+1 line net);
+  the distribution-side layout files are input-only under the
+  standing series ruling. `data/*` and `schema/*` are byte-identical
+  to r12.67.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.04-r12.68`
+  (date component moves to 08.04) with the measured tag
+  `e2e-distribution-finalization`. No terminal D-contract required
+  an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 6E/209W/27I (raw sweep
+  6E/210W/27I: +1W is the PSA7002 LF artefact; +1W on the marker
+  line, declared series debt). Snapshot form: BOM + LF; committed checkout form BOM+CRLF.
+
+## [update-wsi-2026.08.03-r12.67] - 2026-08-07
+
+Tag: `catalog-boundary-horizontal-hardening`.
+
+### Changed
+
+- **The Catalog/PowerShell collection-shape hardening is applied
+  horizontally**: the r12.64–r12.66 fix patterns are completed
+  across every active Catalog boundary rather than only at the
+  originally failing sites. All active Catalog response contracts
+  are typed in-process validators (internal scriptblock validators
+  removed); Search, DownloadDialog and ScopedView bodies are
+  semantically validated BEFORE caching; cache keys are
+  collision-resistant and identity-bound; Catalog identities are
+  scalar-validated at every legacy and current download boundary;
+  `Generic.List` values are materialized with `ToArray()`; and
+  collection selectors return flat sequences throughout. Script-only
+  change (+147 lines net); `data/*` and `schema/*` are
+  byte-identical to r12.66.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.03-r12.67`
+  with the measured tag `catalog-boundary-horizontal-hardening`. No
+  terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 6E/208W/27I (raw sweep
+  6E/209W/27I: +1W is the PSA7002 LF artefact) — unchanged from
+  r12.66. Snapshot form: BOM + LF; committed
+  checkout form BOM+CRLF.
+
+## [update-wsi-2026.08.03-r12.66] - 2026-08-07
+
+Tag: `catalog-validator-scope-fix`.
+
+### Fixed
+
+- **Exact-KB Catalog validation works under PowerShell 7 scoping**:
+  validators created with `GetNewClosure()` were isolated from the
+  script-scope parser functions they call, so exact-KB semantic
+  validation could fail for scope reasons and be misread as a
+  Catalog transient. Exact-KB validation is now a typed in-process
+  contract shared by the cache and transport paths, closures no
+  longer sever the validators from script scope, and a validator
+  IMPLEMENTATION failure is fail-fast instead of being retried
+  against the Catalog. Script-only change (+87 lines net); `data/*`
+  and `schema/*` are byte-identical to r12.65.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.03-r12.66`
+  with the measured tag `catalog-validator-scope-fix`. No terminal
+  D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 6E/208W/27I (raw sweep
+  6E/209W/27I: +1W is the PSA7002 LF artefact; +2W declared series
+  debt). Snapshot form: BOM + LF; committed
+  checkout form BOM+CRLF.
+
+## [update-wsi-2026.08.03-r12.65] - 2026-08-07
+
+Tag: `catalog-setupdu-scalar-updateid-fix`.
+
+### Fixed
+
+- **Setup DU Catalog requests carry exactly one UpdateId**: nested
+  candidate collection in the Setup DU discovery path could coerce
+  multiple Update Catalog UpdateIds into a single space-delimited
+  string, producing a malformed DownloadDialog request. Candidate
+  selectors now emit flat rows, every DownloadDialog request
+  validates that its identity is exactly one GUID before transport,
+  and a malformed identity fails CLOSED without retrying the
+  Catalog. Script-only change (+54 lines net); `data/*` and
+  `schema/*` are byte-identical to r12.64.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.03-r12.65`
+  with the measured tag `catalog-setupdu-scalar-updateid-fix`. No
+  terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 6E/206W/27I (raw sweep
+  6E/207W/27I: +1W is the PSA7002 LF artefact) — unchanged from
+  r12.64. Snapshot form: BOM + LF; committed
+  checkout form BOM+CRLF.
+
+## [update-wsi-2026.08.03-r12.64] - 2026-08-07
+
+Tag: `oscdimg-resolver-collection-fix`.
+
+### Fixed
+
+- **The r12.63 resolver's `Generic.List` array-subexpression
+  regression on PowerShell 7.4+ is corrected**: repository records,
+  error collections, and local candidate paths in the oscdimg
+  resolver are now materialized with `List<T>.ToArray()`, and
+  `New-Object`-style generic-list construction is removed from the
+  resolver — the known engine behavior where wrapping a generic list
+  in an array subexpression throws on current PowerShell 7.4+/7.5+
+  runtimes. Script-only change (+39 lines net); `data/*` and
+  `schema/*` are byte-identical to r12.63.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.03-r12.64`
+  with the measured tag `oscdimg-resolver-collection-fix`. No
+  terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 6E/206W/27I (raw sweep
+  6E/207W/27I: +1W is the PSA7002 LF artefact). **A sixth PSA error
+  joins with the revised resolver code and is carried as declared
+  series debt per the no-fix-forward rule** (series PSA debt is now
+  6E). Snapshot form: BOM + LF; committed
+  checkout form BOM+CRLF.
+
+## [update-wsi-2026.08.03-r12.63] - 2026-08-07
+
+Tag: `oscdimg-qualified-resolution`.
+
+### Added
+
+- **`oscdimg.exe` resolution becomes source-aware qualification**
+  (replacing the hash-only advisory and the ADK-install fallback):
+  candidates are gathered from signed AMD64 local ADK installs
+  (PE + Authenticode + ADK-registration evidence) and from
+  Microsoft `secureboot_objects` Symbol-Server references resolved
+  at runtime from the fetched `Make2023BootableMedia.ps1` script
+  text, with a WorkRoot-managed exact-SHA-256 fallback download —
+  the host ADK is never modified, selection fails CLOSED when no
+  candidate qualifies, and each candidate must pass a cached
+  behavioral ISO-assembly test before use. **A new declared dataset
+  `data/tool-references/oscdimg-reference.json`
+  (`oscdimg-reference/1.0`) enters the repository** (path adopted by
+  user adjudication this session): expected ADK family/servicing KB,
+  the selection policy, pinned repository references and qualified
+  identities that the resolver consumes. The former
+  `Install-WindowsAdkFallback` path is removed. Script delta +719
+  lines / −206; the remaining `data/*` and `schema/*` files are
+  byte-identical to r12.62.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.03-r12.63`
+  (date component moves to 08.03) with the measured tag
+  `oscdimg-qualified-resolution`. No terminal D-contract required an
+  edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 5E/204W/27I (raw sweep
+  5E/205W/27I: +1W is the PSA7002 LF artefact; +22W/+15I on the new
+  resolver code, declared series debt). Snapshot form: BOM + LF; committed checkout form BOM+CRLF.
+
+## [update-wsi-2026.08.02-r12.62] - 2026-08-07
+
+Tag: `winpe-final-media-sync`.
+
+### Added
+
+- **The Microsoft final WinPE-to-media contract is implemented after
+  Setup DU**: once every `boot.wim` index has been serviced and
+  committed, the media Dynamic Update sequence requires the serviced
+  WinPE payload to be carried onto the final media — not only inside
+  the WIM. The revision adds `Export-BootWimCompressed` (rebuilds
+  `boot.wim` by exporting every index in original order to a fresh
+  `/Compress:max` WIM, with index-count and metadata comparison, the
+  original left untouched on any failure — the documented step-25
+  export), `Sync-ServicedWinPeMediaFiles` +
+  `New-WinPeMediaSyncRecord` (root-invariant final media sync with
+  per-file records), and `Test-FinalWinPeMediaIdentity` (the complete
+  final-ISO identity surface is verified before release assessment).
+  WinPE/WinRE component cleanup uses `/ResetBase /Defer` per the
+  media-servicing guidance. Script-only change (+663 lines);
+  `data/*` and `schema/*` are byte-identical to r12.61.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.02-r12.62`
+  with the measured tag `winpe-final-media-sync` (first tag change
+  since r12.55). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 5E/182W/12I (raw sweep
+  5E/183W/12I: +1W is the PSA7002 LF artefact; +21W on the new
+  export/sync/verification code, declared series debt). Snapshot
+  form: BOM + LF; committed checkout form
+  BOM+CRLF.
+
+## [update-wsi-2026.08.02-r12.61] - 2026-08-07
+
+Tag retained: `setupdu-baseline-language-preservation`.
+
+### Added
+
+- **`boot.stl` becomes PCA2023 conversion target #5**: Microsoft
+  documents `EFI\Microsoft\Boot\boot.stl` as a required Secure Boot
+  validation input for refreshed installation media, and an
+  original-media copy left in place can still fail boot with
+  `0xc0430001` even after the four r12.5x targets are converted. A
+  new `Sync-Pca2023MediaBootStl` step refreshes the file from the
+  serviced image, and P11 gains Target #5 rows that prove
+  byte-identity against the authoritative serviced-image source —
+  presence alone is explicitly NOT an acceptable gate, and a present
+  file without identity evidence is reported as unproven rather than
+  passed. Script-only change (+407 lines); `data/*` and `schema/*`
+  are byte-identical to r12.60.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.02-r12.61`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 5E/161W/12I (raw sweep
+  5E/162W/12I: +1W is the PSA7002 LF artefact; +15W on the new sync
+  and verification code, declared series debt). Snapshot form: BOM + LF; committed checkout form BOM+CRLF.
+
+## [update-wsi-2026.08.02-r12.60] - 2026-08-07
+
+Tag retained: `setupdu-baseline-language-preservation`.
+
+### Fixed
+
+- **El Torito Sector Count 0/1 is honored as the UEFI end-of-media
+  sentinel**: for platform-0xEF no-emulation entries, UEFI defines
+  Sector Count 0 or 1 as a sentinel meaning the EFI System Partition
+  extends from the image Load RBA toward the end of the medium — not
+  a literal 0- or 512-byte image, and `oscdimg` emits Sector Count 1
+  for Windows efisys images. r12.59 treated the field literally and
+  rejected standards-compliant media before hashing the embedded
+  image. Identity is now proven by hashing the expected efisys image
+  length from the firmware-visible Load RBA (evidence schema
+  `iso-el-torito-uefi/1.1` with explicit sentinel-interpretation
+  fields); explicit Sector Count values above 1 keep the stronger
+  catalog-extent lower-bound check. The r12.59 gains — Int64-safe
+  parsing and P10 fail-closed — are retained. Script-only change
+  (+22 lines); `data/*` and `schema/*` are byte-identical to r12.59.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.02-r12.60`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 5E/146W/12I (raw sweep
+  5E/147W/12I: +1W is the PSA7002 LF artefact; +6W on the revised
+  verification code, declared series debt). Snapshot form: BOM + LF; committed checkout form BOM+CRLF.
+
+## [update-wsi-2026.08.02-r12.59] - 2026-08-07
+
+Tag retained: `setupdu-baseline-language-preservation`.
+
+### Fixed
+
+- **The r12.58 El Torito verification is Int64-safe and P10 fails
+  closed**: the r12.58 parser selected the correct `efisys_ex.bin`
+  but clamped its read length through an Int32-bound `Math.Min`, so
+  a real multi-gigabyte ISO (measured on an 8.91-GiB image) produced
+  a false verification failure. The catalog read is now Int64-safe
+  with an explicit truncated-catalog guard, and P10 fails CLOSED —
+  the phase itself fails when the firmware-visible embedded image
+  cannot be proven, instead of deferring the failure to P11 while
+  reporting P10 done. Script delta +25 lines;
+  `data/config-Server2025.json` value-level only (Notes sentence +
+  `_meta.scriptVersion`) — no declared key changes.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.02-r12.59`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 5E/140W/12I (raw sweep
+  5E/141W/12I: +1W is the PSA7002 LF artefact; +2W on the revised
+  parser code, declared series debt). Snapshot form: BOM + LF; committed checkout form BOM+CRLF.
+
+## [update-wsi-2026.08.02-r12.58] - 2026-08-07
+
+Tag retained: `setupdu-baseline-language-preservation`.
+
+### Fixed
+
+- **The r12.57 PCA2023 boot failure is corrected at the El Torito
+  layer**: the shared ISO assembly now binds the El Torito
+  platform-0xEF (UEFI) boot entry to `efisys_ex.bin` for
+  PCA2023-converted media, instead of letting the legacy `efisys.bin`
+  remain wired into the boot catalog while only the loose files were
+  converted. A new boot-catalog parser
+  (`Get-IsoElToritoUefiBootImageEvidence`,
+  `iso-el-torito-uefi/1.0` evidence) reads the ISO9660 boot catalog,
+  extracts the UEFI boot image by LBA/sector count, and proves
+  byte-identity against the expected efisys image; P11 gains a
+  static-verification row backed by a `P11_uefi_el_torito.json`
+  evidence file (`P11-static-verification/1.1`) and P12 consumes the
+  same proof, so the class of failure r12.57 shipped (catalog and
+  loose files disagreeing) is now caught before any boot attempt.
+  Script delta +295 lines; `data/config-Server2025.json` changes at
+  the value level only (the `Pca2023.Notes` sentence now describes
+  the correction; `_meta.scriptVersion` stamp) — no declared key is
+  added or removed.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.02-r12.58`
+  (the tag is retained). No terminal D-contract required an edit, and
+  the two pins relocated at r12.57 remain green unchanged.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 5E/138W/12I (raw sweep
+  5E/139W/12I: +1W is the PSA7002 LF artefact). The +17W step versus
+  r12.57 is concentrated in the new El Torito parser (PSA2009 rises
+  from 1 to 17) and is carried as declared series debt per the
+  no-fix-forward rule. Snapshot form: BOM + LF;
+  committed checkout form BOM+CRLF via `.gitattributes`.
+  (Supersedes the corresponding sentence in the r12.57 entry:
+  the "mixed line endings" reading there was a measurement
+  artifact; the archive snapshots measure pure BOM + LF.)
+
+## [update-wsi-2026.08.02-r12.57] - 2026-08-07
+
+Tag retained: `setupdu-baseline-language-preservation`.
+
+### Changed
+
+- **PCA2023 conversion becomes the Server 2025 default**: the single
+  declared-surface change is a value-level policy flip on
+  `data/config-Server2025.json` — `Pca2023.Mode` moves from
+  `Firmware2023Default` to `ConvertByDefault`, `RequiredByDefault`
+  from `false` to `true`, and `CompliancePolicy` from `AuditOnly` to
+  `RequirePca2023`. No declared key is added or removed, so the
+  terminal contract set and the derived gap timeline are unchanged.
+  The script delta (−4 lines) sits entirely on the same axis: the
+  `-ForcePca2023OnServer2025` switch is demoted to a deprecated
+  compatibility slot whose only remaining consumer is an operator
+  caution, the Server 2025 P10 documented-conversion-boundary skip
+  gate is removed (default-on needs no gate), and the fallback
+  compliance policy is `RequirePca2023` for every OS family.
+
+### Known defect (carried verbatim; corrected at r12.58)
+
+- Operator validation of media built from this revision found that
+  the PCA2023-converted Server 2025 ISOs fail Hyper-V Generation 2
+  UEFI boot (status `0xc0430001`) in both tested languages even
+  though P11 and P12 report green: the shared ISO assembly helper
+  still resolves the legacy `efisys.bin` as the El Torito UEFI boot
+  image, so the boot catalog embeds the PCA2011 image while the
+  loose media files are PCA2023 — firmware boots from the catalog,
+  not from the loose files, and the static checks only inspected the
+  loose files. This revision lands unmodified per the series rulings
+  (the history is the deliverable; no fix-forward); the correction
+  is the r12.58 revision.
+
+### Tests
+
+- **Two T39-style pin relocations** (both verified green at the
+  r12.57 frame and re-verified at the r12.75 terminal frame):
+  `pca2023_default_auto_test.py` replaces the retired force-gate
+  presence pin with three successor pins (promotion of the switch
+  into the Deprecated compatibility slot, the caution wiring on that
+  slot, and the ABSENCE of the removed gate);
+  `media_inspection_test.py` flips the Server 2025
+  documented-conversion-boundary marker from a presence pin to an
+  absence pin while retaining the operator opt-out marker, the two
+  `Get-P10SkipReason` call sites and the BY-POLICY caution.
+- **T40**: release pin advanced to `update-wsi-2026.08.02-r12.57`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Distribution note
+
+- The r12.57 snapshot ships its own regression additions (a Server
+  2025 PCA-default PowerShell test, a static validator, a ja-jp
+  PCA2023 fixture and a static validation summary) and edits its
+  release-validation trio; these are input-only under the standing
+  series ruling and are not committed.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 5E/121W/12I (raw sweep
+  5E/122W/12I: +1W is the PSA7002 LF artefact) — unchanged from
+  r12.56. The r12.57 snapshot in the currently attached archive
+  measures a UTF-8 BOM with mixed line endings (LF-dominant); the
+  committed checkout form remains BOM+CRLF via `.gitattributes`
+  normalization.
+
+## [update-wsi-2026.08.02-r12.56] - 2026-08-02
+
+Tag retained: `setupdu-baseline-language-preservation`.
+
+### Added
+
+- **Automatic per-invocation run transcript**: every invocation —
+  including Resume preflight and Resume execution — starts a
+  PowerShell transcript under `WorkRoot\logs`, so a failed or
+  interrupted run always leaves a complete session record without
+  the operator having to enable anything. A JSONL debug-trace file
+  output can additionally be enabled for structured step tracing.
+  The transcript wiring also covers the P12 PCA2023-readiness and
+  P13 final-report phases. Script-only change (+36 lines); `data/*`
+  and `schema/*` are byte-identical to r12.55.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.02-r12.56`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 5E/121W/12I (raw sweep
+  5E/122W/12I: +1W is the PSA7002 LF artefact) — a fifth PSA error
+  joins with the new debug-trace code (`PSA2001` undefined variable
+  in `Enable-DebugTraceFileOutput`) and is carried as declared
+  series debt per the no-fix-forward rule. The r12.56 snapshot in
+  the currently attached source archive measures BOM + LF (the
+  committed checkout form is BOM+CRLF via `.gitattributes`
+  normalization).
+
+## [update-wsi-2026.08.01-r12.55] - 2026-08-02
+
+Tag: `setupdu-baseline-language-preservation`.
+
+### Changed
+
+- **Baseline language resources are preserved, not removed**: when
+  the SOURCE media itself ships locale directories outside the
+  r12.49 allowlist, those baseline-original resources are now
+  recorded (`PreserveExistingLanguageResource` decisions;
+  `BaselinePreservedDisallowedLocaleDirectories` and
+  `BaselinePreservedDisallowedFiles` with per-file SHA-256 in the
+  language-cleanup manifest) and kept on the media instead of being
+  cleaned up — the allowlist governs what the OVERLAY may add, not
+  what the vendor media already contained. Media without baseline
+  language evidence retains the former strict behavior.
+- **P11 verifies no-new-locale instead of allowlist-only**: the
+  language-scope verification row now asserts that every observed
+  disallowed locale directory is within the baseline-preserved set
+  (nothing new was introduced by the overlay) and that each
+  baseline-preserved file still exists with its recorded SHA-256.
+  Script-only change; `data/*` and `schema/*` are untouched at this
+  revision.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.01-r12.55`
+  with the measured tag `setupdu-baseline-language-preservation`.
+  No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 4E/120W/12I (raw sweep
+  4E/121W/12I: +1W is the PSA7002 LF artefact; declared series
+  debt). The snapshot form remains BOM + LF at r12.55.
+
+## [update-wsi-2026.08.01-r12.54] - 2026-08-02
+
+Tag: `setupdu-pinned-authority-handoff`.
+
+### Changed
+
+- **Pinned Catalog identity evidence handoff**: the P04 fetch phase
+  records the pinned-identity basis and its verification state
+  (`CatalogPinnedIdentityBasis`, `CatalogPinnedIdentityVerified`)
+  into the resolved-patch manifest, and Setup DU package authority
+  accepts a reviewed pinned identity as a first-class basis
+  (`CatalogPinnedIdentityAndLocalHashVerified`) alongside the
+  scraped-identity path — under pinned-identity mode the
+  Search.aspx-scoped evidence is declared not required rather than
+  silently absent.
+- **P09 resume compatibility for pre-handoff evidence**: a resume
+  over a build fetched at r12.53 recovers the reviewed pinned
+  identity from the r12.53 P04 evidence
+  (`LegacyR12.53PinnedIdentityRecovered` →
+  `CatalogLegacyPinnedIdentityAndLocalHashVerified`), so pinned
+  authority verification does not force a refetch across the
+  revision boundary. Script-only change; `data/*` and `schema/*`
+  are untouched at this revision.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.01-r12.54`
+  with the measured tag `setupdu-pinned-authority-handoff`. No
+  terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21. PSA committed 4E/120W/12I (raw sweep
+  4E/121W/12I: +1W is the PSA7002 LF artefact) — one PSA2002
+  automatic-variable shadow left the error set with the reworked
+  resume-manifest sites (5E → 4E; remaining findings stay declared
+  series debt). The snapshot form remains BOM + LF at r12.54 (the
+  CRLF half of the O1 oscillation is still ahead).
+
+## [update-wsi-2026.08.01-r12.53] - 2026-08-02
+
+Tag retained: `catalog-semantic-retry`.
+
+### Changed
+
+- **Pinned UpdateId resolution on the Server 2025 declaration**:
+  `data/config-Server2025.json` lines carry reviewed pinned
+  identities — `UpdateId`, exact file name, and SHA-1 (base64 and
+  hex) — so `PinOs`/`PinAll` refresh modes resolve Catalog assets
+  without depending on Search.aspx HTML discovery. This is a
+  declared-surface change: T43 tracks it as 120 → 128 asserts,
+  matching the convergence-matrix transition row for this revision
+  (terminal D-totals reached: 139/37/128/64/21/112 = 501).
+- **Parser-shape resilience and raw Catalog evidence capture**:
+  Catalog search, UpdateId and download-link parsing tolerate
+  page-shape variation, and the raw response is captured as
+  transport evidence alongside the parse result, extending the
+  r12.51/r12.52 transport hardening.
+
+### Fixed
+
+- **Canonical `.ps1` BOM restored** (O1 watch closure, first half):
+  the snapshot script regains the UTF-8 BOM at this revision — the
+  measured snapshot form is BOM + LF — so the committed checkout
+  form returns to BOM+CRLF under `.gitattributes` normalization and
+  the PSA7001 (missing BOM) debt carried since r12.10 clears. The
+  CRLF half of the oscillation returns at a later revision (the
+  snapshot form is BOM+CRLF by r12.56).
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.01-r12.53`
+  (the tag is retained). No terminal D-contract required an edit:
+  the T43 total moves with the declaration.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/128/64/112 + T45 21 (T43 120 → 128, matrix match). PSA
+  committed 5E/120W/12I (raw sweep 5E/121W/12I: +1W is the PSA7002
+  LF artefact; PSA7001 no longer fires; declared series debt).
+
+## [update-wsi-2026.08.01-r12.52] - 2026-08-02
+
+Tag: `catalog-semantic-retry`.
+
+### Changed
+
+- **Catalog semantic-response retry**: the Catalog can answer
+  HTTP 200 with a temporary landing/error/challenge page instead of
+  the requested content. Such responses are now detected as
+  semantically invalid and treated as transient — retried under the
+  shared escalating transport schedule from r12.51 — and only a
+  transport- and semantic-validated response is cached; a
+  semantically invalid cache entry is discarded before the retry.
+- **Single-fetch fallback hardening**: the last-resort search
+  parser and the download-link fallback reuse the SAME validated
+  HTML / DownloadDialog response as the primary path instead of
+  repeating the request through independent fixed-timeout code
+  paths, so every parser sees one consistent, validated page.
+  Script-only change; `data/*` and `schema/*` are untouched at this
+  revision.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.01-r12.52`
+  with the measured tag `catalog-semantic-retry`. No terminal
+  D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/120/64/112 + T45 21. PSA committed 5E/113W/11I (raw sweep
+  5E/114W/11I: +1W is the PSA7002 LF artefact; declared series
+  debt). The snapshot script remains BOM-absent at r12.52 (O1 watch
+  continues).
+
+## [update-wsi-2026.08.01-r12.51] - 2026-08-02
+
+Tag retained: `setupdu-language-allowlist`.
+
+### Added
+
+- **Catalog transport hardening**: a centralized, deterministic
+  retry policy for Microsoft Update Catalog requests — escalating
+  timeout schedule (60/120/180 s) with fixed retry delays — so a
+  transient Catalog timeout cannot terminate a multi-hour build
+  before any asset is modified. Each transport attempt is recorded
+  as evidence under the logs directory, and the Catalog POST path
+  now sends the same pinned request headers as the page-fetch path.
+- **Pinned monthly-auxiliary identity under `PinOs`**: the
+  Server 2025 contract (advanced to `-r7`) declares
+  `Discovery.MonthlyAuxiliaryIdentityPolicy`
+  (`PinnedKbExactAssetWhenPinOs`). When the effective patch-refresh
+  mode is `PinOs`, SafeOS DU and Setup DU resolution queries the
+  Catalog by the exact pinned KB identity and fails closed if the
+  pinned KB is absent from the scoped result or resolves no x64
+  asset; the decision evidence records the selection mode
+  (`pinned-kb-exact-asset` vs `same-month-or-latest-prior`).
+
+### Changed
+
+- **Servicing-contract baselines advanced**: schema `2.5` → `2.6`;
+  the Server 2025 contract revision `-r6` → `-r7` with re-pinned
+  component hashes (declared change; the other three contracts are
+  unchanged; T45 totals unchanged at 21).
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.01-r12.51`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/120/64/112 + T45 21. PSA committed 5E/113W/11I (raw sweep
+  5E/114W/11I: +1W is the PSA7002 LF artefact; declared series
+  debt). The snapshot script remains BOM-absent at r12.51 (O1 watch
+  continues).
+
+## [update-wsi-2026.08.01-r12.50] - 2026-08-02
+
+Tag retained: `setupdu-language-allowlist`.
+
+### Changed
+
+- **Server 2025 contract hardened to parity** (`-r5` → `-r6`,
+  baselines schema `2.4` → `2.5`; the other three contracts are
+  unchanged): the boot.wim declaration flips
+  `SmokeTestRequired` to `true`, and the `Setup` declaration gains
+  the same package-authority trio Server 2022 received at r12.47
+  (`SameVersionDifferentContentPolicy=ApplyTrustedPackagePayload`,
+  `PackageAuthorityPolicy=CatalogScopedIdentityAndLocalHash`,
+  `RequireTrustedPackage=true`) alongside the existing language
+  allowlist. Script delta is the contract declaration only.
+- **E2E baselines add the language-compliant Server 2022 cases**:
+  `data/servicing-e2e-baselines.json` schema `1.2` → `1.3`; new
+  `Server2022-ja-jp` and `Server2022-en-us` cases record the r12.49
+  static builds as language-compliant
+  (`CompliantEnUsAndTargetOnly`), with user-confirmed Hyper-V
+  Generation 2 Secure Boot and complete installation, measured
+  builds 20348.5386 and P11/P06/operation-evidence counts. The
+  superseded `Server2022-ja-jp-r12.48` case is retained for audit
+  history.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.08.01-r12.50`
+  (the tag is retained). No terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/120/64/112 + T45 21. PSA committed 5E/112W/10I (raw sweep
+  5E/113W/10I: +1W is the PSA7002 LF artefact; declared series
+  debt). The snapshot script remains BOM-absent at r12.50 (O1 watch
+  continues).
+
+## [update-wsi-2026.07.31-r12.49] - 2026-08-02
+
+Tag: `setupdu-language-allowlist`.
+
+### Added
+
+- **Setup DU language-resource allowlist**: every per-OS servicing
+  contract now declares `Setup.LanguageResourcePolicy`
+  (`EnUsAndTargetOnly`) — the allowed Setup DU language directories
+  are en-us plus the target media language. The overlay records a
+  `SkipLanguageResource` decision for package payloads outside the
+  allowlist, and disallowed locale directories already present on the
+  media are cleaned up only when their content can be safely
+  attributed to a prior verified overlay; unattributable content
+  fails closed before the media is touched.
+- **P11 verifies the language scope**: new
+  `SetupDuLanguageResourceAllowlist` verification row (observed
+  locale directories must all be within the declared allowlist) and
+  the `SetupDuFinalManifest` row additionally proves excluded
+  language files are absent, driven by the overlay manifest's
+  `Policy.AllowedLanguageDirectories`.
+
+### Changed
+
+- **Servicing-contract baselines advanced**: schema `2.3` → `2.4`;
+  all four contract revisions move (Server 2016/2019 `-r4` → `-r5`,
+  Server 2022 `-r5` → `-r6`, Server 2025 `-r4` → `-r5`) with
+  re-pinned component hashes (declared change; T45 totals unchanged
+  at 21).
+- **E2E baselines record the language-scope supersession**:
+  `data/servicing-e2e-baselines.json` schema `1.1` → `1.2`; the four
+  existing cases carry `SetupDuLanguageScopeStatus`
+  `SupersededByR1249LanguageAllowlist`, and a new
+  `Server2022-ja-jp-r12.48` case records the r12.48 static build as
+  passed under pre-r12.49 checks but language-scope non-compliant
+  (`RequiresR1249P09Repair`).
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.07.31-r12.49`
+  with the measured tag `setupdu-language-allowlist`. No terminal
+  D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/120/64/112 + T45 21. PSA committed 5E/112W/10I (raw sweep
+  5E/113W/10I: +1W is the PSA7002 LF artefact; declared series
+  debt). The snapshot script remains BOM-absent at r12.49 (O1 watch
+  continues).
+
+## [update-wsi-2026.07.31-r12.48] - 2026-08-02
+
+Tag: `server2022-setupdu-resume-hash`.
+
+### Changed
+
+- **Setup DU expected-hash resolution widened and provenance-tagged**:
+  `Get-SetupDuPackageAuthority` now resolves the expected SHA-256
+  from an ordered set of provenance sources — `Patch.Integrity.Sha256`,
+  the `ExpectedHashes` dictionary, asset-metadata evidence, and the
+  resume manifest's `LocalAssetSha256` — and records which source
+  supplied the value (`ExpectedSha256Source`, plus the resume
+  manifest evidence path) in the authority evidence, so a hash match
+  is auditable back to where the expectation came from.
+- **Resume rehydration keeps the digest chain**: resumed runs persist
+  the measured `LocalAssetSha256` (with source
+  `ResumePriorManifestVerified`) back into the resume patch state
+  (schema `resume-patch-state/1.2`), keeping the Setup DU authority
+  check independently auditable across a resume boundary. Script-only
+  change; `data/*` and `schema/*` are untouched at this revision.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.07.31-r12.48`
+  with the measured tag `server2022-setupdu-resume-hash`. No terminal
+  D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/120/64/112 + T45 21. PSA committed 5E/110W/10I (raw sweep
+  5E/111W/10I: +1W is the PSA7002 LF artefact). A fifth PSA error
+  joins at this revision — `PSA2002` (shadowing the automatic
+  variable `$matches`) at the resume-manifest repair site — and is
+  carried as declared series debt per the no-fix-forward rule. The
+  snapshot script remains BOM-absent at r12.48 (O1 watch continues).
+
+## [update-wsi-2026.07.31-r12.47] - 2026-08-02
+
+Tag: `server2022-setupdu-authority`.
+
+### Added
+
+- **Setup DU package authority for Server 2022**: the Server 2022
+  servicing contract (advanced to `-r5`) extends its `Setup`
+  declaration with `SameVersionDifferentContentPolicy`
+  (`ApplyTrustedPackagePayload`), `PackageAuthorityPolicy`
+  (`CatalogScopedIdentityAndLocalHash`) and
+  `RequireTrustedPackage=true`. New helpers
+  `Get-SetupDuOverlayPolicy` and `Get-SetupDuPackageAuthority`
+  establish package authority before an overlay: patch type, KB id,
+  UpdateId, trusted source host, local SHA-256 and catalog-scoped
+  identity must all verify, and the result is written as
+  `setupdu-package-authority/1.0` evidence. When source and
+  destination report the same file version but differing SHA-256,
+  the trusted package payload is applied under the declared policy;
+  if authority cannot be established the overlay fails closed before
+  touching the media.
+
+### Changed
+
+- **Servicing-contract baselines advanced**: schema `2.2` → `2.3`;
+  the Server 2022 contract revision `-r4` → `-r5` with re-pinned
+  component hashes (declared change; the other three contracts are
+  unchanged at `-r4`; T45 totals unchanged at 21).
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.07.31-r12.47`
+  with the measured tag `server2022-setupdu-authority` (the tag
+  changed at this revision after being retained since r12.44). No
+  terminal D-contract required an edit.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/120/64/112 + T45 21. PSA committed 4E/110W/10I (raw sweep
+  4E/111W/10I: +1W is the PSA7002 LF artefact; declared series
+  debt). The snapshot script remains BOM-absent at r12.47 (O1 watch
+  continues).
+
+## [update-wsi-2026.07.30-r12.46] - 2026-08-02
+
+Tag retained: `safeos-p11-metadata-contract-isolation-stage1`.
+
+### Changed
+
+- **LCU evidence is declaration-driven**: each per-OS servicing
+  contract (advanced to `-r4`) now declares
+  `Verification.LcuEvidenceMode` — `RollupFixAndMeasuredBuild` on the
+  Server 2016 contract, `MeasuredBuild` on Server 2019/2022/2025 —
+  and `Test-LcuTargetApplied` reads the declared mode from the
+  contract under test (defaulting to `MeasuredBuild` when absent)
+  instead of branching on a per-OS KB-identity fork. Under
+  `RollupFixAndMeasuredBuild`, package, registry and kernel evidence
+  must each reach the expected build; failures are reported
+  per-source.
+- **Server 2016 LCU authority corrected**: the authoritative
+  cumulative-update package on 14393 is `Package_for_RollupFix`
+  (build parsed from the package name), while KB-named packages
+  remain standalone SSU/prerequisite evidence and are never treated
+  as the LCU identity — selecting the highest KB-named package could
+  mislabel the SSU as the LCU (observed with KB5099542 / KB5099535).
+  The evidence object gains `LcuEvidenceMode`, `RelatedKbIds` and
+  `RelatedKbPackageNames` so related KB packages stay visible without
+  claiming LCU authority.
+- **boot.wim compatibility smoke test generalized**: the
+  Server 2019-specific wording in the P06 smoke-test decision and
+  step messages is replaced by contract-driven text keyed on the
+  selected OS, preparing the same gate for the other OS families
+  without behavioural change where the contract does not require the
+  test.
+- **Servicing-contract baselines advanced**:
+  `data/servicing-contract-baselines.json` schema `2.1` → `2.2`; all
+  four per-OS contract revisions `-r3` → `-r4` with re-pinned SHA-256
+  component hashes (declared change tracking the `LcuEvidenceMode`
+  addition; T45 totals unchanged at 21).
+- **E2E baselines advanced to the r12.45 static builds**:
+  `data/servicing-e2e-baselines.json` schema `1.0` → `1.1`; all four
+  cases (Server 2016 ja-jp/en-us, Server 2019 en-us/ja-jp) carry
+  r12.45 static-build evidence — statuses upgraded, output ISO
+  SHA-256 values re-pinned, four-part servicing-stack versions, and
+  measured P11/P06/operation-evidence counts. The Server 2016 en-us
+  case moves from `PendingE2E` to `R1245StaticBuildValidated`.
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.07.30-r12.46`
+  (the tag is retained). No terminal D-contract required an edit for
+  this revision: the `-r4` contract advance is absorbed by
+  declaration reading (measured pass-through on the contract axis).
+
+### Distribution note
+
+- The r12.46 distribution ships its own validation additions
+  (`tests/Test-R1246Server2016LcuEvidenceAndServer2022Readiness.ps1`,
+  `tests/validate_r1246_static.py`,
+  `validation-summary-r12.46.json`, and the R12.46 analysis /
+  test-plan / validation-report documents). Per the standing ruling
+  these are input-only and are not committed in-series.
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/120/64/112 + T45 21. PSA committed 4E/109W/10I (raw sweep
+  4E/110W/10I: +1W is the PSA7002 LF artefact; declared series debt
+  per the no-fix-forward rule). The snapshot script remains
+  BOM-absent at r12.46 (the O1 watch for the BOM-return revision
+  continues).
+
+## [update-wsi-2026.07.29-r12.45] - 2026-08-02
+
+Tag retained: `safeos-p11-metadata-contract-isolation-stage1`.
+
+### Added
+
+- **Servicing-contract role-target layer**: patch routing is now read
+  from the per-OS servicing contract's declared `RoleTargets` map
+  instead of type-keyed code paths. New helpers
+  `Get-ServicingContractRoleTargets` and `Get-PatchTargetsForRole`
+  resolve a canonical role (e.g. `CheckpointDependency`, `FinalLCU`)
+  to its declared target set; `Test-PatchPlanAgainstServicingContract`
+  validates a built plan against the declaration; contract identity is
+  hashable via `Get-CanonicalObjectSha256` /
+  `Get-ServicingContractHash` /
+  `Get-ServicingContractComponentHashes`. Measured Server 2025
+  routing under the declaration: a Checkpoint entry targets
+  Install/Boot/WinRE and the final LCU targets Install/Boot.
+- **`data/servicing-e2e-baselines.json`** (new file, landed by
+  per-path adjudication): compact measured E2E baseline records for
+  four OS/language cases (Server 2016 ja-jp/en-us, Server 2019
+  en-us/ja-jp) — status, implementation baseline, output ISO SHA-256
+  where captured, measured install/boot builds and boot update model.
+  No ISO/WIM payloads are embedded; the records do not replace
+  Windows E2E execution after shared-core changes.
+
+### Changed
+
+- **Servicing-contract baselines advanced**:
+  `data/servicing-contract-baselines.json` schema
+  `servicing-contract-baselines/1.0` → `2.1`; all four per-OS
+  contract revisions `-r1` → `-r3` with re-pinned SHA-256 component
+  hashes (declared change; T45 17 → 21 asserts, matrix match).
+- **KB-identity evidence guard is declaration-driven**: the P11
+  generic `Kb_<id>` presence rows are now gated by the contract's
+  declared `Verification.KbIdentityEvidenceMode`
+  (`Server2016InstallSsu` on the Server 2016 contract; `None` on the
+  other three) instead of the `OsVersion -eq 'Server2016'` literal.
+
+### Tests
+
+- **T32 routing rows re-located to the declaration (T39-type event
+  #3, user-adjudicated)**: the `checkpoint_placement_test.py` routing
+  pins encoded the pre-r12.45 model (Checkpoint routed nowhere;
+  Install carries the LCU alone). Measured at the r12.46/r12.56/r12.57
+  frames, the new routing persists to the series terminal, so the
+  pins were revised to read the declared `RoleTargets` from the
+  contract under test and derive the expected slices (membership and
+  ApplyOrder), never hardcoding per-OS targets. 15 asserts.
+- **`media_inspection_test.py` Kb_-guard row follows the declared
+  mode**: asserts the single `Kb_` row site sits behind the declared
+  `KbIdentityEvidenceMode` check and that only the Server 2016
+  contract declares `Server2016InstallSsu` (the other three declare
+  `None`). 31 asserts.
+- **T40**: release pin advanced to `update-wsi-2026.07.29-r12.45`
+  (the tag is retained).
+
+### Gate state
+
+- Offline suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/120/64/112 + T45 21. PSA committed 4E/109W/10I (raw sweep
+  4E/110W/10I: +1W is the PSA7002 LF artefact; declared series debt
+  per the no-fix-forward rule).
+
+## [update-wsi-2026.07.29-r12.44] - 2026-08-02
+
+ScriptTag advanced to `safeos-p11-metadata-contract-isolation-stage1`.
+(Backfilled 2026-08-02: this revision's commit landed without its
+CHANGELOG entry; authored from the landed commit and the measured
+gate records.)
+
+### Added
+
+- **Per-OS servicing contracts with hash enforcement**: four contract
+  constructors (`New-Server2016/2019/2022/2025ServicingContract`) and
+  `Assert-AllServicingContractBaselines`; the new
+  `data/servicing-contract-baselines.json`
+  (`servicing-contract-baselines/1.0`, four `-r1` contract revisions
+  with canonical SHA-256 component hashes) fails the build closed on
+  any undeclared contract change. The file landed by per-path
+  adjudication; T45 converges NOT-YET -> 17 asserts as scheduled
+  (matrix match).
+
+### Tests
+
+- **T40**: release pin advanced to `update-wsi-2026.07.29-r12.44`
+  with the new tag.
+
+### Gate state
+
+- Suite 25/26 (the declared T30 red only). D-contract totals
+  139/37/120/64/112 + T45 17. PSA committed 4E/106W/10I (raw +1W =
+  PSA7002 LF artefact; declared series debt per the no-fix-forward
+  rule).
+
+## [update-wsi-2026.07.29-r12.43] - 2026-08-02
+
+Tag retained: `all-os-version-decision-hardening` (the version date component moves to 07.29).
+(Backfilled 2026-08-02: this revision's commit landed without its
+CHANGELOG entry; authored from the landed commit and the measured
+gate records.)
+
+### Added
+
+- **Fail-closed SafeOS-DU boot.wim verification decision**: the
+  boot.wim verification requires a `Package_for_SafeOSDU` identity at
+  or above the expected SafeOS version with no pending packages; the
+  full-LCU verification contract is not applied under the SafeOSDU
+  model. Script-only change.
+
+### Tests
+
+- **T40**: release pin advanced (the tag is retained).
+
+### Gate state
+
+- Suite 25/26 (T30 declared). D-totals 139/37/120/64/112 + T45
+  NOT-YET. PSA committed 4E/103W/10I (raw +1W = PSA7002).
+
+## [update-wsi-2026.07.28-r12.42] - 2026-08-02
+
+Tag retained: `all-os-version-decision-hardening`.
+(Backfilled 2026-08-02: this revision's commit landed without its
+CHANGELOG entry; authored from the landed commit and the measured
+gate records.)
+
+### Changed
+
+- **Server 2019 boot.wim update model declared as SafeOSDU**:
+  `config-Server2019.json` declares `BootWimUpdateModel` SafeOSDU and
+  the standalone ServicingStack step is dropped from the 2019
+  boot.wim plan (declared change; T41 140 -> 139 asserts, matrix
+  match).
+
+### Tests
+
+- **T40**: release pin advanced (the tag is retained).
+
+### Gate state
+
+- Suite 25/26 (T30 declared). D-totals 139/37/120/64/112 + T45
+  NOT-YET. PSA committed 4E/103W/10I (raw +1W = PSA7002).
+
+## [update-wsi-2026.07.28-r12.41] - 2026-08-02
+
+Tag retained: `all-os-version-decision-hardening`.
+(Backfilled 2026-08-02: this revision's commit landed without its
+CHANGELOG entry; authored from the landed commit and the measured
+gate records.)
+
+### Added
+
+- **Boot.wim smoke-test mount forensics (evidence 1.1)**: the P06
+  smoke test records a staged narrative marker, attribute/read-only
+  tracking and explicit per-index DISM mount logs, so a mount-side
+  failure leaves an attributable record. Script-only change.
+
+### Tests
+
+- **T40**: release pin advanced (the tag is retained).
+
+### Gate state
+
+- Suite 25/26 (T30 declared). D-totals 140/37/120/64/112 + T45
+  NOT-YET. PSA committed 4E/102W/10I (raw +1W = PSA7002).
+
+## [update-wsi-2026.07.28-r12.40] - 2026-08-02
+
+Tag retained: `all-os-version-decision-hardening` (the version date component moves to 07.28).
+(Backfilled 2026-08-02: this revision's commit landed without its
+CHANGELOG entry; authored from the landed commit and the measured
+gate records.)
+
+### Added
+
+- **Mandatory Server 2019 boot.wim pre-servicing smoke test**: P06
+  exercises the LCU against an isolated copy/mount of boot.wim before
+  the real servicing pass (mandatory for Server 2019 with
+  `BootWimLcuPolicy=enabled`); evidence schema
+  `P06-bootwim-servicing-smoke-test/1.0`. Script-only change; one
+  declared PSA warning is resolved by the deliverable.
+
+### Tests
+
+- **T40**: release pin advanced (the tag is retained).
+
+### Gate state
+
+- Suite 25/26 (T30 declared). D-totals 140/37/120/64/112 + T45
+  NOT-YET. PSA committed 4E/102W/10I (raw +1W = PSA7002).
+
+## [update-wsi-2026.07.27-r12.39] - 2026-08-02
+
+Tag retained: `all-os-version-decision-hardening`.
+(Backfilled 2026-08-02: this revision's commit landed without its
+CHANGELOG entry; authored from the landed commit and the measured
+gate records.)
+
+### Changed
+
+- **P11 setup-binary verification prefers the post-overlay digest**:
+  verification consumes `ExpectedSha256After` from the SetupDU
+  overlay evidence (the `setupdu-overlay/1.x` fallback is retained;
+  an empty expectation fails). Script-only change.
+
+### Tests
+
+- **T40**: release pin advanced (the tag is retained).
+
+### Gate state
+
+- Suite 25/26 (T30 declared). D-totals 140/37/120/64/112 + T45
+  NOT-YET. PSA committed 4E/103W/10I (raw +1W = PSA7002).
+
+## [update-wsi-2026.07.27-r12.38] - 2026-08-02
+
+Tag retained: `all-os-version-decision-hardening`.
+(Backfilled 2026-08-02: this revision's commit landed without its
+CHANGELOG entry; authored from the landed commit and the measured
+gate records.)
+
+### Added
+
+- **Server 2016 SSU state detection filesystem fallback**:
+  `Get-OfflineServicingStackFilesystemState` supplies the active
+  servicing stack from the component directory when package identity
+  does not surface it (measured Server 2016 case); the evidence rows
+  record the source column
+  (`offline-servicing-stack-filesystem-state/1.0`). Script-only
+  change.
+
+### Tests
+
+- **T40**: release pin advanced (the tag is retained).
+
+### Gate state
+
+- Suite 25/26 (T30 declared). D-totals 140/37/120/64/112 + T45
+  NOT-YET. PSA committed 4E/103W/10I (raw +1W = PSA7002).
+
+## [update-wsi-2026.07.27-r12.37] - 2026-08-02
+
+ScriptTag advanced to `all-os-version-decision-hardening`.
+(Backfilled 2026-08-02: this revision's commit landed without its
+CHANGELOG entry; authored from the landed commit and the measured
+gate records.)
+
+### Added
+
+- **Fail-closed patch version-decision pipeline**: a 27-helper layer
+  makes every patch-version decision explicit and evidence-backed —
+  downgrade rejection, `ManualReviewRequired` escalation,
+  version-aware SetupDU overlay, and `patch-version-decision/1.0`
+  evidence records.
+
+### Changed
+
+- **Declared vocabulary migration**: `VersionDecisionPolicy` /
+  `Lines[].VersionPolicy` join schema v4 and all configs (declared
+  change; T42 30 -> 37 asserts, matrix match). Snapshot overlay:
+  script + five configs + schema.
+
+### Tests
+
+- **T40**: release pin advanced with the new tag.
+
+### Gate state
+
+- Suite 25/26 (T30 declared). D-totals 140/37/120/64/112 + T45
+  NOT-YET. PSA committed 4E/102W/10I (raw +1W = PSA7002).
+
+## [update-wsi-2026.07.26-r12.36] - 2026-08-02
+
+Revision r12.36 carries two independent delivered works under one
+revision number (series ruling: two commits, one CHANGELOG heading).
+
+Part 1 — tag: `server2019-bootwim-hresult-policy-fix`.
+Part 2 — tag: `offline-servicing-failure-forensics` (the version date
+component moves 07.26 → 07.27 within the same revision number).
+
+### Fixed
+
+- **Boot.wim failure policy decides on the HRESULT, not localized
+  text**: DISM exceptions for cases like `0x80070032` can carry only
+  a localized message while the machine-readable `HResult` remains on
+  the exception; a new `Get-ExceptionDiagnosticText` helper renders
+  the unsigned `HRESULT=0x…` alongside the message, the P08 boot.wim
+  failure decision consumes that diagnostic, and the policy exception
+  is recorded as a structured `bootwim-policy-exception` JSONL entry
+  (type, message, diagnostic, image, policy, strategy, error code,
+  install-validation flag). Script-only change.
+- **T40**: release pin advanced to `update-wsi-2026.07.26-r12.36`
+  with the measured tag (part 1), then to
+  `update-wsi-2026.07.27-r12.36` (part 2).
+
+### Added (part 2)
+
+- **Offline servicing failure forensics**: four new helpers
+  (`Copy-ServicingEvidenceFile`, `Copy-ServicingLogTailEvidence`,
+  `Export-OfflineServicingFailureEvidence`,
+  `Export-ExpandedMsuMetadataEvidence`) capture a forensics bundle on
+  offline-servicing failure — DISM/CBS log tails, expanded-MSU
+  metadata and related evidence files are copied with verification
+  into the evidence tree, so a failed servicing run leaves an
+  analyzable record instead of only an error line. Script-only
+  change.
+
+### Gate state (measured on the branch, after both parts)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged across both parts).
+PSA **2E/94W/9I** after part 1 and **2E/95W/9I** after part 2 — one
+warning joins the debt with the forensics layer; committed verbatim
+per the no-fix-forward rule.
+
+## [update-wsi-2026.07.26-r12.35] - 2026-08-02
+
+Tag: `resume-checkpoint-evidence-hardening` (the tag advances; the
+version date component moves 07.25 → 07.26). Resume becomes a
+verified, checkpointed evidence transaction.
+
+### Changed
+
+- **Resume checkpoint/evidence layer**: twenty new helpers build a
+  session-scoped resume transaction — critical evidence files are
+  enumerated by relative path, copied with per-file verification,
+  backed up into an `evidence-history` under the session root, and
+  tree manifests (`Get-ResumeTreeManifest` /
+  `Test-ResumeTreeManifestMatch`) prove checkpoint integrity.
+  Media checkpoints (`New-ResumeMediaCheckpoint`), downstream-state
+  reset, verified transaction backups and
+  `Ensure-P08FinalInstallWimEvidenceForResume` make P08/P09 resume a
+  fail-closed, evidence-bound operation with a recorded session
+  action log. Script-only change (+737 net lines).
+- **T40**: release pin advanced to `update-wsi-2026.07.26-r12.35`
+  with the measured tag. The P08S wiring pin (a token-count proxy) is
+  updated 4 → 5 lists by adjudication: the resume layer legitimately
+  adds a fifth `'P08','P08S',…` site (the downstream-cleanup prefix
+  list); the four original lists are intact and the count is measured
+  stable at 5 through the series terminal.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **2E/94W/9I** on
+the committed tree — the deliverable resolves three long-standing
+errors (two PSA2012 positional `Save-CanonicalJsonFile` calls and the
+PSA2013 never-assigned read); the remaining errors are one PSA2012
+and the PSA2010 `Resolve-OscdimgPath` forward reference. Five
+warnings and one info join the debt; committed verbatim per the
+no-fix-forward rule.
+
+## [update-wsi-2026.07.25-r12.34] - 2026-08-02
+
+Tag: `rawxml-filetime-conversion-regression-fix` (the tag is
+retained). The resolved-patch manifest gains a resume-safe lifecycle.
+
+### Fixed
+
+- **Resume-manifest lifecycle**: `resolved_patch_manifest.json`
+  (schema `release-patch-manifest/1.3`) is persisted as soon as P04
+  has verified all payloads — previously it was written late enough
+  that a P11 failure made P09 resume impossible. Three new helpers
+  carry the lifecycle: `Write-ResolvedPatchEvidenceManifest`
+  (early persistence), `Repair-ResolvedPatchManifestForResume`
+  (rebuilds a missing manifest from measured evidence without
+  trusting mutable state) and `Get-CatalogPayloadSha1FromFileName`
+  (recovers the expected digest from the Catalog payload naming
+  convention `_<40-hex-SHA1>.cab/.msu`). Script-only change.
+- **T40**: release pin advanced to `update-wsi-2026.07.25-r12.34`
+  (tag retained per the deliverable).
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **5E/89W/8I** on
+the committed tree — fourteen warnings join the debt; committed
+verbatim per the no-fix-forward rule, draining post-series.
+
+## [update-wsi-2026.07.25-r12.33] - 2026-08-02
+
+Tag: `rawxml-filetime-conversion-regression-fix` (the tag is
+retained). Display-date persistence is verified on the final media
+WIM, not only the servicing workspace copy.
+
+### Fixed
+
+- **Final-WIM evidence boundary**: four new helpers
+  (`Test-WimIntegrityTableAgainstFile`,
+  `Test-InstallWimDisplayDatePersistence`,
+  `Test-InstallWimFinalEvidenceBinding`,
+  `New-InstallWimFinalMetadataEvidence`) bind the display-date
+  evidence to the final install.wim as placed on the media — the
+  final snapshot must carry the P07-serviced index set without
+  duplicates, the persisted CREATIONTIME values must match the
+  requested transition, and the integrity table is re-validated
+  against the final file bytes. Evidence of the servicing-workspace
+  copy alone no longer counts as persistence proof. Script-only
+  change.
+- **T40**: release pin advanced to `update-wsi-2026.07.25-r12.33`
+  (tag retained per the deliverable).
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **5E/75W/8I** on
+the committed tree — two warnings join the debt; committed verbatim
+per the no-fix-forward rule.
+
+## [update-wsi-2026.07.25-r12.32] - 2026-08-02
+
+Tag: `rawxml-filetime-conversion-regression-fix` (the tag is
+retained). The native preflight stops assuming a full-inventory
+snapshot.
+
+### Fixed
+
+- **Subset-inventory consistency check**: a new
+  `Test-WimInventorySnapshotConsistency` helper validates the
+  display-date snapshot against the before/after WIM inventories when
+  only a subset of image indexes is serviced — requested indexes must
+  be non-empty and duplicate-free, and before/after inventories must
+  agree on the index set outside the snapshot. The r12.29 preflight
+  implicitly assumed the snapshot covered every image index.
+  Script-only change.
+- **T40**: release pin advanced to `update-wsi-2026.07.25-r12.32`
+  (tag retained per the deliverable).
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **5E/73W/8I** on
+the committed tree — unchanged from r12.31; committed verbatim per
+the no-fix-forward rule.
+
+## [update-wsi-2026.07.25-r12.31] - 2026-08-02
+
+Tag: `rawxml-filetime-conversion-regression-fix` (the tag is
+retained). Runtime-validation identity revision.
+
+### Changed
+
+- **PowerShell 7 runtime validation recorded**: a validation marker
+  states the r12.30 FILETIME layer as
+  pwsh7-runtime-validated (PowerShell 7.6.4, Linux x64), with
+  Windows-native gates still required; revision-anchored comments
+  advance. Script-only identity/annotation revision (+1 net line);
+  no behavioural change.
+- **T40**: release pin advanced to `update-wsi-2026.07.25-r12.31`
+  (tag retained per the deliverable).
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **5E/73W/8I** on
+the committed tree — unchanged from r12.30; committed verbatim per
+the no-fix-forward rule.
+
+## [update-wsi-2026.07.25-r12.30] - 2026-08-02
+
+Tag: `rawxml-filetime-conversion-regression-fix` (the tag advances;
+the version date component moves 07.24 → 07.25). The raw-XML FILETIME
+split stops relying on a PowerShell hex-literal cast.
+
+### Fixed
+
+- **FILETIME low/high split via `BitConverter`**: the r12.29 path
+  cast an unsuffixed all-bits hexadecimal mask, which PowerShell
+  parses as signed Int32 `-1` before the UInt64 cast — corrupting the
+  HIGHPART/LOWPART split. The conversion now takes the `Int64`
+  `ToFileTimeUtc()` value (rejecting pre-1601 dates), splits it
+  through `BitConverter` byte access, requires a little-endian host,
+  and a new `Test-WimFileTimeConversionRoundTrip` self-check verifies
+  the round trip before any write. Script-only change.
+- **T40**: release pin advanced to `update-wsi-2026.07.25-r12.30`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **5E/73W/8I** on
+the committed tree — one warning joins the debt; committed verbatim
+per the no-fix-forward rule.
+
+## [update-wsi-2026.07.24-r12.29] - 2026-08-02
+
+Tag: `rawxml-creationtime-integrity-integration` (the tag advances;
+the version date component moves 07.21 → 07.24). The display-date
+write moves off WIMGAPI onto a raw XML-resource strategy with
+integrity-table recalculation.
+
+### Changed
+
+- **Raw XML CREATIONTIME strategy**: measured runs showed WIMGAPI
+  write calls returning success without persisting the requested
+  value, so the display-date transition now edits the WIM's raw XML
+  resource directly — a 21-helper layer parses the WIM header and
+  resource descriptors, rewrites CREATIONTIME values while preserving
+  layout (byte length, encoding, BOM, terminators, descriptors and
+  LASTMODIFICATIONTIME untouched), always recalculates an existing
+  integrity table (`New-WimIntegrityTableBytes` over the changed byte
+  ranges), and then verifies the reopened WIM through WIMGAPI, DISM
+  and a read-only mount preflight. Fail-closed guards refuse
+  multi-part WIMs, `WRITE_IN_PROGRESS` headers and malformed
+  integrity structures. WIMGAPI remains for reread verification only.
+  Script-only change (+1,149 net lines).
+- **T40**: release pin advanced to `update-wsi-2026.07.24-r12.29`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **5E/72W/8I** on
+the committed tree — sixteen warnings join the debt with the raw-WIM
+byte layer; committed verbatim per the no-fix-forward rule, draining
+post-series.
+
+## [update-wsi-2026.07.21-r12.28] - 2026-08-02
+
+Tag: `wimgapi-utf16le-creationtime-displaydate-fix` (the tag advances;
+the version date component moves 07.20 → 07.21). The display-date
+layer targets the measured field with the API's required encoding.
+
+### Fixed
+
+- **Display date targets CREATIONTIME, written as BOM-prefixed
+  UTF-16LE**: measured behaviour corrected two r12.26 assumptions —
+  (1) Windows displays the CREATIONTIME date for the tested Server
+  media even when LASTMODIFICATIONTIME already reflects the change,
+  so the display-date transition now sets CREATIONTIME
+  (`Set-WimImageCreationTimeXml`); (2) `WIMSetImageInformation`
+  rejects a re-serialized Unicode string without the UTF-16LE BOM
+  (Win32 error 203), so the XML round-trip now goes through
+  BOM-prefixed UTF-16LE buffers (`Get-WimUnicodeXmlFromHandle`,
+  `ConvertTo-WimUnicodeXmlBuffer`, `Set-WimUnicodeXmlOnHandle`) with
+  a native preflight (`Invoke-WimDisplayDateNativePreflight`).
+  Script-only change.
+- **T40**: release pin advanced to `update-wsi-2026.07.21-r12.28`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **5E/56W/8I** on
+the committed tree — two warnings join the debt; committed verbatim
+per the no-fix-forward rule.
+
+## [update-wsi-2026.07.20-r12.27] - 2026-08-02
+
+Tag: `wimgapi-image-root-localname-hotfix` (the tag advances). The
+r12.26 WIM image-XML root check is made adapter-safe.
+
+### Fixed
+
+- **WIM image XML root check uses `LocalName`**: PowerShell's XML
+  adapter is case-insensitive, so on WIM IMAGE XML a child `<NAME>`
+  element can shadow `XmlElement.Name`; the r12.26 root check
+  (`.Name -ne 'IMAGE'`) could therefore reject valid metadata. The
+  check now reads the unambiguous CLR `LocalName` property.
+  Script-only hotfix to the r12.26 layer.
+- **T40**: release pin advanced to `update-wsi-2026.07.20-r12.27`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **5E/54W/8I** on
+the committed tree — unchanged from r12.26; committed verbatim per
+the no-fix-forward rule.
+
+## [update-wsi-2026.07.20-r12.26] - 2026-08-02
+
+Tag: `install-wim-display-date-metadata-and-p14-evidence` (the tag
+advances). Serviced install.wim indexes can carry an operator-declared
+display date, applied through the WIM API with invariant-fingerprint
+evidence.
+
+### Added
+
+- **`-ImageDisplayDate` parameter and WIM metadata layer**: thirteen
+  new helpers (WIM API interop initialisation, per-handle image XML
+  get/set, `ConvertTo`/`ConvertFrom-WimFileTimeParts`,
+  invariant-fingerprint capture, metadata snapshot/transition
+  validation and the `Resolve-InstallWimDisplayDateDecision` driver)
+  set the display last-modification date on serviced install.wim
+  indexes (`yyyy-MM-dd`, format-validated at entry). The transition
+  is evidence-gated: a metadata-invariant fingerprint proves that
+  only the display date moved, and the before/after snapshot joins
+  the P14 evidence surface. Script-only change (+552 net lines).
+- **T40**: release pin advanced to `update-wsi-2026.07.20-r12.26`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (unchanged). PSA **5E/54W/8I** on
+the committed tree — five warnings and one info join the debt with
+the new WIM interop layer; committed verbatim per the no-fix-forward
+rule, draining post-series.
+
+## [update-wsi-2026.07.20-r12.25] - 2026-08-02
+
+Tag: `measured-e2e-os-specific-servicing-and-catalog-rehydration` (the
+tag advances; the version date component moves 07.19 → 07.20).
+Measured-E2E corrections to per-OS boot.wim servicing, declared in the
+schema.
+
+### Changed
+
+- **Boot.wim servicing declared per OS**: four new resolver/decision
+  helpers (`Resolve-BootWimFailurePolicyValue`,
+  `Resolve-BootWimServicingStrategyValue`,
+  `Get-BootWimFailurePolicyDecision`, `Get-BootWimServicingStrategy`)
+  consume a widened declaration — `schema/config.schema.v4.json`
+  constrains the failure-policy fields to enumerated values
+  (`enabled/disabled/tolerate`; reason codes `FailBuild`,
+  `UnsupportedByPinnedSourceMedia`,
+  `ResearchTolerateNotReleaseEligible`, `LegacyPolicy`) and adds a
+  `BootWimServicingStrategy` enum. `config-Server2019.json` declares
+  `BootWimServicingStrategy: ExpandedCombinedCab`.
+- **Stale pre-download digest removed, Catalog rehydration**
+  (`config-Server2025.json`): a pre-download SHA-256 that failed a
+  measured P04 run is removed (`Sha256: null`); the mutable candidate
+  rehydrates the Catalog SHA-256 after stable-identity selection
+  (declared in the line's Notes). T43 tracks the declaration:
+  123 → 120 asserts per its declaration-derived count, matching the
+  convergence-matrix row for this revision.
+- **T40**: release pin advanced to `update-wsi-2026.07.20-r12.25`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/120/64/112 with T45 NOT-YET (T43 moves with the declaration —
+a declared change, not a regression). PSA **5E/49W/7I** on the
+committed tree — one warning joins the debt; committed verbatim per
+the no-fix-forward rule.
+
+## [update-wsi-2026.07.19-r12.24] - 2026-08-02
+
+Tag: `evidence-audit-and-pca2023-verdict-provenance` (the tag
+advances). PCA2023 verdicts carry their measurement provenance.
+
+### Changed
+
+- **PCA2023 verdict provenance**: the signature-evidence record is
+  widened to state how each verdict was reached — X.509 chain fields
+  (`X509IsPca2023` / `X509IsPca2011`) are kept distinct from parsed
+  signtool embedded-signature provenance (`Embedded*`), and boot-file
+  verdicts carry a `BootX64VerdictMethod`. An audit consumer can now
+  distinguish a chain-derived verdict from an embedded-signature one
+  instead of reading a single collapsed boolean. Script-only change.
+- **T40**: release pin advanced to `update-wsi-2026.07.19-r12.24`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/123/64/112 with T45 NOT-YET (unchanged). PSA **5E/48W/7I** on
+the committed tree — unchanged from r12.23; committed verbatim per
+the no-fix-forward rule.
+
+## [update-wsi-2026.07.19-r12.23] - 2026-08-02
+
+Tag: `resume-automatic-variable-safety` (the tag advances). The resume
+path stops colliding with PowerShell automatic variables and gains a
+non-destructive preflight.
+
+### Added
+
+- **`-ResumePreflightOnly` switch**: validates an existing P08/P09
+  resume workspace and rehydrates all measured state without mutating
+  anything (requires `-ResumeFromPhase P08|P09`); resume is refused
+  when neither the P08 boot.wim transaction backup nor the source ISO
+  is available.
+
+### Fixed
+
+- **Automatic-variable collision removed**: a resume-path local that
+  collided with the read-only automatic variable `$Host` is renamed
+  (one PSA2002 shadowing warning resolved by the deliverable).
+- **T40**: release pin advanced to `update-wsi-2026.07.19-r12.23`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/123/64/112 with T45 NOT-YET (unchanged). PSA **5E/48W/7I** on
+the committed tree — one error joins the debt (1× PSA2013:
+`$Script:IsoPathResolved` read but never assigned) and one PSA2002
+warning is resolved; committed verbatim per the no-fix-forward rule,
+draining post-series.
+
+## [update-wsi-2026.07.19-r12.22] - 2026-08-02
+
+Tag: `resume-asset-state-rehydration` (the tag advances). Resumed runs
+rebuild resolved patch-asset state from measured evidence.
+
+### Fixed
+
+- **Resume rehydrates resolved patch assets**: two new helpers
+  (`Set-ResumePatchProperty`, `Restore-ResolvedPatchAssetsForResume`)
+  rebuild the P02 runtime patch objects from the measured P04 Catalog
+  crosscheck evidence when resuming at P08/P09. P01/P02 intentionally
+  rebuild runtime objects from immutable config, which left monthly
+  auxiliary entries in their pre-P04 metadata-only state on
+  `-ResumeFromPhase P08/P09` — P09 then rejected assets it had itself
+  produced. Rehydration fails closed: it refuses to resume when
+  `P04.ok` is missing or when the evidence does not contain exactly
+  one Catalog row per OS/KB/servicing type. Script-only change.
+- **T40**: release pin advanced to `update-wsi-2026.07.19-r12.22`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/123/64/112 with T45 NOT-YET (unchanged). PSA **4E/49W/7I** on
+the committed tree — one warning joins the debt with the new helpers;
+committed verbatim per the no-fix-forward rule.
+
+## [update-wsi-2026.07.19-r12.21] - 2026-08-02
+
+Tag: `dotnet-applicability-secureboot-v165-alignment` (the tag
+advances; the version date component moves 07.18 → 07.19).
+
+### Changed
+
+- **.NET applicability grading**: the .NET freshness assessment gains
+  a `NotApplicable` grade — a configured standalone runtime absent
+  from every install index no longer counts against freshness, and an
+  all-`NotApplicable` .NET set aggregates to `Fresh` (there is no
+  stale payload to service). Refines the r12.20 `Kind='DotNet'`
+  filtering.
+- **Secure Boot tooling reference pinned at v1.6.5**: a new
+  `Get-SecureBootWorkflowReference` helper and script-scope constants
+  pin the delegated conversion tooling identity
+  (`SecureBootObjectsRelease v1.6.5-signed`, source tag `v1.6.5`,
+  commit `798cdc5`, `Make2023BootableMedia.ps1` v1.4 / 2026-03-13),
+  aligning every reference emitted in evidence and messages.
+- **Server 2025 audit-only rationale corrected**
+  (`data/config-Server2025.json` Notes): the audit-only default is a
+  project safety policy pending a measured Server 2025 conversion and
+  Secure Boot E2E — not a statement about Microsoft's tooling, which
+  is generic Windows-media tooling without this project-specific
+  exclusion.
+- **T40**: release pin advanced to `update-wsi-2026.07.19-r12.21`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/123/64/112 with T45 NOT-YET (unchanged). PSA **4E/48W/7I** on
+the committed tree — unchanged from r12.20; committed verbatim per
+the no-fix-forward rule.
+
+## [update-wsi-2026.07.18-r12.20] - 2026-08-02
+
+Tag: `runtime-catalog-handoff-placeholder-fix` (the tag advances).
+KB-only placeholder file names stop constraining live resolution.
+
+### Fixed
+
+- **Placeholder file names excluded from the identity handoff**: a new
+  `Test-IsCatalogPlaceholderFileName` helper identifies
+  non-authoritative KB-only placeholder names (e.g. `KB5101007.msu`)
+  in configured lines. The r12.18 stable-identity selector treated
+  such a placeholder as an exact expected file name, over-constraining
+  the P04 live resolution; a placeholder is never a Catalog identity
+  and is now bypassed at the runtime handoff (metadata-only lines) and
+  at local-leaf comparison. Script-only change.
+- **T40**: release pin advanced to `update-wsi-2026.07.18-r12.20`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/123/64/112 with T45 NOT-YET (unchanged). PSA **4E/48W/7I** on
+the committed tree — one warning joins the debt with the new helper;
+committed verbatim per the no-fix-forward rule.
+
+## [update-wsi-2026.07.18-r12.19] - 2026-08-02
+
+Tag: `catalog-scoped-product-identity-live-verified` (the tag
+advances). Catalog resolution gains a scoped, per-asset identity
+verification tier, live-verified for the 2026-07 baseline.
+
+### Changed
+
+- **Scoped product-identity verification**: five new helpers
+  (`Get-CatalogScopedElementText`, `Get-CatalogScopedLabeledText`,
+  `Get-CatalogScopedDetail`, `Test-CatalogProductScope`,
+  `Test-CatalogScopedDetailAgainstRule`) add a ScopedView tier to
+  Catalog resolution — each live case must pass Search product scope,
+  ScopedView UpdateId/KB/product/architecture verification and
+  DownloadDialog file selection before an asset is accepted. This is
+  the scheduled first step of the T30 structural answer (scoped
+  product identity at this revision; pinned identity completes at
+  r12.51–r12.53 per the reclassification card — T30 remains
+  SUPERSEDED-PENDING, no contract change here).
+- **Crosscheck manifest schema 1.3 → 1.4**: rules gain
+  `ExpectedUpdateId`, `ExpectedFileName` values are filled for the
+  full four-generation 2026-07 baseline, and the manifest now carries
+  all exact assets used by that baseline (not core anchors only).
+- **Config UpdateId columns resolved**: the four `config-Server*.json`
+  files fill previously null `UpdateId` values with the live-resolved
+  Catalog Update IDs for their declared lines (declared surface
+  content only; no policy-shape change).
+- **T40**: release pin advanced to `update-wsi-2026.07.18-r12.19`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/123/64/112 with T45 NOT-YET (unchanged). PSA **4E/47W/7I** on
+the committed tree — unchanged from r12.18; committed verbatim per
+the no-fix-forward rule.
+
+## [update-wsi-2026.07.18-r12.18] - 2026-08-02
+
+Tag: `catalog-stable-identity-localization-isolation` (the tag
+advances). Catalog asset selection moves fully onto the stable
+identity columns.
+
+### Changed
+
+- **Catalog selection keyed on stable identity, display text
+  isolated**: five new helpers (`Get-TextFingerprint`,
+  `Get-CatalogDisplayMetadataAssessment`, `Test-CatalogRowAgainstRule`,
+  `Get-PatchConfiguredCatalogIdentity`, `Select-CatalogCandidateAsset`)
+  restructure candidate selection so that the decision path consumes
+  only locale-stable columns (KB ID, Update ID, product, file name),
+  while localized Title/Classification display text is assessed
+  separately and reported, never matched on. This completes the
+  isolation line begun at r12.16 (Accept-Language pinning) and
+  r12.07/r12.08 (semantic aliases and structural fallback).
+- **Crosscheck manifest schema 1.2 → 1.3**:
+  `data/catalog-crosscheck-manifest.json` rules gain
+  `StableTitleMustContain`, `ExpectedFileName` and `CanonicalTitle`
+  columns, giving the crosscheck a per-rule stable-identity surface
+  (2026-07-B baseline identities carried over unchanged).
+- **T40**: release pin advanced to `update-wsi-2026.07.18-r12.18`
+  with the measured tag.
+
+### Distribution note
+
+The delivered snapshot ships its own regression suite under `tests/`
+and two workflow files (`catalog-live.yml`,
+`powershell-regression.yml`). Input-only per the series ruling;
+no distribution test or workflow file is committed.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; D-contract totals
+140/30/123/64/112 with T45 NOT-YET (unchanged — the declared policy
+surface does not move at this revision). PSA **4E/47W/7I** on the
+committed tree — eight warnings join the debt with the new catalog
+helpers; committed verbatim per the no-fix-forward rule, draining
+post-series.
+
+## [update-wsi-2026.07.18-r12.17] - 2026-08-02
+
+Tag: `generic-list-binder-hardening` (the tag advances). Generic-list
+construction stops going through the `New-Object` type binder.
+
+### Fixed
+
+- **Generic-list construction hardened**: every
+  `New-Object System.Collections.Generic.List[...]` site (script
+  state, debug-trace buffers, plan/step accumulators and helpers) is
+  replaced by the direct `[System.Collections.Generic.List[...]]::new()`
+  constructor — 76 sites, zero `New-Object` generic-list calls remain
+  (measured). The `New-Object` generic-type binder is the
+  edition-fragile path; the static constructor syntax binds
+  identically on Windows PowerShell 5.1 and PowerShell 7. Script-only
+  change: `data/*` and `schema/*` are byte-identical to r12.15
+  (measured).
+
+### Changed
+
+- **T40**: release pin advanced to `update-wsi-2026.07.18-r12.17`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/39W/7I**
+on the committed tree — one finding joins the debt (1× PSAP0005
+revision-anchored comment); committed verbatim per the no-fix-forward
+rule, draining post-series.
+
+## [update-wsi-2026.07.18-r12.16] - 2026-08-02
+
+Tag: `catalog-language-and-workspace-containment` (the tag advances).
+Catalog requests pin their language at the source, and run outputs are
+contained inside the WorkRoot.
+
+### Fixed
+
+- **Catalog request language pinned**: every Catalog request now
+  carries declared headers via `Get-CatalogRequestHeaders`
+  (`Accept-Language: en-US,en;q=0.9`, no-cache), with a declared
+  display-language policy (`en-us|ja-jp`). This removes the
+  serving-edge locale non-determinism at its source; the r12.07/08
+  semantic-alias matcher becomes the second line while the strict
+  matcher stays the fail-closed boundary, and the alias tables shrink
+  accordingly (non-ASCII characters in the script drop from 303 to
+  103, measured).
+- **Workspace containment**: `Resolve-PathWithinRoot` constrains
+  operator-supplied paths to resolve inside the WorkRoot (traversal
+  rejected), and `Start-RunTranscript` starts the run transcript
+  through the contained path. Script-only change: `data/*` and
+  `schema/*` are byte-identical to r12.15 (measured).
+
+### Changed
+
+- **T40**: release pin advanced to `update-wsi-2026.07.18-r12.16`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/38W/7I**
+on the committed tree — two findings join the debt (1× PSA6003 plural
+noun, 1× PSAP0005 revision-anchored comment); committed verbatim per
+the no-fix-forward rule, draining post-series.
+
+## [update-wsi-2026.07.18-r12.15] - 2026-08-02
+
+Tag: `bound-release-evidence-and-july-auxiliaries` (the tag advances).
+Release evidence becomes a bound, indexed artifact set, and the July
+auxiliary lines land in every config.
+
+### Added
+
+- **Bound release-evidence layer**: the release evidence gains an
+  identity (`Get-ReleaseEvidenceIdentity`), a saved index
+  (`Save-ReleaseEvidenceIndex`, `Write-ReleaseEvidenceMarker`,
+  `Read-ReleaseJsonFile`), a resolved-patch evidence manifest
+  (`New-ResolvedPatchEvidenceManifest`), a static-verification
+  assessment, and structural boot-evidence validation
+  (`Test-BootEvidenceArtifacts` / `Test-BootEvidenceApproval`):
+  BootOnly evidence must declare `RequiresOperatorReview=true` and
+  carry screenshot integrity records verified by SHA-256.
+- **2026-07 auxiliary lines in all four configs**: the July
+  re-resolution reshapes the shipped line sets (new `Discovered`
+  auxiliary rows such as KB5101007 / KB5099548). The
+  declaration-derived T43 tracks the surface (150 → 123 assertions)
+  with no edit (measured, matching the convergence-matrix row).
+
+### Changed
+
+- **T39 revised (pin re-location, adjudicated)**: r12.15 re-locates
+  the VM-state honesty surface — Install success is graded from guest
+  evidence with an empty reasons list, BootOnly carries an enforced
+  "screenshots never directly produce ReleaseReady" reason and the
+  structural evidence validator above. The T39 honesty pin follows
+  the measured surface (the r12.04 pinned literals it supersedes were
+  comment/expression forms of the same concern); 17 assertions.
+- **T40**: release pin advanced to `update-wsi-2026.07.18-r12.15`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/36W/7I**
+on the committed tree — three findings join the debt (1× PSA2012
+positional `Save-CanonicalJsonFile` call, 1× PSA6003 plural noun, 3×
+PSA6007 missing `[OutputType]`, the latter as info); committed
+verbatim per the no-fix-forward rule, draining post-series.
+
+## [update-wsi-2026.07.18-r12.14] - 2026-08-02
+
+Tag: `release-evidence-and-july-dotnet` (the tag advances; the version
+date moves to 2026.07.18). Release evidence gains two assessment
+decisions, and Server 2022's .NET line reaches the July CU.
+
+### Added
+
+- **Two assessment helpers**: `Get-AuxiliaryFreshnessAssessment`
+  (grades the auxiliary-package freshness state for the release
+  evidence) and `Get-BootValidationAssessment` (grades the boot
+  validation outcome), both returning closed records consumed by the
+  release evidence path.
+
+### Changed
+
+- **Server 2022 .NET line advances to the 2026-07 CU**: KB5087068
+  (2026-05, `State=Fallback`) is replaced by KB5101010 (2026-07,
+  `Classification: Security Updates`) declared as a **child of the
+  combined parent KB5102206 via `ParentKbId`** — the first shipped
+  line measured to use the parent/child resolution path. The
+  declaration-derived T43 tracks the line surface (153 → 150
+  assertions) with no edit (measured, matching the convergence-matrix
+  row).
+- **T40**: release pin advanced to `update-wsi-2026.07.18-r12.14`
+  with the measured tag and date.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **3E/35W/4I**
+on the committed tree — unchanged from r12.13; the declared series
+debt carries as-is per the no-fix-forward rule.
+
+## [update-wsi-2026.07.17-r12.13] - 2026-08-02
+
+Tag: `measured-e2e-corrections` (the tag advances; the version date
+moves to 2026.07.17). A batch of corrections from measured E2E runs,
+each landing as a declared decision or evidence artifact.
+
+### Fixed
+
+- **Measured E2E correction batch** — seven new decision/evidence
+  helpers: `Get-BootSequencePolicyDecision` (boot.wim apply-sequence
+  policy), `Get-ExpandedMsuCabRolesForSubPhase` +
+  `Assert-ExpandedBootLcuTarget` (expanded-CAB role classification and
+  target assertion for the ExpandedCab path),
+  `Get-WinReServicingVerificationDecision` (WinRE verification
+  routing), `Test-Server2025PcaPolicyPreflight` (PCA policy
+  preflight), `Write-DismRollbackEvidence` and
+  `Write-PatchFreshnessSummary` (rollback and freshness evidence
+  artifacts).
+- **Server 2025 PCA compliance defaults to audit-only**: the shipped
+  `config-Server2025.json` moves `CompliancePolicy` from
+  `RequirePca2023` to `AuditOnly` and declares
+  `SourceMediaAssurance: Unverified` — the 2016/2019/2022
+  media-conversion workflow is not documented for this media
+  generation, so requiring PCA2023 needs an explicitly verified source
+  or `-ForcePca2023OnServer2025`.
+
+### Changed
+
+- **T40**: release pin advanced to `update-wsi-2026.07.17-r12.13`
+  with the measured tag and date.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **3E/35W/4I**
+on the committed tree — one carried PSA2010 error is resolved by the
+deliverable (`Get-PatchTargets` is now defined) and five findings join
+the debt (1× PSA2002 + 1× PSA2007 `$Error` shadowing, 3× PSA6005
+mandatory-parameter defaults); committed verbatim per the
+no-fix-forward rule, draining post-series.
+
+## [update-wsi-2026.07.15-r12.12] - 2026-08-02
+
+Tag: `july-asset-integrity-fix` (the tag advances). The 2026-07 lines
+carry their resolved Catalog file identities, and identity refresh gets
+its own declared decision.
+
+### Fixed
+
+- **Catalog file identity rehydration**:
+  `Get-CatalogIdentityRefreshDecision` decides, from the baseline
+  state and `-UseBaselineOnly`, whether an already-selected KB may
+  refresh missing or stale Catalog transport/file identity in memory —
+  `-UseBaselineOnly` pins the selected KB set but does not turn a
+  `ResearchCandidate` into an immutable release;
+  `ResearchCandidate` / `Discovered` / `Resolved` baselines may
+  rehydrate, while `Frozen` / `Approved` stay immutable and fail on
+  any digest change.
+- **All four configs carry resolved 2026-07 asset identities**: the
+  July lines gain their actual Catalog `FileName`s with matching
+  SHA-1 digests (e.g. the Server 2016 SSU and combined packages). The
+  declaration-derived T43 tracks the added `Integrity` surface and
+  grows from 145 to 153 assertions with no edit (measured, matching
+  the convergence-matrix row).
+
+### Changed
+
+- **T40**: release pin advanced to `update-wsi-2026.07.15-r12.12`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/30W/4I**
+on the committed tree — unchanged from r12.11; the declared series
+debt carries as-is per the no-fix-forward rule.
+
+## [update-wsi-2026.07.15-r12.11] - 2026-08-02
+
+Tag: `resume-parameter-default-fix` (the tag advances). Runs without
+`-ResumeFromPhase` stop tripping over the parameter's own ValidateSet.
+
+### Fixed
+
+- **`-ResumeFromPhase` self-assignment trap**: assigning the unbound
+  validated parameter back to a script-scoped variable of the same
+  name triggered `ValidateSet` against the implicit empty string on
+  both Windows PowerShell 5.1 and PowerShell 7. The operator-facing
+  parameter stays untouched and only its normalized state is copied to
+  a separate, unconstrained internal variable
+  (`$Script:RequestedResumeFromPhase`), which the resume gates read.
+  Script-only change: `data/*` and `schema/*` are byte-identical to
+  r12.06 (measured); the UTF-8 BOM remains absent as delivered
+  (PSA7001 carries from r12.10).
+
+### Changed
+
+- **T40**: release pin advanced to `update-wsi-2026.07.15-r12.11`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/30W/4I**
+on the committed tree — unchanged from r12.10; the declared series
+debt carries as-is per the no-fix-forward rule.
+
+## [update-wsi-2026.07.15-r12.10] - 2026-08-02
+
+Tag: `option-semantics-pwsh7-fix` (continued). Generic-collection
+enumeration stops depending on the PowerShell edition.
+
+### Fixed
+
+- **Stable array materialisation**: `ConvertTo-StableObjectArray`
+  materialises any enumerable (including
+  `System.Collections.Generic.List`) as a plain object array, avoiding
+  engine-specific array-subexpression behaviour between Windows
+  PowerShell 5.1 and PowerShell 7; the P04 fresh-config-line
+  enumeration goes through it, and a test switch deliberately
+  round-trips through a generic list so both editions exercise the
+  same implementation. Script-only change: `data/*` and `schema/*` are
+  byte-identical to r12.06 (measured).
+
+### Distribution note
+
+The r12.10 snapshot is the first in the series to ship its own CI
+workflow files (`.github/workflows/catalog-live.yml`,
+`powershell-regression.yml`) alongside its own regression suite
+(`tests/Invoke-RegressionSuite.ps1` and companions). Per the series
+ruling these are input only and are not committed — workflow changes
+are never taken in-series; the content is logged in the campaign
+observation ledger. The snapshot script also drops the UTF-8 BOM
+(committed verbatim; surfaced by PSA below).
+
+### Changed
+
+- **T40**: release pin advanced to `update-wsi-2026.07.15-r12.10`
+  (tag unchanged).
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/30W/4I**
+on the committed tree — one finding joins the carried debt (1×
+PSA7001: the script lacks the UTF-8 BOM at this revision); committed
+verbatim per the no-fix-forward rule, draining post-series.
+
+## [update-wsi-2026.07.15-r12.09] - 2026-08-02
+
+Tag: `option-semantics-pwsh7-fix` (the tag advances). The P03/P04
+refresh switches get one declared decision point, testable on both
+PowerShell editions.
+
+### Fixed
+
+- **Refresh-option semantics centralised**: the interaction of
+  `-UseBaselineOnly`, `-SkipDynamicPatchRefresh` and
+  `-AutoDetectLatestPatches` with the baseline state is now decided in
+  one pure helper, `Get-PatchRefreshDecision`, returning a closed
+  record (`Mode` = `FreshnessControlled` | `BaselineOnly` |
+  `ForceRefresh` | `PinnedOsBaselineWithMonthlyAuxiliaries`, plus the
+  refresh flags, the exact-Catalog-asset policy and baseline
+  mutability). `-UseBaselineOnly` now also suppresses monthly-auxiliary
+  resolution and identity refresh. The helper is exercised through
+  `-Action TestHarness` under both Windows PowerShell 5.1 and
+  PowerShell 7 so the two editions' option semantics cannot silently
+  diverge again. Script-only change: `data/*` and `schema/*` are
+  byte-identical to r12.06 (measured).
+
+### Changed
+
+- **T40**: release pin advanced to `update-wsi-2026.07.15-r12.09`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/29W/4I**
+on the committed tree — one finding joins the carried debt (1×
+PSAP0005 revision-anchored comment in the new helper); committed
+verbatim per the no-fix-forward rule, draining post-series.
+
+## [update-wsi-2026.07.15-r12.08] - 2026-08-02
+
+Tag: `catalog-classification-hardening` (the tag advances from
+`catalog-localization-hardening`). The classification filter stops
+being a single point of failure for unseen localized labels.
+
+### Fixed
+
+- **Structural fallback for unrecognized Classification labels**: the
+  Catalog localizes display labels independently of the Product and
+  package-identity columns, so a previously unseen localized
+  `Classification` string could make the strict row filter return
+  zero rows. When that happens the filter re-evaluates with
+  classification ignored and accepts a **single structurally
+  unambiguous** row — exact KB, architecture, title semantics, Product
+  and Product-reject rules stay mandatory — logging a caution with the
+  actual label. The alias table also gains a further Japanese
+  security-update variant. Script-only change: `data/*` and `schema/*`
+  are byte-identical to r12.06 (measured).
+
+### Changed
+
+- **T40**: release pin advanced to `update-wsi-2026.07.15-r12.08`
+  with the measured tag.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/28W/4I**
+on the committed tree — unchanged from r12.07; the declared series
+debt carries as-is per the no-fix-forward rule.
+
+## [update-wsi-2026.07.15-r12.07] - 2026-08-02
+
+Tag: `catalog-localization-hardening` (the tag advances from
+`release-validation-hardening`). Catalog display-text
+localization stops rejecting valid rows.
+
+### Fixed
+
+- **Catalog semantic matching**: the Microsoft Update Catalog can
+  serve localized `Title` and `Classification` display strings
+  (German, French, Japanese and other locales) depending on the
+  serving edge and request context, while product names, KB IDs,
+  Update IDs and file names stay stable. Three new helpers
+  (`Get-CatalogSemanticAliases`, `Test-CatalogSemanticEquals`,
+  `Test-CatalogSemanticContains`) carry per-token alias tables for the
+  canonical English classification and title tokens, and the row
+  filters match against the alias set instead of the raw English
+  string — a valid row is no longer rejected solely because its
+  display text is localized. Script-only change: `data/*` and
+  `schema/*` are byte-identical to r12.06 (measured).
+
+### Changed
+
+- **T40**: release pin advanced to `update-wsi-2026.07.15-r12.07`.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/28W/4I**
+on the committed tree — the carried debt is joined by four findings in
+the new helpers (3× PSA6003 plural noun, 1× PSA7003: 282 non-ASCII
+characters inside the localized alias tables); committed verbatim per
+the no-fix-forward rule, draining post-series.
+
+## [update-wsi-2026.07.15-r12.06] - 2026-08-02
+
+Tag: `release-validation-hardening` (continued). The monthly patch set
+stops being a hand-refreshed constant: the baseline month is declared
+per config and the auxiliary packages are re-resolved at fetch time.
+
+### Added
+
+- **Three `DiscoveryPolicy` keys** in every config:
+  `BaselineMonth` (`"2026-07"` in the shipped profiles),
+  `MonthlyAuxiliaryStrict`, and `ResolveMonthlyAuxiliariesAtFetch`.
+  The declaration-derived T46 absorbed the new keys without an edit
+  (measured).
+- **P04 monthly-auxiliary resolution (Step 0A)**: when
+  `ResolveMonthlyAuxiliariesAtFetch` is declared true, the run derives
+  the baseline month from the config's `PatchBaseline`, re-resolves
+  the SafeOS DU and Setup DU rows for that month, re-resolves the
+  Server 2016 standalone monthly SSU, and builds .NET monthly selector
+  lines from the official .NET Framework release-notes cache (fetching
+  the cache when missing or stale). Selected rows replace the shipped
+  fallback lines, duplicates are merged, and the selection is
+  persisted as a `logs/` evidence artifact
+  (`P04_monthly_auxiliary_selection.json`).
+
+### Changed
+
+- **All four shipped patch sets re-resolved to the 2026-07 baseline.**
+  Server 2016's monthly SSU (KB5099542) is declared `State=Discovered`
+  with no `DownloadUrl` — resolution is deferred to fetch under the
+  new policy. The declaration-derived T43 absorbed the shape without
+  an edit (measured); the pre-series T23 contract this supersedes was
+  retired at r12.00 (SPEC §B.15.4).
+- **T40**: release pin advanced to `update-wsi-2026.07.15-r12.06`
+  (the P08S four-list wiring is unchanged, measured).
+
+### Distribution note
+
+The r12.06 snapshot ships its own validation scripts and reports under
+its `tests/` directory. Per the series ruling these are input only and
+are not committed; their content is logged in the campaign observation
+ledger.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/24W/4I**
+on the committed tree — the r12.04/r12.05 declared debt carries
+unchanged (2× PSA2010, 2× PSA2012) and four findings join it in the
+new monthly-auxiliary code (2× PSA3004 empty catch, 1× PSA5003 SHA1
+usage, 1× PSA6003 plural noun); committed verbatim per the
+no-fix-forward rule, draining post-series.
+
+## [update-wsi-2026.07.15-r12.05] - 2026-08-02
+
+Tag: `release-validation-hardening` (continued). Closes the four
+measured r12.04 E2E failures (2026-07-14 runs) and adds phase-resume.
+
+### Added
+
+- **`Common.BootWimPackageMode`** (declared per OS; schema enum
+  `DirectMsu` | `ExpandedCab`): Server 2019 moves to `ExpandedCab` —
+  the measured answer to `0x80070032`, raised while the outer LCU MSU
+  processed its embedded unattend data against boot.wim. Expanded
+  mode extracts the MSU once, inspects MUM identities/content,
+  excludes WSUS/express/metadata CABs, and applies servicing-stack
+  payloads before RollupFix payloads. Other generations stay
+  `DirectMsu`.
+- **`-ResumeFromPhase P08` / `P09`**: safely reuse an existing
+  WorkRoot after validation (the measured 2016/2022/2025 runs resume
+  at P09; 2019 restores boot.wim and resumes at P08). P08S writes an
+  explicit marker; r12.04 JSON evidence is accepted as a one-time
+  legacy resume source.
+
+### Fixed
+
+- **Windows PowerShell 5.1 `TrimStart` type mismatch** (stopped
+  2016/2022/2025 in P09): `Get-SetupDuFileManifest` now uses an
+  explicit separator `char[]`, full-path boundary checks and
+  traversal rejection.
+- **Failed-mount durability**: P07/P08 use transaction backups — a
+  failed mount is discarded and the original WIM restored (a strict
+  P08 failure no longer saves a partially serviced boot.wim); WinRE
+  distribution likewise discards an index that fails copy/hash
+  validation.
+- **DISM evidence classification**: based on the explicit operation
+  result plus the current session tail; child-package CBS noise no
+  longer promotes `PackageNotApplicable` / `ProviderWarning` /
+  `RecoveredInternalError` over a successful top-level operation.
+
+### Changed
+
+- **T40**: the P08S pipeline-wiring pin follows the measured
+  structure — four phase lists now carry `P08 → P08S → P09` (the two
+  standard pipelines, the Build action, and the new ResumeFromPhase
+  list); release pin advanced to `update-wsi-2026.07.15-r12.05`.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA **4E/20W/4I**
+on the committed tree — declared series debt: the two r12.04 PSA2010
+undefined-function calls persist and two PSA2012 positional-call
+findings against `Save-CanonicalJsonFile` join them; committed
+verbatim per the no-fix-forward rule, draining post-series.
+
+## [update-wsi-2026.07.14-r12.04] - 2026-08-02
+
+Tag: `release-validation-hardening`. The release gate becomes explicit:
+what must be *proven* before an ISO is release-eligible is declared per
+config and enforced by an expanded P11 plus a read-only P12 and a final
+P13 report.
+
+### Added
+
+- **Five `ValidationPolicy` flags** in every config and the v4
+  template: `FailOnPca2023ComplianceFailure`,
+  `SuppressRedundantCombinedLcuReapply`, `VerifyAllInstallIndexes`,
+  `VerifySetupDuManifest`, `VerifyWinRePackageState`. The
+  declaration-derived T42 reads the flag set from the config under
+  test and adapted without an edit (measured).
+- **P11 evidence expansion**: per-index install.wim
+  `TargetBuildAfterUpdate` verification, enabled boot.wim index build
+  verification, per-index runtime-matched .NET rollup state, embedded
+  WinRE presence/byte-identity plus build and pending-package count,
+  SafeOS DU evidence, a Setup DU final file manifest, and final-ISO
+  WIM hashes equal to the serviced extracted WIMs — persisted as new
+  `logs/` artifacts (winre_post_verification.json,
+  setupdu_overlay_manifest.json, P11_verification.csv,
+  inspection_post.json, dism_outcomes.jsonl).
+
+### Changed
+
+- **boot.wim servicing stance hardened**: Server 2019 moves to
+  `enabled` (an index that does not reach the configured target build
+  now fails P11); Server 2022's `tolerate` is removed from the shipped
+  profile. The declaration lives in `ValidationPolicy` /
+  `Common.BootWimUpdateModel`; the retained-legacy
+  `Common.BootWimLcuPolicy` mirrors it (SPEC §B.15.4 / T34 record).
+- **Server 2025 PCA policy**: the shipped profile declares
+  `Pca2023.CompliancePolicy=RequirePca2023`; because automatic 2025
+  conversion is intentionally outside Microsoft's documented
+  conversion boundary, a PCA2011-only result is retained for
+  diagnosis but is not release-eligible, and the run ends non-zero
+  after P13 writes the final report. The P10 skip marker now records
+  this stance (`skipped-by-policy: Server2025 documented-conversion
+  boundary; policy=...` / operator opt-out), replacing the old
+  "Server2025 default" skip reason.
+- **Combined-LCU reapply suppression**: on combined SSU/LCU
+  generations one asset may carry both `ServicingStackCarrier` and
+  `FinalLCU` roles; if no language pack / FOD / optional component /
+  DU changed the mounted image in between, the second application is
+  suppressed (declared by `SuppressRedundantCombinedLcuReapply`).
+- **T38** (media inspection): the Server2016-only `Kb_` guard pin
+  widens its match window — the guard itself survives verbatim but
+  the guarded block grew with the P11 census; the P10 skip-marker pin
+  follows the new marker reasons. 31 assertions.
+- **T39** (boot-verification tool set): the "VM state is NOT a boot
+  verdict" honesty pin becomes structural — since r12.04 the main
+  BootTest derives `Success` from guest evidence (Install) or forces
+  operator review (BootOnly), never from the recorded `VmState`; the
+  harness keeps the explicit disclaimer. 17 assertions.
+- **T40** release pin advanced to `update-wsi-2026.07.14-r12.04`.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. PSA
+**2E/18W/4I** on the committed tree — the two errors are PSA2010
+undefined-function calls in the snapshot (`Get-PatchTargets`,
+`Resolve-OscdimgPath`), latent defects committed verbatim per the
+no-fix-forward rule and declared here as series debt; they drain in
+the post-series conformance release. D-contract totals unchanged from
+r12.03 (140/30/150/64/112; T45 NOT-YET).
+
+## [update-wsi-2026.07.12-r12.03] - 2026-08-01
+
+Tag: `e2e-log-fixes` (continued). Catalog cross-check pass over all
+four generations: not just "the KB exists", but the x64 Catalog row,
+title, Product, Classification, DownloadDialog file set and CDN
+reachability are made verifiable expectations.
+
+> **Note on r12.02.** Revision r12.02 was permanently lost
+> (user-deleted) and is not fabricated here; this revision's diff
+> subsumes it. The commit sequence therefore goes r12.01 → r12.03 by
+> design, and the sparse numbering is the honest record.
+
+### Added
+
+- **`data/catalog-crosscheck-manifest.json`** — a per-OS, per-Kind
+  table of Catalog expectations (required title tokens, required
+  Product tokens, Classification, file extension) for every baseline
+  KB, referenced from each config's `_meta.catalogCrossCheckManifest`.
+  This makes the cross-check machine-consumable: the same expectations
+  drive the P04 pre-fetch verification and the Windows-side
+  `tests/Test-CatalogAllOs.ps1` reachability probe (HEAD or 1-byte
+  Range GET).
+- **`ServicingModel.DotNetPolicyDetails`** (Server 2016): declares the
+  in-box vs standalone .NET stance measured in the cross-check — the
+  in-box .NET is updated by the OS LCU; KB5087537 is NOT applied as a
+  separate MSU; the only standalone candidate is the .NET 4.8
+  KB5087065. The 2016 .NET line gains a
+  `RuntimeSelector.NetFx4Release` guard so the standalone MSU is only
+  applied when the image's runtime matches.
+
+### Changed
+
+- **Per-generation Catalog aliasing**: Server 2022 and 2025 rows are
+  matched under their full server product tokens (their Catalog title
+  and Product spellings differ from the client rows and from each
+  other); SafeOS DU vs Setup DU on 2016/2019/2022 share a title shape
+  and are discriminated by the Product column; the Server 2025 target
+  LCU's DownloadDialog is verified to contain both the checkpoint and
+  the target file.
+- **Server 2019 KB5094123**: the previously pinned CDN URL (measured
+  HTTP 404) is removed from the config; the asset is re-resolved
+  KB-based at run time under the r12.01 exact-KB mechanism.
+- **`Lines[]` role targeting refined** (2016): SafeOS DU / Setup DU
+  lines carry explicit `TargetsByRole` entries.
+- **T40** release pin advanced to `update-wsi-2026.07.12-r12.03`.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red. Declaration-derived
+contract totals move with the declaration exactly as the convergence
+matrix records for this revision (T41 140, T42 30, T43 150, T44 64,
+T46 112; T45 NOT-YET). PSA 0E/17W/3I on the committed tree (declared
+series debt).
+
+## [update-wsi-2026.07.12-r12.01] - 2026-08-01
+
+Tag: `e2e-log-fixes`. Fixes derived from the 2026-07-12 E2E runs on a
+Windows Server 2025 / Windows PowerShell 5.1 host, where all four OS
+builds failed for four *distinct* measured causes (not one shared
+root): 2016 stopped at P07 on a .NET line that was metadata-only (KB
+known, distribution file never resolved); 2019 failed at P04 on a
+pinned CDN URL returning HTTP 404; 2022 hit `0x800f0823` in WinRE
+because its servicing stack (20348.557) sat below the LCU's floor;
+2025's P08S succeeded but a `Generic.List` → `@(...)` coercion was
+type-mismatched under Windows PowerShell 5.1.
+
+### Added
+
+- **Exact-KB Catalog re-resolution**: `Get-CatalogRowsForResolvedPatch`
+  and `Resolve-ResolvedPatchAssetFromCatalog` re-resolve the
+  distribution assets of the KBs already in the baseline — never
+  selecting a different KB. Server 2022/2025 queries are narrowed by
+  the full Server product token so Windows-client rows are excluded;
+  SafeOS DU and Setup DU are discriminated by the Products column; the
+  Catalog search / DownloadDialog caches can be refreshed explicitly.
+- **`Merge-ResolvedPatchDuplicates`**: de-duplicates resolved patches
+  on `Kind` + KB, preferring an entry with a real file over a
+  metadata-only one and taking the union of `Roles`.
+
+### Changed
+
+- **P04 fails early on unresolved assets**: an exact-KB resolution
+  step runs first and any line still metadata-only after it fails the
+  phase — instead of r12.00's behaviour of admitting metadata-only
+  lines at P04 and failing later inside P07/P08/P09. Build phases
+  consume resolved files only.
+- **`config-Server2022.json`**: the source-prerequisite (bridge)
+  declaration now targets WinRE as well (Targets 2 → 3) and its
+  `Condition.WinRePolicy` records the E2E-confirmed stance
+  (`ApplyWhenSourceBelowFloor_E2EConfirmed_0x800f0823`) — the measured
+  answer to the WinRE `0x800f0823` failure.
+- **Offline-registry probe quieting**: the `SecureBoot\Servicing` key
+  may be absent on older ISOs; the probe now checks `Test-Path` and
+  reads with `-ErrorAction SilentlyContinue`, so transcripts no longer
+  record a terminating error that was already being caught.
+- **T40** release pin advanced to `update-wsi-2026.07.12-r12.01` /
+  `e2e-log-fixes`; the pin-tracking wording in TESTING.md /
+  tests/README.md is made revision-agnostic (the pin advances in every
+  merge commit).
+
+### Unchanged (safety envelope)
+
+Single-script layout; baseline KBs are never silently swapped;
+previews are never auto-adopted; Frozen/Approved hash mismatches are
+never silently accepted; WinRE `0x800f0823` is never ignored;
+checkpoint CU + target LCU stay co-located in one folder.
+
+### Gate state (measured on the branch)
+
+Offline suite 25/26 PASS with T30 the declared red; PSA 0E/15W/0I on
+the committed tree (declared series debt; +1W over r12.00).
+
+## [update-wsi-2026.07.11-r12.00] - 2026-08-01
+
+Tag: `schema-v4-role-planner`. First commit of the r12-series merge
+campaign on the integration branch
+`integration/powershell-update-windows-server-iso/r12-series` (56
+commits total; the history itself is the deliverable). The script,
+`data/*` and `schema/*` are committed **verbatim** from the delivered
+r12.00 snapshot (14,861 lines; staged-blob SHA-256 verified identical
+to the snapshot source): Schema 4.0 lands whole — the declared
+servicing-policy architecture that every later revision refines. The
+repository contract set is re-founded on the terminal-referenced
+convergence model: contracts are authored once against the series
+terminal and evaluated per revision; a contract whose anchor does not
+yet exist at a revision is a recorded gap (`NOT-YET`), not a failure.
+
+### Added
+
+- **Config Schema v4.0** (`schema/config.schema.v4.json`, JSON Schema
+  draft 2020-12) and `data/config-template-v4.json`. All four
+  `data/config-Server*.json` move to `Schema: "4.0"` and gain the
+  declared policy surfaces: `ServicingModel` (canonical servicing
+  model; `ApplyPlans` declares the apply sequence as data, replacing
+  the in-code apply map), `DiscoveryPolicy` (live-Catalog discovery:
+  `CatalogAliases`, per-Kind `SearchProfiles`, release-channel and
+  preview policy), `ValidationPolicy` (what must be proven before
+  freeze/approval), `Compatibility` (the config's own migration map:
+  `LegacyFieldsRetained` / `CanonicalV4Fields`), and per-Line `Roles`,
+  `TargetsByRole`, `Applicability`, `RuntimeSelector`, `Integrity`,
+  `State`, `Evidence`, `ParentKbId`. SPEC §B.4.0 is the normative
+  description.
+- **Six declaration-derived contracts (T41–T46)** — authored once
+  against the series terminal, expected values read from the config
+  under test, never hardcoded:
+  T41 `apply_plan_conformance_test.py` (ApplyPlans + TargetsByRole),
+  T42 `servicing_model_declaration_test.py` (SourcePrerequisites,
+  BootWimUpdateModel, ValidationPolicy),
+  T43 `line_integrity_declaration_test.py` (Lines[].Integrity + Roles),
+  T44 `compatibility_declaration_test.py` (legacy/canonical
+  meta-contract: a test asserting a `LegacyFieldsRetained` field is by
+  definition asserting the superseded model),
+  T45 `servicing_contract_baseline_test.py` (NOT-YET at r12.00: its
+  anchor `data/servicing-contract-baselines.json` is introduced at
+  r12.44),
+  T46 `discovery_policy_declaration_test.py` (CatalogAliases +
+  SearchProfiles; supersedes T28, with T30's replacement scheduled).
+- **SPEC §B.4.0** (Config Schema v4.0 — declared servicing policy) and
+  **SPEC §B.15.4** (contract retirements at r12.00: per retired
+  contract, what it asserted and why that reading of Microsoft's
+  servicing model was wrong).
+
+### Changed
+
+- **Config schema gate** (`config_schema_test.py`): schema selection is
+  now **declaration-based** — each config's top-level `Schema` field
+  selects `config.schema.json` (`"3.0"`) or `config.schema.v4.json`
+  (`"4.0"`); an unknown value fails loudly. The stdlib-only validator
+  gains the five 2020-12 keywords the v4 schema uses (`#/$defs/...`
+  refs, `oneOf`, `pattern`, `minItems`, `minimum`), each covered by
+  self-tests in both directions.
+- **T32 `checkpoint_placement_test.py`** (partial retirement): the
+  `PatchModel` Forbid-axis assertion is retired (see Removed) and
+  replaced by a retirement guard asserting the Forbid axis stays
+  **absent** from `Test-PatchModelConsistency`, plus three new rows
+  pinning the r12.00 State-driven integrity requirement (a Line at
+  state `Frozen`+ must carry a SHA-256; a `LegacyResolved` Line must
+  carry at least one integrity key). The landing-layout and routing
+  rows are unchanged.
+- **T29 `patch_integrity_digest_test.py`** (replaced wiring guard): the
+  static pins on direct flat-field seeding (`$p.Digest` / `$p.Sha256`)
+  are replaced by single-accessor pins — all baseline hash reads go
+  through `Get-BaselineHashValue -Line ... -Algorithm Sha1|Sha256`,
+  which serves the canonical `Integrity.<Alg>.Value` node and guards
+  the flat `Digest`/`Sha256` fields as the retained-legacy path; a
+  regression pin rejects any resurfaced direct-field seeding. The
+  format-boundary rows are unchanged; the data-side declaration is T43.
+- **T40 `setup_binaries_sync_test.py`**: release pin advanced to
+  `update-wsi-2026.07.11-r12.00` / `schema-v4-role-planner` (recurs at
+  every merge).
+- **T30 `setup_du_discriminator_test.py`** → **SUPERSEDED-PENDING (the
+  declared red on the integration branch)**: r12.00's selector returns
+  three candidate rows where the contract expects one. Not adjudicated
+  as a defect — Catalog title-string heuristics are a known fragility
+  surface and the series tightens exactly this via
+  `DiscoveryPolicy.SearchProfiles`, progressively (scoped product
+  identity at r12.19; pinned identity at r12.51–53). The replacement
+  contract ("resolved rows conform to the declared SearchProfiles")
+  becomes assertable once the policy is honoured end to end; re-examine
+  at the r12.19 and r12.51 merge cards.
+- **SPEC §B.4** heading and intro (v4.0 current, v3.0 retained;
+  compatibility note on §B.4.1–§B.4.5) and **§B.15** (the Require/Forbid
+  matrix documented as **superseded** with Microsoft citations; kept as
+  the historical record).
+- **TESTING.md / tests/README.md**: contract inventory updated for the
+  retirements, the T41–T46 additions, and the revised gates.
+
+### Removed
+
+Eight contracts retired. Per the series rule, no test is deleted
+without a record of what it asserted and why that reading of
+Microsoft's servicing model was wrong; SPEC §B.15.4 carries the full
+records — summarised here:
+
+- **T28 `setup_du_forbid_test.py`** — asserted Setup DU exists only for
+  the uup-checkpoint OS and that 2016/2019/2022 resolve the empty
+  no-line marker. Wrong: Microsoft publishes Setup DU per servicing
+  branch; the live Catalog resolves KB5068794 / KB5068795 / KB5079518
+  for 2016 / 2019 / 2022. A point-in-time absence of rows had been
+  generalised into a publishing rule. Successor: T46 (+ live-network
+  behavioural half, scheduled).
+- **T23 `config_required_ssu_downloadurl_test.py`** — asserted every
+  SSU line carries its own `DownloadUrl` and a per-OS
+  `PatchModel` ⇔ SSU-presence consistency. Wrong: an SSU delivered as
+  a child of a combined parent (`ParentKbId`) has no standalone URL and
+  is resolvable through its parent; under live discovery a committed
+  URL is a staleness hazard, not a guarantee. Successor: T43.
+- **T27 `catalog_patchset_builder_test.py`** — asserted the builder
+  reproduces an in-code apply map keyed by `PatchModel`. Wrong: the
+  apply sequence is a property of the servicing model, expressible as
+  data — `ServicingModel.ApplyPlans` — which the builder must conform
+  to rather than restate; the earlier fail-closed rows had encoded
+  fixture staleness as designed behaviour. Successor: T41.
+- **T31 `lcu_target_verify_test.py`** — asserted Server 2016 verifies
+  post-update state by KB-id membership while other OSes verify by
+  measured build. Wrong: the fork mistook an implementation workaround
+  for a Microsoft-side distinction; 2016 joins the unified
+  `RollupFixAndMeasuredBuild` evidence mode (measured at r12.46).
+  Successor: T42/T43.
+- **T32 (Forbid rows only)** — the `PatchModel` Forbid axis encoded
+  per-generation publishing assumptions the Catalog disproves; the
+  runtime keeps Require + the State-driven integrity rule. The file
+  survives with the routing rows and the new absence guard.
+- **T33 `bridge_lcu_contract_test.py`** — asserted a standalone
+  `BridgeLcu` block and "no other OS carries a bridge". Wrong: the
+  bridge is one instance of the uniform source-prerequisite fact
+  (`SourcePrerequisites[]` + `Condition.Mode`); Server 2016 carries a
+  legacy prerequisite under the same structure, falsifying the scope
+  pin. Successor: T42.
+- **T34 `bootwim_policy_test.py`** — asserted a per-OS
+  `BootWimLcuPolicy` matrix (enabled/disabled/tolerate). Wrong twice:
+  the stance is a validation policy, not a per-OS capability
+  (`ValidationPolicy.FailOnBootWimServicingFailure`, every OS
+  `enabled` from r12.04); and boot.wim cannot be LCU-serviced at all
+  (WinPE rejects the `.msu` with `0x80070032`; the extracted CAB fails
+  `0x8007371b`) — a per-OS policy matrix over a structurally
+  impossible operation encoded a distinction that does not exist.
+  Successor: T42.
+- **T37 `per_os_evidence_test.py`** — asserted four forked per-OS
+  evidence resolvers and hardcoded 2024-4B build floors. Wrong: the
+  floors are per-prerequisite facts of Microsoft's servicing timeline,
+  declared in `SourcePrerequisites[].Condition`; one uniform declared
+  structure now expresses what four hand-written branches used to.
+  Successor: T42 + the declared `Detection` list.
+
+### Gate state (measured on the branch, not assumed)
+
+Offline suite 25/26 PASS with T30 the **declared** red (branch rule:
+red is allowed, but only declared red). PSA on the committed tree:
+0 errors / 14 warnings / 0 info (the raw-LF snapshot sweep additionally
+shows the one-off PSA7002 line-ending artefact; committed form is CRLF
+via `.gitattributes` and does not carry it). PSA debt is declared per
+revision and drains in the post-series conformance release.
+
 ### Fixed (2026-07-14 — docs only; no script change)
 
 - Repaired the pre-migration analyzer path `../../python/powershell-static-analyzer/psa.py`

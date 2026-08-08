@@ -1,12 +1,12 @@
 {
   "Schema": "4.0",
-  "OsKey": "Server2022",
+  "OsKey": "Server2099",
   "Common": {
-    "Build": 20348,
-    "OsShortName": "WS2022",
+    "Build": 99999,
+    "OsShortName": "WS2099",
     "Edition": "Datacenter",
     "Architecture": "x64",
-    "WimEdition": "Windows Server 2022 Datacenter (Desktop Experience)",
+    "WimEdition": "Windows Server 2099 Datacenter (Desktop Experience)",
     "InstallWimIndex": 4,
     "BootWimIndexes": [
       1,
@@ -28,9 +28,9 @@
     "_VerifiedDate": "2026-07-11T00:00:00+09:00",
     "_VerifiedBy": "research:data-model-v4",
     "BootWimPackageMode": "DirectMsu",
+    "BootWimServicingStrategy": "DirectMsu",
     "VersionDecisionPolicy": "StrictFailClosed",
-    "VersionDecisionEvidenceSchema": "patch-version-decision/1.0",
-    "BootWimServicingStrategy": "DirectMsu"
+    "VersionDecisionEvidenceSchema": "patch-version-decision/1.0"
   },
   "ServicingModel": {
     "MonthlyServicingStyle": "CombinedSSULCU",
@@ -239,9 +239,9 @@
     "DynamicUpdateSelection": "SameMonthOrLatestPrior",
     "DotNetSelection": "LatestNonPreviewAtOrBeforeBaselineCutoff",
     "CatalogAliases": {
-      "OsUpdate": "Microsoft server operating system version 21H2",
-      "DynamicUpdate": "Microsoft server operating system version 21H2",
-      "BuildFamily": "20348"
+      "OsUpdate": "<catalog OS product alias>",
+      "DynamicUpdate": "<catalog Dynamic Update alias>",
+      "BuildFamily": "99999"
     },
     "SearchProfiles": {
       "LCU": {
@@ -301,55 +301,37 @@
       "SafeOS DU / Setup DU Support KB",
       "Monthly Windows Server images",
       "Windows release health / message center"
-    ],
-    "ResolveMonthlyAuxiliariesAtFetch": true,
-    "MonthlyAuxiliaryStrict": true,
-    "BaselineMonth": "2026-07"
+    ]
   },
   "PatchBaseline": {
     "Schema": "4.0",
-    "BaselineId": "2026-07-B",
-    "Status": "ResearchCandidate",
+    "BaselineId": "YYYY-MM-B",
+    "Status": "Discovered",
     "ReleaseChannel": "B",
-    "CutoffUtc": "2026-07-14T23:59:59Z",
-    "TargetBuildAfterUpdate": "20348.5386",
+    "CutoffUtc": null,
+    "TargetBuildAfterUpdate": "99999.0",
     "ChecksumAlgorithm": "SHA256",
     "SourcePrerequisites": [
       {
-        "PrerequisiteId": "Server2022-KB5030216-source-floor",
+        "PrerequisiteId": "Server2099-source-prerequisite",
         "Kind": "BridgeLCU",
-        "KbId": "KB5030216",
+        "KbId": "KB0000000",
         "Roles": [
           "SourcePrerequisite"
         ],
         "Targets": [
           "Install",
-          "Boot",
-          "WinRE"
+          "Boot"
         ],
         "Condition": {
-          "Mode": "IfImageOrServicingStackBelowFloor",
-          "MinimumImageBuild": "20348.1970",
-          "MinimumServicingStack": "20348.1960",
+          "Mode": "IfSourceBelowFloor",
+          "MinimumImageBuild": "99999.0",
           "Detection": [
-            "Get-WindowsImage",
             "Get-WindowsPackage",
-            "CompareActiveServicingStackVersion"
-          ],
-          "WinRePolicy": "ApplyWhenSourceBelowFloor_E2EConfirmed_0x800f0823"
+            "Get-WindowsImage"
+          ]
         },
-        "Asset": {
-          "KbId": "KB5030216",
-          "FileName": "windows10.0-kb5030216-x64_cbe587155f9818548b75f65d5cd41d341ed2fc61.msu",
-          "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2023/09/windows10.0-kb5030216-x64_cbe587155f9818548b75f65d5cd41d341ed2fc61.msu",
-          "Digest": "y+WHFV+YGFSLdfZdXNQdNB7S/GE=",
-          "Sha256": "",
-          "MinimumImageBuild": "20348.1970",
-          "MinimumImageServicingStack": "20348.1960",
-          "Condition": "ApplyOnlyWhenSourceBelowFloor",
-          "EvidenceUrl": "https://support.microsoft.com/en-us/topic/june-9-2026-kb5094128-os-build-20348-5256-56823f3e-e2a4-4839-ab01-b9de5ec4cbed",
-          "Note": "Retained for compatibility; canonical condition is PatchBaseline.SourcePrerequisites."
-        },
+        "Asset": null,
         "State": "Conditional",
         "Evidence": {
           "Levels": [
@@ -357,53 +339,45 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://support.microsoft.com/en-us/topic/june-9-2026-kb5094128-os-build-20348-5256-56823f3e-e2a4-4839-ab01-b9de5ec4cbed",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5030216"
+            "https://support.microsoft.com/<LCU-KB>"
           ],
           "VerifiedAt": "2026-07-11T00:00:00+09:00",
           "VerifiedBy": "research:ChatGPT-2026-07-11",
           "Notes": [
-            "Apply only when the source image is below Microsoft's documented servicing floor.",
-            "2026-07-12 E2E: WinRE SSU 20348.557 rejected KB5094128, which requires SSU 20348.1960 (0x800f0823)."
+            "Replace with the OS-specific prerequisite rule."
           ]
         },
         "VersionPolicy": {
           "RejectDowngrade": true,
           "UnknownStateDecision": "ManualReviewRequired",
           "MetadataRequired": true,
-          "DecisionMode": "CompareBridgeFloor",
-          "MinimumImageBuild": "20348.1970",
-          "MinimumServicingStackVersion": "20348.1960"
+          "DecisionMode": "CompareBridgeFloor"
         }
       }
     ],
     "Lines": [
       {
-        "PackageId": "Server2022-KB5099540-x64",
+        "PackageId": "Server2099-KB0000001-x64",
         "Kind": "LCU",
-        "KbId": "KB5099540",
+        "KbId": "KB0000001",
         "ParentKbId": null,
-        "UpdateId": "1e3afdda-0049-4d76-8711-b76c2d509dac",
+        "UpdateId": null,
         "Revision": null,
-        "Title": "2026-07 B release for Server2022 (KB5099540)",
-        "Products": [
-          "Microsoft Server operating system-21H2"
-        ],
-        "Classification": "Security Updates",
+        "Title": null,
+        "Products": null,
+        "Classification": null,
         "Architecture": "x64",
-        "ReleaseDate": "2026-07-14",
+        "ReleaseDate": null,
         "ReleaseType": "B",
         "State": "Discovered",
-        "FileName": "windows10.0-kb5099540-x64_9238518dcf76e3b46d5c72e0392b0e04e5d2ae66.msu",
+        "FileName": null,
         "DownloadUrl": null,
-        "Digest": "kjhRjc9247RtXHLgOSsOBOXSrmY=",
+        "Digest": null,
         "Sha256": "",
         "SizeBytes": null,
         "ApplyOrder": 20,
-        "InScope": {
-          "build": "20348.5386"
-        },
-        "Note": "The same combined LCU asset is reused as servicing-stack carrier and final LCU.",
+        "InScope": {},
+        "Note": "Populate UpdateId, revision, file identity and SHA-256 before Freeze.",
         "Roles": [
           "ServicingStackCarrier",
           "FinalLCU"
@@ -425,80 +399,6 @@
         },
         "Dependencies": [],
         "Integrity": {
-          "Sha1": {
-            "Encoding": "base64",
-            "Value": "kjhRjc9247RtXHLgOSsOBOXSrmY=",
-            "Hex": "9238518dcf76e3b46d5c72e0392b0e04e5d2ae66"
-          },
-          "Sha256": null,
-          "SizeBytes": null,
-          "AuthenticodeStatus": "NotTested"
-        },
-        "Evidence": {
-          "Levels": [
-            "E1",
-            "E2"
-          ],
-          "SourceUrls": [
-            "https://support.microsoft.com/help/5099540"
-          ],
-          "VerifiedAt": "2026-07-15T00:00:00Z",
-          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
-          "Notes": [
-            "Target OS build 20348.5386. Exact Catalog asset is re-resolved at P04.",
-            "Embedded SSU KB5120210 build 20348.5384."
-          ]
-        },
-        "VersionPolicy": {
-          "RejectDowngrade": true,
-          "UnknownStateDecision": "ManualReviewRequired",
-          "MetadataRequired": true,
-          "DecisionMode": "CompareTargetBuild",
-          "TargetVersion": "20348.5386",
-          "EmbeddedServicingStackVersion": "20348.5384"
-        }
-      },
-      {
-        "PackageId": "Server2022-KB5101010-x64",
-        "Kind": "DotNet",
-        "KbId": "KB5101010",
-        "ParentKbId": "KB5102206",
-        "UpdateId": null,
-        "Revision": null,
-        "Title": "2026-07 Cumulative Update for .NET Framework 3.5 and 4.8 for Microsoft server operating system version 21H2 for x64 (KB5101010)",
-        "Products": [
-          "Microsoft Server operating system-21H2"
-        ],
-        "Classification": "Security Updates",
-        "Architecture": "x64",
-        "ReleaseDate": "2026-07-14",
-        "ReleaseType": "B",
-        "State": "Discovered",
-        "FileName": null,
-        "DownloadUrl": null,
-        "Digest": null,
-        "Sha256": "",
-        "SizeBytes": null,
-        "ApplyOrder": 60,
-        "InScope": {},
-        "Note": "2026-07 leaf security CU for the default Server 2022 .NET Framework 4.8 media state; exact Catalog asset is resolved at P04.",
-        "Roles": [
-          "DotNetLeaf"
-        ],
-        "TargetsByRole": {
-          "DotNetLeaf": [
-            "Install"
-          ]
-        },
-        "RuntimeSelector": {
-          "NetFx3": "PresentOrEnabled",
-          "NetFx4Release": "4.8"
-        },
-        "Applicability": {
-          "Mode": "IfRuntimeDetectedPerInstallIndex"
-        },
-        "Dependencies": [],
-        "Integrity": {
           "Sha1": null,
           "Sha256": null,
           "SizeBytes": null,
@@ -510,115 +410,35 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/07-14-july-cumulative-update",
-            "https://support.microsoft.com/help/KB5101010",
-            "https://support.microsoft.com/help/KB5102206",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5101010",
-            "https://support.microsoft.com/en-us/servicing/os/azure-marketplace/windows-server/2026/windows-server-images-for-july-2026"
+            "https://learn.microsoft.com/en-us/windows/release-health/windows-server-release-info",
+            "https://support.microsoft.com/<LCU-KB>",
+            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB0000001"
           ],
-          "VerifiedAt": "2026-07-18T00:00:00+09:00",
-          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
+          "VerifiedAt": "2026-07-11T00:00:00+09:00",
+          "VerifiedBy": "research:ChatGPT-2026-07-11",
           "Notes": [
-            "2026-07 leaf security CU for the default Server 2022 .NET Framework 4.8 media state; exact Catalog asset is resolved at P04.",
-            "Exact Catalog asset identity is resolved and integrity-checked at P04."
+            "Populate UpdateId, revision, file identity and SHA-256 before Freeze."
           ]
         },
         "VersionPolicy": {
           "RejectDowngrade": true,
           "UnknownStateDecision": "ManualReviewRequired",
           "MetadataRequired": true,
-          "DecisionMode": "ComparePackageFamily",
-          "PackageFamily": "DotNetRollup"
+          "DecisionMode": "CompareTargetBuild"
         }
       },
       {
-        "PackageId": "Server2022-KB5101005-x64",
-        "Kind": "DotNet",
-        "KbId": "KB5101005",
-        "ParentKbId": "KB5102206",
-        "UpdateId": null,
-        "Revision": null,
-        "Title": "2026-07 Cumulative Update for .NET Framework 3.5 and 4.8.1 for Microsoft server operating system version 21H2 for x64 (KB5101005)",
-        "Products": [
-          "Microsoft Server operating system-21H2"
-        ],
-        "Classification": "Security Updates",
-        "Architecture": "x64",
-        "ReleaseDate": "2026-07-14",
-        "ReleaseType": "B",
-        "State": "Discovered",
-        "FileName": null,
-        "DownloadUrl": null,
-        "Digest": null,
-        "Sha256": "",
-        "SizeBytes": null,
-        "ApplyOrder": 60,
-        "InScope": {},
-        "Note": "2026-07 leaf security CU selected when .NET Framework 4.8.1 is detected on Server 2022; exact Catalog asset is resolved at P04.",
-        "Roles": [
-          "DotNetLeaf"
-        ],
-        "TargetsByRole": {
-          "DotNetLeaf": [
-            "Install"
-          ]
-        },
-        "RuntimeSelector": {
-          "NetFx3": "PresentOrEnabled",
-          "NetFx4Release": "4.8.1"
-        },
-        "Applicability": {
-          "Mode": "IfRuntimeDetectedPerInstallIndex"
-        },
-        "Dependencies": [],
-        "Integrity": {
-          "Sha1": null,
-          "Sha256": null,
-          "SizeBytes": null,
-          "AuthenticodeStatus": "NotTested"
-        },
-        "Evidence": {
-          "Levels": [
-            "E1",
-            "E2"
-          ],
-          "SourceUrls": [
-            "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/07-14-july-cumulative-update",
-            "https://support.microsoft.com/help/KB5101005",
-            "https://support.microsoft.com/help/KB5102206",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5101005",
-            "https://support.microsoft.com/en-us/servicing/os/azure-marketplace/windows-server/2026/windows-server-images-for-july-2026"
-          ],
-          "VerifiedAt": "2026-07-18T00:00:00+09:00",
-          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
-          "Notes": [
-            "2026-07 leaf security CU selected when .NET Framework 4.8.1 is detected on Server 2022; exact Catalog asset is resolved at P04.",
-            "Exact Catalog asset identity is resolved and integrity-checked at P04."
-          ]
-        },
-        "VersionPolicy": {
-          "RejectDowngrade": true,
-          "UnknownStateDecision": "ManualReviewRequired",
-          "MetadataRequired": true,
-          "DecisionMode": "ComparePackageFamily",
-          "PackageFamily": "DotNetRollup"
-        }
-      },
-      {
-        "PackageId": "Server2022-KB5099552-x64",
+        "PackageId": "Server2099-KB0000002-x64",
         "Kind": "SafeOSDU",
-        "KbId": "KB5099552",
+        "KbId": "KB0000002",
         "ParentKbId": null,
         "UpdateId": null,
         "Revision": null,
-        "Title": "2026-07 Safe OS Dynamic Update for Windows Server 2022 for x64-based Systems (KB5099552)",
-        "Products": [
-          "Windows 10 and later Dynamic Update",
-          "Windows Safe OS Dynamic Update"
-        ],
-        "Classification": "Critical Updates",
+        "Title": null,
+        "Products": null,
+        "Classification": null,
         "Architecture": "x64",
-        "ReleaseDate": "2026-07-14",
+        "ReleaseDate": null,
         "ReleaseType": "DynamicUpdate",
         "State": "Discovered",
         "FileName": null,
@@ -628,7 +448,7 @@
         "SizeBytes": null,
         "ApplyOrder": 40,
         "InScope": {},
-        "Note": "July 2026 Safe OS Dynamic Update for Windows Server 2022.",
+        "Note": null,
         "Roles": [
           "SafeOSDU"
         ],
@@ -654,16 +474,11 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://support.microsoft.com/help/KB5099552",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5099552",
-            "https://support.microsoft.com/en-us/servicing/os/azure-marketplace/windows-server/2026/windows-server-images-for-july-2026"
+            "https://support.microsoft.com/<SafeOS-DU-KB>"
           ],
-          "VerifiedAt": "2026-07-18T00:00:00+09:00",
-          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
-          "Notes": [
-            "July 2026 Safe OS Dynamic Update for Windows Server 2022.",
-            "The July 2026 Server image inventory is the authoritative month-to-KB cross-check; exact Catalog asset identity is resolved and integrity-checked at P04."
-          ]
+          "VerifiedAt": "2026-07-11T00:00:00+09:00",
+          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "Notes": []
         },
         "VersionPolicy": {
           "RejectDowngrade": true,
@@ -674,21 +489,19 @@
         }
       },
       {
-        "PackageId": "Server2022-KB5079518-x64",
+        "PackageId": "Server2099-KB0000003-x64",
         "Kind": "SetupDU",
-        "KbId": "KB5079518",
+        "KbId": "KB0000003",
         "ParentKbId": null,
         "UpdateId": null,
         "Revision": null,
         "Title": null,
-        "Products": [
-          "Windows 10 and later Dynamic Update"
-        ],
-        "Classification": "Critical Updates",
+        "Products": null,
+        "Classification": null,
         "Architecture": "x64",
-        "ReleaseDate": "2026-03-10",
+        "ReleaseDate": null,
         "ReleaseType": "DynamicUpdate",
-        "State": "Fallback",
+        "State": "Discovered",
         "FileName": null,
         "DownloadUrl": null,
         "Digest": null,
@@ -696,7 +509,7 @@
         "SizeBytes": null,
         "ApplyOrder": 80,
         "InScope": {},
-        "Note": "Latest prior Setup Dynamic Update used by the July 2026 Server image set.",
+        "Note": null,
         "Roles": [
           "SetupDU"
         ],
@@ -707,7 +520,7 @@
         },
         "RuntimeSelector": null,
         "Applicability": {
-          "Mode": "LatestPriorForBuildFamily"
+          "Mode": "SameMonthOrLatestPrior"
         },
         "Dependencies": [],
         "Integrity": {
@@ -722,24 +535,81 @@
             "E2"
           ],
           "SourceUrls": [
-            "https://support.microsoft.com/en-us/topic/kb5079518-setup-dynamic-update-for-windows-server-2022-march-10-2026-1e93ff7e-93de-47cf-8140-1e4ef663b4a3",
-            "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5079518",
-            "https://support.microsoft.com/en-us/servicing/os/azure-marketplace/windows-server/2026/windows-server-images-for-july-2026"
+            "https://support.microsoft.com/<Setup-DU-KB>"
           ],
-          "VerifiedAt": "2026-07-18T00:00:00+09:00",
-          "VerifiedBy": "ChatGPT+official-Microsoft-sources",
-          "Notes": [
-            "Latest prior Setup Dynamic Update used by the July 2026 Server image set.",
-            "Fallback only. P04 ResolveMonthlyAuxiliariesAtFetch replaces this line with the latest non-preview package at or before 2026-07.",
-            "The July 2026 Server image inventory confirms that this Setup DU remains current for this OS family."
-          ]
+          "VerifiedAt": "2026-07-11T00:00:00+09:00",
+          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "Notes": []
         },
         "VersionPolicy": {
           "RejectDowngrade": true,
           "UnknownStateDecision": "ManualReviewRequired",
           "MetadataRequired": false,
           "DecisionMode": "CompareSetupFileSet",
-          "ComparisonDeferredTo": "P09"
+          "ComparisonPhase": "P09"
+        }
+      },
+      {
+        "PackageId": "Server2099-KB0000004-x64",
+        "Kind": "DotNet",
+        "KbId": "KB0000004",
+        "ParentKbId": null,
+        "UpdateId": null,
+        "Revision": null,
+        "Title": null,
+        "Products": null,
+        "Classification": null,
+        "Architecture": "x64",
+        "ReleaseDate": null,
+        "ReleaseType": "B",
+        "State": "Discovered",
+        "FileName": null,
+        "DownloadUrl": null,
+        "Digest": null,
+        "Sha256": "",
+        "SizeBytes": null,
+        "ApplyOrder": 60,
+        "InScope": {},
+        "Note": null,
+        "Roles": [
+          "DotNetLeaf"
+        ],
+        "TargetsByRole": {
+          "DotNetLeaf": [
+            "Install"
+          ]
+        },
+        "RuntimeSelector": {
+          "NetFx4Release": "<detected runtime>"
+        },
+        "Applicability": {
+          "Mode": "IfRuntimeDetectedPerInstallIndex"
+        },
+        "Dependencies": [],
+        "Integrity": {
+          "Sha1": null,
+          "Sha256": null,
+          "SizeBytes": null,
+          "AuthenticodeStatus": "NotTested"
+        },
+        "Evidence": {
+          "Levels": [
+            "E1",
+            "E2"
+          ],
+          "SourceUrls": [
+            "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/release-notes"
+          ],
+          "VerifiedAt": "2026-07-11T00:00:00+09:00",
+          "VerifiedBy": "research:ChatGPT-2026-07-11",
+          "Notes": []
+        },
+        "VersionPolicy": {
+          "RejectDowngrade": true,
+          "UnknownStateDecision": "ManualReviewRequired",
+          "MetadataRequired": true,
+          "DecisionMode": "ComparePackageFamily",
+          "PackageFamily": "DotNetRollup"
         }
       }
     ],
@@ -760,21 +630,9 @@
       ],
       "ApprovalRequiredForBuild": true
     },
-    "LastVerifiedDate": "2026-07-15T00:00:00Z",
-    "LastVerifiedBy": "ChatGPT+official-Microsoft-sources",
-    "PatchTuesdayOfBaseline": "2026-07-14",
-    "BridgeLcu": {
-      "KbId": "KB5030216",
-      "FileName": "windows10.0-kb5030216-x64_cbe587155f9818548b75f65d5cd41d341ed2fc61.msu",
-      "DownloadUrl": "https://catalog.s.download.windowsupdate.com/c/msdownload/update/software/secu/2023/09/windows10.0-kb5030216-x64_cbe587155f9818548b75f65d5cd41d341ed2fc61.msu",
-      "Digest": "y+WHFV+YGFSLdfZdXNQdNB7S/GE=",
-      "Sha256": "",
-      "MinimumImageBuild": "20348.1970",
-      "MinimumImageServicingStack": "20348.1960",
-      "Condition": "ApplyOnlyWhenSourceBelowFloor",
-      "EvidenceUrl": "https://support.microsoft.com/en-us/topic/june-9-2026-kb5094128-os-build-20348-5256-56823f3e-e2a4-4839-ab01-b9de5ec4cbed",
-      "Note": "Retained for compatibility; canonical condition is PatchBaseline.SourcePrerequisites."
-    }
+    "LastVerifiedDate": "2026-07-11T00:00:00+09:00",
+    "LastVerifiedBy": "research:data-model-v4",
+    "PatchTuesdayOfBaseline": "2026-06-09"
   },
   "Pca2023": {
     "Mode": "ConvertByDefault",
@@ -827,30 +685,13 @@
     "en-us": {
       "DisplayName": "English (United States)",
       "Iso": {
-        "Url": "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso",
+        "Url": "<official ISO URL>",
         "Sha256": "",
         "State": "UrlResolvedHashPending",
-        "_VerifiedDate": "2026-05-26",
-        "_VerifiedBy": "legacy:v3"
+        "_VerifiedDate": null,
+        "_VerifiedBy": null
       },
-      "VolumeLabelPrefix": "WS2022EN",
-      "LanguageSpecificPatches": {
-        "LanguagePacks": [],
-        "LxpUpdates": [],
-        "DotNetLanguagePacks": [],
-        "SelectionPolicy": "ExplicitOnly"
-      }
-    },
-    "ja-jp": {
-      "DisplayName": "Japanese",
-      "Iso": {
-        "Url": "https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_ja-jp.iso",
-        "Sha256": "",
-        "State": "UrlResolvedHashPending",
-        "_VerifiedDate": "2026-05-26",
-        "_VerifiedBy": "legacy:v3"
-      },
-      "VolumeLabelPrefix": "WS2022JA",
+      "VolumeLabelPrefix": "WS2099EN",
       "LanguageSpecificPatches": {
         "LanguagePacks": [],
         "LxpUpdates": [],
@@ -860,15 +701,13 @@
     }
   },
   "_meta": {
-    "scriptVersion": "update-wsi-2026.07.18-r12.15",
-    "generatedAt": "2026-07-18T00:00:00Z",
-    "isTemplate": false,
+    "scriptVersion": "update-wsi-2026.07.14-r12.04",
+    "generatedAt": "2026-07-11T00:00:00Z",
+    "isTemplate": true,
     "migrationFromSchema": "3.0",
-    "compatibilityNote": "PatchModel and legacy flat package fields are retained for staged migration.",
-    "catalogCrossCheckManifest": "data/catalog-crosscheck-manifest.json",
-    "r1215CrossCheck": "2026-07 .NET and Safe OS DU cross-check against official Microsoft release notes and Server image inventory."
+    "compatibilityNote": "PatchModel and legacy flat package fields are retained for staged migration."
   },
-  "PatchModel": "embedded-ssu-du",
+  "PatchModel": "embedded-ssu",
   "Compatibility": {
     "LegacySchema": "3.0",
     "LegacyFieldsRetained": [

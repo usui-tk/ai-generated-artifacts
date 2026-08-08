@@ -23,12 +23,24 @@ P04 ``ExpectedHashes`` seeding. This test pins both halves:
    exact pair is pinned here as a regression vector.
 3. **Hex pass-through + rejection paths.** Hex input returns unchanged
    (lowercased); non-hex/non-base64 input and wrong-length base64 throw.
-4. **Static wiring guard.** The script text must (a) normalize BOTH
-   expected hashes through the boundary function inside
-   ``Test-PatchIntegrity`` and (b) seed BOTH ``'sha-1'`` (from
-   ``Line.Digest``) and ``'sha-256'`` (from ``Line.Sha256``) in the P04
-   ExpectedHashes block -- so the fix cannot silently regress to a bare
-   ``.ToLower()`` comparison or drop the primary-key wiring.
+4. **Static wiring guard (REPLACED at r12.00, Schema 4.0).** The old
+   guard pinned direct flat-field reads (``$p.Digest`` / ``$p.Sha256``)
+   in the P04 seeding block. r12 makes ``PatchBaseline.Lines[].Integrity``
+   the canonical integrity surface and keeps the flat ``Digest`` /
+   ``Sha256`` fields only as ``Compatibility.LegacyFieldsRetained``; the
+   runtime therefore reads every baseline hash through the single
+   accessor ``Get-BaselineHashValue -Line ... -Algorithm Sha1|Sha256``,
+   which serves both surfaces (flat legacy fields honoured for retained
+   v3 data, ``Integrity.<Alg>.Value`` for canonical v4 data). The guard
+   now pins: (a) BOTH expected hashes are normalized through the boundary
+   function inside ``Test-PatchIntegrity``; (b) the P04/runtime seeding
+   goes through ``Get-BaselineHashValue`` and no direct ``$p.Digest`` /
+   ``$p.Sha256`` seeding remains; (c) the accessor itself reads the
+   canonical ``Integrity.<Alg>.Value`` node and guards the flat fields as
+   the retained-legacy path. The data-side declaration (every Line
+   carries ``Integrity`` with valid algorithm nodes) is T43
+   ``line_integrity_declaration_test.py``; this test keeps the
+   script-side wiring and the format boundary.
 
 Run from the project root:
 
@@ -159,17 +171,39 @@ def main() -> int:
         passed, failed)
 
     passed, failed = check(
-        "P04 seeding wires Line.Digest into ExpectedHashes['sha-1']",
-        re.search(r"\$expectedHashes\['sha-1'\]\s*=\s*\[string\]\$p\.Digest",
+        "baseline-line seeding goes through the single accessor (Sha1)",
+        re.search(r"\$sha1\s*=\s*Get-BaselineHashValue\s+-Line\s+\$\w+\s+-Algorithm\s+Sha1",
                   text) is not None,
-        "expected `$expectedHashes['sha-1'] = [string]$p.Digest`",
+        "expected `$sha1 = Get-BaselineHashValue -Line ... -Algorithm Sha1`",
         passed, failed)
 
     passed, failed = check(
-        "P04 seeding still wires Line.Sha256 into ExpectedHashes['sha-256']",
-        re.search(r"\$expectedHashes\['sha-256'\]\s*=\s*\$p\.Sha256",
+        "baseline-line seeding goes through the single accessor (Sha256)",
+        re.search(r"\$sha256\s*=\s*Get-BaselineHashValue\s+-Line\s+\$\w+\s+-Algorithm\s+Sha256",
                   text) is not None,
-        "expected `$expectedHashes['sha-256'] = $p.Sha256`",
+        "expected `$sha256 = Get-BaselineHashValue -Line ... -Algorithm Sha256`",
+        passed, failed)
+
+    passed, failed = check(
+        "no direct flat-field seeding of a baseline Line remains",
+        re.search(r"\$expectedHashes\['sha-(?:1|256)'\]\s*=\s*(?:\[string\])?\$p\.(?:Digest|Sha256)",
+                  text) is None,
+        "a direct `$p.Digest` / `$p.Sha256` ExpectedHashes seeding resurfaced",
+        passed, failed)
+
+    passed, failed = check(
+        "accessor reads the canonical Integrity.<Alg>.Value node",
+        "function Get-BaselineHashValue" in text
+        and re.search(r"\$Line\.Integrity\b", text) is not None
+        and re.search(r"\$node\.Value\b", text) is not None,
+        "Get-BaselineHashValue does not read Integrity.<Alg>.Value",
+        passed, failed)
+
+    passed, failed = check(
+        "accessor guards the flat fields as the retained-legacy path",
+        re.search(r"PSObject\.Properties\['Digest'\]", text) is not None
+        and re.search(r"PSObject\.Properties\['Sha256'\]", text) is not None,
+        "flat legacy Digest/Sha256 path missing from the accessor",
         passed, failed)
 
     print()

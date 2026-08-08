@@ -310,10 +310,11 @@ jobs:
           }
 
       # --- Smoke test 3: Synthetic + DryRun (no DISM writes, no Catalog) ---
-      # Exercises the registry-driven dispatcher and the P02/P04/P05
-      # planning paths without mounting any WIM. -SyntheticTestMode also
-      # implicitly skips P03 (Catalog refresh) and P06 (patch-servicing validation)
-      # in r05.0+ phase numbering (was P02.5/P04.5 in r04.x).
+      # Exercises the registry-driven dispatcher and the planning paths
+      # without mounting any WIM. -SyntheticTestMode skips the Catalog
+      # refresh and the patch-servicing validation phases, so the step
+      # needs no Catalog connectivity. The durable phase model is
+      # P01-P14 (plus P08S); see the project SPEC for the registry.
       - name: '[Smoke3] Synthetic + DryRun'
         shell: powershell
         timeout-minutes: 5

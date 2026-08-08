@@ -27,6 +27,20 @@ boot.wim). What this test pins:
      images and MediaSetupBinaries for the media root; P11 emits
      SetupBinarySync_* rows and grades a mismatch Fail.
 
+O7 supersession [2026-08-07, re-impl phase C]: the P08S pipeline-wiring
+pin was originally a global token-count proxy
+(``code.count("'P08','P08S','P09'")``) whose expected value broke at
+r12.35 when the resume layer legitimately added a fifth wiring site
+(adjudicated option A: count 4 -> 5 with provenance). This file now
+carries the deferred option-B rework instead: a structural invariant
+(every quoted phase-ID list literal of three or more elements that
+contains both P08 and P09 must wire P08S strictly between them --
+two-element constructs such as parameter ValidateSets are exempt by
+the length discriminator) plus per-site pins for the five known
+pipeline lists. A legitimately added new pipeline list that wires
+P08S correctly no longer breaks the contract; a list that drops or
+misorders P08S fails with a specific diagnosis.
+
 Run:  python3 tests/setup_binaries_sync_test.py
 Deps: pwsh on PATH (same as T31/T37/T38).
 """
@@ -60,12 +74,20 @@ def main() -> int:
 
     with PSSession(SCRIPT_PATH) as ps:
         print("=== 1. Get-SetupBinarySyncPlan build gates ===")
+        # r12.72 T39 revision: the sync SET became build-independent BY
+        # DESIGN — Microsoft final media Dynamic Update copies setup.exe
+        # AND setuphost.exe from serviced WinPE for every supported OS;
+        # the 26100 threshold moved from the plan to the REQUIREMENT
+        # (SetupHostRequired: missing setuphost.exe throws on 26100+,
+        # tolerated below when genuinely absent from boot.wim index 2).
+        # Pins re-derived from the measured r12.72 surface and verified
+        # byte-identical at the r12.75 terminal frame.
         cases = [
             (26100, ["setup.exe", "setuphost.exe"]),
             (27000, ["setup.exe", "setuphost.exe"]),
-            (20348, ["setup.exe"]),
-            (17763, ["setup.exe"]),
-            (14393, ["setup.exe"]),
+            (20348, ["setup.exe", "setuphost.exe"]),
+            (17763, ["setup.exe", "setuphost.exe"]),
+            (14393, ["setup.exe", "setuphost.exe"]),
         ]
         ok = True
         detail = ""
@@ -77,12 +99,18 @@ def main() -> int:
                 detail = f"build {build}: {files!r} != {expect!r}"
                 break
         passed, failed = check(
-            "setuphost.exe joins the plan at 26100+ only", ok, detail, passed, failed)
+            "every build plans setup.exe + setuphost.exe (build-independent set)",
+            ok, detail, passed, failed)
+        passed, failed = check(
+            "the 26100 threshold lives in SetupHostRequired, and a required-but-missing setuphost fails",
+            "$result.SetupHostRequired = [bool]($imageVersion -ge [version]'10.0.26100.0')" in code
+            and "requires sources\\setuphost.exe, but it is missing." in code,
+            "requirement gate pinned", passed, failed)
         plan = ps.invoke("Get-SetupBinarySyncPlan", BuildNumber=None)
         files = plan["Files"] if isinstance(plan["Files"], list) else [plan["Files"]]
         passed, failed = check(
-            "unknown build -> setup.exe only, with a stated reason",
-            files == ["setup.exe"] and "unknown" in str(plan["Reason"]),
+            "unknown build -> both files planned, with a stated reason",
+            files == ["setup.exe", "setuphost.exe"] and "unknown" in str(plan["Reason"]),
             f"got={plan!r}", passed, failed)
 
         print("=== 2. Get-SetupBinaryFileEvidence ===")
@@ -136,12 +164,47 @@ def main() -> int:
     passed, failed = check(
         "P08S registered between P08 and P09 (Build group)",
         bool(reg), "registry order pin failed", passed, failed)
-    lists_ok = (
-        code.count("'P08','P08S','P09'") == 3  # two standardFull variants + Build action
-    )
+    # O7 option-B rework [2026-08-07]: structural invariant + per-site
+    # pins replace the former global token-count proxy (see header).
+    bad_lists = []
+    for m in re.finditer(r"(?:'P\d{2}[A-Z]?'\s*,\s*)+'P\d{2}[A-Z]?'", code):
+        ids = re.findall(r"'(P\d{2}[A-Z]?)'", m.group(0))
+        if len(ids) < 3 or "P08" not in ids or "P09" not in ids:
+            continue
+        if ("P08S" not in ids
+                or not ids.index("P08") < ids.index("P08S") < ids.index("P09")):
+            line = code.count("\n", 0, m.start()) + 1
+            bad_lists.append(f"line {line}: {ids!r}")
     passed, failed = check(
-        "P08S wired into both standard pipelines and the Build action (3 lists)",
-        lists_ok, f"count={code.count(chr(39) + 'P08' + chr(39) + ',' + chr(39) + 'P08S' + chr(39))}", passed, failed)
+        "every pipeline phase list containing P08 and P09 wires P08S strictly between them",
+        not bad_lists, "; ".join(bad_lists), passed, failed)
+
+    anchor = "$standardFull = if ($Script:SyntheticTestMode) {"
+    idx = code.find(anchor)
+    window = code[idx:idx + 400] if idx >= 0 else ""
+    passed, failed = check(
+        "P08S wired into both standardFull pipeline variants (synthetic + normal)",
+        idx >= 0 and window.count("'P08','P08S','P09'") == 2,
+        f"anchor found={idx >= 0}, wired variants={window.count(chr(39) + 'P08' + chr(39) + ',' + chr(39) + 'P08S' + chr(39) + ',' + chr(39) + 'P09' + chr(39))}",
+        passed, failed)
+    passed, failed = check(
+        "P08S wired into the Build action list (P07..P10)",
+        bool(re.search(r"'Build'\s*\{\s*return \[string\[\]\]@\('P07','P08','P08S','P09','P10'\)\s*\}", code)),
+        "Build action list pin failed", passed, failed)
+    resume_idx = code.find("$Script:RequestedResumeFromPhase -eq 'P08'")
+    resume_window = code[resume_idx:resume_idx + 300] if resume_idx >= 0 else ""
+    passed, failed = check(
+        "P08S wired into the ResumeFromPhase P08 list (r12.05)",
+        resume_idx >= 0
+        and "@('P01','P02','P08','P08S','P09','P10','P11','P12','P13')" in resume_window,
+        "ResumeFromPhase list pin failed", passed, failed)
+    prefix_idx = code.find("function Reset-ResumeDownstreamState")
+    prefix_window = code[prefix_idx:prefix_idx + 400] if prefix_idx >= 0 else ""
+    passed, failed = check(
+        "P08S wired into the resume downstream-cleanup prefix list (r12.35)",
+        prefix_idx >= 0
+        and "@('P08','P08S','P09','P10','P11','P12','P13','P14')" in prefix_window,
+        "downstream-cleanup prefix list pin failed", passed, failed)
 
     print("=== 5. Structure pins: explicit-sync contract ===")
     fn = code[code.find("function Invoke-BuildPhase08S_SyncSetupBinaries"):]
@@ -182,8 +245,8 @@ def main() -> int:
         "SetupBinarySync_" in code and "-Actual 'MISMATCH' -Status 'Fail'" in code,
         "P11 pin failed", passed, failed)
     passed, failed = check(
-        "version bumped to r11.68 setup-binaries-sync",
-        "update-wsi-2026.07.11-r11.68" in code and "'setup-binaries-sync'" in code,
+        "version bumped to r12.85 (tag: doc-contract-r5)",
+        "update-wsi-2026.08.08-r12.85" in code and "'doc-contract-r5'" in code,
         "bump pin failed", passed, failed)
 
     print(f"\n  Summary: {passed} passed, {failed} failed, {passed + failed} total")

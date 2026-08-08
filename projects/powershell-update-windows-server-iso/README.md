@@ -141,12 +141,16 @@ projects/powershell-update-windows-server-iso/
 ├── PSScriptAnalyzerSettings.psd1     # PSScriptAnalyzer project configuration
 ├── data/                             # Persistent inputs (committed, flat layout)
 │   ├── config-Server{2016,2019,2022,2025}.json
+│   ├── config-template-v4.json       # Schema 4.0 template for adding an OS
 │   ├── raw-release-info.md (+ .meta.json)
 │   ├── raw-dotnet-cu.json
 │   ├── cache-release-info.json
 │   └── cache-dotnet-cu.json
-├── tests/                            # Self-verification suite (sparse T1-T31 + gates)
-└── docs/history/                     # Per-cycle investigation reports
+├── schema/                           # Machine-readable config contracts
+│   ├── config.schema.json            # Config Schema v3.0 (retained-compatibility)
+│   ├── config.schema.v4.json         # Config Schema v4.0 (canonical, r12.00)
+│   └── config-seed.schema.json       # SEED projection (SPEC B.14.2)
+└── tests/                            # Self-verification suite (sparse T1-T55 + gates)
 ```
 
 The PowerShell static analyzer (`psa.py`) used to verify this script
@@ -201,12 +205,13 @@ $LogFile    = Join-Path $WorkRoot ('logs\{0}-{1}-{2}.log' -f 'PrepareBuildVerify
 
 ### Worked example: Server 2016 vs Server 2025
 
-P10 (PCA2023 boot-manager conversion) now runs by default,
-readiness-driven, so Server 2016 needs no PCA2023 switches at all.
-Server 2025 is the exception: it still skips P10 unless
-`-ForcePca2023OnServer2025` is set (certified 2025 platforms carry the
-2023 certificates in firmware). To keep the shipped PCA2011-signed
-boot manager on any OS, opt out with `-SkipPca2023BootManager`.
+P10 (PCA2023 boot-manager conversion) runs by default,
+readiness-driven, for **every supported OS including Server 2025** —
+neither example below needs a PCA2023 switch. To keep the shipped
+PCA2011-signed boot manager on any OS, opt out with
+`-SkipPca2023BootManager`. (`-ForcePca2023OnServer2025` survives only
+as a deprecated no-op compatibility slot and emits a caution when
+supplied; do not infer current policy from it.)
 
 ```powershell
 # Server 2016 (no PCA2023 switches)
@@ -219,14 +224,13 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     -UseBaselineOnly `
     -Execute
 
-# Server 2025 (override the 2025-specific P10 skip)
+# Server 2025 (no PCA2023 switches needed -- conversion is default-on)
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 .\Update-WindowsServerIso.ps1 `
     -Action PrepareBuildVerify `
     -OsVersion Server2025 -OsLanguage ja-jp `
     -WorkRoot 'D:\UpdateWsi-Server2025' `
     -LogFile ('D:\UpdateWsi-Server2025\logs\build-2025-{0}.log' -f $stamp) `
-    -ForcePca2023OnServer2025 `
     -UseBaselineOnly `
     -Execute
 ```
@@ -256,7 +260,7 @@ by purpose. The default is `PrepareBuildVerify`.
 | Action | Description |
 |:---|:---|
 | `BootTest` | Hyper-V Gen2 Secure Boot smoke test against the output ISO: console screenshots for operator review (mutually exclusive with `-SyntheticTestMode`; the full revoked-firmware matrix lives in `tools/boot-verification/`) |
-| `GenerateManifest` | Compute a manifest of resolved patches (P01-P03 only) |
+| `GenerateManifest` | **Placeholder**: runs the P01-P03 resolution, then emits a placeholder caution — the manifest-file emission step is not implemented in this revision (SPEC Part H.2) |
 | `Cleanup` | Clean up workspace and stale DISM mounts |
 | `ListPhases` | Dump phase + action registry as JSON |
 | `TestHarness` | Eval-PS-function REPL mode used by `tests/powershell_harness.py` (T3); not for human invocation |
@@ -264,7 +268,7 @@ by purpose. The default is `PrepareBuildVerify`.
 ### Admin Actions (Config baseline management)
 
 The `data/config-<OsKey>.json` files hold the baseline data the script
-uses. Five Admin Actions let you refresh and inspect that data without
+uses. Four Admin Actions let you refresh and inspect that data without
 touching any ISO. **The refresh path is two-stage**: `RefreshSnapshots`
 populates the upstream `data/raw-*` / `data/cache-*` files from
 Microsoft Learn + Microsoft Update Catalog, then `RefreshAllBaselines`
@@ -319,7 +323,7 @@ groups for newly-added languages).
 | Privileges | Administrator (DISM Mount requires elevation) |
 | Windows ADK | Deployment Tools feature (provides `oscdimg.exe`); auto-installed when missing (no switch) |
 | Windows SDK Signing Tools | Provides `signtool.exe` for embedded PCA2023/PCA2011 boot-signature verification (P10/P12 readiness); auto-installed when missing (no switch) |
-| Disk space | 100 GB free on the `-WorkRoot` drive (60 GB minimum, 100 GB enforced by Workspace preflight) |
+| Disk space | 100 GB minimum free on the `-WorkRoot` drive, enforced by the Workspace preflight |
 | Network | Internet access for ISO / patch downloads (offline: `-IsoPath` + pre-staged patch files under `<WorkRoot>/patches/<OsVersion>/`, LCU + checkpoint MSUs in the `cu/` subfolder) |
 | Static analysis | `python3` + the canonical `psa.py` for static analysis (see "Static analysis" below) |
 
@@ -330,7 +334,7 @@ groups for newly-added languages).
 | Server 2016 | en-us, ja-jp | LCU 2024-4B or later required for PCA2023 conversion |
 | Server 2019 | en-us, ja-jp | LCU 2024-4B or later required for PCA2023 conversion |
 | Server 2022 | en-us, ja-jp | LCU 2025-2B (build 20348.2227) or later required for PCA2023 conversion |
-| Server 2025 | en-us, ja-jp | PCA2023 not required by default; firmware-provided 2023 certificates |
+| Server 2025 | en-us, ja-jp | PCA2023 conversion default-on (current policy); firmware also provides the 2023 certificates on certified platforms |
 
 Adding a new language is a single-node addition under
 `LanguageSpecific` in the relevant `data/config-Server<N>.json`. See
@@ -338,13 +342,13 @@ SPEC.md §B.4.5.
 
 ## Phase reference
 
-Pipeline of thirteen phases:
+Pipeline (canonical phase model P01-P14, incl. the inserted P08S build phase):
 
 | ID | Name | Group | What it does |
 |:---|:---|:---|:---|
 | P01 | Initialize | Setup | PowerShell environment, admin, ADK, disk, Hyper-V |
 | P02 | ResolveInputs | Setup | ISO / patch source resolution, Config JSON load |
-| P03 | RefreshPatchBaseline | Setup | Microsoft Update Catalogue scrape; writeback to `data/config-<OsKey>.json` |
+| P03 | RefreshPatchBaseline | Setup | Microsoft Update Catalogue scrape; the refreshed baseline updates the in-memory profile, persisted to `data/config-<OsKey>.json` only when `AutoRefreshPolicy.WritebackToConfig` allows |
 | P04 | FetchAssets | Fetch | ISO + patch downloads with hash verification |
 | P05 | ExpandIso | Plan | Mount source ISO; copy to workspace; enumerate WIM indexes |
 | P06 | ValidatePatchServicing | Plan | PatchModel consistency + pre-servicing inspection of every WIM index (`logs/inspection_pre.json`; on-mount readiness still via P07/P08) |
@@ -352,10 +356,11 @@ Pipeline of thirteen phases:
 | P08 | PatchBootWim | Build | boot.wim (PE + Setup) and winre.wim |
 | P08S | SyncSetupBinaries | Build | Explicit sync of setup.exe / setuphost.exe from the serviced boot.wim idx2 to media `sources\` (size/timestamp/SHA-256 recorded before and after; MS media-dynamic-update mandate) |
 | P09 | AssembleIso | Build | Dynamic Update Setup overlay; Export-WindowsImage; oscdimg ISO build |
-| P10 | ConvertPca2023BootManager | Build | **Default-on**, readiness-driven PCA2023 Secure Boot conversion (opt-out: `-SkipPca2023BootManager`; Server 2025 additionally requires `-ForcePca2023OnServer2025`) |
+| P10 | ConvertPca2023BootManager | Build | **Default-on**, readiness-driven PCA2023 Secure Boot conversion for every supported OS (opt-out: `-SkipPca2023BootManager`) |
 | P11 | StaticVerify | Verify | Mount output ISO; SHA-256 content identity vs the extracted tree; full post-servicing inspection (`logs/inspection_post.json`); per-Kind measured verification (target build, .NET rollup census; KB-name rows on Server 2016 only) |
 | P12 | VerifyPca2023Readiness | Verify | **Always runs** — emits `pca2023_readiness.json` + `.md` |
 | P13 | FinalReport | Report | End-of-run summary; ISO hash; log paths; pre/post inspection diff + observe-first declared-vs-measured cross-checks |
+| P14 | HyperVValidation | Verify | Hyper-V Gen2 Secure Boot validation of the output ISO with identity-bound boot evidence and a separate operator-approval step; runs via `-Action BootTest`, `-Action All`, or `-RunHyperVValidation` (inserted before P13); see SPEC §B.5 |
 
 See [SPEC.md](./SPEC.md) Part B for the full per-phase contracts.
 
@@ -365,9 +370,8 @@ The Microsoft "Windows Production PCA 2011" Secure Boot signing
 certificate expires in **2026-06**. Firmware that has been updated to
 revoke the 2011 cert refuses to boot ISOs whose boot manager is still
 signed via the 2011 chain. P10 / P12 address this; the full operational
-model (per-OS defaults, when to set `-ForcePca2023OnServer2025`,
-standalone `-Pca2023OnlyMode` forensic inspection) is documented in
-SPEC.md §B.17 and §B.18.
+model (per-OS defaults, standalone `-Pca2023OnlyMode` forensic
+inspection) is documented in SPEC.md §B.17 and §B.18.
 
 Common operator decisions:
 
@@ -379,12 +383,16 @@ Common operator decisions:
   2024) or later (Server 2022 specifically needs 2025-2B per Lenovo
   lp2353.pdf). Pass `-SkipPca2023BootManager` to keep the shipped
   PCA2011-signed boot manager for older-firmware targets.
-- **Server 2025**: P10 is still default-skipped for this OS
-  (Microsoft-certified Server 2025 platforms ship the 2023
-  certificates in firmware; KB5053484 does not list Server 2025 as
-  needing the procedure). Override with `-ForcePca2023OnServer2025`
-  only when running on non-certified hardware that requires PCA2023
-  conversion.
+- **Server 2025**: P10 also runs by default (`RequiredByDefault=true`
+  under the current policy) — media must boot on PCA2023-only
+  firmware regardless of what certified platforms carry. The
+  conversion mechanism was validated end-to-end on the r12.75
+  terminal implementation (historical evidence preserved as
+  provenance); the current branch's own outstanding verification
+  gates are listed in TESTING.md and are not inferred closed from
+  that historical evidence. The retained
+  `-ForcePca2023OnServer2025` switch is a deprecated no-op
+  compatibility slot (a caution is emitted when it is supplied).
 - **Forensic inspection** of an existing ISO: pass `-Pca2023OnlyMode
   -IsoPath <existing.iso>` to skip the entire build pipeline and run
   ONLY P12 against the ISO.
@@ -394,7 +402,8 @@ manager support) and §B.18 (Output ISO verification).
 
 ## Parameters (complete)
 
-All 34 parameters are listed below, grouped by typical use. The table is
+Every public parameter is listed below, grouped by typical use (the
+authoritative surface is the script's `param()` block). The table is
 a documentation-time snapshot; the authoritative, always-current list is
 `Get-Help .\Update-WindowsServerIso.ps1 -Full`.
 
@@ -420,7 +429,15 @@ a documentation-time snapshot; the authoritative, always-current list is
 | `-SkipDynamicPatchRefresh` | patch | switch (OFF) | Skip P03 even if baseline is stale (offline runs) |
 | `-UseBaselineOnly` | patch | switch (OFF) | Use PatchBaseline strictly as-is; no Catalog access |
 | `-SkipPca2023BootManager` | secure-boot | switch (OFF) | Opt OUT of the default-on P10 PCA2023 boot-manager conversion (keep the shipped PCA2011-signed boot manager) |
-| `-ForcePca2023OnServer2025` | secure-boot | switch (OFF) | Override the Server 2025 default-skip for P10 |
+| `-ForcePca2023OnServer2025` | secure-boot | switch (OFF) | **Deprecated no-op** compatibility slot (P10 is default-on for Server 2025; a caution is emitted when supplied) |
+| `-ResumeFromPhase` | resume | string | Resume an interrupted build from `P08` or `P09`: P01/P02 reconstruct runtime state, the existing WorkRoot is validated, measured patch assets are restored |
+| `-ResumePreflightOnly` | resume | switch (OFF) | Validate a P08/P09 resume workspace and rehydrate assets, stopping before any build phase (requires `-ResumeFromPhase`) |
+| `-PatchRefreshMode` | patch-selection | string | Explicit patch-selection mode: `PinAll` pins OS and auxiliary KB identities; `PinOs` pins the reviewed OS LCU/SSU/checkpoint while resolving monthly auxiliaries |
+| `-ImageDisplayDate` | media | string (yyyy-MM-dd) | Display date rewritten into the serviced install.wim indexes (Windows Setup surfaces the WIM IMAGE CREATIONTIME field) |
+| `-RunHyperVValidation` | boot-test | switch (OFF) | Insert P14 before P13 in the standard pipeline (`BootTest`/`All` run P14 regardless) |
+| `-HyperVValidationMode` | boot-test | string (BootOnly) | `BootOnly` captures console thumbnails for operator adjudication; `Install` performs an unattended evaluation install and collects evidence via PowerShell Direct |
+| `-BootTestIsoPath` | boot-test | string | Validate an ISO moved from its output directory with standalone `-Action BootTest` (SHA-256 must match the P11/P12 evidence index) |
+| `-BootEvidenceApprovalPath` | boot-test | string | Operator-controlled JSON approval file promoting existing identity-bound BootOnly evidence to ReleaseReady on a subsequent BootTest invocation |
 | `-Pca2023OnlyMode` | secure-boot | switch (OFF) | Standalone P12 inspection of an existing ISO (`-IsoPath` required) |
 | `-Pca2023ScriptPath` | secure-boot | (none) | External `Make2023BootableMedia.ps1` instead of the internal helper |
 | `-Mode` | admin | `Monthly` (or `Initial`/`Force`) | `RefreshAllBaselines` refresh mode |
@@ -461,7 +478,7 @@ P03 RefreshPatchBaseline (if baseline is stale OR -AutoDetectLatestPatches)
         - Identify SSU + LCU + DynamicUpdate(.Setup/.Component/.SafeOs)
           + .NET CU using config-driven title-token narrowing
         - Fetch ScopedViewInline.aspx for Supersedes / SupersededBy lists
-        - Write back PatchBaseline.Lines to Config JSON (atomically)
+        - Always refresh the effective in-memory PatchBaseline; persist to Config JSON (atomically) only when AutoRefreshPolicy.WritebackToConfig allows
 P04   FetchAssets (uses the freshly resolved patch URLs and SHA-256s)
 P05   ExpandIso
 P06 ValidatePatchServicing
@@ -498,7 +515,7 @@ For troubleshooting a run, these are the files to look at:
 | Scenario | Behaviour |
 |:---|:---|
 | Baseline fresh (Patch Tuesday unchanged since last verify) | P03 is a no-op |
-| Baseline stale, scrape succeeds | Config is updated and the new patches are used |
+| Baseline stale, scrape succeeds | The effective in-memory baseline is updated and the new patches are used; Config JSON is persisted only when `AutoRefreshPolicy.WritebackToConfig` allows |
 | Baseline stale, scrape fails, existing baseline usable | Warning + continue with existing baseline |
 | Baseline stale, scrape fails, baseline empty/unusable | ABORT |
 | `-UseBaselineOnly` set | P03 skipped unconditionally (offline mode) |
@@ -514,18 +531,32 @@ Run from the project directory:
 python3 ../../quality-tools/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1
 ```
 
-The required gate before any commit is **0 errors / 0 warnings / 0
-info**. The current build satisfies this; see TESTING.md §0 for the
-last-verified row.
+The static-analysis governance is the **adjudicated-debt model**: no
+UNADJUDICATED finding is permitted at any severity, while findings
+that have been measured, adjudicated and documented (with rationale
+and a non-regression baseline) may remain as declared debt; any new
+or increased unexplained finding blocks integration. The current
+declared baseline and each debt class's rationale live in
+TESTING.md §0.
 
 ## Self-verification tools
 
-The `tests/` subdirectory ships seventeen Python-based self-verification
-tools (sparse T-numbering, T1 – T31; numbers of retired tools are never
-reused) plus three format / schema / seed gates. They probe the
-script's external dependencies, unit-test its PowerShell functions, and
-enforce the SPEC §B.23 JSON canonical format. All offline tools use only
-the Python standard library (no `pip install` required).
+The `tests/` subdirectory ships the Python-based self-verification
+suite (sparse T-numbering, T1 – T55; numbers of retired tools are never
+reused) plus three format / schema / seed gates. The set includes six
+declaration-derived contracts (T41 – T46) that read their expected
+values from the config under test rather than hardcoding them, and the
+six series-end contracts (T47 – T52) covering the evidence Collector,
+the declared oscdimg reference, the Catalog boundary and collection
+shapes, the Generic.List binder guard, and the final-writer authority
+model. T54 and T55 hold the source-file format contract and the
+analyzer debt-baseline gate; the whole offline tier now runs in CI
+Stage 1, not only in the local gate battery. The suite is declared in three execution tiers in TESTING.md §5
+(offline-deterministic / live-network / user-side evidence); the
+offline tier is **all green — no declared red**. Offline tools use the
+Python standard library, and most contracts additionally drive the
+pinned PowerShell (pwsh) on PATH through a REPL or AST-extraction
+harness.
 
 ```bash
 # Offline tests — safe to run anywhere
@@ -591,9 +622,10 @@ enforces this per repository SPEC.md §12 (SPEC-CI-081).
 | Stale WIM mount blocks new run | Previous run crashed mid-mount | Run `dism /Get-MountedImageInfo` then `dism /Cleanup-Mountpoints`. See SPEC.md §D.1 |
 | ISO SHA-256 mismatch on download | Microsoft rotated the Evaluation Center snapshot URL | Update `data/config-<OsKey>.json` `LanguageSpecific.<lang>.Iso.Sha256` to the new value. See SPEC.md §D.11 |
 
-For broader investigation context, the per-cycle finding reports under
-[`docs/history/`](./docs/history/) carry deep-dive narratives of the
-issues that motivated each Pitfall entry in SPEC.md Part D.
+For broader investigation context, the historical rationale behind
+each Pitfall entry in SPEC.md Part D is preserved in CHANGELOG.md
+(the strongest provenance source in this project) and in the
+development archive kept outside the repository tree.
 
 ## Acknowledgements
 
@@ -603,20 +635,16 @@ issues that motivated each Pitfall entry in SPEC.md Part D.
 - The 0x800f081e suppression heuristic is also from OSDBuilder.
 - The three-tier `etfsboot.com` / `efisys.bin` fallback chain comes
   from [Win_ISO_Patching_Scripts_zhCN](https://github.com/adavak/Win_ISO_Patching_Scripts_zhCN).
-- The Debug Trace Facility, logging conventions, environment-check
-  cmdlets, and retry primitives are reused verbatim from the companion
-  in-house script
-  [`Download-SpeakerDeck.ps1`](../download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1).
-- The 7-Zip helper trio (`Get-SevenZipPath`, `Get-LatestSevenZipUrl`,
-  `Install-SevenZipFallback`) is reused from
-  `Deploy-AMDChipsetDriverOnWindowsServer.ps1`.
 - The canonical Server 2022 SHA-256 hash was sourced from
   [rgl/windows-evaluation-isos-scraper](https://github.com/rgl/windows-evaluation-isos-scraper).
 - The PCA2023 boot-manager conversion (P10 `Convert-WimBootToPca2023Signed`)
-  is a PSA-clean re-implementation of Microsoft's
-  [`Make2023BootableMedia.ps1`](https://github.com/microsoft/secureboot_objects)
-  (`v1.6.4-signed`, commit `bd7abe3`) `Copy-2023BootBins`; the upstream-compatible
-  output-verification facility (P12 `Test-OutputIsoPca2023Readiness`)
-  is a quality extension not present in the Microsoft original.
+  is a PSA-clean re-implementation of the `Copy-2023BootBins` function
+  from Microsoft's
+  [`Make2023BootableMedia.ps1`](https://github.com/microsoft/secureboot_objects);
+  the pinned upstream file identity this project tracks is recorded in
+  SPEC.md §B.17.4 (tracking is by file identity, not release tag). The
+  upstream-compatible output verification (P12
+  `Test-OutputIsoPca2023Readiness`) is a quality extension absent from
+  the Microsoft original.
 
 This script was generated and iteratively refined with Anthropic Claude.

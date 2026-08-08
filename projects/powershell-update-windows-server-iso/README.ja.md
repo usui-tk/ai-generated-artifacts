@@ -134,12 +134,16 @@ projects/powershell-update-windows-server-iso/
 ├── PSScriptAnalyzerSettings.psd1     # PSScriptAnalyzer プロジェクト設定
 ├── data/                             # 永続的な入力データ（コミット対象、flat 配置）
 │   ├── config-Server{2016,2019,2022,2025}.json
+│   ├── config-template-v4.json       # OS 追加用の Schema 4.0 テンプレート
 │   ├── raw-release-info.md (+ .meta.json)
 │   ├── raw-dotnet-cu.json
 │   ├── cache-release-info.json
 │   └── cache-dotnet-cu.json
-├── tests/                            # 自己検証スイート（疎番号 T1-T31 + ゲート）
-└── docs/history/                     # サイクル別の調査レポート
+├── schema/                           # 機械可読の config 契約
+│   ├── config.schema.json            # Config Schema v3.0（互換保持）
+│   ├── config.schema.v4.json         # Config Schema v4.0（正準・r12.00）
+│   └── config-seed.schema.json       # SEED 射影（SPEC B.14.2）
+└── tests/                            # 自己検証スイート（疎番号 T1-T55 + ゲート）
 ```
 
 本スクリプトの検証に使用する PowerShell 静的解析ツール（`psa.py`）は、
@@ -194,12 +198,12 @@ $LogFile    = Join-Path $WorkRoot ('logs\{0}-{1}-{2}.log' -f 'PrepareBuildVerify
 
 ### 実例：Server 2016 と Server 2025
 
-P10（PCA2023 ブートマネージャ変換）は現在、既定で（readiness 駆動により）
-実行されるため、Server 2016 には PCA2023 関連スイッチが一切不要です。
-Server 2025 は例外で、`-ForcePca2023OnServer2025` を指定しない限り P10 を
-スキップします（認証済み 2025 プラットフォームはファームウェアに 2023
-証明書を同梱）。出荷時の PCA2011 署名 boot manager を維持したい場合は、
-どの OS でも `-SkipPca2023BootManager` でオプトアウトできます。
+P10（PCA2023 ブートマネージャ変換）は **Server 2025 を含む全サポート OS**
+で既定実行（readiness 駆動）されるため、以下のどちらの例にも PCA2023
+関連スイッチは不要です。出荷時の PCA2011 署名 boot manager を維持したい
+場合は、どの OS でも `-SkipPca2023BootManager` でオプトアウトできます
+（`-ForcePca2023OnServer2025` は非推奨の no-op 互換スロットとしてのみ
+残存し、指定時は caution を出します。現行ポリシーの推定に使わないこと）。
 
 ```powershell
 # Server 2016（PCA2023 スイッチなし）
@@ -212,14 +216,13 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     -UseBaselineOnly `
     -Execute
 
-# Server 2025（2025 固有の P10 スキップを上書き）
+# Server 2025（PCA2023 スイッチ不要 — 変換は既定で実行）
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 .\Update-WindowsServerIso.ps1 `
     -Action PrepareBuildVerify `
     -OsVersion Server2025 -OsLanguage ja-jp `
     -WorkRoot 'D:\UpdateWsi-Server2025' `
     -LogFile ('D:\UpdateWsi-Server2025\logs\build-2025-{0}.log' -f $stamp) `
-    -ForcePca2023OnServer2025 `
     -UseBaselineOnly `
     -Execute
 ```
@@ -248,7 +251,7 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 | Action | 説明 |
 |:---|:---|
 | `BootTest` | 出力 ISO に対する Hyper-V Gen2 セキュアブート起動スモークテスト。コンソールのスクリーンショットを保存しオペレータが合否判定（`-SyntheticTestMode` と排他。失効ファームウェアを含む本格マトリクスは `tools/boot-verification/` 参照）|
-| `GenerateManifest` | 解決済みパッチのマニフェストを算出（P01-P03 のみ）|
+| `GenerateManifest` | **Placeholder**：P01-P03 の解決を実行後、placeholder caution を出力 — マニフェストファイル出力ステップは本リビジョン未実装（SPEC Part H.2）|
 | `Cleanup` | ワークスペースと残留 DISM マウントの清掃 |
 | `ListPhases` | フェーズとアクションのレジストリを JSON で出力 |
 | `TestHarness` | `tests/powershell_harness.py`（T3）が利用する PS 関数評価 REPL モード。人間からは呼び出さない |
@@ -256,7 +259,7 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 ### Admin アクション（Config ベースライン管理）
 
 `data/config-<OsKey>.json` ファイル群がスクリプトの利用するベースラインデータを
-保持します。5 つの Admin Action により、ISO に触れずにこのデータを更新・点検
+保持します。4 つの Admin Action により、ISO に触れずにこのデータを更新・点検
 できます。**更新は 2 段階** で行います：`RefreshSnapshots` が Microsoft Learn と
 Microsoft Update Catalog から上流の `data/raw-*` / `data/cache-*` を取得し、
 `RefreshAllBaselines` が各 `data/config-Server*.json` の
@@ -310,7 +313,7 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
 | 権限 | Administrator（DISM マウントは管理者権限が必須）|
 | Windows ADK | Deployment Tools 機能（`oscdimg.exe` を提供）。不在時に自動インストール（スイッチ不要）|
 | Windows SDK Signing Tools | 埋め込み PCA2023/PCA2011 ブート署名検証用の `signtool.exe` を提供（P10/P12 readiness）。不在時に自動インストール（スイッチ不要）|
-| ディスク空き容量 | `-WorkRoot` ドライブに 100 GB 以上（最低 60 GB、Workspace プリフライトが 100 GB を強制チェック）|
+| ディスク空き容量 | `-WorkRoot` ドライブに最低 100 GB の空き（Workspace プリフライトが強制）|
 | ネットワーク | ISO とパッチのダウンロード用インターネットアクセス（オフライン時は `-IsoPath` + `<WorkRoot>/patches/<OsVersion>/` へのパッチ事前配置。LCU とチェックポイント MSU は `cu/` サブフォルダへ）|
 | 静的解析 | `python3` + 正規配置の `psa.py`（後述「静的解析」を参照）|
 
@@ -321,20 +324,20 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
 | Server 2016 | en-us, ja-jp | PCA2023 変換には LCU 2024-4B 以降が必要 |
 | Server 2019 | en-us, ja-jp | PCA2023 変換には LCU 2024-4B 以降が必要 |
 | Server 2022 | en-us, ja-jp | PCA2023 変換には LCU 2025-2B（build 20348.2227）以降が必要 |
-| Server 2025 | en-us, ja-jp | デフォルトでは PCA2023 変換不要（ファームウェアに 2023 証明書が同梱されている）|
+| Server 2025 | en-us, ja-jp | PCA2023 変換は既定で実行（現行ポリシー）。認証済みプラットフォームはファームウェアにも 2023 証明書を同梱 |
 
 新規言語の追加は、該当 `data/config-Server<N>.json` の `LanguageSpecific`
 配下にノードを 1 つ追加するだけで完結します（SPEC.md §B.4.5 参照）。
 
 ## フェーズ一覧
 
-13 個のフェーズによるパイプライン：
+パイプライン（正規フェーズモデル P01-P14・挿入 P08S ビルドフェーズを含む）：
 
 | ID：| 名称：| グループ：| 処理内容：|
 |:---|:---|:---|:---|
 | P01 | Initialize | Setup | PowerShell 環境、管理者権限、ADK、ディスク、Hyper-V のチェック |
 | P02 | ResolveInputs | Setup | ISO / パッチソースの解決、Config JSON のロード |
-| P03 | RefreshPatchBaseline | Setup | Microsoft Update Catalogue スクレイプ、`data/config-<OsKey>.json` への書き戻し |
+| P03 | RefreshPatchBaseline | Setup | Microsoft Update Catalogue スクレイプ。更新後ベースラインはインメモリ・プロファイルに反映され、`data/config-<OsKey>.json` への永続化は `AutoRefreshPolicy.WritebackToConfig` が許可する場合のみ |
 | P04 | FetchAssets | Fetch | ISO + パッチのダウンロード（ハッシュ検証付き）|
 | P05 | ExpandIso | Plan | ソース ISO のマウント、ワークスペースへのコピー、WIM インデックスの列挙 |
 | P06 | ValidatePatchServicing | Plan | PatchModel 整合チェック＋適用前の全 WIM インデックス検査（`logs/inspection_pre.json`。マウント時の準備性検証は引き続き P07/P08）|
@@ -342,10 +345,11 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
 | P08 | PatchBootWim | Build | boot.wim（PE + Setup）と winre.wim |
 | P08S | SyncSetupBinaries | Build | servicing済み boot.wim idx2 の setup.exe / setuphost.exe をメディア `sources\` へ明示同期（前後のサイズ/タイムスタンプ/SHA-256 を記録。MS のメディア更新手順の必須要件）|
 | P09 | AssembleIso | Build | Dynamic Update Setup オーバーレイ、Export-WindowsImage、oscdimg による ISO ビルド |
-| P10 | ConvertPca2023BootManager | Build | **既定で実行**（readiness 駆動）の PCA2023 Secure Boot 変換（オプトアウト：`-SkipPca2023BootManager`。Server 2025 のみ追加で `-ForcePca2023OnServer2025` が必要）|
+| P10 | ConvertPca2023BootManager | Build | **既定で実行**（readiness 駆動）の PCA2023 Secure Boot 変換 — 全サポート OS 対象（オプトアウト：`-SkipPca2023BootManager`）|
 | P11 | StaticVerify | Verify | 出力 ISO をマウントし、展開ツリーとの SHA-256 内容同一性を検証。適用後の全インデックス検査（`logs/inspection_post.json`）から種別ごとに実測検証（到達ビルド、.NET ロールアップ実在確認。KB 名照合は Server 2016 のみ）|
 | P12 | VerifyPca2023Readiness | Verify | **常時実行** — `pca2023_readiness.json` + `.md` を出力 |
 | P13 | FinalReport | Report | 実行終了サマリ、ISO ハッシュ、ログパス。適用前後の検査差分と、宣言値と実測値の突き合わせ（observe-first）|
+| P14 | HyperVValidation | Verify | 出力 ISO の Hyper-V Gen2 Secure Boot 検証（identity 束縛の boot 証跡＋独立した operator 承認ステップ）。`-Action BootTest`／`-Action All`／`-RunHyperVValidation`（P13 の前に挿入）で実行。SPEC §B.5 参照 |
 
 各フェーズの詳細契約は [SPEC.md](./SPEC.md) Part B を参照してください。
 
@@ -355,7 +359,7 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
 **2026-06** に失効します。2011 証明書を失効済みに更新したファームウェアは、
 2011 系で署名された boot manager をもつ ISO の起動を拒否します。P10 / P12 が
 この問題に対処します。詳細な運用モデル（OS 別デフォルト、
-`-ForcePca2023OnServer2025` を設定するタイミング、`-Pca2023OnlyMode` による
+`-Pca2023OnlyMode` による
 スタンドアロンのフォレンジック検査）は SPEC.md §B.17 と §B.18 を参照してください。
 
 代表的な運用判断：
@@ -367,11 +371,14 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
   は 2024-4B（2024 年 4 月）以降が必要（Server 2022 は Lenovo lp2353.pdf に
   従い、2025-2B が必要）。旧ファームウェア向けに出荷時の PCA2011 署名 boot
   manager を維持する場合は `-SkipPca2023BootManager` を指定。
-- **Server 2025**：この OS のみ P10 は引き続きデフォルトでスキップ
-  （Microsoft 認証済み Server 2025 プラットフォームはファームウェアに 2023
-  証明書を同梱、KB5053484 は Server 2025 を手順対象としていない）。PCA2023
-  変換が必要な非認証ハードウェアで運用する場合のみ
-  `-ForcePca2023OnServer2025` で上書き。
+- **Server 2025**：P10 はこの OS でも既定実行です（現行ポリシーで
+  `RequiredByDefault=true`）— 認証済みプラットフォームのファームウェア
+  内容に依存せず、PCA2023 専用ファームウェアで起動できるメディアを生成
+  します。変換メカニズムの E2E 検証は r12.75 終端実装で完了しており
+  （歴史的証跡として保存）、現行ブランチ自身の未完了検証ゲートは
+  TESTING.md に列挙され、歴史的証跡から閉鎖を推定しません。残存する
+  `-ForcePca2023OnServer2025`
+  は非推奨の no-op 互換スロットです（指定時は caution を出力）。
 - **既存 ISO のフォレンジック検査**：`-Pca2023OnlyMode -IsoPath <existing.iso>`
   で全ビルドパイプラインをスキップし、P12 のみを ISO に対して実行。
 
@@ -406,7 +413,15 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
 | `-SkipDynamicPatchRefresh` | patch | switch（OFF）| ベースライン陳腐でも P03 をスキップ（オフライン）|
 | `-UseBaselineOnly` | patch | switch（OFF）| PatchBaseline をそのまま使用。Catalog アクセスなし |
 | `-SkipPca2023BootManager` | secure-boot | switch（OFF）| 既定で実行される P10 PCA2023 ブートマネージャ変換をオプトアウト（出荷時の PCA2011 署名 boot manager を維持）|
-| `-ForcePca2023OnServer2025` | secure-boot | switch（OFF）| Server 2025 の P10 既定スキップを上書き |
+| `-ForcePca2023OnServer2025` | secure-boot | switch（OFF）| **非推奨 no-op** 互換スロット（Server 2025 でも P10 は既定実行。指定時は caution を出力）|
+| `-ResumeFromPhase` | resume | string | 中断ビルドを `P08`/`P09` から再開：P01/P02 がランタイム状態を再構築し、既存 WorkRoot を検証、実測済みパッチ資産を復元 |
+| `-ResumePreflightOnly` | resume | switch（OFF）| P08/P09 再開ワークスペースの検証と資産再水和のみ実行し、ビルドフェーズ前で停止（`-ResumeFromPhase` 必須）|
+| `-PatchRefreshMode` | patch-selection | string | パッチ選択モードの明示指定：`PinAll` は OS・補助 KB の同一性を固定、`PinOs` はレビュー済み OS LCU/SSU/checkpoint を固定しつつ月次補助を解決 |
+| `-ImageDisplayDate` | media | string（yyyy-MM-dd）| サービス済み install.wim インデックスへ書き込む表示日付（Windows Setup は WIM IMAGE CREATIONTIME を表示）|
+| `-RunHyperVValidation` | boot-test | switch（OFF）| 標準パイプラインの P13 前に P14 を挿入（`BootTest`/`All` は本スイッチと無関係に P14 を実行）|
+| `-HyperVValidationMode` | boot-test | string（BootOnly）| `BootOnly` はコンソールサムネイルを取得し operator 裁定へ。`Install` は無人評価インストールを行い PowerShell Direct 経由で証跡収集 |
+| `-BootTestIsoPath` | boot-test | string | 出力ディレクトリ外へ移動済み ISO を単独 `-Action BootTest` で検証（SHA-256 は P11/P12 証跡インデックスと一致必須）|
+| `-BootEvidenceApprovalPath` | boot-test | string | operator 管理の JSON 承認ファイル。後続 BootTest 実行で既存の identity 束縛 BootOnly 証跡を ReleaseReady へ昇格 |
 | `-Pca2023OnlyMode` | secure-boot | switch（OFF）| 既存 ISO の P12 単独検査（`-IsoPath` 必須）|
 | `-Pca2023ScriptPath` | secure-boot | （なし）| 内部ヘルパーの代わりに外部 `Make2023BootableMedia.ps1` を使用 |
 | `-Mode` | admin | `Monthly`（または `Initial`/`Force`）| `RefreshAllBaselines` の更新モード |
@@ -447,7 +462,7 @@ P03 RefreshPatchBaseline（ベースラインが古いとき、または -AutoDe
         - Config 駆動の title-token 絞り込みで SSU + LCU + DynamicUpdate(.Setup/.Component/.SafeOs)
           + .NET CU を識別
         - ScopedViewInline.aspx を取得して Supersedes / SupersededBy を確認
-        - PatchBaseline.Lines を Config JSON にアトミックに書き戻し
+        - 有効なインメモリ PatchBaseline は常時更新。Config JSON への（アトミックな）永続化は AutoRefreshPolicy.WritebackToConfig が許可する場合のみ
 P04   FetchAssets（新しく解決された URL と SHA-256 を使用）
 P05   ExpandIso
 P06 ValidatePatchServicing
@@ -484,7 +499,7 @@ P07+  Build / Verify / Report
 | シナリオ：| 挙動：|
 |:---|:---|
 | ベースライン新鮮（前回検証から Patch Tuesday が更新されていない）| P03 は no-op |
-| ベースライン陳腐、スクレイプ成功 | Config を更新し新しいパッチを使用 |
+| ベースライン陳腐、スクレイプ成功 | 有効なインメモリ・ベースラインを更新し新しいパッチを使用。Config JSON への永続化は `AutoRefreshPolicy.WritebackToConfig` が許可する場合のみ |
 | ベースライン陳腐、スクレイプ失敗、既存ベースライン使用可能 | 警告 + 既存ベースラインで継続 |
 | ベースライン陳腐、スクレイプ失敗、ベースラインが空または使用不可 | 中断 |
 | `-UseBaselineOnly` 指定 | P03 を無条件でスキップ（オフラインモード）|
@@ -500,17 +515,28 @@ P07+  Build / Verify / Report
 python3 ../../quality-tools/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1
 ```
 
-コミット前の必須ゲートは **0 errors / 0 warnings / 0 info** です。現行ビルドは
-この条件を満たしています。最終確認状況は TESTING.md §0 を参照してください。
+静的解析ガバナンスは**裁定済み債務モデル**です：いかなる重大度でも
+**未裁定**の指摘は許容されません。一方、実測・裁定・文書化（根拠と
+非後退基線付き）を経た指摘は宣言的債務として残存できます。未説明の
+新規・増加指摘は統合をブロックします。現在の宣言基線と各債務クラスの
+根拠は TESTING.md §0 を参照してください。
 
 ## 自己検証ツール
 
-`tests/` サブディレクトリには 17 個の Python 自己検証ツール（疎番号
-T1 – T31。退役したツールの番号は再利用しません）に加え、
-フォーマット／スキーマ／シードの 3 ゲートが同梱されています。これらは
-スクリプトの外部依存をプローブし、PowerShell 関数をユニットテストし、
-さらに SPEC §B.23 の JSON canonical 形式を強制します。オフラインツールは
-Python 標準ライブラリのみを利用するため、`pip install` は不要です。
+`tests/` サブディレクトリには Python 自己検証スイート（疎番号
+T1 – T55。退役したツールの番号は再利用しません）に加え、
+フォーマット／スキーマ／シードの 3 ゲートが同梱されています。
+期待値をハードコードせず検証対象 config の宣言から読み取る
+declaration-derived 契約 6 本（T41 – T46）と、シリーズ終端の 6 契約
+（T47 – T52：証跡 Collector・宣言済み oscdimg リファレンス・Catalog
+境界とコレクション形状・Generic.List バインダガード・final-writer
+権威モデル）を含みます。T54・T55 はソースファイル形式契約とアナライザ
+債務基線ゲートを担い、オフラインティア全体はローカルのゲートバッテリ
+だけでなく CI Stage 1 でも実行されます。スイートは TESTING.md §5 の 3 実行ティア
+（オフライン決定的／ライブネットワーク／ユーザー側証跡）で宣言され、
+オフラインティアは**全緑 — 宣言赤なし**です。オフラインツールは
+Python 標準ライブラリを利用し、多くの契約は加えて PATH 上のピン留め
+PowerShell（pwsh）を REPL / AST 抽出ハーネス経由で駆動します。
 
 ```bash
 # オフラインテスト — どこでも安全に実行可能
@@ -578,10 +604,9 @@ Stage 4 は `workflow_dispatch` の 4 入力（`mode`、`onlyOs`、`onlyLanguage
 | 古い WIM マウントが新規実行を阻害 | 過去の実行がマウント途中でクラッシュ | `dism /Get-MountedImageInfo` 実行後に `dism /Cleanup-Mountpoints` を実行（SPEC.md §D.1 参照）|
 | ダウンロード後の ISO SHA-256 不一致 | Microsoft が Evaluation Center スナップショット URL を更新 | `data/config-<OsKey>.json` の `LanguageSpecific.<lang>.Iso.Sha256` を新しい値に更新（SPEC.md §D.11 参照）|
 
-調査の広いコンテキストとしては、各サイクルの finding レポートが
-[`docs/history/`](./docs/history/) に格納されており、SPEC.md Part D の
-各 Pitfall エントリの背景となった issue の deep-dive ナラティブを
-提供しています。
+調査の広いコンテキストとして、SPEC.md Part D の各 Pitfall エントリの
+背景となった歴史的経緯は CHANGELOG.md（本プロジェクト最強の来歴情報源）
+と、リポジトリツリー外に保管された開発アーカイブに保存されています。
 
 ## 謝辞
 
@@ -591,20 +616,15 @@ Stage 4 は `workflow_dispatch` の 4 入力（`mode`、`onlyOs`、`onlyLanguage
 - 0x800f081e の抑制ヒューリスティックも OSDBuilder からです。
 - `etfsboot.com` / `efisys.bin` の 3 段階フォールバックチェーンは、
   [Win_ISO_Patching_Scripts_zhCN](https://github.com/adavak/Win_ISO_Patching_Scripts_zhCN) からです。
-- Debug Trace Facility、ロギング規約、環境チェック cmdlet、リトライ
-  プリミティブは、社内コンパニオンスクリプト
-  [`Download-SpeakerDeck.ps1`](../download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1)
-  からそのまま再利用しています。
-- 7-Zip ヘルパー 3 件（`Get-SevenZipPath`、`Get-LatestSevenZipUrl`、
-  `Install-SevenZipFallback`）は
-  `Deploy-AMDChipsetDriverOnWindowsServer.ps1` からの再利用です。
 - 正規の Server 2022 SHA-256 ハッシュは
   [rgl/windows-evaluation-isos-scraper](https://github.com/rgl/windows-evaluation-isos-scraper)
   から取得しました。
 - PCA2023 boot manager 変換（P10 `Convert-WimBootToPca2023Signed`）は、
   Microsoft の [`Make2023BootableMedia.ps1`](https://github.com/microsoft/secureboot_objects)
-  （`v1.6.4-signed`、commit `bd7abe3`）の `Copy-2023BootBins` の PSA-clean 再実装です。
-  上流互換の出力検証機能（P12 `Test-OutputIsoPca2023Readiness`）は、
-  Microsoft オリジナルにはない品質向上のための拡張です。
+  の `Copy-2023BootBins` 関数の PSA-clean 再実装です。本プロジェクトが
+  追跡する上流ピン（ファイル同一性ベース・リリースタグ非依存）は
+  SPEC.md §B.17.4 に記録しています。上流互換の出力検証機能（P12
+  `Test-OutputIsoPca2023Readiness`）は、Microsoft オリジナルにはない
+  品質向上のための拡張です。
 
 本スクリプトは Anthropic Claude で生成・反復的に洗練されました。

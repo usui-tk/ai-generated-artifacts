@@ -64,13 +64,38 @@ def main() -> int:
         "[switch]   $ForcePca2023OnServer2025," in text,
         "declared", passed, failed)
     passed, failed = check(
+        "standalone readiness artifacts use the declared filenames",
+        "'pca2023_readiness.json'" in text and text.count("'pca2023_readiness.md'") >= 3,
+        "declared readiness artifact filename set incomplete", passed, failed)
+    passed, failed = check(
+        "no readiness artifact writes a .txt variant",
+        "pca2023_readiness.txt" not in text,
+        "a readiness writer still emits the undeclared .txt filename", passed, failed)
+    passed, failed = check(
         "P10 gate reads the opt-out switch",
         "if ($Script:SkipPca2023BootManager) {" in text,
         "gate present", passed, failed)
+    # r12.57 T39 revision: the Server 2025 force-gate was removed BY DESIGN
+    # (conversion is default-on for every OS under RequirePca2023). The
+    # switch survives as a deprecated compatibility slot: promoted into a
+    # Deprecated* script-scope variable whose only consumer is a caution.
+    # Pins re-derived from the measured r12.57 surface and verified
+    # unchanged at the r12.75 terminal frame.
     passed, failed = check(
-        "Server 2025 force-gate survives",
-        "if ($osKey -eq 'Server2025' -and -not $Script:ForcePca2023OnServer2025) {" in text,
-        "gate present", passed, failed)
+        "force switch promoted into the Deprecated compatibility slot",
+        "$Script:DeprecatedForcePca2023OnServer2025 = [bool]$ForcePca2023OnServer2025"
+        in text,
+        "promotion present", passed, failed)
+    passed, failed = check(
+        "deprecation caution is wired to the Deprecated slot",
+        "if ($Script:DeprecatedForcePca2023OnServer2025) {" in text
+        and "'-ForcePca2023OnServer2025 is deprecated" in text,
+        "caution wired", passed, failed)
+    passed, failed = check(
+        "retired Server 2025 force-gate is gone (default-on has no gate)",
+        "if ($osKey -eq 'Server2025' -and -not $Script:ForcePca2023OnServer2025) {"
+        not in text,
+        "old gate absent", passed, failed)
 
     print("=== 2. REPL script-scope defaults ===")
     with PSSession(SCRIPT_PATH) as ps:
