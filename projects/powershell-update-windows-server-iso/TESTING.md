@@ -46,7 +46,7 @@ a build identifier plus a calendar date. Pending items are marked
 
 | Item | Status | Last verified |
 |---|---|---|
-| `psa.py` (latest mainline; with project `.psa.config.json`) on `Update-WindowsServerIso.ps1` | **0 errors / 14 warnings / 0 info — declared per-revision series debt** (the r12 snapshots are committed verbatim, no fix-forwards; the debt drains in the post-series conformance release; the 0/0/0 gate resumes there) | r12.00 schema-v4-role-planner / 2026-08-01 |
+| `psa.py` (latest mainline; with project `.psa.config.json`) on `Update-WindowsServerIso.ps1` and the Collector | **Adjudicated-debt model** (the standing governance: no UNADJUDICATED finding at any severity; adjudicated findings remain as declared debt with documented cause and a non-regression baseline; new/increased unexplained findings block). Declared baseline after the PSA debt drain: main **1E / 120W / 0I** — the 1E is the measured PSA2001 analyzer false positive (top-level `param()` declarations not harvested) pinned inside a canonical frame with no out-of-frame remediation; the 120W are 87 measured analyzer false positives (77 PSA2009 double-cast + 10 PSA6005 parameter-boundary) awaiting the registered central analyzer fixes plus 33 naming findings deferred to the refactoring campaign. Collector **0E / 4W / 0I** (4 naming, same deferral). Causes and adjudications: CHANGELOG r12.76–r12.82 | r12.82 consolidation-fold / 2026-08-08 |
 | File encoding (UTF-8 with BOM, CRLF line endings, ASCII-only outside literals) | ✓ for the main script | r11.51 audit-residue-sweep build (re-verified; also gated per-push by CI Stage 1) / 2026-07-02 |
 | `PSAP0005` strict-mode baseline (no stale `rNN` references in comment bodies) | **0 findings** ✓ | r11.51 audit-residue-sweep build (re-verified after the r11.48 canon-conformance fix) / 2026-07-02 |
 | PSScriptAnalyzer on Windows PowerShell 5.1 (Stage 2) | ✓ pass | CI Stage 2 (continuous) |
@@ -391,12 +391,8 @@ $common = @{
     Execute               = $true
 }
 
-# P10 runs by default (readiness-driven); Server 2025 alone still needs the force switch
-if ($OsVersion -eq 'Server2025') {
-    .\Update-WindowsServerIso.ps1 @common -ForcePca2023OnServer2025
-} else {
-    .\Update-WindowsServerIso.ps1 @common
-}
+# P10 runs by default (readiness-driven) for every supported OS incl. Server 2025
+.\Update-WindowsServerIso.ps1 @common
 ```
 
 **What to confirm after the run:**
@@ -702,7 +698,7 @@ the committed baseline — and is **expected**, not a failure.
 |---|---|---|
 | **G1 Discovery-source currency** *(critical)* | the refreshed `data/raw-release-info.md` already lists the target month | A01 logs `Discovery returned zero records for OS=… Month=<yyyy-MM>` |
 | **G2 Stamp / patch-set consistency** | every `config-Server*.json` has `PatchTuesdayOfBaseline` = the target month's Patch Tuesday **and** resolved LCU/SSU KBs belonging to that month | a new-month stamp sitting over previous-month KBs |
-| **G3 Standing gates** | `psa.py` 0/0/0, offline suite green, restamp IN SYNC, `doc_gate` PASS, validator A–G green | any non-green |
+| **G3 Standing gates** | `psa.py` at the declared adjudicated-debt baseline (no new/increased unexplained findings), offline suite green, restamp IN SYNC, `doc_gate` PASS, validator A–G green | any regression from the declared baseline |
 
 **G1 is the gate that is easy to miss.** The cab and the Microsoft
 Update Catalog lead the release-health page by **a day or more after

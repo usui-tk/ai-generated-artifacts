@@ -206,12 +206,13 @@ $LogFile    = Join-Path $WorkRoot ('logs\{0}-{1}-{2}.log' -f 'PrepareBuildVerify
 
 ### Worked example: Server 2016 vs Server 2025
 
-P10 (PCA2023 boot-manager conversion) now runs by default,
-readiness-driven, so Server 2016 needs no PCA2023 switches at all.
-Server 2025 is the exception: it still skips P10 unless
-`-ForcePca2023OnServer2025` is set (certified 2025 platforms carry the
-2023 certificates in firmware). To keep the shipped PCA2011-signed
-boot manager on any OS, opt out with `-SkipPca2023BootManager`.
+P10 (PCA2023 boot-manager conversion) runs by default,
+readiness-driven, for **every supported OS including Server 2025** —
+neither example below needs a PCA2023 switch. To keep the shipped
+PCA2011-signed boot manager on any OS, opt out with
+`-SkipPca2023BootManager`. (`-ForcePca2023OnServer2025` survives only
+as a deprecated no-op compatibility slot and emits a caution when
+supplied; do not infer current policy from it.)
 
 ```powershell
 # Server 2016 (no PCA2023 switches)
@@ -224,14 +225,13 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     -UseBaselineOnly `
     -Execute
 
-# Server 2025 (override the 2025-specific P10 skip)
+# Server 2025 (no PCA2023 switches needed -- conversion is default-on)
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 .\Update-WindowsServerIso.ps1 `
     -Action PrepareBuildVerify `
     -OsVersion Server2025 -OsLanguage ja-jp `
     -WorkRoot 'D:\UpdateWsi-Server2025' `
     -LogFile ('D:\UpdateWsi-Server2025\logs\build-2025-{0}.log' -f $stamp) `
-    -ForcePca2023OnServer2025 `
     -UseBaselineOnly `
     -Execute
 ```
@@ -357,10 +357,11 @@ Pipeline of thirteen phases:
 | P08 | PatchBootWim | Build | boot.wim (PE + Setup) and winre.wim |
 | P08S | SyncSetupBinaries | Build | Explicit sync of setup.exe / setuphost.exe from the serviced boot.wim idx2 to media `sources\` (size/timestamp/SHA-256 recorded before and after; MS media-dynamic-update mandate) |
 | P09 | AssembleIso | Build | Dynamic Update Setup overlay; Export-WindowsImage; oscdimg ISO build |
-| P10 | ConvertPca2023BootManager | Build | **Default-on**, readiness-driven PCA2023 Secure Boot conversion (opt-out: `-SkipPca2023BootManager`; Server 2025 additionally requires `-ForcePca2023OnServer2025`) |
+| P10 | ConvertPca2023BootManager | Build | **Default-on**, readiness-driven PCA2023 Secure Boot conversion for every supported OS (opt-out: `-SkipPca2023BootManager`) |
 | P11 | StaticVerify | Verify | Mount output ISO; SHA-256 content identity vs the extracted tree; full post-servicing inspection (`logs/inspection_post.json`); per-Kind measured verification (target build, .NET rollup census; KB-name rows on Server 2016 only) |
 | P12 | VerifyPca2023Readiness | Verify | **Always runs** — emits `pca2023_readiness.json` + `.md` |
 | P13 | FinalReport | Report | End-of-run summary; ISO hash; log paths; pre/post inspection diff + observe-first declared-vs-measured cross-checks |
+| P14 | HyperVValidation | Verify | Hyper-V Gen2 Secure Boot validation of the output ISO with identity-bound boot evidence and a separate operator-approval step; runs via `-Action BootTest`, `-Action All`, or `-RunHyperVValidation` (inserted before P13); see SPEC §B.5 |
 
 See [SPEC.md](./SPEC.md) Part B for the full per-phase contracts.
 
@@ -370,9 +371,8 @@ The Microsoft "Windows Production PCA 2011" Secure Boot signing
 certificate expires in **2026-06**. Firmware that has been updated to
 revoke the 2011 cert refuses to boot ISOs whose boot manager is still
 signed via the 2011 chain. P10 / P12 address this; the full operational
-model (per-OS defaults, when to set `-ForcePca2023OnServer2025`,
-standalone `-Pca2023OnlyMode` forensic inspection) is documented in
-SPEC.md §B.17 and §B.18.
+model (per-OS defaults, standalone `-Pca2023OnlyMode` forensic
+inspection) is documented in SPEC.md §B.17 and §B.18.
 
 Common operator decisions:
 
@@ -384,12 +384,12 @@ Common operator decisions:
   2024) or later (Server 2022 specifically needs 2025-2B per Lenovo
   lp2353.pdf). Pass `-SkipPca2023BootManager` to keep the shipped
   PCA2011-signed boot manager for older-firmware targets.
-- **Server 2025**: P10 is still default-skipped for this OS
-  (Microsoft-certified Server 2025 platforms ship the 2023
-  certificates in firmware; KB5053484 does not list Server 2025 as
-  needing the procedure). Override with `-ForcePca2023OnServer2025`
-  only when running on non-certified hardware that requires PCA2023
-  conversion.
+- **Server 2025**: P10 also runs by default (`RequiredByDefault=true`
+  under the current policy) — media must boot on PCA2023-only
+  firmware regardless of what certified platforms carry, and the
+  measured conversion is verified end-to-end. The retained
+  `-ForcePca2023OnServer2025` switch is a deprecated no-op
+  compatibility slot (a caution is emitted when it is supplied).
 - **Forensic inspection** of an existing ISO: pass `-Pca2023OnlyMode
   -IsoPath <existing.iso>` to skip the entire build pipeline and run
   ONLY P12 against the ISO.
@@ -425,7 +425,7 @@ a documentation-time snapshot; the authoritative, always-current list is
 | `-SkipDynamicPatchRefresh` | patch | switch (OFF) | Skip P03 even if baseline is stale (offline runs) |
 | `-UseBaselineOnly` | patch | switch (OFF) | Use PatchBaseline strictly as-is; no Catalog access |
 | `-SkipPca2023BootManager` | secure-boot | switch (OFF) | Opt OUT of the default-on P10 PCA2023 boot-manager conversion (keep the shipped PCA2011-signed boot manager) |
-| `-ForcePca2023OnServer2025` | secure-boot | switch (OFF) | Override the Server 2025 default-skip for P10 |
+| `-ForcePca2023OnServer2025` | secure-boot | switch (OFF) | **Deprecated no-op** compatibility slot (P10 is default-on for Server 2025; a caution is emitted when supplied) |
 | `-Pca2023OnlyMode` | secure-boot | switch (OFF) | Standalone P12 inspection of an existing ISO (`-IsoPath` required) |
 | `-Pca2023ScriptPath` | secure-boot | (none) | External `Make2023BootableMedia.ps1` instead of the internal helper |
 | `-Mode` | admin | `Monthly` (or `Initial`/`Force`) | `RefreshAllBaselines` refresh mode |
@@ -519,9 +519,13 @@ Run from the project directory:
 python3 ../../quality-tools/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1
 ```
 
-The required gate before any commit is **0 errors / 0 warnings / 0
-info**. The current build satisfies this; see TESTING.md §0 for the
-last-verified row.
+The static-analysis governance is the **adjudicated-debt model**: no
+UNADJUDICATED finding is permitted at any severity, while findings
+that have been measured, adjudicated and documented (with rationale
+and a non-regression baseline) may remain as declared debt; any new
+or increased unexplained finding blocks integration. The current
+declared baseline and each debt class's rationale live in
+TESTING.md §0.
 
 ## Self-verification tools
 
@@ -616,20 +620,16 @@ issues that motivated each Pitfall entry in SPEC.md Part D.
 - The 0x800f081e suppression heuristic is also from OSDBuilder.
 - The three-tier `etfsboot.com` / `efisys.bin` fallback chain comes
   from [Win_ISO_Patching_Scripts_zhCN](https://github.com/adavak/Win_ISO_Patching_Scripts_zhCN).
-- The Debug Trace Facility, logging conventions, environment-check
-  cmdlets, and retry primitives are reused verbatim from the companion
-  in-house script
-  [`Download-SpeakerDeck.ps1`](../download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1).
-- The 7-Zip helper trio (`Get-SevenZipPath`, `Get-LatestSevenZipUrl`,
-  `Install-SevenZipFallback`) is reused from
-  `Deploy-AMDChipsetDriverOnWindowsServer.ps1`.
 - The canonical Server 2022 SHA-256 hash was sourced from
   [rgl/windows-evaluation-isos-scraper](https://github.com/rgl/windows-evaluation-isos-scraper).
 - The PCA2023 boot-manager conversion (P10 `Convert-WimBootToPca2023Signed`)
-  is a PSA-clean re-implementation of Microsoft's
-  [`Make2023BootableMedia.ps1`](https://github.com/microsoft/secureboot_objects)
-  (`v1.6.4-signed`, commit `bd7abe3`) `Copy-2023BootBins`; the upstream-compatible
-  output-verification facility (P12 `Test-OutputIsoPca2023Readiness`)
-  is a quality extension not present in the Microsoft original.
+  is a PSA-clean re-implementation of the `Copy-2023BootBins` function
+  from Microsoft's
+  [`Make2023BootableMedia.ps1`](https://github.com/microsoft/secureboot_objects);
+  the pinned upstream file identity this project tracks is recorded in
+  SPEC.md §B.17.4 (tracking is by file identity, not release tag). The
+  upstream-compatible output verification (P12
+  `Test-OutputIsoPca2023Readiness`) is a quality extension absent from
+  the Microsoft original.
 
 This script was generated and iteratively refined with Anthropic Claude.

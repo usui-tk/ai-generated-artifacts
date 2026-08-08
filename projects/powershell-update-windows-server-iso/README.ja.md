@@ -199,12 +199,12 @@ $LogFile    = Join-Path $WorkRoot ('logs\{0}-{1}-{2}.log' -f 'PrepareBuildVerify
 
 ### 実例：Server 2016 と Server 2025
 
-P10（PCA2023 ブートマネージャ変換）は現在、既定で（readiness 駆動により）
-実行されるため、Server 2016 には PCA2023 関連スイッチが一切不要です。
-Server 2025 は例外で、`-ForcePca2023OnServer2025` を指定しない限り P10 を
-スキップします（認証済み 2025 プラットフォームはファームウェアに 2023
-証明書を同梱）。出荷時の PCA2011 署名 boot manager を維持したい場合は、
-どの OS でも `-SkipPca2023BootManager` でオプトアウトできます。
+P10（PCA2023 ブートマネージャ変換）は **Server 2025 を含む全サポート OS**
+で既定実行（readiness 駆動）されるため、以下のどちらの例にも PCA2023
+関連スイッチは不要です。出荷時の PCA2011 署名 boot manager を維持したい
+場合は、どの OS でも `-SkipPca2023BootManager` でオプトアウトできます
+（`-ForcePca2023OnServer2025` は非推奨の no-op 互換スロットとしてのみ
+残存し、指定時は caution を出します。現行ポリシーの推定に使わないこと）。
 
 ```powershell
 # Server 2016（PCA2023 スイッチなし）
@@ -217,14 +217,13 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     -UseBaselineOnly `
     -Execute
 
-# Server 2025（2025 固有の P10 スキップを上書き）
+# Server 2025（PCA2023 スイッチ不要 — 変換は既定で実行）
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 .\Update-WindowsServerIso.ps1 `
     -Action PrepareBuildVerify `
     -OsVersion Server2025 -OsLanguage ja-jp `
     -WorkRoot 'D:\UpdateWsi-Server2025' `
     -LogFile ('D:\UpdateWsi-Server2025\logs\build-2025-{0}.log' -f $stamp) `
-    -ForcePca2023OnServer2025 `
     -UseBaselineOnly `
     -Execute
 ```
@@ -347,10 +346,11 @@ Refresher が失敗、`2` = 手動補完が必要なフィールドあり（自�
 | P08 | PatchBootWim | Build | boot.wim（PE + Setup）と winre.wim |
 | P08S | SyncSetupBinaries | Build | servicing済み boot.wim idx2 の setup.exe / setuphost.exe をメディア `sources\` へ明示同期（前後のサイズ/タイムスタンプ/SHA-256 を記録。MS のメディア更新手順の必須要件）|
 | P09 | AssembleIso | Build | Dynamic Update Setup オーバーレイ、Export-WindowsImage、oscdimg による ISO ビルド |
-| P10 | ConvertPca2023BootManager | Build | **既定で実行**（readiness 駆動）の PCA2023 Secure Boot 変換（オプトアウト：`-SkipPca2023BootManager`。Server 2025 のみ追加で `-ForcePca2023OnServer2025` が必要）|
+| P10 | ConvertPca2023BootManager | Build | **既定で実行**（readiness 駆動）の PCA2023 Secure Boot 変換 — 全サポート OS 対象（オプトアウト：`-SkipPca2023BootManager`）|
 | P11 | StaticVerify | Verify | 出力 ISO をマウントし、展開ツリーとの SHA-256 内容同一性を検証。適用後の全インデックス検査（`logs/inspection_post.json`）から種別ごとに実測検証（到達ビルド、.NET ロールアップ実在確認。KB 名照合は Server 2016 のみ）|
 | P12 | VerifyPca2023Readiness | Verify | **常時実行** — `pca2023_readiness.json` + `.md` を出力 |
 | P13 | FinalReport | Report | 実行終了サマリ、ISO ハッシュ、ログパス。適用前後の検査差分と、宣言値と実測値の突き合わせ（observe-first）|
+| P14 | HyperVValidation | Verify | 出力 ISO の Hyper-V Gen2 Secure Boot 検証（identity 束縛の boot 証跡＋独立した operator 承認ステップ）。`-Action BootTest`／`-Action All`／`-RunHyperVValidation`（P13 の前に挿入）で実行。SPEC §B.5 参照 |
 
 各フェーズの詳細契約は [SPEC.md](./SPEC.md) Part B を参照してください。
 
@@ -360,7 +360,7 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
 **2026-06** に失効します。2011 証明書を失効済みに更新したファームウェアは、
 2011 系で署名された boot manager をもつ ISO の起動を拒否します。P10 / P12 が
 この問題に対処します。詳細な運用モデル（OS 別デフォルト、
-`-ForcePca2023OnServer2025` を設定するタイミング、`-Pca2023OnlyMode` による
+`-Pca2023OnlyMode` による
 スタンドアロンのフォレンジック検査）は SPEC.md §B.17 と §B.18 を参照してください。
 
 代表的な運用判断：
@@ -372,11 +372,11 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
   は 2024-4B（2024 年 4 月）以降が必要（Server 2022 は Lenovo lp2353.pdf に
   従い、2025-2B が必要）。旧ファームウェア向けに出荷時の PCA2011 署名 boot
   manager を維持する場合は `-SkipPca2023BootManager` を指定。
-- **Server 2025**：この OS のみ P10 は引き続きデフォルトでスキップ
-  （Microsoft 認証済み Server 2025 プラットフォームはファームウェアに 2023
-  証明書を同梱、KB5053484 は Server 2025 を手順対象としていない）。PCA2023
-  変換が必要な非認証ハードウェアで運用する場合のみ
-  `-ForcePca2023OnServer2025` で上書き。
+- **Server 2025**：P10 はこの OS でも既定実行です（現行ポリシーで
+  `RequiredByDefault=true`）— 認証済みプラットフォームのファームウェア
+  内容に依存せず、PCA2023 専用ファームウェアで起動できるメディアを生成
+  し、変換は実測で E2E 検証済みです。残存する `-ForcePca2023OnServer2025`
+  は非推奨の no-op 互換スロットです（指定時は caution を出力）。
 - **既存 ISO のフォレンジック検査**：`-Pca2023OnlyMode -IsoPath <existing.iso>`
   で全ビルドパイプラインをスキップし、P12 のみを ISO に対して実行。
 
@@ -411,7 +411,7 @@ Microsoft の「Windows Production PCA 2011」Secure Boot 署名証明書は
 | `-SkipDynamicPatchRefresh` | patch | switch（OFF）| ベースライン陳腐でも P03 をスキップ（オフライン）|
 | `-UseBaselineOnly` | patch | switch（OFF）| PatchBaseline をそのまま使用。Catalog アクセスなし |
 | `-SkipPca2023BootManager` | secure-boot | switch（OFF）| 既定で実行される P10 PCA2023 ブートマネージャ変換をオプトアウト（出荷時の PCA2011 署名 boot manager を維持）|
-| `-ForcePca2023OnServer2025` | secure-boot | switch（OFF）| Server 2025 の P10 既定スキップを上書き |
+| `-ForcePca2023OnServer2025` | secure-boot | switch（OFF）| **非推奨 no-op** 互換スロット（Server 2025 でも P10 は既定実行。指定時は caution を出力）|
 | `-Pca2023OnlyMode` | secure-boot | switch（OFF）| 既存 ISO の P12 単独検査（`-IsoPath` 必須）|
 | `-Pca2023ScriptPath` | secure-boot | （なし）| 内部ヘルパーの代わりに外部 `Make2023BootableMedia.ps1` を使用 |
 | `-Mode` | admin | `Monthly`（または `Initial`/`Force`）| `RefreshAllBaselines` の更新モード |
@@ -505,8 +505,11 @@ P07+  Build / Verify / Report
 python3 ../../quality-tools/powershell-static-analyzer/psa.py Update-WindowsServerIso.ps1
 ```
 
-コミット前の必須ゲートは **0 errors / 0 warnings / 0 info** です。現行ビルドは
-この条件を満たしています。最終確認状況は TESTING.md §0 を参照してください。
+静的解析ガバナンスは**裁定済み債務モデル**です：いかなる重大度でも
+**未裁定**の指摘は許容されません。一方、実測・裁定・文書化（根拠と
+非後退基線付き）を経た指摘は宣言的債務として残存できます。未説明の
+新規・増加指摘は統合をブロックします。現在の宣言基線と各債務クラスの
+根拠は TESTING.md §0 を参照してください。
 
 ## 自己検証ツール
 
@@ -602,20 +605,15 @@ Stage 4 は `workflow_dispatch` の 4 入力（`mode`、`onlyOs`、`onlyLanguage
 - 0x800f081e の抑制ヒューリスティックも OSDBuilder からです。
 - `etfsboot.com` / `efisys.bin` の 3 段階フォールバックチェーンは、
   [Win_ISO_Patching_Scripts_zhCN](https://github.com/adavak/Win_ISO_Patching_Scripts_zhCN) からです。
-- Debug Trace Facility、ロギング規約、環境チェック cmdlet、リトライ
-  プリミティブは、社内コンパニオンスクリプト
-  [`Download-SpeakerDeck.ps1`](../download-speakerdeck-oracle4engineer/Download-SpeakerDeck.ps1)
-  からそのまま再利用しています。
-- 7-Zip ヘルパー 3 件（`Get-SevenZipPath`、`Get-LatestSevenZipUrl`、
-  `Install-SevenZipFallback`）は
-  `Deploy-AMDChipsetDriverOnWindowsServer.ps1` からの再利用です。
 - 正規の Server 2022 SHA-256 ハッシュは
   [rgl/windows-evaluation-isos-scraper](https://github.com/rgl/windows-evaluation-isos-scraper)
   から取得しました。
 - PCA2023 boot manager 変換（P10 `Convert-WimBootToPca2023Signed`）は、
   Microsoft の [`Make2023BootableMedia.ps1`](https://github.com/microsoft/secureboot_objects)
-  （`v1.6.4-signed`、commit `bd7abe3`）の `Copy-2023BootBins` の PSA-clean 再実装です。
-  上流互換の出力検証機能（P12 `Test-OutputIsoPca2023Readiness`）は、
-  Microsoft オリジナルにはない品質向上のための拡張です。
+  の `Copy-2023BootBins` 関数の PSA-clean 再実装です。本プロジェクトが
+  追跡する上流ピン（ファイル同一性ベース・リリースタグ非依存）は
+  SPEC.md §B.17.4 に記録しています。上流互換の出力検証機能（P12
+  `Test-OutputIsoPca2023Readiness`）は、Microsoft オリジナルにはない
+  品質向上のための拡張です。
 
 本スクリプトは Anthropic Claude で生成・反復的に洗練されました。

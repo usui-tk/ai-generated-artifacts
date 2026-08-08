@@ -59,7 +59,7 @@ without breaking on cosmetic edits:
 |:---|:---|:---|
 | **Section reference** | `B.N`, `B.N.M`, `D.NN` | Cross-references inside this document |
 | **Policy identifier** | `SPEC-WSI-NNN` | Repository-wide policy IDs (parallel to `SPEC-CI-NNN` in the repository-level SPEC) |
-| **Phase identifier** | `P01`–`P13`, `A00`–`A03` | Pipeline phases (see §B.5) and stand-alone actions (see §B.6) |
+| **Phase identifier** | `P01`–`P14` (incl. `P08S`), `A00`–`A03` | Pipeline phases (see §B.5) and stand-alone actions (see §B.6) |
 
 A section's identifier is stable across revisions. If a section is
 deleted, its identifier is **never reused** for a different purpose;
@@ -107,7 +107,7 @@ remain unambiguous.
   - [B.2 Inputs and outputs](#b2-inputs-and-outputs)
   - [B.3 Workspace layout](#b3-workspace-layout)
   - [B.4 OS profile (Config Schema v2.1)](#b4-os-profile-config-schema-v21)
-  - [B.5 Phase contracts (P01–P13)](#b5-phase-contracts-p01p13)
+  - [B.5 Phase contracts (P01–P14)](#b5-phase-contracts-p01p14)
   - [B.6 Action → Phase mapping](#b6-action--phase-mapping)
   - [B.7 ISO filename detection patterns](#b7-iso-filename-detection-patterns)
   - [B.8 Patch integrity check (three-layer)](#b8-patch-integrity-check-three-layer)
@@ -810,7 +810,7 @@ Per-OS Secure Boot conversion defaults consumed by P10 / P12:
 | Server2016 | `true`  | `2024-04-09` | "2024-4B (April 2024 LCU) or later" |
 | Server2019 | `true`  | `2024-04-09` | "2024-4B (April 2024 LCU) or later" |
 | Server2022 | `true`  | `2025-02-11` | "2025-2B (February 2025 LCU, 20348.2227 baseline) or later" |
-| Server2025 | `false` | `""`         | "n/a (firmware-provided 2023 certs)" |
+| Server2025 | `true`  | `2024-04-09` | "2024-4B (April 2024 LCU) or later" |
 
 Server 2022 has a later baseline date because the `EFI_EX` staging
 directories appeared in cumulative updates only from the 2025-2B LCU
@@ -827,7 +827,7 @@ language is a one-node addition under `LanguageSpecific` plus an
 entry in `Common.SupportedLanguages`; no changes are required in
 `PatchBaseline` or `Pca2023` (both are language-neutral).
 
-## B.5 Phase contracts (P01–P13)
+## B.5 Phase contracts (P01–P14)
 
 **Status**: normative.
 
@@ -866,8 +866,11 @@ P08:  Common.BootWimLcuPolicy governs the boot.wim loop only
 P08S: -SyntheticTestMode (boot.wim absent) OR sandbox mode (no
       -Execute); otherwise always runs (identical files are recorded
       as already-identical, never blindly copied)
-P10:  default-ON, readiness-driven; -SkipPca2023BootManager opts out;
-      Server 2025 additionally requires -ForcePca2023OnServer2025
+P10:  default-ON, readiness-driven, for every supported OS incl.
+      Server 2025; -SkipPca2023BootManager opts out
+P14:  runs only when selected (-Action BootTest / All, or
+      -RunHyperVValidation inserting it before P13); mutually
+      exclusive with -SyntheticTestMode
 P12:  none (always runs)
 P13:  none (always runs)
 ```
@@ -877,6 +880,32 @@ when `-Verbose` is set or on failure. Each phase reports an
 elapsed-time tuple to the `$Script:PhaseTimingSummary` collection
 that `Show-PhaseSummary` (idempotent since r07.0 Step 19) renders at
 script exit.
+
+### B.5.1 P14 HyperVValidation (Group: Verify)
+
+`Invoke-VerifyPhase14_HyperVValidation` validates the produced ISO on
+a Hyper-V Generation 2 VM (virtual UEFI Secure Boot) and binds the
+result to the exact media it validated. Contract facts (derived from
+the implementation phase registry and function):
+
+- **Selection.** P14 is never part of the bare standardFull sequence.
+  It runs via `-Action BootTest` (P14 alone), `-Action All`
+  (standardFull with P14 inserted before P13), or
+  `-RunHyperVValidation` (same insertion for the default Action). It
+  is mutually exclusive with `-SyntheticTestMode`.
+- **Evidence.** The phase writes an identity-bound
+  `P14_hyperv_validation.json` (the boot evidence carries the output
+  ISO identity, so evidence cannot be re-used against different
+  media), plus the boot-console capture artifacts.
+- **Approval.** Operator approval is a second, explicit operation
+  over already-captured BootOnly evidence via
+  `-BootEvidenceApprovalPath`: the phase validates the existing
+  identity-bound evidence and artifact set, never re-running or
+  silently replacing evidence, and records the verdict as
+  `P14_boot_evidence_approval.json`.
+- **Release eligibility.** P14 evidence participates in the
+  release-validation model; a VM state alone is never a verdict
+  (Success derives from guest evidence or forces operator review).
 
 ## B.6 Action → Phase mapping
 
@@ -892,17 +921,17 @@ The default is `PrepareBuildVerify`. The full list, grouped by purpose:
 | `Prepare` | P01-P06 | Stage only (no patching, no DISM mount) |
 | `Build` | P07-P10 | Patch and assemble; presumes Prepare already staged the workspace |
 | `Verify` | P11-P13 | Verify an existing output ISO (presumes a prior Build -Execute produced it) |
-| `PrepareBuildVerify` (default) | P01-P13 | Combined full pipeline (the standardFull sequence in `Get-PhaseListByAction`) |
-| `All` | P01-P13 + post-pipeline extras | StandardFull plus the additional steps gated by `if ($Action -in @('BootTest','All'))` |
+| `PrepareBuildVerify` (default) | P01-P13 (P08S included; P14 inserted before P13 when `-RunHyperVValidation` is set) | Combined full pipeline (the standardFull sequence in `Get-PhaseListByAction`) |
+| `All` | standardFull + P14 (inserted before P13) | The full pipeline with the Hyper-V validation phase always included |
 
 ### B.6.2 Specialty Actions
 
 | Action | Phases run | Description |
 |:---|:---|:---|
-| `BootTest` | (empty Phase array; Hyper-V smoke test) | Stand-alone Hyper-V Gen2 boot smoke test against the output ISO. Mutually exclusive with `-SyntheticTestMode` (parameter-exclusivity guard block) |
+| `BootTest` | P14 | Stand-alone run of the P14 HyperVValidation phase against the output ISO. Mutually exclusive with `-SyntheticTestMode` (parameter-exclusivity guard block) |
 | `GenerateManifest` | P01-P03 | Compute a manifest of resolved patches without proceeding to Fetch / Build / Verify |
 | `Cleanup` | (custom; `Invoke-CleanupAction`) | Clean up workspace and stale DISM mounts |
-| `ListPhases` | (none) | Dump phase + action registry as JSON to stdout |
+| `ListPhases` | (none) | Pretty-print the phase + action registry to the console (`Show-PhaseList`; no execution) |
 | `TestHarness` | (JSON-over-stdin REPL hook, the `TestHarness` short-circuit before phase dispatch) | Eval-PS-function mode used by `tests/powershell_harness.py` (T3); not for human invocation |
 
 ### B.6.3 Admin Actions (A00 - A01 - A03 - A02)
@@ -1682,7 +1711,9 @@ Two functions cooperate to gate P10:
   `Healthy` / `Warning` / `Critical` / `Unknown`.
 
 P10 runs unless `Get-Pca2023ReadinessSnapshot` returns `Critical`
-(skip-with-warn); for Server 2025 it also requires `-ForcePca2023OnServer2025`.
+(skip-with-warn); this applies uniformly to every supported OS
+including Server 2025 (`-ForcePca2023OnServer2025` is a deprecated
+no-op compatibility slot).
 
 Both readiness paths classify a UEFI boot file's signer through the
 shared `Test-Pca2023AuthenticodeChain` helper, which prefers the EMBEDDED
@@ -1702,9 +1733,12 @@ Per the matrix in §B.4.4:
 - Server 2016/2019/2022: `RequiredByDefault=true`. P10 runs whenever
   `EnableInstallWimUpdate=true` and the LCU is at the configured
   minimum date.
-- Server 2025: `RequiredByDefault=false`. P10 short-circuits with
-  rationale "firmware already includes 2023 certs" unless
-  `-ForcePca2023OnServer2025` is set.
+- Server 2025: `RequiredByDefault=true` under the current policy
+  (`Mode=ConvertByDefault`, minimum date 2024-04-09). The historical
+  default-skip and its `-ForcePca2023OnServer2025` force-gate were
+  removed by the r12-series default-enable reshape; the switch
+  survives only as a deprecated no-op compatibility slot with a
+  wired caution (see CHANGELOG for the historical contract).
 
 ### B.17.4 Microsoft Support reference
 
@@ -1714,6 +1748,19 @@ signed boot manager", 2025-02-04) lists Server 2012, 2012 R2,
 Server 2025 is omitted because the article predates Server 2025
 GA; Server 2025 ships with PCA2023 staging assets in install.wim
 natively (§B.16.2).
+
+**Upstream reference pin (tracked by file identity, not release
+tag).** The P10 conversion is a PSA-clean re-implementation of the
+`Copy-2023BootBins` function from `Make2023BootableMedia.ps1` in
+`microsoft/secureboot_objects` (`scripts/windows/`). The pinned
+upstream file identity is git blob `09dd906d28ed1c7e8c7a1860b6c3f63b54d9680c`
+— measured byte-identical across the `v1.6.4`/`v1.6.4-signed` and
+`v1.6.5`/`v1.6.5-signed` release tags (verified 2026-08-08), so
+upstream releases that do not change this blob require no
+re-implementation review. Re-review triggers when the blob hash of
+that file changes upstream. README deliberately carries no version
+numbers for this dependency; this subsection is the single pin
+record.
 
 ## B.18 Output ISO verification
 

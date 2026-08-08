@@ -22,6 +22,43 @@ the script and follows the
 
 ## [Unreleased]
 
+### Documentation
+
+- **Documentation-contract remediation R1 (blocking batch)** — driven
+  by the user-directed staleness audit and an independently verified
+  third-party consistency review (each finding re-measured against
+  the repository before action; one audit claim was refuted by
+  measurement and left unchanged: the standalone readiness flow
+  writes `pca2023_readiness.json` + `.md` exactly as documented).
+  F-01: every current-facing document now states the measured
+  PCA2023 contract — conversion is default-on for every supported OS
+  including Server 2025 (`Mode=ConvertByDefault`,
+  `RequiredByDefault=true`, min date 2024-04-09), and
+  `-ForcePca2023OnServer2025` is a deprecated no-op compatibility
+  slot; corrected in README worked example / per-OS bullets /
+  parameter table (both languages), SPEC §B.5 gating, §B.17.3,
+  §B.4.4 matrix, and the TESTING worked example. F-02: SPEC's
+  normative phase model is now P01–P14 (incl. P08S): heading, TOC,
+  identifier table, the B.6 Action→Phase rows re-derived from
+  `Get-PhaseListByAction` (BootTest = P14; All = standardFull with
+  P14 before P13; ListPhases = pretty-printed console, not JSON),
+  and a new §B.5.1 P14 contract subsection authored from the
+  implementation (selection, identity-bound evidence, two-step
+  operator approval, release-eligibility); the README phase tables
+  gain the P14 row (both languages). F-03: static-analysis
+  governance is unified on the adjudicated-debt model (user ruling)
+  in README (both languages) and TESTING §0 — whose psa row now
+  carries the post-drain declared baseline (main 1E/120W/0I with
+  causes, collector 0E/4W/0I) — and the G3 standing-gates row is
+  re-stated as no-regression-from-baseline. Acknowledgements
+  (user-directed): in-house reuse entries removed and the upstream
+  Microsoft reference made version-free in README; the pin moves to
+  SPEC §B.17.4 as a file-identity record (blob `09dd906d…`,
+  measured byte-identical across the v1.6.4 and v1.6.5 release
+  tags on 2026-08-08, so no re-implementation review is required
+  for v1.6.5; re-review triggers on a future blob change).
+
+
 ## [update-wsi-2026.08.08-r12.82] - 2026-08-08
 
 Tag: `consolidation-fold`. **This release folds the entire series-end
