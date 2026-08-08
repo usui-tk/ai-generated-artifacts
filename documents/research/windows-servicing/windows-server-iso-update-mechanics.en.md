@@ -3,8 +3,12 @@ title: "Windows Server Patched-ISO Build — Metadata-Source Reference Architect
 subtitle: "An Architecture Decision Record for selecting the production metadata source of an autonomous ISO-build pipeline"
 doc-type: reference-architecture (ADR-structured)
 lang: en
+doc-provenance:
+  layer-1-format: 1.0.0
+  layer-2-template: 1.0.0
+  rendered: 2026-08-08
 status: living-document
-revision: "r2.4 (zero-based rewrite + 4 technical-feedback passes, 2026-06)"
+revision: "r2.5 (r12-series measured extensions: Catalog localization/declared discovery, Setup-DU coverage, parent/child delivery, PCA2023 measured subset, WIM metadata mechanics; 2026-08)"
 scope: "Windows Server 2016 / 2019 / 2022 / 2025 LTSC, x64, offline slipstream"
 snapshot: "2026-06 Patch Tuesday cycle"
 companion-ja: "windows-server-iso-update-mechanics.ja.md (derived from this English version)"
@@ -392,6 +396,8 @@ The Catalog at `catalog.update.microsoft.com` is the only surface that publishes
 
 The one structural trap is the **OS naming change** between Server 2019 and 2022. Older OSes use the brand name in titles ("Windows Server 2019"); from Server 2022, Microsoft switched to the codename form ("Microsoft server operating system, version 21H2" for 2022, "…version 24H2" for 2025 — the brand "Server 2025" never appears in a title). A title heuristic MUST therefore maintain **both** naming conventions, and (the single most common silent error) MUST **post-filter the Products column** — a query containing `21H2` can still rank `24H2` rows highly, and vice-versa. The underlying **Product GUIDs are invariant** under these renames (§5.7), which is why the cab's GUID filter is more robust than any title match.
 
+**Measured extension (2026-08, r12-series terminal).** Two further Catalog behaviours were measured during the r12 reverse-engineering series and are confirmed at its terminal. First, the Catalog localizes Title and Classification **display strings** by request context (German, French, Japanese and more were observed), while Product names, KB IDs, update GUIDs and file names stay stable — so matching on raw English display text is a second fragility on top of the naming quirk above. Robust matching must be **semantic**: per-classification alias sets (including the localized forms) with a structural fallback keyed on the stable identity columns when a single unambiguous row remains. Second, the structural answer to title-heuristic fragility as a class is to make discovery **declared data** rather than code: the terminal implementation carries per-Kind search profiles (query strategy, title accept/reject constraints, classification requirements) as a declared policy object, so every heuristic is inspectable and guarded by declaration-derived tests instead of living in ad-hoc string predicates.
+
 ### 6.2 The four surfaces
 
 `[CATALOG-VERIFIED 2026-06-24]`
@@ -499,6 +505,12 @@ Catalog       →  Dynamic Update present  AND  reachable without auth
 
 So for the 2022/2025 SafeOS DU — a line the ISO genuinely needs — the Catalog is not merely *a* source, it is the **only reachable production source that has the data at all**. The cab forces a Catalog hop; SOAP cannot be reached. This single row, on its own, is enough to disqualify [B] as a standalone production source and to confirm [C]. The Catalog supplies every line uniformly, including the one the offline cab structurally cannot.
 
+### 7.1 Measured extensions to the matrix (2026-08, r12-series terminal)
+
+Two facts measured during the r12 series refine the matrix above without changing its verdict. First, **Setup Dynamic Update rows exist for all four Server generations** — not only the uup-era OS: the live Catalog resolves a Setup DU for 2016, 2019, 2022 and 2025 alike, and the terminal per-OS configurations carry those rows (KB5068794 / KB5068795 / KB5079518 / KB5095966 as the 2026-07/08 snapshot values; the KBs roll monthly, the per-generation existence is the stable claim). Setup DU is a distinct family from the SafeOS DU discussed above: it updates Windows Setup's own sources on the media rather than the WinRE/Safe OS image.
+
+Second, the package **parent/child delivery mechanism is measured in use**: the Line model carries a `ParentKbId`, and the Server 2022 .NET CU children (KB5101010 and KB5101005) both declare parent KB5102206 — children of a combined parent package whose resolution goes through the parent row. Real four-VM post-install evidence corroborates the child KB installed on 2022. Whether any shipped **SSU** uses parent/child delivery remains unverified — the one measured 2016 standalone SSU resolves directly (`ParentKbId` null) — so the mechanism is confirmed for .NET children and stays an open question for SSUs.
+
 ## 8. Secure Boot (PCA2023) and media structure  — **DRAFT / under verification**
 
 > **⚠️ STATUS: DRAFT.** Unlike the patch-metadata material (§4–§7, §12), the Secure Boot and media-structure findings below are **structurally reasoned and partially observed, but not yet rigorously tested** end-to-end against the metadata-grounded standard used elsewhere in this memo. They are carried forward from the earlier investigation as orientation and **will be revised** once the build-and-boot verification loop has been exercised with the same rigor. Treat everything in §8 as `[DRAFT]`.
@@ -527,6 +539,12 @@ The mechanism is **dual-staging inside `install.wim`**: alongside `\Windows\Boot
 
 A post-build check proves strictly less than a boot test, and the report must say so. File-presence proves layout; Authenticode-chain proves the signer chain; a Hyper-V Gen2 boot proves the virtual firmware accepts it; only **physical hardware** exercises the real DB/DBX trust decision. A `Pass` from a signer-chain verifier is **necessary but not sufficient**; it does not prove any firmware will accept the media.
 
+### 8.5 Measured update (2026-08, r12-series terminal) — a verified subset within the DRAFT
+
+The r12 series exercised the build loop this section was waiting for, and a measured subset can now be stated firmly. A Server 2025 conversion to the PCA2023-signed boot manager **completed and verified** on real ja-jp media: the static verification phase passed 33/33 with all five PCA2023 output targets valid. The root `\bootmgr.efi` on converted media **remains PCA2011 by Microsoft's media-conversion design** — it is not on the UEFI critical boot path (firmware boots `\EFI\Boot\bootx64.efi`), so its PCA2011 chain is not a conversion defect.
+
+Real post-install evidence from the four Server VMs (2026-08) additionally shows the Secure Boot 2023 certificate rollout **directly verified against firmware variables** on 2016, 2022 and 2025 built from the serviced media, with 2019 exhibiting a known monitoring divergence (the registry rollout state lags while the direct firmware-variable check already verifies the 2023 certificate set) that conservative evidence grading must not paper over. Boot behaviour on PCA2023-only firmware remains the separately-gated test §8.4 describes; the rest of §8 stays `[DRAFT]`.
+
 ## 9. From resolution to ISO
 
 `[VERIFIED for source/ordering metadata; DISM mechanics are standard servicing guidance]` The Catalog gives, per OS, the files (direct URLs + SHA-1 digests) and which file is in-scope. Consuming them:
@@ -540,6 +558,10 @@ A post-build check proves strictly less than a boot test, and the report must sa
    - SafeOS DU (2022 `KB5094157` / 2025 `KB5094150`): a `.cab` for the **WinRE / Safe OS** image — it MUST be applied to `winre.wim`, not the OS in `install.wim`.
 
 The ISO build is therefore a **two-source acquisition only in the abstract** (Catalog for everything; the cab/SOAP are verification). In practice the agent calls **one** production source — the Catalog — for all four lines.
+
+### 9.1 WIM image-metadata mechanics (measured, 2026-08)
+
+Servicing changes the `install.wim` images' metadata story in a way the standard DISM guidance does not cover, and the r12 series measured it end-to-end. Three facts, folded here with an explicit supersession: (1) the Windows Setup edition list and Explorer surface the WIM IMAGE **CREATIONTIME** date on the measured Server 2016 and 2022 media — a LASTMODIFICATIONTIME reflecting the servicing change does not alter what the user sees, so a serviced image that should *look* current needs its CREATIONTIME rewritten. (2) The WIMGAPI write path is **not reliable for that rewrite**: `WIMSetImageInformation` was measured returning success **without persisting** the requested image-XML value on the tested media (silent non-persistence), which supersedes any plan to write dates through the API. The reliable path is editing the WIM's **raw XML resource directly** — preserving byte length, encoding, BOM, terminators and resource descriptors, and always recalculating the integrity table — with WIMGAPI relegated to re-read verification only. (3) On the surviving read/verify path the API is strict about form: re-serialized Unicode XML **without the UTF-16LE BOM is rejected** (Win32 error 203) — the API requires the memory representation of a Unicode XML file, an easy trap for any tool that round-trips the XML through a BOM-stripping serializer.
 
 ---
 
