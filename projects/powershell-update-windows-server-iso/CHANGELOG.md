@@ -22,6 +22,24 @@ the script and follows the
 
 ## [Unreleased]
 
+_No unreleased changes._
+
+
+## [update-wsi-2026.08.08-r12.85] - 2026-08-08
+
+Tag: `doc-contract-r5`. **This release closes the r12 series.** It
+folds the entire documentation-contract remediation arc (R1 through
+R5, driven by three independent third-party audit cycles and ending in
+a Critical 0 / High 0 verdict scoped to the documentation contract),
+the introspection completion that closed re-audit F-04 in code, and
+the CI alignment that brings Stage 1 back onto the r12 contract
+surface. With it the external-implementation merge, consolidation and
+documentation arcs are all closed, and the branch is ready to merge to
+`main`; maintenance continues on `main`, and any further restructuring
+opens its own branch. Entries below are folded verbatim from
+[Unreleased]; the three `Documentation` subsections it had accumulated
+are merged into one, entry text unchanged.
+
 ### Added
 
 - **Source-file format contract, T54**
@@ -112,7 +130,6 @@ the script and follows the
   recorded as reserved for the contract-surface sync test still under
   adjudication.
 
-### Documentation
 
 - **Documentation-contract remediation R5** (post-R4 re-audit; all
   seven active findings re-measured and confirmed, including the two
@@ -147,7 +164,6 @@ the script and follows the
   `update-wsi-2026.08.08-r12.84`, tag `doc-contract-r4`; the T40
   release pin advances in the same change set.
 
-### Documentation
 
 - **Provenance correction to the R1 remediation record (re-audit
   F-16; the R1 entry below is preserved unrewritten as history).**
@@ -270,7 +286,6 @@ the script and follows the
   measured byte-identical across the v1.6.4 and v1.6.5 release
   tags on 2026-08-08, so no re-implementation review is required
   for v1.6.5; re-review triggers on a future blob change).
-
 
 ## [update-wsi-2026.08.08-r12.82] - 2026-08-08
 
