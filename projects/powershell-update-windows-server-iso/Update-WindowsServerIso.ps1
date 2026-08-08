@@ -718,10 +718,10 @@ function Initialize-RuntimeDirectories { # psa-disable-line PSA6003 -- canonical
 #   ScriptHash    : auto-computed SHA256 (first 12 chars) of the actual
 #                   file being executed. Changes for any byte-level edit;
 #                   does NOT need manual bumping.
-$Script:ScriptVersion = 'update-wsi-2026.08.08-r12.80'
+$Script:ScriptVersion = 'update-wsi-2026.08.08-r12.81'
 # Validation history: the per-revision validation markers formerly kept
 # here live in CHANGELOG.md (chronological log) and SPEC.md Part D (rationale).
-$Script:ScriptTag     = 'psa-outputtype-drain'
+$Script:ScriptTag     = 'canon-frame-restoration'
 $Script:SecureBootObjectsRelease       = 'v1.6.5-signed'
 $Script:SecureBootObjectsSourceTag     = 'v1.6.5'
 $Script:SecureBootObjectsCommit        = '798cdc5'
@@ -1448,7 +1448,7 @@ function Enable-DebugTraceFileOutput {
             scriptVer      = $Script:ScriptVersion
             scriptSha      = $Script:ScriptHash
             action         = [string]$Action
-            osKey          = [string]$Script:OsVersion
+            osKey          = [string]$OsVersion
             osLanguage     = [string]$OsLanguage
             transcriptPath = [string]$Script:LogFile
             procId         = $PID

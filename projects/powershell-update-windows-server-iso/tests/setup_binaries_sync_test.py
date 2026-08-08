@@ -245,8 +245,8 @@ def main() -> int:
         "SetupBinarySync_" in code and "-Actual 'MISMATCH' -Status 'Fail'" in code,
         "P11 pin failed", passed, failed)
     passed, failed = check(
-        "version bumped to r12.80 (tag: psa-outputtype-drain)",
-        "update-wsi-2026.08.08-r12.80" in code and "'psa-outputtype-drain'" in code,
+        "version bumped to r12.81 (tag: canon-frame-restoration)",
+        "update-wsi-2026.08.08-r12.81" in code and "'canon-frame-restoration'" in code,
         "bump pin failed", passed, failed)
 
     print(f"\n  Summary: {passed} passed, {failed} failed, {passed + failed} total")

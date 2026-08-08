@@ -377,6 +377,44 @@ the script and follows the
   main 0E/229W/27I and collector 0E/13W/44I; the warning/info drain
   continues in subsequent reviewed batches.
 
+### Governance
+
+- **Canon-frame restoration (incident remediation, user ruling).** The
+  PSA error-drain batch 1 resolved the PSA2001 finding by qualifying
+  `$OsVersion` as `$Script:OsVersion` inside the debug-trace header —
+  an edit that, unrecognized at the time, landed inside the vendored
+  canonical region `pwsh.helper.enable-debugtracefileoutput`. The
+  root cause was a self-authored marker-search pattern used instead
+  of the authoritative marker definitions in the canon tooling; the
+  zero-hit result was then rationalized against the governance
+  documents instead of triggering a stop-and-verify. Per the adopted
+  prevention controls, the in-frame token is reverted and the unit
+  body is proven byte-identical to its pre-campaign state; the
+  improvement routes through central reflux instead (canon unit
+  candidate: `$Script:` qualification of the dynamically-read
+  consumer-scope variable). The returning PSA2001 finding is
+  adjudicated as a fourth measured analyzer false-positive class —
+  the rule harvests only top-level assignments into its
+  script-scope set and does not recognize top-level `param()`
+  declarations, so the declared `$OsVersion` script parameter is
+  reported undefined — registered as a central-reflux candidate and
+  retained as declared debt at its native ERROR severity (main is
+  1E/120W/0I, the 1E being this pinned false positive; frame
+  integrity outranks analyzer appeasement, and no out-of-frame
+  remediation exists by design). Prevention controls adopted with
+  this commit's session: canon-region pre-edit guard derived from
+  the authoritative marker definitions (session instrument), the
+  full canon battery (drift scanner, restamp check,
+  governance-state validator) standing in every code-touching
+  commit's gate set, an authoritative-pattern-source rule, a
+  stop-on-contradiction rule, a negative-evidence reporting rule,
+  and a fixed incident-handling order. Verified with this change:
+  restamp 58/58 IN SYNC and the central-drift count unchanged at
+  the three r12-inherited debug-trace units (the campaign introduced
+  no new central drift). ScriptVersion
+  `update-wsi-2026.08.08-r12.81`, tag `canon-frame-restoration`;
+  the T40 release pin advances in the same change set.
+
 ### Changed
 
 - **Collector r13 — PSA debt drain and the Skip-form opt-out
