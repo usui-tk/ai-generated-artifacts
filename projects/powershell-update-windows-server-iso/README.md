@@ -15,12 +15,16 @@ doc-provenance:
 
 **English** | [日本語](README.ja.md)
 
-Integrate the latest Microsoft Servicing Stack Update, Latest Cumulative
-Update, Dynamic Updates, and .NET Framework cumulative updates into a
-Windows Server evaluation ISO, and re-emit a bootable ISO whose embedded
-`install.wim`, `boot.wim`, and `winre.wim` already contain those
-updates. Targeted at Windows 11 / Windows Server 2016+ host with
-Windows PowerShell 5.1 (also runs on PowerShell 7+).
+Integrate the current month's Windows Server updates — the servicing
+stack (a standalone SSU on Server 2016; embedded in the combined LCU on
+the later generations), the Latest Cumulative Update, Dynamic Updates,
+and .NET Framework cumulative updates — into a Windows Server
+evaluation ISO, and re-emit a bootable ISO whose coupled servicing
+targets are updated together: the embedded `install.wim`, `boot.wim`
+and `winre.wim`, the media's Setup file tree under `sources\` (Setup
+DU overlay), the Setup binaries synced from the serviced boot.wim, and
+the boot files / boot manager. Targeted at Windows 11 / Windows Server
+2016+ host with Windows PowerShell 5.1 (also runs on PowerShell 7+).
 
 This script is part of the
 [`usui-tk/ai-generated-artifacts`](https://github.com/usui-tk/ai-generated-artifacts)
@@ -38,14 +42,22 @@ solve well on its own:
   a stale evaluation ISO and then running Windows Update on each takes
   hours per VM. Building one patched ISO once and reusing it cuts the
   per-VM patch time to zero.
-- **PCA2011 boot-manager cert expiry (2026-06)**. The Microsoft Windows
-  Production PCA 2011 certificate, which signs the boot manager of
-  Server 2016 / 2019 / 2022 evaluation ISOs, expires in 2026-06.
-  Firmware that has been updated to revoke the 2011 certificate (per
-  the BlackLotus CVE-2023-24932 mitigation rollout) refuses to boot
-  ISOs whose boot manager is still on the 2011 chain. This script's
-  P10 phase re-signs the boot manager via the **'Windows UEFI CA 2023'**
-  chain so the resulting ISO boots on revoked-firmware hardware.
+- **Secure Boot 2011-to-2023 certificate transition**. Two distinct
+  clocks drive this. *Expiration*: the KEK CA 2011 and UEFI CA 2011
+  expired in June 2026 (2026-06-24 / 2026-06-27), and the Microsoft
+  Windows Production PCA 2011 — which signs the boot manager of
+  Server 2016 / 2019 / 2022 evaluation ISOs — expires on 2026-10-19.
+  Expiration by itself does not stop existing media from booting; it
+  ends new boot-level protections for the old chain. *Revocation*:
+  firmware where the 2011 certificate has been revoked (the BlackLotus
+  CVE-2023-24932 mitigation rollout) refuses to start media whose boot
+  manager is on the 2011 chain. This script's P10 phase replaces the
+  media's boot manager with the **'Windows UEFI CA 2023'**-signed one
+  staged by Windows servicing, producing media aimed at firmware that
+  trusts the 2023 chain; the P12 report records the measured signature
+  state, and whether a specific machine boots the ISO is confirmed by
+  a boot test on representative hardware (`-Action BootTest`), not
+  assumed from the conversion.
 - **Air-gapped / offline labs**. Lab networks with no internet egress
   cannot use Windows Update. The script accepts pre-staged MSU / CAB
   files under `<WorkRoot>/patches/<OsVersion>/` -- with the LCU and any

@@ -15,10 +15,14 @@ doc-provenance:
 
 [English](README.md) | **日本語**
 
-Microsoft の最新の Servicing Stack Update、Latest Cumulative Update、
-Dynamic Update、および .NET Framework cumulative update を Windows Server
-評価版 ISO に統合し、`install.wim` / `boot.wim` / `winre.wim` に各更新が
-適用済みの起動可能 ISO を再構築します。Windows 11 / Windows Server 2016+
+当月の Windows Server 更新 —— servicing stack（Server 2016 は standalone
+SSU、以降の世代では combined LCU に内蔵）、Latest Cumulative Update、
+Dynamic Update、および .NET Framework cumulative update —— を Windows Server
+評価版 ISO に統合し、結合された servicing ターゲット群をまとめて更新した
+起動可能 ISO を再構築します。対象は、内蔵の `install.wim` / `boot.wim` /
+`winre.wim` に加え、メディアの `sources\` 配下の Setup ファイルツリー
+（Setup DU オーバーレイ）、serviced boot.wim から同期される Setup バイナリ、
+および boot ファイル／boot manager です。Windows 11 / Windows Server 2016+
 ホスト上の Windows PowerShell 5.1（PowerShell 7+ でも動作）を対象としています。
 
 本スクリプトは
@@ -36,13 +40,21 @@ Windows Update は稼働中サーバーを最新状態に保つ標準的な手�
   を立て、各 VM で Windows Update を走らせると、VM 1 台あたり数時間を要します。
   パッチ適用済み ISO を一度作って使い回せば、VM 単位のパッチ適用時間はゼロに
   なります。
-- **PCA2011 boot manager 証明書失効（2026-06）**：Server 2016 / 2019 / 2022
-  の評価版 ISO の boot manager に署名している Microsoft Windows Production
-  PCA 2011 証明書は 2026-06 に失効します。BlackLotus CVE-2023-24932 緩和策の
-  展開で 2011 証明書を失効済みのファームウェアは、boot manager が 2011 系の
-  ままの ISO の起動を拒否します。本スクリプトの P10 フェーズは boot manager を
-  **'Windows UEFI CA 2023'** 系で再署名し、失効済みファームウェアの
-  ハードウェアで起動できる ISO を生成します。
+- **Secure Boot の 2011 → 2023 証明書移行**：ここには2つの異なる時計が
+  あります。*満了（expiration）*：KEK CA 2011 と UEFI CA 2011 は 2026 年
+  6 月に満了済み（2026-06-24 / 2026-06-27）で、Server 2016 / 2019 / 2022 の
+  評価版 ISO の boot manager に署名している Microsoft Windows Production
+  PCA 2011 の満了は 2026-10-19 です。満了それ自体で既存メディアが起動
+  不能になるわけではなく、旧チェーンへの新しい boot レベル保護の提供が
+  終わることを意味します。*失効（revocation）*：BlackLotus CVE-2023-24932
+  緩和策の展開により 2011 証明書を失効済みのファームウェアは、boot manager
+  が 2011 系のままのメディアの起動を拒否します。本スクリプトの P10
+  フェーズは、メディアの boot manager を Windows servicing が staging する
+  **'Windows UEFI CA 2023'** 署名済みのものへ置き換え、2023 チェーンを
+  信頼するファームウェア向けのメディアを生成します。P12 レポートが実測の
+  署名状態を記録し、特定マシンで当該 ISO が起動するか否かは、変換から
+  推定せず代表ハードウェアでの起動テスト（`-Action BootTest`）で確認
+  します。
 - **エアギャップ／オフラインラボ**：インターネット出口を持たないラボ
   ネットワークでは Windows Update を利用できません。本スクリプトは事前配置済みの
   MSU / CAB ファイルを `<WorkRoot>/patches/<OsVersion>/` で受け入れます

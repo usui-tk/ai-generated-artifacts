@@ -78,6 +78,31 @@ the script and follows the
 
 ### Documentation
 
+- **Media targets, SSU topology, and the PCA2023 claims corrected in
+  the README; the 2025 P10 contradiction resolved in SPEC (alignment
+  audit F-11, F-12, F-13).** The README intro (both languages) now
+  describes the deliverable as a coupled servicing-target set — the
+  three WIMs plus the media Setup file tree, the Setup binaries synced
+  from the serviced boot.wim, and the boot files/boot manager — and
+  states the servicing stack per generation (standalone SSU on 2016,
+  embedded in the combined LCU later) instead of a universal "latest
+  SSU". The Secure Boot bullet separates expiration from revocation
+  and corrects the certificate facts: KEK CA 2011 and UEFI CA 2011
+  expired 2026-06-24/27, Windows Production PCA 2011 expires
+  2026-10-19 (the old text dated PCA2011 to 2026-06 — a certificate
+  family mix-up), expiration alone does not stop existing media from
+  booting, and revocation-applied firmware is what refuses 2011-chain
+  media. "Re-signs"/「再署名」 is gone: P10 replaces the boot manager
+  with the PCA2023-signed one staged by Windows servicing (Microsoft's
+  KB5053484 wording is "updates boot manager support ... to the boot
+  manager signed by" the 2023 CA), and bootability on a specific
+  machine is confirmed by `-Action BootTest` on representative
+  hardware, not assumed from the conversion. SPEC B.16.2's stale
+  sentence justifying `RequiredByDefault=false` for Server 2025 is
+  replaced with the readiness-driven framing consistent with
+  B.4.4/B.17.3 (default-ON everywhere; an already-ready 2025 image
+  has less conversion work).
+
 - **Dynamic Update selection documented as baseline-bounded; Setup-DU
   discriminator documented as release-aware (alignment audit F-09,
   F-10).** SPEC B.22.6 no longer says "always-latest / same-month

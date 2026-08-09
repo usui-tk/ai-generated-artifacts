@@ -1697,8 +1697,14 @@ The r08.0 Step 1 / Step 2 investigation established this is
 | Server 2022 | No (verified) | Yes (6 unique binaries) | Same |
 | Server 2025 | **Yes** (72 files pre-populated) | No (0 `*_EX.efi` binaries in LCU) | install.wim contains assets natively; P10 can run without LCU |
 
-This is the technical justification for §B.4.4's `Pca2023.RequiredByDefault`
-being `false` only for Server 2025.
+This asset-provenance difference means Server 2025 needs no LCU to
+source the staging assets: its conversion is readiness-driven and can
+proceed from the native install.wim payload. It does not change the
+default — under the current policy (§B.4.4, §B.17.3) P10 is default-ON
+for every OS including Server 2025, and an already-ready 2025 image
+simply has less conversion work to do. (The historical
+`RequiredByDefault=false` short-circuit this paragraph once justified
+was removed by the r12-series default-enable reshape.)
 
 ### B.16.3 EFI_EX file-by-file signature inventory (Server 2025)
 
