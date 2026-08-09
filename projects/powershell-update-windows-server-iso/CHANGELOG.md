@@ -22,6 +22,33 @@ the script and follows the
 
 ## [Unreleased]
 
+### Added
+
+- T56 `tests/research_reference_drift_test.py` — the research-reference
+  drift guard closing the last guard item of the 2026-08-08 alignment
+  audit (finding F-18 with the recurrence clauses of
+  F-02/F-03/F-04/F-05/F-07/F-12/F-14/F-15). Scans the current
+  normative files (SPEC.md, README.md, README.ja.md, TESTING.md,
+  tests/README.md, and the main script including comments) and rejects
+  the six statement families the remediation retired; CHANGELOG and
+  explicitly Historical/Superseded regions are excluded, so history
+  may quote what normative text may not. The bare impossibility
+  phrase is context-qualified (boot.wim proximity) because the script
+  uses it legitimately about derived-value staleness. Every pattern
+  family and every exclusion rule is proven against built-in synthetic
+  samples before the repository scan, and a companion check pins the
+  STAGE 3 trigger surfaces to each other (workflow `on:` exactly
+  `workflow_dispatch`; the TESTING Current-trigger paragraph states
+  the dispatch-only status). Negative controls measured before
+  landing: on the pre-remediation audit tree (145f4b8) the guard
+  fails naming the pattern family, file and line for every expected
+  residue, and on the pre-sweep r12.86 tree it fails on the three
+  Forbidden-Kind-axis residues corrected in this series; on the
+  current tree it passes 32/32. The offline contract count grows
+  from 32 to 33; STAGE 1 picks the test up by glob with no workflow
+  change. The guard does not convert the research report into
+  executable policy.
+
 ### Documentation
 
 - Research-alignment residual sweep (Phase 3 preparation; alignment
