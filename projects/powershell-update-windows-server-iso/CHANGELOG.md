@@ -22,6 +22,21 @@ the script and follows the
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [update-wsi-2026.08.09-r12.90] - 2026-08-09
+
+Release fold of the fourth-audit remediation Set 1 (external audit
+2026-08-09 20:18; findings N4-01 through N4-06; Q1/Q2/Q3
+adjudications): the A00 fail-closed guard (behavioral change carrying
+this release's single ScriptVersion bump; T40 pin advanced in the
+same change), the N4-02..N4-06 residue sweep, and the T57 /
+schema-gate mechanical pins. The full v4 seed migration (audit Sets
+2-4 and the scratch-clone A00 acceptance) is a dedicated follow-up
+campaign with its own handoff; until it lands, A00 must not be used
+for canonical dataset updates (SPEC B.14.1, TESTING 7.0a). F-06
+stays open as REVALIDATE-pending per SPEC B.11.3.
+
 ### Added
 
 - T57 `tests/a00_rebuild_guard_contract_test.py` and mechanical pins
