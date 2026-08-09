@@ -78,6 +78,24 @@ the script and follows the
 
 ### Documentation
 
+- **Research report anchored in the document set (alignment audit
+  F-01, F-17).** A new SPEC introduction section, "Research basis and
+  document roles", defines which material holds authority over which
+  question — the repository-level research report for observed Windows
+  servicing behavior, this SPEC for adopted engineering decisions, the
+  script/config/schema for executed behavior, and TESTING for
+  verification — and requires that conflicts about Windows behavior be
+  adjudicated against primary evidence instead of being resolved by
+  presuming the implementation correct. The README reader's roadmap now
+  links the research report as the measured evidence behind the
+  servicing design (explicitly not this project's specification), and
+  the README audit-trail description is split into two layers: config +
+  CHANGELOG as the declared baseline and design provenance, and
+  per-build outputs (build logs, P11 inspection record, P12 readiness
+  report, recorded ISO/package hashes) as the evidence for auditing a
+  specific ISO. README.md / README.ja.md are kept in lock-step; the
+  external audit document itself stays outside the repository.
+
 - **TESTING §6 re-authored from the implemented workflows**, replacing
   a section that had drifted on every stage: §6.1 enumerated eight
   steps that no longer matched, §6.3 named triggers the workflow did

@@ -54,8 +54,13 @@ solve well on its own:
   P04 skips verified files, so the entire build can run offline.
 - **Reproducible patch baselines**. Compliance and forensic-replay
   scenarios require an audited "what was inside this ISO at build time"
-  record. The Config baseline (`data/config-Server*.json`) and the
-  CHANGELOG together provide that audit trail.
+  record. Two layers provide it: the Config baseline
+  (`data/config-Server*.json`) and the CHANGELOG record the *declared*
+  baseline and its engineering provenance, while each build's own
+  outputs — the build logs, the P11 inspection record, the P12
+  PCA2023-readiness report, and the recorded source/output ISO and
+  package hashes — carry the evidence against which a *specific* ISO is
+  audited and reproduced.
 
 ### Who this is for, and who it is not for
 
@@ -75,6 +80,15 @@ solve well on its own:
 - For **verification procedures and recorded results**, see
   [`TESTING.md`](./TESTING.md).
 - For **per-revision change history**, see [`CHANGELOG.md`](./CHANGELOG.md).
+- For the **measured research record behind the servicing design**
+  (Windows servicing mechanics, evidence taxonomy, dated observations),
+  see the repository-level research report
+  [`windows-server-iso-update-mechanics.en.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/documents/research/windows-servicing/windows-server-iso-update-mechanics.en.md)
+  ([Japanese edition](https://github.com/usui-tk/ai-generated-artifacts/blob/main/documents/research/windows-servicing/windows-server-iso-update-mechanics.ja.md)).
+  It records observations; it is **not** this project's specification.
+  The division of authority between the report, `SPEC.md`, the
+  implementation, and `TESTING.md` is defined in SPEC
+  ["Research basis and document roles"](./SPEC.md#research-basis-and-document-roles).
 - For the **repository-wide LLM-agent operating guide** (governance hierarchy, ground-truth extraction, Doc-Touching Matrix, Part A inheritance rule, anti-patterns), see [`AGENTS.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/AGENTS.md) at the repository root.
 - The **repository-wide** Language Policy, File Format Policy, Disclaimer, and Contribution rules live at the [root `README.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md), [`CONTRIBUTING.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/CONTRIBUTING.md), and [`SECURITY.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/SECURITY.md).
 

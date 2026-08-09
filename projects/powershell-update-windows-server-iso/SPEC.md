@@ -36,6 +36,47 @@ doc-provenance:
 
 ---
 
+## Research basis and document roles
+
+*(normative)*
+
+The Windows / Microsoft servicing behavior this project builds on is
+recorded in an independent research report maintained at repository
+level:
+
+- [Windows Server ISO Update Mechanics — Independent Technical Research Record](https://github.com/usui-tk/ai-generated-artifacts/blob/main/documents/research/windows-servicing/windows-server-iso-update-mechanics.en.md)
+  (English is the source of truth; a
+  [Japanese edition](https://github.com/usui-tk/ai-generated-artifacts/blob/main/documents/research/windows-servicing/windows-server-iso-update-mechanics.ja.md)
+  is kept in lock-step)
+
+Four classes of material each hold authority over a different question,
+and none substitutes for another:
+
+| Material | Authoritative for |
+|:---|:---|
+| Research report (`documents/research/windows-servicing/`) | What Windows / Microsoft servicing behavior has been observed, measured, or officially documented — including dated observations and superseded conclusions kept for provenance |
+| This SPEC | Which engineering decisions this project adopts on top of that evidence |
+| Script, `data/config-*.json`, `schema/` | What the implementation actually executes |
+| [`TESTING.md`](./TESTING.md) | How the implemented behavior is verified, and which results have been recorded |
+
+The research report is a living observation record governed by its own
+change process (knowledge-delta ledger). It is **not** an implementation
+specification for this project, and its statements MUST NOT be converted
+mechanically into runtime policy or test assertions.
+
+When any two of these materials disagree about Windows behavior, the
+disagreement is a defect to investigate — not a tie to break by rank.
+In particular, the implementation MUST NOT be presumed correct merely
+because it is the implementation. Return to the primary evidence
+(measurements, Microsoft primary sources), determine whether the
+difference is a deliberate project policy or a stale assumption, and
+correct whichever material is wrong: project-side corrections are
+recorded in the CHANGELOG, report-side corrections go through the
+report's own governance, and historical entries are preserved as
+written.
+
+---
+
 ## Conventions (RFC 2119)
 
 This document uses the keywords **MUST**, **MUST NOT**, **SHOULD**,
@@ -101,6 +142,7 @@ remain unambiguous.
 
 ## Table of Contents
 
+- [Research basis and document roles](#research-basis-and-document-roles)
 - [Conventions (RFC 2119)](#conventions-rfc-2119)
 - [Stable Identifiers](#stable-identifiers)
 - [Policy Index](#policy-index-quick-reference-for-ai-agents)

@@ -52,8 +52,12 @@ Windows Update は稼働中サーバーを最新状態に保つ標準的な手�
   オフラインで実行できます。
 - **再現可能なパッチベースライン**：コンプライアンスやフォレンジック再現
   シナリオでは「この ISO にビルド時点で何が含まれていたか」の監査記録が
-  必要です。Config ベースライン（`data/config-Server*.json`）と CHANGELOG が
-  併せて監査証跡を提供します。
+  必要です。監査記録は二層で提供されます。Config ベースライン
+  （`data/config-Server*.json`）と CHANGELOG は**宣言された**ベースラインと
+  その設計来歴（provenance）を記録し、各ビルド自身の出力 —— ビルドログ、
+  P11 の検査記録、P12 の PCA2023 readiness レポート、記録済みの
+  ソース／出力 ISO・パッケージのハッシュ —— が、**個別の** ISO を監査・
+  再現するための証拠を担います。
 
 ### 想定する利用者と、対象外
 
@@ -72,6 +76,15 @@ Windows Update は稼働中サーバーを最新状態に保つ標準的な手�
   [`SPEC.md`](./SPEC.md)（開発者・LLM 向け仕様書）も併読してください。
 - **検証手順と実行結果** は [`TESTING.md`](./TESTING.md) を参照してください。
 - **リビジョン単位の変更履歴** は [`CHANGELOG.md`](./CHANGELOG.md) を参照してください。
+- **servicing 設計の背後にある実測調査記録**（Windows servicing の機構、
+  証拠分類、日付付きの観測）は、リポジトリレベルの調査レポート
+  [`windows-server-iso-update-mechanics.ja.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/documents/research/windows-servicing/windows-server-iso-update-mechanics.ja.md)
+  （[英語版が正本](https://github.com/usui-tk/ai-generated-artifacts/blob/main/documents/research/windows-servicing/windows-server-iso-update-mechanics.en.md)）を
+  参照してください。同レポートは観測の記録であり、本プロジェクトの
+  **仕様書ではありません**。レポート・`SPEC.md`・実装・`TESTING.md` の
+  役割分担は、SPEC の
+  ["Research basis and document roles"](./SPEC.md#research-basis-and-document-roles)
+  節で定義しています。
 - **リポジトリ全体に共通する LLM エージェント運用ガイド**(ガバナンス階層、ground truth 抽出、Doc-Touching マトリクス、Part A 継承ルール、アンチパターン)は、リポジトリルートの [`AGENTS.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/AGENTS.md) を参照してください。
 - **リポジトリ全体に共通する** 言語ポリシー、ファイル形式ポリシー、免責事項、
   貢献ルールは、ルートの [`README.md`](https://github.com/usui-tk/ai-generated-artifacts/blob/main/README.md)、
