@@ -8,7 +8,7 @@ doc-provenance:
 
 > **Status**: rolling specification — the implementation contract is
 > synchronized through the r12-series consolidation (last contract
-> review: 2026-08-08; original baseline r09.0, rewritten 2026-05-27).
+> review: 2026-08-09; original baseline r09.0, rewritten 2026-05-27).
 > This document is the
 > authoritative developer / LLM specification for
 > `Update-WindowsServerIso.ps1`. It is structured so that an LLM agent
@@ -129,7 +129,7 @@ remain unambiguous.
 | SPEC-WSI-014 | Media-dynamic-update sub-phase sequences | §B.11 |
 | SPEC-WSI-015 | Catalogue scrape and supersedence selection | §B.12 |
 | SPEC-WSI-016 | Refresh policy decision matrix | §B.14 |
-| SPEC-WSI-017 | Update type matrix per OS generation | §B.15 |
+| SPEC-WSI-017 | Retired per-generation update-type matrix — historical v3 record only (current model: B.19) | §B.15 |
 | SPEC-WSI-018 | PCA2023 boot manager support | §B.17 |
 | SPEC-WSI-019 | Output ISO verification (post-conversion) | §B.18 |
 | SPEC-WSI-020 | Servicing model consistency check (P06) | §B.19 |
@@ -1447,6 +1447,15 @@ This SEED/DERIVED boundary is enforced mechanically, not by prose: the
 by `schema/config-seed.schema.json`) or DERIVED, so a config-schema field
 can never be silently dropped from the seed (the defect class that the
 coarse `PatchBaseline`-as-one-unit reading first produced).
+
+> **v4 migration pending (audit 2026-08-09 N4-01/N4-02).** The
+> inventory above is still the legacy v3 schema, so the v4-only
+> policy blocks are not yet part of the SEED/DERIVED classification;
+> the whole seed axis (seed schema, seeds, builder, this inventory
+> and its gate) moves to the v4 canonical schema together in the
+> dedicated seed-migration campaign. Until then A00 is fail-closed
+> (B.14.1) and the paragraph above documents the historical v3
+> contract.
 
 **Evidence**: script-body ground truth — `$Script:OsConfigFieldGroups`
 (field-classification constant) and `Invoke-CatalogPatchSetRefresh` (L5283).
@@ -2999,7 +3008,7 @@ for f in data/config-Server*.json; do
 done
 ```
 
-### C.3.2 Schema 2.1 conformance
+### C.3.2 Structural config loader checks
 
 The internal `Test-OsConfigSchema` helper validates that every
 required top-level key (`Schema`, `OsKey`, `Common`, `PatchBaseline`,
@@ -3016,9 +3025,14 @@ has the expected type. Invoked via:
 **Status**: normative. **Tool**: `tests/config_schema_test.py` 
 (standard-library only, run in CI stage1).
 
-`schema/config.schema.json` is the machine-readable single source 
-of truth that mirrors this section (B.4). Every 
-`data/config-Server*.json` is validated against it. Unlike the positive 
+The machine-readable contract mirrors B.4 and is selected by the
+config's own declared `Schema` version: `"4.0"` validates against
+`schema/config.schema.v4.json` (the canonical current shape) and
+`"3.0"` against the legacy `schema/config.schema.json` (B.4.0). Every
+production config committed under `data/` is required, at present, to
+declare `Schema` `"4.0"` — the 3.0 validation path exists only for
+retained compatibility fixtures and legacy inputs — and the schema
+gate pins that currentness mechanically. Unlike the positive
 key-presence check in C.3.2, the schema gate also rejects:
 
 - **unknown / mistyped properties**, via `additionalProperties: false` 

@@ -22,6 +22,28 @@ the script and follows the
 
 ## [Unreleased]
 
+### Documentation
+
+- Fourth-audit residue sweep (findings N4-02 through N4-06; behavior
+  unchanged). SPEC C.3.2 is renamed to the version-neutral
+  "Structural config loader checks" (the old heading still said
+  Schema 2.1); C.3.2a now describes the real declaration-based
+  selection (4.0 → `config.schema.v4.json`, 3.0 → legacy) and states
+  the production-currentness contract — all committed production
+  configs MUST currently declare Schema 4.0, with 3.0 validation
+  reserved for compatibility fixtures; B.14.2 carries a
+  v4-migration-pending note so its v3 inventory reads as the
+  historical contract; the Policy Index row for SPEC-WSI-017 now
+  names the B.15 matrix as superseded (the body already did); the
+  SPEC review metadata advances to 2026-08-09; both READMEs' test
+  inventory advances to T1-T56; and the two stale free-text `Note`
+  identities in the committed configs (Server 2016 build 14393.9234
+  → 14393.9339, Server 2019 KB5094123 → KB5099538) are corrected to
+  match their structured fields, rewritten through the canonical
+  JSON serializer with the byte-format gate green. The audit's
+  long-term suggestion (stop duplicating KB/build identity into
+  free-text notes) is registered with the seed-migration campaign.
+
 ### Changed
 
 - A00 `RebuildDataset` is fail-closed until the v4 seed migration

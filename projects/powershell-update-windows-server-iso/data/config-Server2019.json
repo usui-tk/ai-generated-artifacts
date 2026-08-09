@@ -395,7 +395,7 @@
         "InScope": {
           "build": "17763.9020"
         },
-        "Note": "Stable identity is Server2019 + LCU + KB5094123 + x64; resolve current Catalog file before download.",
+        "Note": "Stable identity is Server2019 + LCU + KB5099538 + x64; resolve current Catalog file before download.",
         "Roles": [
           "ServicingStackCarrier",
           "FinalLCU"

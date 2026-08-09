@@ -168,7 +168,7 @@ projects/powershell-update-windows-server-iso/
 │   ├── config.schema.json            # Config Schema v3.0（互換保持）
 │   ├── config.schema.v4.json         # Config Schema v4.0（正準・r12.00）
 │   └── config-seed.schema.json       # SEED 射影（SPEC B.14.2）
-└── tests/                            # 自己検証スイート（疎番号 T1-T55 + ゲート）
+└── tests/                            # 自己検証スイート（疎番号 T1-T56 + ゲート。T56 = 研究参照ドリフトガード）
 ```
 
 本スクリプトの検証に使用する PowerShell 静的解析ツール（`psa.py`）は、
