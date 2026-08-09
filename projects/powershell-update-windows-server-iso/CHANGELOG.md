@@ -78,6 +78,30 @@ the script and follows the
 
 ### Documentation
 
+- **Digest demoted from "primary key" to same-artifact
+  identity/integrity field; SPEC hash requirement aligned to the
+  state-driven implementation (alignment audit F-07, F-08).** All
+  "Catalog primary key" / "cross-surface primary key" phrasings are
+  replaced (SPEC B.4 example + prose, B.19.2, the
+  `ConvertTo-HexDigestString` script comment, and the legacy v3 schema
+  description, now marked as the legacy path): the Catalog SHA-1 Digest
+  identifies the exact byte container the Catalog serves and is valid
+  comparison evidence only when both sides refer to those same bytes —
+  an MSU wrapper, its inner CAB and the extracted payload hash
+  differently by construction, so Digest is not a universal semantic
+  key across surfaces. SPEC B.19.2 replaces the blanket "every line
+  carries a non-empty Digest" rule — contradicted by schema v4
+  (`Digest: string | null`) and by the current Server 2016 config —
+  with the measured state-driven table of `Test-PatchModelConsistency`
+  via `Get-BaselineHashValue`: Discovered/Fallback lines need no hash
+  yet, LegacyResolved needs SHA-1 or SHA-256, Frozen/E3–E5/Approved
+  need SHA-256 (harness-executed against the live config on
+  2026-08-09; the function returns consistent with three null-Digest
+  lines present). The T29 descriptions in TESTING/tests-README already
+  describe the test as a digest-format/normalization boundary and
+  needed no change. Comment-only .ps1 change; bump deferred to the
+  Phase 1 fold.
+
 - **Universal boot.wim no-LCU claim superseded (alignment audit
   F-05).** The retired-T34 rationale in SPEC asserted in the present
   tense that boot.wim cannot be LCU-serviced at all and called the

@@ -758,7 +758,7 @@ Cadence: refreshed monthly per the AutoRefreshPolicy (§B.14).
       "Title":               "...",
       "FileName":            "...",
       "DownloadUrl":         "...",
-      "Digest":              "8v6Qwu...",     // SHA-1, base64: Catalog primary key
+      "Digest":              "8v6Qwu...",     // SHA-1, base64: Catalog same-artifact identity/integrity field
       "Sha256":              "...",           // recorded for reference (R5 verify target)
       "SizeBytes":           null,            // HEAD Content-Length (fill pending)
       "ApplyOrder":          2,
@@ -833,8 +833,14 @@ allowed to mutate each field is the §B.14 decision matrix.
 
 **Resolved patches live in `PatchBaseline.Lines[]`** (Config Schema
 v3.0, the data-source migration from `wsusscn2.cab` to the Microsoft
-Update Catalog). Each Line carries a `Kind` and is keyed by its `Digest`
-(SHA-1, base64 - the Catalog DownloadDialog primary key). **Digest
+Update Catalog). Each Line carries a `Kind`; its `Digest` (SHA-1,
+base64, exactly as the Catalog DownloadDialog serves it) is a
+same-artifact identity/integrity field: it identifies the exact byte
+container the Catalog serves, and it is valid comparison evidence only
+when the compared metadata refers to those same bytes. An MSU wrapper,
+its inner CAB and the extracted payload are different byte containers
+whose hashes differ by construction, so `Digest` is not a universal
+semantic key across those surfaces. **Digest
 format rule [r11.44]**: `Digest` and `Sha256` are stored BASE64 exactly
 as the Catalog DownloadDialog serves them (never re-encoded at rest);
 `Get-FileHash` yields hex, so `Test-PatchIntegrity` normalizes the
@@ -842,7 +848,8 @@ expected values through the single conversion boundary
 `ConvertTo-HexDigestString` at comparison time (offline gate: T29
 `patch_integrity_digest_test.py`, incl. a live-captured KB5095966
 vector). Both fields are wired into P04 verification: `Digest` as the
-`sha-1` expectation (the primary key), `Sha256` as `sha-256`. The legacy
+`sha-1` expectation, `Sha256` as `sha-256` (local integrity prefers
+SHA-256 where present). The legacy
 field names `PatchBaseline.Patches` and `PatchBaseline.NeutralPatches`
 are **both forbidden** in current configs: `schema/config.schema.json`
 forbids them via `not.anyOf` and requires `Lines`, and the CI gate in
@@ -1993,7 +2000,21 @@ history.
 
 1. every Required Kind for the model is present at least once
    (non-required Kinds are accepted, not forbidden — B.19.1);
-2. every line carries a non-empty `Digest` (the Catalog primary key);
+2. a state-driven integrity-key requirement over each line, matching
+   the implementation (`Get-BaselineHashValue` is the single accessor):
+
+   | Line `State` | Required integrity key |
+   |:---|:---|
+   | `Discovered`, `Fallback` | none yet — remote identity (KbId / UpdateId / URL) suffices; hashes may be pending |
+   | `LegacyResolved` (or absent `State`) | at least one of SHA-1 (`Digest`) or SHA-256 |
+   | `Frozen`, `E3Validated`, `E4Validated`, `E5Validated`, `Approved` | SHA-256; the Catalog SHA-1 `Digest` is retained as a separate field, not accepted as a substitute |
+
+   This matches Config Schema v4, which declares `package.Digest` as
+   `string | null`: a null `Digest` on a `Discovered`/`Fallback` line
+   is a valid pre-resolution state, not a violation (measured against
+   the current Server 2016 config, which carries three such lines, on
+   2026-08-09). Built-artifact integrity is covered separately: the
+   output ISO SHA-256 is recorded by P11/P12 (B.18);
 3. an unknown `PatchModel` raises a typed error.
 
 P06 throws on any violation - the build stops before any WIM is mounted

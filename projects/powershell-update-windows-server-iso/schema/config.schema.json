@@ -736,7 +736,7 @@
         "Digest": {
           "type": "string",
           "minLength": 1,
-          "description": "PRIMARY KEY + integrity: the Catalog Digest (SHA-1, base64). Every downloaded file MUST be verified against this; a mismatch MUST abort the build."
+          "description": "[Legacy v3 path] Same-artifact identity + integrity: the Catalog Digest (SHA-1, base64) of the served byte container. Every downloaded file MUST be verified against this; a mismatch MUST abort the build."
         },
         "Sha256": {
           "type": "string",

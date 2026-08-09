@@ -3176,8 +3176,11 @@ function ConvertTo-HexDigestString {
     .DESCRIPTION
         Config Schema v3.0 stores Line.Digest (SHA-1) and Line.Sha256 exactly  # psa-disable-line PSA5003 -- MS Catalog SHA-1
         as the Microsoft Update Catalog DownloadDialog serves them: BASE64.
-        That at-rest format is deliberate (raw Catalog truth; the Digest is
-        the cross-surface primary key per the reference architecture memo).
+        That at-rest format is deliberate (raw Catalog truth). The Digest
+        is a same-artifact identity/integrity field: valid comparison
+        evidence only when both sides refer to the same byte container
+        (an MSU wrapper, its inner CAB and the extracted payload hash
+        differently by construction).
         Get-FileHash yields HEX. This function is the SINGLE conversion
         boundary: expected values are normalized here, at comparison time.
         Hex input passes through unchanged so filename-embedded SHA-1 values  # psa-disable-line PSA5003 -- MS Catalog SHA-1
