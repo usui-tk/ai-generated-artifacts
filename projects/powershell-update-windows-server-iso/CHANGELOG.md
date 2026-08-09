@@ -22,6 +22,22 @@ the script and follows the
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [update-wsi-2026.08.09-r12.87] - 2026-08-09
+
+Release fold of the research-alignment remediation campaign Phase 3
+(external alignment audit 2026-08-08, finding F-18 with the
+recurrence-prevention clauses; Q3/Q6 adjudications): the T56
+research-reference drift guard plus the residual Forbidden-Kind-axis
+sweep found while designing it. Per the campaign adjudication (Q2)
+the comment-only script correction carries the single ScriptVersion
+bump of this release (`update-wsi-2026.08.09-r12.87`, tag
+`research-alignment-r12.87`; T40 pin advanced in the same change).
+Phase 1 (r12.86) plus this release close the r12 arc of the audit
+campaign; F-06 stays open as REVALIDATE-pending per SPEC B.11.3 and
+is deliberately excluded from the closure claim.
+
 ### Added
 
 - T56 `tests/research_reference_drift_test.py` — the research-reference
