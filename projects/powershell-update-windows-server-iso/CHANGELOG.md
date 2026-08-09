@@ -22,6 +22,37 @@ the script and follows the
 
 ## [Unreleased]
 
+### Changed
+
+- T56 `tests/research_reference_drift_test.py` upgraded to v2
+  (re-audit 2026-08-09 finding R-07, plus the measured v1 defect the
+  re-audit exposed). The v1 scanner matched patterns line by line
+  against raw text and therefore could not see the stale norm the
+  re-audit found in SPEC C.3.3, for two measured reasons: the phrase
+  wrapped across a hard line break, and inline code markup sat
+  between the words. v2 scans normalized logical blocks — Markdown
+  paragraphs and PowerShell comment blocks are joined, code markup
+  stripped and whitespace collapsed before any pattern is applied —
+  with findings attributed to the block's first line; PowerShell
+  code lines keep the v1 per-line proximity scan. Two statement
+  families are added (universal WinRE no-LCU phrasing, armed only
+  with WinRE in the same block; universal digest-mandatory phrasing
+  superseded by the state-driven B.19.2 table) and a
+  retired-CLI-alias check rejects the two retired invocation aliases
+  of the public `-OsVersion` / `-OsLanguage` parameters across the
+  Markdown normative files (the script keeps those names internally
+  as legitimate private helper parameters and is out of that check's
+  scope). Machinery self-tests now include wrapped-phrase and
+  markup-split positives reproducing the measured v1 miss. Negative
+  controls measured before landing on disposable clones: the
+  pre-remediation r12.87 tree fails naming SPEC C.3.3 (two
+  families), the script BridgeLcu comment, and all four retired
+  alias sites — including one in the B.4 config-field table that
+  the re-audit itself had not listed; the audit-time tree 145f4b8
+  retains every v1 detection with strictly wider coverage (family
+  dump verified); the remediated tree passes 46/46. Registered
+  descriptions in tests/README.md and TESTING.md updated in step.
+
 ### Documentation
 
 - Re-audit remediation Phase A (external re-audit 2026-08-09,

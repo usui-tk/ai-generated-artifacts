@@ -1,52 +1,80 @@
 #!/usr/bin/env python3
-"""T56: research-reference drift guard over current normative files.
+"""T56: research-reference drift guard over current normative files (v2).
 
 Mechanises the alignment-audit Phase 3 guard (finding family F-18 with
-the recurrence-prevention clauses of F-03/F-05/F-07/F-12/F-14/F-15):
-statement families that the 2026-08 research-alignment remediation
-removed from the current normative surface must not be reintroduced.
-The guard scans only current normative files and rejects known
-superseded phrasings; it does not convert the research report into
-executable policy, and it asserts nothing about servicing behavior.
+the recurrence-prevention clauses of F-03/F-05/F-07/F-12/F-14/F-15)
+and, since the 2026-08-09 re-audit remediation, the re-audit's
+recurrence clauses as well (R-01 through R-04, R-06 and the retired
+CLI aliases of R-02): statement families that the remediation removed
+from the current normative surface must not be reintroduced. The
+guard scans only current normative files; it does not convert the
+research report into executable policy, and it asserts nothing about
+servicing behavior.
+
+Why v2 exists (measured v1 defect, recorded honestly). The v1 scanner
+matched patterns line by line against raw text. The 2026-08-09
+re-audit then found a live stale norm in SPEC C.3.3 that v1 could not
+see, for two measured reasons: the phrase wrapped across a hard line
+break between its words, and inline code markup (backticks) sat
+between words that the patterns joined with plain whitespace. v2
+therefore scans NORMALIZED LOGICAL BLOCKS: Markdown paragraphs (and
+PowerShell comment blocks) are joined into one string, code markup
+characters are stripped, and whitespace runs are collapsed, before
+any pattern is applied. Findings are attributed to the block's first
+line. PowerShell code lines (non-comment) are still scanned line by
+line with the v1 proximity window.
 
 Scope. Scanned files: SPEC.md, README.md, README.ja.md, TESTING.md,
 tests/README.md, and the main script (comments included). Excluded
 from scanning entirely: CHANGELOG.md (history is preserved verbatim),
-fixtures, and the research report itself (it owns its superseded
-record). Excluded inside scanned Markdown files: sections whose
-heading names them Historical/Superseded, sections opening with a
-superseded Status marker, and paragraphs opening with an emphasised
-Superseded/Historical/Supersession label -- those regions exist to
-preserve the superseded record and are allowed to quote it.
+fixtures, and the research report itself. Excluded inside scanned
+Markdown files: sections whose heading names them
+Historical/Superseded, sections opening with a superseded Status
+marker, and paragraphs opening with an emphasised
+Superseded/Historical/Supersession label -- those regions preserve
+the superseded record and are allowed to quote it.
 
-Statement families rejected (each anchored to the audit finding that
-retired it):
+Statement families rejected (audit finding in brackets):
 
   1. Server 2016 Setup-Dynamic-Update non-existence claims (F-03).
   2. Generation-based / by-design update-kind absence claims, and the
-     retired Forbidden-Kind-axis phrasing of the P06 consistency check,
-     in English or Japanese (F-04; the runtime enforces Required Kinds
-     and state-driven integrity only).
+     retired Forbidden-Kind-axis phrasing of the P06 consistency
+     check, in English or Japanese (F-04, re-audit R-01; the runtime
+     enforces Required Kinds and state-driven integrity only).
   3. Stale research paths -- `research/windows-servicing` without the
      `documents/` prefix (F-02).
   4. Digest-as-primary-key claims, cross-surface or Catalog (F-07).
   5. Universal boot.wim no-LCU claims (F-05). The bare phrase
-     "structurally impossible" is NOT sufficient: the script uses it
-     legitimately about derived-value staleness, so that phrase only
-     counts when boot.wim appears in the nearby context window.
+     "structurally impossible" counts only when boot.wim appears in
+     the same block (the script uses the phrase legitimately about
+     derived-value staleness).
   6. PCA2023 boot-manager "re-sign" claims, English or Japanese (F-12).
+  7. Universal WinRE no-LCU claims (F-05/F-06 boundary, re-audit
+     R-04): the "never ... LCU" phrasing counts only with WinRE in
+     the same block, so that release-specific routing statements
+     remain expressible.
+  8. Universal digest-mandatory claims (F-08, re-audit R-01): the
+     "non-empty digest for every line" phrasing, superseded by the
+     state-driven B.19.2 table.
+
+A retired-CLI-alias check (re-audit R-02) additionally rejects the
+retired invocation aliases (the two former internal names for the
+public -OsVersion / -OsLanguage parameters) anywhere in the Markdown
+normative files. The main script is deliberately out of this check's
+scope: its internal helper functions legitimately use those names as
+private parameter identifiers.
 
 A companion lightweight check pins the STAGE 3 trigger documentation
 (F-14/F-15 recurrence prevention): the synthetic workflow's `on:`
-triggers are read from the workflow file and must be exactly
-`workflow_dispatch`, and the TESTING.md "Current trigger" paragraph
-must state the dispatch-only status. Either surface changing alone
-trips this test, forcing the two to move together.
+triggers must be exactly `workflow_dispatch`, and the TESTING.md
+"Current trigger" paragraph must state the dispatch-only status.
+Either surface changing alone trips this test.
 
-Every pattern family and every exclusion rule is first proven against
-built-in synthetic samples (the machinery's own negative controls) so
-that a silent regex or exclusion regression cannot turn the repository
-scan vacuous.
+Every pattern family, the alias check and every exclusion rule is
+first proven against built-in synthetic samples (including
+wrapped-phrase and markup-split positives reproducing the measured
+v1 miss) so a scanner regression cannot turn the repository scan
+vacuous silently.
 
 Class: B (behaviour/structure pins over the documentation surface).
 
@@ -71,13 +99,17 @@ SCAN_TARGETS = (
     "Update-WindowsServerIso.ps1",
 )
 
+# The retired-alias check runs over the Markdown normative files only
+# (see the docstring for why the script is excluded).
+ALIAS_CHECK_TARGETS = tuple(t for t in SCAN_TARGETS if t.endswith(".md"))
+
 STAGE3_WORKFLOW = (
     ".github/workflows/"
     "projects__powershell-update-windows-server-iso__stage3__synthetic.yml"
 )
 
-# Context window (lines either side) for compound patterns; also the
-# proximity used for the boot.wim qualifier of family 5.
+# Proximity window (lines either side) for compound patterns on
+# PowerShell CODE lines; block scope is used everywhere else.
 CONTEXT_WINDOW = 5
 
 # "\u518d\u7f72\u540d" is the Japanese noun for the retired re-sign
@@ -90,9 +122,12 @@ RESIGN_JA = "\u518d\u7f72\u540d"
 # the family-2 Forbidden-axis sub-pattern); kept as escapes likewise.
 FORBID_KINDS_JA = "\u5fc5\u9808/\u7981\u6b62\\s*Kind"
 
-# family id -> (label, [simple regexes], [compound regexes])
-# A compound regex only produces a finding when the qualifier regex
-# also matches within CONTEXT_WINDOW lines of the hit.
+# family id -> (label, [simple regexes], [compound (pattern, qualifier)])
+# Patterns are applied to NORMALIZED block text (markup stripped,
+# whitespace collapsed) for blocks, and to raw lines for PowerShell
+# code lines. A compound pattern produces a finding only when the
+# qualifier also matches the same block (or the proximity window, for
+# PowerShell code lines).
 FAMILIES = (
     ("F1-2016-setupdu-absence", [
         r"(?i)no\s+Setup\s+Dynamic\s+Update",
@@ -120,14 +155,28 @@ FAMILIES = (
     ]),
     ("F6-pca-resign", [
         r"(?i)\bre-sign",
-        re.escape(RESIGN_JA),
+        RESIGN_JA,
+    ], []),
+    ("F7-winre-universal-no-lcu", [], [
+        (r"(?i)never\s+(?:receives?\s+)?an?\s+LCU", r"(?i)winre"),
+    ]),
+    ("F8-universal-digest-mandatory", [
+        r"(?i)non-empty\s+Digest",
     ], []),
 )
+
+RETIRED_ALIAS_RE = re.compile(r"-OsKey\b|-OsLang\b")
 
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 STATUS_SUPERSEDED_RE = re.compile(r"(?i)\*\*status\*\*.*superseded")
 PARA_LABEL_RE = re.compile(
     r"^\s*>?\s*\*{1,2}[^*\n]*?(?i:superseded|supersession|historical)")
+
+
+def normalize(text):
+    """Strip code/emphasis markup and collapse whitespace runs."""
+    text = text.replace("`", "").replace("*", "")
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def markdown_excluded(lines):
@@ -186,14 +235,72 @@ def markdown_excluded(lines):
     return mask
 
 
-def scan_lines(lines, mask):
-    """Scan text lines against every family; return finding tuples."""
+def markdown_blocks(lines, mask):
+    """Yield (start_line_1based, normalized_paragraph_text) for every
+    non-excluded Markdown paragraph."""
+    n = len(lines)
+    i = 0
+    while i < n:
+        if lines[i].strip():
+            j = i
+            while j < n and lines[j].strip():
+                j += 1
+            if not mask[i]:
+                yield i + 1, normalize("\n".join(lines[i:j]))
+            i = j
+        else:
+            i += 1
+
+
+def ps1_comment_blocks(lines):
+    """Yield (start_line_1based, normalized_comment_block_text) for
+    every contiguous run of comment lines in a PowerShell source."""
+    n = len(lines)
+    i = 0
+    while i < n:
+        if lines[i].lstrip().startswith("#"):
+            j = i
+            body = []
+            while j < n and lines[j].lstrip().startswith("#"):
+                body.append(lines[j].lstrip().lstrip("#"))
+                j += 1
+            yield i + 1, normalize("\n".join(body))
+            i = j
+        else:
+            i += 1
+
+
+def scan_block_text(start, text, findings):
+    """Apply every family to one normalized block; append findings."""
+    for family, simple, compound in FAMILIES:
+        for pat in simple:
+            if re.search(pat, text):
+                findings.append((start, family, text[:70]))
+        for pat, qualifier in compound:
+            if re.search(pat, text) and re.search(qualifier, text):
+                findings.append((start, family, text[:70]))
+
+
+def scan_markdown(lines):
+    mask = markdown_excluded(lines)
     findings = []
+    for start, text in markdown_blocks(lines, mask):
+        scan_block_text(start, text, findings)
+    return findings, mask
+
+
+def scan_ps1(lines):
+    findings = []
+    # comment blocks: normalized block scope (wrap-safe)
+    for start, text in ps1_comment_blocks(lines):
+        scan_block_text(start, text, findings)
+    # code lines: raw line scope with the proximity window, so string
+    # payloads are still covered without comment double-reporting
     for family, simple, compound in FAMILIES:
         for pat in simple:
             rx = re.compile(pat)
             for i, line in enumerate(lines):
-                if mask[i]:
+                if line.lstrip().startswith("#"):
                     continue
                 if rx.search(line):
                     findings.append((i + 1, family, line.strip()[:70]))
@@ -201,7 +308,7 @@ def scan_lines(lines, mask):
             rx = re.compile(pat)
             qx = re.compile(qualifier)
             for i, line in enumerate(lines):
-                if mask[i]:
+                if line.lstrip().startswith("#"):
                     continue
                 if not rx.search(line):
                     continue
@@ -217,10 +324,23 @@ def scan_file(path: pathlib.Path):
     text = raw.decode("utf-8-sig", errors="replace")
     lines = text.split("\n")
     if path.suffix.lower() in (".md", ".markdown"):
-        mask = markdown_excluded(lines)
-    else:
-        mask = [False] * len(lines)
-    return scan_lines(lines, mask)
+        findings, _mask = scan_markdown(lines)
+        return findings
+    return scan_ps1(lines)
+
+
+def scan_retired_aliases(path: pathlib.Path):
+    """Reject retired CLI aliases in a Markdown normative file."""
+    lines = path.read_text(encoding="utf-8").split("\n")
+    mask = markdown_excluded(lines)
+    hits = []
+    for i, line in enumerate(lines):
+        if mask[i]:
+            continue
+        m = RETIRED_ALIAS_RE.search(line)
+        if m:
+            hits.append((i + 1, m.group(0), line.strip()[:70]))
+    return hits
 
 
 def workflow_on_keys(text: str):
@@ -258,7 +378,32 @@ SYNTHETIC_POSITIVES = {
         "boot.wim cannot be LCU-serviced at all",
     "F6-pca-resign":
         "the phase re-signs the boot manager",
+    "F8-universal-digest-mandatory":
+        "every entry carries a non-empty Digest value",
 }
+
+# The measured v1 miss, reproduced: the phrase wraps across a line
+# break AND backticks sit between the words. v2 must detect both
+# families in this one paragraph.
+SYNTHETIC_WRAPPED_POSITIVE = [
+    "under the declared PatchModel each required Kind must be present, no forbidden",
+    "`Kind` may appear, and each `Lines[]` row then carries a non-empty `Digest`.",
+]
+
+SYNTHETIC_F7_POSITIVE = [
+    "NOT sent to WinRE here: WinRE stays serviced by",
+    "SSU plus SafeOS DU, never an LCU.",
+]
+
+SYNTHETIC_F7_NEGATIVE = [
+    "that lane never receives an LCU under the bridge",
+    "ordering rule for install.wim.",
+]
+
+SYNTHETIC_F8_NEGATIVE = [
+    "a pre-resolution line may legitimately carry no",
+    "digest value yet under the state-driven table.",
+]
 
 SYNTHETIC_COMPOUND_POSITIVE = [
     "servicing boot.wim with the update is",
@@ -298,13 +443,18 @@ def check(name, cond, detail, passed, failed):
     return passed, failed + 1
 
 
+def scan_md_sample(lines):
+    findings, _ = scan_markdown(lines)
+    return findings
+
+
 def main():
-    print("T56: research-reference drift guard")
+    print("T56: research-reference drift guard (v2)")
     passed = failed = 0
 
-    # -- machinery self-test: every family fires on its synthetic sample
+    # -- machinery self-test: every simple family fires on its sample
     for family, sample in SYNTHETIC_POSITIVES.items():
-        got = scan_lines([sample], [False])
+        got = scan_md_sample([sample])
         hit = any(f[1] == family for f in got)
         passed, failed = check(
             f"machinery: family {family} detects its synthetic sample",
@@ -314,30 +464,82 @@ def main():
     for sample in ("throws with the required/forbidden Kinds",
                    "the Forbidden Kinds for that model",
                    "\u5fc5\u9808/\u7981\u6b62 Kind \u3068\u5171\u306b"):
-        got = scan_lines([sample], [False])
+        got = scan_md_sample([sample])
         hit = any(f[1] == "F2-generation-based-absence" for f in got)
         passed, failed = check(
             "machinery: family F2 Forbidden-axis sub-pattern fires on "
             f"sample {sample[:30]!r}",
             hit, "no finding", passed, failed)
 
-    # -- compound qualifier: fires with boot.wim context, stays silent
-    #    without it
-    got = scan_lines(SYNTHETIC_COMPOUND_POSITIVE,
-                     [False] * len(SYNTHETIC_COMPOUND_POSITIVE))
+    # -- the measured v1 miss: wrapped + backtick-split phrase must now
+    #    be seen by BOTH families in one normalized paragraph
+    got = scan_md_sample(SYNTHETIC_WRAPPED_POSITIVE)
+    fams = {f[1] for f in got}
     passed, failed = check(
-        "machinery: bare-phrase family 5 fires with boot.wim in context",
+        "machinery: wrapped/markup-split phrase detected by family F2",
+        "F2-generation-based-absence" in fams,
+        f"families seen {sorted(fams)!r}", passed, failed)
+    passed, failed = check(
+        "machinery: wrapped/markup-split phrase detected by family F8",
+        "F8-universal-digest-mandatory" in fams,
+        f"families seen {sorted(fams)!r}", passed, failed)
+
+    # -- family 7: WinRE qualifier required
+    got = scan_md_sample(SYNTHETIC_F7_POSITIVE)
+    passed, failed = check(
+        "machinery: family F7 fires with WinRE in the block",
+        any(f[1] == "F7-winre-universal-no-lcu" for f in got),
+        "compound pattern did not fire", passed, failed)
+    got = scan_md_sample(SYNTHETIC_F7_NEGATIVE)
+    passed, failed = check(
+        "machinery: family F7 stays silent without WinRE",
+        not any(f[1] == "F7-winre-universal-no-lcu" for f in got),
+        f"unexpected findings {got!r}", passed, failed)
+
+    # -- family 7 on a PowerShell comment block (wrap-safe path)
+    got = scan_ps1(["    # " + SYNTHETIC_F7_POSITIVE[0],
+                    "    # " + SYNTHETIC_F7_POSITIVE[1]])
+    passed, failed = check(
+        "machinery: family F7 fires across a wrapped ps1 comment block",
+        any(f[1] == "F7-winre-universal-no-lcu" for f in got),
+        "comment-block join did not detect", passed, failed)
+
+    # -- family 8: state-driven wording is NOT a finding
+    got = scan_md_sample(SYNTHETIC_F8_NEGATIVE)
+    passed, failed = check(
+        "machinery: family F8 stays silent on state-driven wording",
+        not any(f[1] == "F8-universal-digest-mandatory" for f in got),
+        f"unexpected findings {got!r}", passed, failed)
+
+    # -- family 5 compound: fires with boot.wim context, silent without
+    got = scan_md_sample(SYNTHETIC_COMPOUND_POSITIVE)
+    passed, failed = check(
+        "machinery: bare-phrase family 5 fires with boot.wim in block",
         any(f[1] == "F5-universal-bootwim-no-lcu" for f in got),
         "compound pattern did not fire", passed, failed)
-    got = scan_lines(SYNTHETIC_COMPOUND_NEGATIVE,
-                     [False] * len(SYNTHETIC_COMPOUND_NEGATIVE))
+    got = scan_md_sample(SYNTHETIC_COMPOUND_NEGATIVE)
     passed, failed = check(
         "machinery: bare-phrase family 5 stays silent without boot.wim",
         not got, f"unexpected findings {got!r}", passed, failed)
 
+    # -- retired-alias machinery: positives flagged, publics not
+    tmp = SUBPROJECT_ROOT / "tests"
+    alias_pos = RETIRED_ALIAS_RE.search("-OsKey Server2019") is not None
+    alias_pos2 = RETIRED_ALIAS_RE.search("-OsLang ja-jp") is not None
+    alias_neg = RETIRED_ALIAS_RE.search(
+        "-OsVersion Server2019 -OsLanguage ja-jp") is None
+    passed, failed = check(
+        "machinery: retired-alias regex flags both retired aliases",
+        alias_pos and alias_pos2, "retired alias not flagged",
+        passed, failed)
+    passed, failed = check(
+        "machinery: retired-alias regex accepts the public parameters",
+        alias_neg, "public parameter falsely flagged", passed, failed)
+
     # -- exclusion rules on the synthetic document
-    mask = markdown_excluded(SYNTHETIC_EXCLUSION_DOC)
-    got = scan_lines(SYNTHETIC_EXCLUSION_DOC, mask)
+    lines = SYNTHETIC_EXCLUSION_DOC
+    mask = markdown_excluded(lines)
+    got = scan_md_sample(lines)
     passed, failed = check(
         "machinery: Historical heading section is excluded",
         mask[2], "line under historical heading not masked",
@@ -375,6 +577,18 @@ def main():
         passed, failed = check(
             f"scan: {rel} carries no superseded statement family",
             not findings, detail or "findings present", passed, failed)
+
+    # -- retired-alias scan over the Markdown normative files
+    for rel in ALIAS_CHECK_TARGETS:
+        target = SUBPROJECT_ROOT / rel
+        if not target.is_file():
+            continue
+        hits = scan_retired_aliases(target)
+        detail = "; ".join(
+            f"line {ln} {tok} {snip!r}" for ln, tok, snip in hits[:6])
+        passed, failed = check(
+            f"alias: {rel} carries no retired CLI alias",
+            not hits, detail or "hits present", passed, failed)
 
     # -- STAGE 3 trigger documentation pin (F-14/F-15 recurrence guard)
     wf = REPO_ROOT / STAGE3_WORKFLOW
