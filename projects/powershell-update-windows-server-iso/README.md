@@ -488,7 +488,10 @@ P02   ResolveInputs
         - Read PatchBaseline.PatchTuesdayOfBaseline
         - Compare against Get-LatestPatchTuesday
 P03 RefreshPatchBaseline (if baseline is stale OR -AutoDetectLatestPatches)
-        - Scrape Microsoft Update Catalogue for the target month
+        - Scrape Microsoft Update Catalogue, bounded by the baseline
+          month (Dynamic Update / .NET: same month if published,
+          otherwise latest prior; never newer than the baseline;
+          Preview excluded)
         - Identify SSU + LCU + DynamicUpdate(.Setup/.Component/.SafeOs)
           + .NET CU using config-driven title-token narrowing
         - Fetch ScopedViewInline.aspx for Supersedes / SupersededBy lists

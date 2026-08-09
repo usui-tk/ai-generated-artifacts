@@ -2276,25 +2276,42 @@ for a fully-patched ISO. (The pre-b3 release-info publication-gap
 carry-forward, which bounded the search by the Dynamic Update 36-month
 window, was removed with the legacy resolution path.)
 
-### B.22.6 Dynamic Update: always-latest resolution
+### B.22.6 Dynamic Update: baseline-bounded resolution
 
 Setup and Safe OS Dynamic Updates are resolved live at build time by
-`Resolve-SetupDu` / `Resolve-SafeOsDu` (a same-month Catalog search via
-`Get-Newest` / `Search-Catalog`), always taking the latest applicable
-package. There is no Dynamic Update cache or lookback window.
+`Resolve-SetupDu` / `Resolve-SafeOsDu` (`Search-Catalog` +
+`Get-NewestAtOrBeforeMonth`), under the declared
+`DynamicUpdatePolicy: SameMonthOrLatestPrior`: the same-month candidate
+is taken when one exists, otherwise the latest applicable candidate
+prior to the selected baseline month. A candidate newer than the
+baseline month is never taken, and Preview packages are excluded
+unless explicitly allowed (`-IncludePreview`). This matches
+Microsoft's documented media-dynamic-update rule that when no Dynamic
+Update was published in the LCU's month, the most recent published
+version is used. There is no Dynamic Update cache: resolution is a
+live Catalog query bounded by the baseline month.
 
-**Setup-DU discriminator correction [r11.45, live-Catalog-verified
-2026-07-02].** Unlike the SafeOS DU, a Setup DU row has NO dedicated
-Products category: its Products column is only `Windows 10 and later
-Dynamic Update` (only the SafeOS DU carries `Windows Safe OS Dynamic
-Update`) -- per the reference architecture memo's resolution recipes.
+**Setup-DU discriminator [r11.45 correction; release-aware].** Setup
+DU Catalog metadata differs per release, so the discriminator treats
+each metadata field as selection evidence of release-dependent
+strength, not as a single universal rule. As live-Catalog-verified on
+2026-07-02 for the then-current rows: unlike the SafeOS DU (whose
+Products carries `Windows Safe OS Dynamic Update`), the observed Setup
+DU rows carried only the broader `Windows 10 and later Dynamic Update`
+product, while newer releases add stronger signals (the
+2025-generation rows carry an explicit `Setup Dynamic Update` title).
 The r11.38 filter `products.Contains('Setup Dynamic Update')` assumed
 SafeOS/Setup symmetry, could never match a live row, and silently
 starved the 2025 SetupDU line (rule (1) of `ConvertTo-ConfigLines`
 dropped the empty line) while every gate stayed green -- the T27
-fixture had fabricated the assumed Products string. Selection is now by
-TITLE via the pure `Select-SetupDuCandidate` (offline gate T30 against
-verbatim-captured rows), and rule (1) now **hard-fails** when a Kind
+fixture had fabricated the assumed Products string.
+`Select-SetupDuCandidate` (offline gate T30 against verbatim-captured
+rows) now combines the evidence: the per-OS query alias + version
+token, x64 architecture, Dynamic Update product membership with
+SafeOS-product exclusion, Cumulative Update title exclusion, and an
+explicit `Setup Dynamic Update` title preference when present;
+`Get-NewestAtOrBeforeMonth` then applies the baseline bound (B.22.6).
+Rule (1) still **hard-fails** when a Kind
 inside the PatchModel's apply map resolves to 0 files (silent drops are
 reserved for Kinds outside the model's apply map — a standalone monthly
 `SSU` on the integrated-SSU generations 2019/2022/2025, and a

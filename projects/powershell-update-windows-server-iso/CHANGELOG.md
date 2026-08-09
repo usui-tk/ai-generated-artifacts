@@ -78,6 +78,25 @@ the script and follows the
 
 ### Documentation
 
+- **Dynamic Update selection documented as baseline-bounded; Setup-DU
+  discriminator documented as release-aware (alignment audit F-09,
+  F-10).** SPEC B.22.6 no longer says "always-latest / same-month
+  search with no lookback": the section now states the implemented
+  `SameMonthOrLatestPrior` policy of `Get-NewestAtOrBeforeMonth` —
+  same-month candidate if one exists, otherwise latest applicable
+  prior; never newer than the baseline month; Preview excluded unless
+  explicitly allowed — matching Microsoft's documented
+  media-dynamic-update fallback rule. The r11.45 discriminator record
+  is reframed release-aware: the "no dedicated Products category"
+  observation is dated to the 2026-07-02 verification and scoped to
+  the rows then observed, "selection is by TITLE" is replaced by the
+  measured evidence stack of `Select-SetupDuCandidate` (per-OS alias +
+  version token, x64, Dynamic Update product membership with SafeOS
+  exclusion, CU exclusion, explicit Setup-DU title preference) plus
+  the baseline bound, and the r11.38 silent-starvation incident is
+  preserved unchanged. The README P03 step (both languages) now
+  describes the scrape as baseline-bounded.
+
 - **Digest demoted from "primary key" to same-artifact
   identity/integrity field; SPEC hash requirement aligned to the
   state-driven implementation (alignment audit F-07, F-08).** All

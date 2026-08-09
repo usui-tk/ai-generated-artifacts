@@ -471,7 +471,10 @@ P02   ResolveInputs
         - PatchBaseline.PatchTuesdayOfBaseline を読み取り
         - Get-LatestPatchTuesday と比較
 P03 RefreshPatchBaseline（ベースラインが古いとき、または -AutoDetectLatestPatches 指定時）
-        - Microsoft Update Catalogue を対象月でスクレイプ
+        - Microsoft Update Catalogue をベースライン月で上限を切って
+          スクレイプ（Dynamic Update / .NET：同月に公開があれば同月、
+          無ければ直近の過去版。ベースラインより新しい候補は選ばず、
+          Preview は除外）
         - Config 駆動の title-token 絞り込みで SSU + LCU + DynamicUpdate(.Setup/.Component/.SafeOs)
           + .NET CU を識別
         - ScopedViewInline.aspx を取得して Supersedes / SupersededBy を確認
