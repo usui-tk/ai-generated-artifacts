@@ -22,6 +22,22 @@ the script and follows the
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [update-wsi-2026.08.09-r12.88] - 2026-08-09
+
+Release fold of the re-audit remediation campaign (external re-audit
+2026-08-09; findings R-01 through R-04, R-06 and R-07; Q1/Q2
+adjudications 2026-08-09): the Phase A duplicated-norm residue sweep
+plus the T56 v2 drift-guard upgrade whose alias check found and swept
+a fourth retired-alias site during landing. Per the standing
+adjudication (Q2 of the alignment campaign) the comment-only script
+correction carries the single ScriptVersion bump of this release
+(`update-wsi-2026.08.09-r12.88`, tag `research-alignment-r12.88`;
+T40 pin advanced in the same change). F-06 (re-audit R-05) stays
+open as REVALIDATE-pending per SPEC B.11.3 and is deliberately
+excluded from any closure claim.
+
 ### Changed
 
 - T56 `tests/research_reference_drift_test.py` upgraded to v2
