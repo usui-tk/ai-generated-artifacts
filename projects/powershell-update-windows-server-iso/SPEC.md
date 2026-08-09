@@ -1068,12 +1068,29 @@ operations. Specifically:
   blocks that emit `Write-Skip` lines.
 - P11, P12, P13 run on the synthetic output and produce reports.
 
-CI Stage 3 (`...__stage3__synthetic.yml`) exercises this mode end to
-end. It MUST NOT upload any artefact containing Microsoft binary
-content; this is enforced by the workflow file's explicit
-`actions/upload-artifact` `path:` enumeration per the repository
+**Required contract.** CI Stage 3 (`...__stage3__synthetic.yml`) is
+the workflow that exercises this mode end to end, and it MUST NOT
+upload any artefact containing Microsoft binary content (repository
 [Artifact Content Minimization](https://github.com/usui-tk/ai-generated-artifacts/blob/main/SPEC.md#12-spec-ci-081-artifact-content-minimization)
-policy.
+policy [SPEC-CI-081]).
+
+**Current implementation.** Stage 3 triggers on `workflow_dispatch`
+only (operator-initiated by construction; the r12.85 CI redesign
+removed the `release/published` trigger). The wildcard
+`actions/upload-artifact` step was removed in the same redesign, so
+the no-Microsoft-content rule is currently satisfied by uploading
+nothing; diagnostics come from the job log and the Step Summary.
+
+**Current status.** The end-to-end run is red on the current tree:
+`-SyntheticTestMode` cannot complete P04 (TESTING §7.0 open defect —
+the synthetic branch invokes the resolved-patch evidence-manifest
+writer, which fails closed without local hashes the mode never has).
+
+**Restoration criteria.** The end-to-end claim returns when the §7.0
+defect is fixed under its own design-first change (ScriptVersion bump
++ T40 pin advance) and a `workflow_dispatch` Stage 3 run completes
+green; any artifact upload reintroduced then must use an explicit
+`path:` enumeration per [SPEC-CI-081].
 
 ---
 

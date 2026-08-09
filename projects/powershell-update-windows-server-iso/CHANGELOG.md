@@ -78,6 +78,22 @@ the script and follows the
 
 ### Documentation
 
+- **Stage 3 / SyntheticTestMode descriptions separated into
+  design-intent vs current-status sections (alignment audit F-14,
+  F-15).** TESTING §2.5 no longer presents a checked end-to-end
+  checklist alongside the §6 red status: the section is restructured
+  into Design intent / Historically validated / Current trigger
+  (`workflow_dispatch` only) / Current status (red, §7.0 open defect) /
+  Known blocker / unchecked Acceptance criteria, so past validation
+  reads as provenance rather than current certification. SPEC B.9's
+  claim that Stage 3 "exercises this mode end to end" with wildcard
+  upload-path enforcement — both stale after the r12.85 CI redesign —
+  is restructured into Required contract / Current implementation
+  (dispatch-only trigger, no artifact upload) / Current status /
+  Restoration criteria (§7.0 fix under its own design-first change,
+  green dispatch run, explicit path enumeration for any reintroduced
+  upload).
+
 - **Media targets, SSU topology, and the PCA2023 claims corrected in
   the README; the 2025 P10 contradiction resolved in SPEC (alignment
   audit F-11, F-12, F-13).** The README intro (both languages) now

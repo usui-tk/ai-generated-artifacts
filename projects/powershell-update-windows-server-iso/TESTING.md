@@ -235,6 +235,10 @@ Verification checklist:
 
 ### 2.5 SyntheticTestMode — CI full pipeline
 
+**Design intent.** Full P01 – P13 pipeline against synthetic
+WIM/MSU/CAB inputs (no Microsoft asset download); P03 and P06 bypassed
+(per SPEC.md §B.14); output ISO generated and validated by P11.
+
 ```powershell
 .\Update-WindowsServerIso.ps1 `
     -Action PrepareBuildVerify `
@@ -244,17 +248,30 @@ Verification checklist:
     -Execute
 ```
 
-Expected: Full P01 – P13 pipeline runs against synthetic WIM/MSU/CAB
-inputs (no Microsoft asset download). P03 and P06 are bypassed
-(per SPEC.md §B.14). Output ISO is generated and validated by P11.
+**Historically validated.** The end-to-end checklist below was
+recorded green in earlier revisions (see CHANGELOG); those runs are
+historical provenance, not a certification of the current tree.
 
-Verification checklist:
+**Current trigger.** STAGE 3 is `workflow_dispatch` only
+(operator-initiated). It does not run on push or pull request; §6 is
+the authoritative trigger record.
 
-- [x] No `microsoft.com` / `update.microsoft.com` HTTP call
-- [x] Synthetic WIM bytes are emitted by the test harness, not extracted from a real ISO
-- [x] P09 produces a non-zero-byte `synthetic_<OsKey>.iso` under `<WorkRoot>/output/`
-- [x] P11 verifies the synthetic ISO and emits the verification log
-- [x] CI Stage 3 runs this end-to-end on every push to main
+**Current status.** Red — the mode cannot complete P04 on the current
+tree (§7.0 open defect: the synthetic branch invokes the
+resolved-patch evidence-manifest writer, which fails closed without
+local SHA-256 values that synthetic mode by contract never has).
+
+**Known blocker.** §7.0. The fix is an independent design-first
+change with its own ScriptVersion bump; it is out of scope for the
+documentation-alignment campaign.
+
+**Acceptance criteria** (to re-certify, run and confirm):
+
+- [ ] No `microsoft.com` / `update.microsoft.com` HTTP call
+- [ ] Synthetic WIM bytes are emitted by the test harness, not extracted from a real ISO
+- [ ] P09 produces a non-zero-byte `synthetic_<OsKey>.iso` under `<WorkRoot>/output/`
+- [ ] P11 verifies the synthetic ISO and emits the verification log
+- [ ] A STAGE 3 `workflow_dispatch` run completes this end-to-end green
 
 ---
 
