@@ -44,10 +44,16 @@ Statement families rejected (audit finding in brackets):
   3. Stale research paths -- `research/windows-servicing` without the
      `documents/` prefix (F-02).
   4. Digest-as-primary-key claims, cross-surface or Catalog (F-07).
-  5. Universal boot.wim no-LCU claims (F-05). The bare phrase
-     "structurally impossible" counts only when boot.wim appears in
-     the same block (the script uses the phrase legitimately about
-     derived-value staleness).
+  5. Universal boot.wim no-LCU claims (F-05; extended for the third
+     audit's N-01 family). Beyond the original phrasing, the retired
+     nonservicing formulations ("does not service ... boot.wim",
+     "boot.wim is not serviced by ...", "boot.wim is not made current
+     by ...") are rejected, while release/source-specific measured
+     statements and explicit contract-routing statements stay
+     expressible (pinned by built-in allowed samples). The bare
+     phrase "structurally impossible" counts only when boot.wim
+     appears in the same block (the script uses the phrase
+     legitimately about derived-value staleness).
   6. PCA2023 boot-manager "re-sign" claims, English or Japanese (F-12).
   7. Universal WinRE no-LCU claims (F-05/F-06 boundary, re-audit
      R-04): the "never ... LCU" phrasing counts only with WinRE in
@@ -150,6 +156,9 @@ FAMILIES = (
     ], []),
     ("F5-universal-bootwim-no-lcu", [
         r"(?i)cannot\s+be\s+LCU-serviced",
+        r"(?i)does\s+not\s+service\s+(?:WinPE\s*/?\s*)?boot\.wim",
+        r"(?i)boot\.wim\s+is\s+not\s+serviced\s+by",
+        r"(?i)boot\.wim\s+is\s+not\s+made\s+current\s+by",
     ], [
         (r"(?i)structurally\s+impossible", r"(?i)boot\.wim"),
     ]),
@@ -415,6 +424,23 @@ SYNTHETIC_COMPOUND_NEGATIVE = [
     "staleness structurally impossible here",
 ]
 
+# F5 extension (third audit N-01 family): the three retired
+# nonservicing formulations must fire; wording is deliberately
+# non-verbatim relative to the audit documents.
+SYNTHETIC_F5EXT_POSITIVES = (
+    "a monthly LCU package does not service WinPE/boot.wim across generations",
+    "on every generation boot.wim is not serviced by monthly LCUs",
+    "these images mean boot.wim is not made current by cumulative packages",
+)
+
+# Allowed formulations that must stay silent: a release/source-specific
+# measured statement, and an explicit project-policy routing statement.
+SYNTHETIC_F5EXT_NEGATIVES = (
+    "one Server 2019 source and package pairing rejected the full LCU "
+    "on boot.wim with 0x80070032",
+    "that contract currently does not route FinalLCU onto boot.wim",
+)
+
 SYNTHETIC_EXCLUSION_DOC = [
     "## Kept model (historical)",
     "",
@@ -521,6 +547,23 @@ def main():
     passed, failed = check(
         "machinery: bare-phrase family 5 stays silent without boot.wim",
         not got, f"unexpected findings {got!r}", passed, failed)
+
+    # -- family 5 extension: retired nonservicing formulations fire;
+    #    measured and policy formulations stay silent
+    for sample in SYNTHETIC_F5EXT_POSITIVES:
+        got = scan_md_sample([sample])
+        passed, failed = check(
+            "machinery: family F5 extension fires on "
+            f"sample {sample[:32]!r}",
+            any(f[1] == "F5-universal-bootwim-no-lcu" for f in got),
+            "no finding", passed, failed)
+    for sample in SYNTHETIC_F5EXT_NEGATIVES:
+        got = scan_md_sample([sample])
+        passed, failed = check(
+            "machinery: family F5 extension stays silent on "
+            f"allowed sample {sample[:32]!r}",
+            not any(f[1] == "F5-universal-bootwim-no-lcu" for f in got),
+            f"unexpected findings {got!r}", passed, failed)
 
     # -- retired-alias machinery: positives flagged, publics not
     tmp = SUBPROJECT_ROOT / "tests"

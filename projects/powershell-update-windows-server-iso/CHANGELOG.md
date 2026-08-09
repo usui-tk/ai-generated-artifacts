@@ -22,6 +22,24 @@ the script and follows the
 
 ## [Unreleased]
 
+### Changed
+
+- T56 family F5 extended (third audit 2026-08-09 19:05, §6.8/§10; the
+  guard's measured blind spot for the B.16.4 formulation corrected).
+  Three retired nonservicing phrasings are now rejected in normalized
+  blocks, while the two formulation classes the audit requires to
+  stay expressible — release/source-specific measured statements and
+  explicit contract-routing statements — are pinned as built-in
+  allowed samples that must remain silent. Synthetic wording is
+  deliberately non-verbatim relative to the audit documents so the
+  transcription gate stays strict. Negative controls measured on
+  disposable clones before landing: the pre-fix r12.88 tree fails
+  naming SPEC B.16.4 under the extended family, and the audit-time
+  tree 145f4b8 retains every previous detection with the extension
+  additionally firing there (full per-family dump verified); the
+  remediated tree passes 51/51. Registered descriptions and counts
+  in tests/README.md and TESTING.md updated in step.
+
 ### Documentation
 
 - Third external audit remediation, project side (audit 2026-08-09
