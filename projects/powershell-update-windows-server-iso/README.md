@@ -176,7 +176,7 @@ projects/powershell-update-windows-server-iso/
 │   ├── config.schema.json            # Config Schema v3.0 (retained-compatibility)
 │   ├── config.schema.v4.json         # Config Schema v4.0 (canonical, r12.00)
 │   └── config-seed.schema.json       # SEED projection (SPEC B.14.2)
-└── tests/                            # Self-verification suite (sparse T1-T56 + gates; T56 = research-reference drift guard)
+└── tests/                            # Self-verification suite (sparse T1-T57 + gates; T56 = research-reference drift guard, T57 = A00 guard pin)
 ```
 
 The PowerShell static analyzer (`psa.py`) used to verify this script

@@ -22,6 +22,31 @@ the script and follows the
 
 ## [Unreleased]
 
+### Added
+
+- T57 `tests/a00_rebuild_guard_contract_test.py` and mechanical pins
+  in the schema gate (fourth audit N4-01; adjudicated Q2). The
+  offline contract count grows 33 → 34 (STAGE 1 picks the new test
+  up by glob). T57 asserts, inside the A00 orchestrator body, that
+  the fail-closed schema-currency guard exists, anchors the
+  canonical current version, and precedes the Stage 2 config write —
+  and pins the guard's factual precondition (all four committed
+  seeds still declare the legacy 3.0 shape), whose designed failure
+  is the signal to revise the contract together with the guard's
+  retirement when the v4 seed migration lands.
+  `tests/config_schema_test.py` gains a production-currentness
+  section (every committed production config must declare the
+  canonical current Schema 4.0; the declaration-based 3.0 validation
+  path is untouched and remains for compatibility fixtures) and
+  policy-regression pins for the audit's measured rollback values
+  (Server 2025 `Pca2023.RequiredByDefault`/`Mode`, Server 2019/2022
+  `Common.BootWimLcuPolicy`). Negative controls measured on
+  disposable clones before landing: on the pre-guard r12.89 tree T57
+  fails naming the missing guard, and on a synthetic v3-rollback
+  fixture the currentness and policy pins fail naming file, field
+  and values; the remediated tree passes (T57 10/10, schema gate
+  28/28, both verbatim).
+
 ### Documentation
 
 - Fourth-audit residue sweep (findings N4-02 through N4-06; behavior

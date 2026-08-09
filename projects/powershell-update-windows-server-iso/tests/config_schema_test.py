@@ -331,6 +331,50 @@ def main():
             print(f"{PASS}  {fname}: no legacy PatchBaseline.Patches (r10.3 regression guard)")
             passed += 1
 
+    # Production-currentness gate (SPEC C.3.2a; audit 2026-08-09 N4-01):
+    # every committed production config must declare the canonical
+    # current schema version. Declaration-based validation above stays
+    # unchanged (a 3.0 fixture still validates against the legacy
+    # schema); this section is what turns a rebuild-driven regression
+    # of the committed dataset into a red gate.
+    CANONICAL_CURRENT = "4.0"
+    for fname in required_files:
+        fpath = DATA_DIR / fname
+        if not fpath.exists():
+            continue
+        declared = json.loads(fpath.read_text(encoding="utf-8")).get("Schema")
+        if declared == CANONICAL_CURRENT:
+            print(f"{PASS}  {fname}: declares canonical current Schema {CANONICAL_CURRENT}")
+            passed += 1
+        else:
+            print(f"{FAIL}  {fname}: declares Schema {declared!r}, expected canonical current {CANONICAL_CURRENT!r}")
+            failed += 1
+
+    # Policy-regression pins (audit 2026-08-09 N4-01 measured rollback
+    # values): the committed dataset must keep the current policy, so a
+    # seed-driven rollback of these values is a red gate even if the
+    # result still validates as some schema.
+    POLICY_PINS = [
+        ("config-Server2025.json", ("Pca2023", "RequiredByDefault"), True),
+        ("config-Server2025.json", ("Pca2023", "Mode"), "ConvertByDefault"),
+        ("config-Server2019.json", ("Common", "BootWimLcuPolicy"), "enabled"),
+        ("config-Server2022.json", ("Common", "BootWimLcuPolicy"), "enabled"),
+    ]
+    for fname, path, expected in POLICY_PINS:
+        fpath = DATA_DIR / fname
+        if not fpath.exists():
+            continue
+        node = json.loads(fpath.read_text(encoding="utf-8"))
+        for key in path:
+            node = node.get(key, {}) if isinstance(node, dict) else {}
+        label = fname + ":" + ".".join(path)
+        if node == expected:
+            print(f"{PASS}  {label} == {expected!r} (policy pin)")
+            passed += 1
+        else:
+            print(f"{FAIL}  {label} is {node!r}, expected {expected!r} (policy rollback?)")
+            failed += 1
+
     print()
     total = passed + failed
     print(f"  Summary: {passed} passed, {failed} failed, {total} total")
