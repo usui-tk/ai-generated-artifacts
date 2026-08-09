@@ -22,6 +22,37 @@ the script and follows the
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [update-wsi-2026.08.09-r12.86] - 2026-08-09
+
+Release fold of the research-alignment remediation campaign Phase 1
+(external alignment audit 2026-08-08, findings F-01 through F-05 and
+F-07 through F-17; F-06 stays open as REVALIDATE-pending — see SPEC
+B.19 area and the WinRE contract notes) together with the CI redesign
+and TESTING re-authoring that preceded it in this window. Per the
+campaign adjudication the [Unreleased] section is folded in full, and
+the single ScriptVersion bump covering the audit-driven comment
+corrections lands here (`update-wsi-2026.08.09-r12.86`, tag
+`research-alignment-r12.86`; T40 pin advanced in the same change).
+
+### Documentation
+
+- **WinRE/LCU generalization removed; F-06 recorded as open and
+  frozen (alignment plan §0/§5).** The B.10 mapping-table rationale
+  "WinRE uses the SafeOS DU instead" and the B.11.3 sentence "The
+  WinRE image is NOT serviced with LCU" are replaced with the
+  contract-routing description (FinalLCU targets Install + Boot under
+  the current contracts; the WinRE lane applies SSU + SafeOS DU). A
+  new B.11.3 note records the Server 2016 name-vs-routing mismatch
+  (`SeparateSSUThenFullLCUPlusSafeOSDU` vs RoleTargets without a
+  WinRE FinalLCU step) as **open, REVALIDATE-pending**: it will be
+  decided only by the planned limited experiment after the r13
+  refactoring, and until then neither the contract name nor the role
+  targets/sequences may be changed to match the other — including by
+  r13 work. The Microsoft media-dynamic-update table is noted as a
+  structural prior, not proof.
+
 ### Changed
 
 - **Evidence authority model made explicit (alignment audit F-16, plan

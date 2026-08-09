@@ -1141,7 +1141,7 @@ guidance:
 | Patch Type (Config Schema v3.0 `Kind`) | Target lanes | Microsoft rationale |
 |:---|:---|:---|
 | `SSU`             | Install + Boot + WinRE | Every serviced WIM needs the latest servicing stack |
-| `LCU`             | Install + Boot         | WinRE uses the SafeOS DU instead |
+| `LCU`             | Install + Boot         | Current per-OS contracts route `FinalLCU` to Install + Boot; the WinRE lane applies SSU + SafeOS DU (whether WinRE should also receive the LCU is an open, per-release question — B.11.3 note) |
 | `DotNet`          | Install                | .NET 4.x runtime KB lives in install.wim |
 | `SafeOSDU`        | WinRE                  | WinRE is the "Safe OS" |
 | `SetupDU`         | Setup                  | Setup binaries; P09 expands the CAB with `expand.exe` and overlays the files onto the extracted ISO `sources\` tree (never WIM-mounted) |
@@ -1217,9 +1217,27 @@ Install-only routing by measurement.
 ### B.11.3 WinRE.wim (P08 inner block)
 
 `W1.SSU` → `W2.LanguagePack` → `W3.SafeOsDU` →
-`W4.CleanupAndExport`. The WinRE image is NOT serviced with LCU;
-Microsoft delivers a Safe OS Dynamic Update that plays the LCU role
-for the recovery environment.
+`W4.CleanupAndExport`. Under the current contracts the WinRE lane
+applies the servicing stack and the Safe OS Dynamic Update, and the
+`FinalLCU` role targets Install + Boot only — a per-contract routing
+decision, not a universal "WinRE cannot take an LCU" rule.
+
+**Open question — Server 2016 WinRE LCU (audit F-06;
+REVALIDATE-pending).** The Server 2016 WinRE servicing contract is
+named `SeparateSSUThenFullLCUPlusSafeOSDU`, yet its `RoleTargets` do
+not route `FinalLCU` to WinRE and its `Sequences.WinRE` has no
+FinalLCU step. This name-vs-routing mismatch is known and recorded as
+**open**: whether `winre.wim` should receive the LCU between the SSU
+and the SafeOS DU for Server 2016 will be decided ONLY by a dedicated
+limited experiment (planned after the r13 refactoring, on a real
+Windows + ADK environment). Until that experiment reports, **neither
+the contract name nor the role targets / sequences may be "fixed" to
+match the other** — including by r13 refactoring work. Microsoft's
+media-dynamic-update table gives a structural prior (its WinRE column
+adds the servicing stack via the LCU, then language, then the SafeOS
+DU, with the standalone LCU-apply row targeting install.wim and
+boot.wim only), but agreement with a table is not proof for this
+standalone-SSU generation; the measurement decides.
 
 `Invoke-PatchSubPhase` is the single helper that drives the apply
 loop for any sub-phase. Phase workers iterate the sequence, calling
