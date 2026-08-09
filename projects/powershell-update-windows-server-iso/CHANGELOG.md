@@ -78,6 +78,19 @@ the script and follows the
 
 ### Documentation
 
+- **Universal boot.wim no-LCU claim superseded (alignment audit
+  F-05).** The retired-T34 rationale in SPEC asserted in the present
+  tense that boot.wim cannot be LCU-serviced at all and called the
+  operation structurally impossible. The paragraph now separates the
+  still-valid retirement reason (servicing stance is a validation
+  policy, not a per-OS capability) from a superseded-rationale note:
+  boot.wim serviceability depends on release, source media,
+  prerequisites and package topology; Microsoft's media-dynamic-update
+  procedure applies the LCU to boot.wim as a documented step; and the
+  dated Server 2019 measurement (0x80070032 / 0x8007371b) is preserved
+  as a per-release exception with its recorded pin closure, not
+  generalized into a cross-generation prohibition.
+
 - **Per-generation prohibition model retired from SPEC B.19; Setup-DU
   absence claims corrected (alignment audit F-03, F-04).** SPEC B.19.1
   no longer publishes a "Forbidden Kinds" column: the measured runtime

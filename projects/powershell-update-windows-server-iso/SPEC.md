@@ -1589,15 +1589,27 @@ declaration).
 
 **T34 `bootwim_policy_test.py` — the per-OS BootWimLcuPolicy matrix.**
 Asserted 2016 enabled / 2019 disabled / 2022 tolerate / 2025 enabled.
-Wrong twice over: (1) the boot.wim servicing stance is a validation
-policy, not a per-OS capability, and r12.04 declares every OS
-`enabled` under `ValidationPolicy.FailOnBootWimServicingFailure`;
-(2) the research knowledge base establishes that boot.wim cannot be
-LCU-serviced at all — WinPE rejects the `.msu` with `0x80070032` and
-the extracted LCU CAB fails with `0x8007371b` — so a per-OS *policy*
-matrix over a structurally impossible operation encoded a distinction
-that does not exist. `Common.BootWimLcuPolicy` is
-`LegacyFieldsRetained`. Successor: T42 (ValidationPolicy declaration).
+Wrong because the boot.wim servicing stance is a validation policy,
+not a per-OS capability, and r12.04 declares every OS `enabled` under
+`ValidationPolicy.FailOnBootWimServicingFailure`.
+`Common.BootWimLcuPolicy` is `LegacyFieldsRetained`. Successor: T42
+(ValidationPolicy declaration).
+
+*Superseded rationale note (F-05).* The original T34 retirement record
+additionally asserted, as the then-current research conclusion, that
+boot.wim cannot be LCU-serviced at all and called the operation
+structurally impossible. That universal claim is superseded: `boot.wim`
+serviceability depends on the release, the source media, the
+prerequisites and the package topology, and Microsoft's
+media-dynamic-update procedure itself applies the latest cumulative
+update to `boot.wim` as a documented step. What remains valid is the
+underlying dated measurement — a specific Server 2019 source/package
+combination rejected the `.msu` with `0x80070032` and the extracted
+LCU CAB with `0x8007371b` — preserved as a measured per-release
+exception, not generalized into a cross-generation prohibition. The
+per-OS boot.wim treatment is declared by the servicing contracts
+(`ServicingModel.ApplyPlans.Boot`), and the Server 2019 boot.wim pin
+is the recorded closure of that measured failure (B.24.2).
 
 **T37 `per_os_evidence_test.py` — forked resolvers and hardcoded
 2024-4B floors.** Asserted four per-OS evidence resolvers and the
