@@ -1798,20 +1798,34 @@ excludes the signature region).
   `EnableInstallWimUpdate=true`).
 - The PCA2023 boot manager (`bootmgfw_EX.efi`, "Windows UEFI CA 2023")
   is LCU-delivered into the **serviced install.wim's**
-  `\Windows\Boot\EFI_EX\`, NOT into boot.wim (signtool `/all` ground
-  truth; the unpatched install.wim has no `EFI_EX\`). The earlier
-  "P08 surfaces EFI_EX from install.wim's WinSxS into boot.wim" step
-  is **disproven and was never implemented**: the OS LCU does not
-  service WinPE/boot.wim (Microsoft Learn "Add an Update to a Windows
-  PE Image"; empirically `0x80070032` for the combined `.msu` and
-  `0x8007371b` for the extracted `.cab` — missing WinPE
-  `BootEnvironment-*-PXE.Resources` members), so boot.wim is not made
-  current by the OS LCU and the staging assets never reach it.
-- P10 therefore sources EFI_EX from the serviced install.wim. The
-  exact conversion path (pre-seed the install.wim EFI_EX into the
-  media + delegate to Microsoft `Make2023BootableMedia.ps1` + ADK) is
-  **under real-environment verification** (see the Secure-Boot
-  campaign; the final mechanism text lands once verified).
+  `\Windows\Boot\EFI_EX\` (signtool `/all` ground truth; the unpatched
+  install.wim has no `EFI_EX\`), and the same measurements found no
+  `EFI_EX\` staging assets inside boot.wim. That asset-provenance
+  finding stands on its own; it does not rest on any general claim
+  about whether boot.wim takes an LCU. The earlier "P08 surfaces
+  EFI_EX from install.wim's WinSxS into boot.wim" step is **disproven
+  and was never implemented**.
+- Separately, dated package-application failures were measured on a
+  particular boot.wim source/package combination: `0x80070032` for
+  the combined `.msu` and `0x8007371b` for the extracted `.cab`
+  (missing WinPE `BootEnvironment-*-PXE.Resources` members) — the
+  recorded Server 2019 measured exception (B.24.2). Those
+  measurements stay valid as release/source/package-specific facts
+  and must not be widened into a cross-generation rule: the current
+  per-OS contracts route the LCU to Install + Boot (B.10, B.11.2,
+  with the Server 2022 E2E bridge measurement on boot.wim), and
+  Microsoft's media-dynamic-update procedure services WinPE with the
+  servicing stack via the latest cumulative update followed by the
+  latest cumulative update. boot.wim LCU servicing is a release-,
+  source-media-, prerequisite- and package-dependent question.
+- P10 sources EFI_EX from the serviced install.wim. This is an
+  asset-provenance decision (that is where the staging assets were
+  measured to land), not an inference about boot.wim's LCU
+  serviceability. The exact conversion path (pre-seed the install.wim
+  EFI_EX into the media + delegate to Microsoft
+  `Make2023BootableMedia.ps1` + ADK) is **under real-environment
+  verification** (see the Secure-Boot campaign; the final mechanism
+  text lands once verified).
 - For Server 2025, the historical `RequiredByDefault=false`
   short-circuit was removed by the r12-series default-enable
   reshape; under the current policy P10 runs by default on Server

@@ -22,7 +22,24 @@ the script and follows the
 
 ## [Unreleased]
 
-_Nothing yet._
+### Documentation
+
+- Third external audit remediation, project side (audit 2026-08-09
+  19:05, finding N-01; behavior unchanged). SPEC B.16.4 still carried
+  the last universal boot.wim generalization on the normative
+  surface — invisible to plain grep because the phrase wrapped across
+  hard line breaks, and confirmed as the only remaining site by a
+  normalized-block census using the T56 v2 scanning engine. The
+  bullet is restructured into separated concerns: the EFI_EX
+  asset-provenance measurement (staging assets land in the serviced
+  install.wim; none were found in boot.wim; the disproven "P08
+  surfaces EFI_EX from WinSxS" record is kept), the dated
+  package-application failures preserved as the recorded Server 2019
+  measured exception (B.24.2) rather than a cross-generation rule,
+  the current release-aware contracts (B.10/B.11.2 and Microsoft's
+  media-dynamic-update WinPE steps), and the P10 sourcing policy
+  stated as an asset-provenance decision. Runtime, `PatchTargetMap`
+  routing and all measured evidence are untouched.
 
 ## [update-wsi-2026.08.09-r12.88] - 2026-08-09
 
