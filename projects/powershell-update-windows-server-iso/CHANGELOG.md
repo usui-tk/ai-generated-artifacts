@@ -22,7 +22,21 @@ the script and follows the
 
 ## [Unreleased]
 
-_Nothing yet._
+### Documentation
+
+- Research-alignment residual sweep (Phase 3 preparation; alignment
+  audit 2026-08-08, finding family F-04). Three statements that still
+  described the retired Forbidden-Kind axis in the present tense were
+  found while designing the Phase 3 drift guard and are corrected to
+  the measured current contract (Required Kinds plus the state-driven
+  integrity rule; SPEC B.19.2): the README / README.ja troubleshooting
+  row for a P06 servicing-model violation, and the stale P06 phase
+  header comment in the main script, which additionally still called
+  P06 a pass-through placeholder awaiting a check that has long since
+  landed (`Test-PatchModelConsistency`). Comment-only script change;
+  no behavior change (audit-driven comment correction per the campaign
+  adjudication; the single ScriptVersion bump folds at the Phase 3
+  release).
 
 ## [update-wsi-2026.08.09-r12.86] - 2026-08-09
 

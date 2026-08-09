@@ -19834,13 +19834,14 @@ function Invoke-PlanPhase05_ExpandIso {
 # ============================================================
 # Phase P06: ValidatePatchServicing
 # ============================================================
-# Pass-through placeholder pending the Catalog-model consistency check.
+# Runs the per-PatchModel consistency check over the resolved set via
+# Test-PatchModelConsistency: Required Kinds plus the state-driven
+# integrity requirement (SPEC B.19). There is no Forbidden-Kind axis and
+# no unconditional digest-presence rule; both readings are superseded.
 #
-# The former wsusscn2 Layer 2 dependency-graph servicing-readiness check was
-# removed in the data-source migration (wsusscn2.cab -> Microsoft Update
-# Catalog); the offline applicability graph is no longer maintained. Its
-# replacement -- a per-PatchModel consistency check over the resolved set
-# (required/forbidden Kinds + Digest presence) -- lands here in a later patch.
+# History: the former wsusscn2 Layer 2 dependency-graph servicing-readiness
+# check was removed in the data-source migration (wsusscn2.cab -> Microsoft
+# Update Catalog); the offline applicability graph is no longer maintained.
 # Real servicing readiness is still validated on-mount during the build by
 # Test-PatchServicingReadinessOnMount (P07/P08).
 
