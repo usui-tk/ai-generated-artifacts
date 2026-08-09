@@ -4,8 +4,8 @@ subtitle: "Reverse engineering, controlled experiments, Microsoft servicing-sour
 doc-type: independent-technical-research-report
 lang: en
 status: living-document
-revision: "r3.0 — independent research re-baseline"
-rendered: 2026-08-08
+revision: "r3.1 — dated Safe OS DU publication confirmation for Server 2016/2019"
+rendered: 2026-08-09
 scope: "Windows Server 2016 / 2019 / 2022 / 2025 LTSC, x64, offline installation-media servicing"
 primary-research-window: "2026-05 through 2026-08"
 retained-snapshot: "2026-06 Patch Tuesday metadata harvest, with later dated experimental corrections"
@@ -770,7 +770,7 @@ The following table summarizes **observed** differences from the 2026 research w
 | LCU container behavior observed | classic large MSU/CAB | combined/UUP-derived classic container | combined/UUP-derived container | WIM/UUP/checkpoint packaging |
 | .NET update topology | runtime-specific behavior; older media differs | umbrella/child leaves | umbrella/child leaves | UUP-era .NET composition |
 | Setup DU publication | later Catalog survey found row | later Catalog survey found row | Microsoft documents 21H2 Setup DU; Catalog row observed | explicitly documented 24H2 Setup DU |
-| SafeOS DU | publication/discovery must be measured, not forbidden by generation | same principle | explicitly documented / 2026-06 artifact verified | explicitly documented / UUP-era artifact verified |
+| SafeOS DU | `[MICROSOFT-DOCUMENTED 2026-07-14]` publication confirmed (KB5099548, WinRE-servicing Safe OS DU); discovery/applicability still measured per baseline | `[MICROSOFT-DOCUMENTED 2026-07-14]` publication confirmed (KB5099549); same measurement rule | explicitly documented / 2026-06 artifact verified | explicitly documented / UUP-era artifact verified |
 | WinPE/boot servicing | actual applicability/prereq must be tested | tested LCU path hit `0x80070032` in one source-media campaign | old media reproduced servicing-stack floor problem | checkpoint/package-placement semantics matter |
 | PCA2023 asset provenance | can be deposited by later servicing | can be deposited by later servicing | depends on media/update floor | newer media more likely to contain staged assets |
 

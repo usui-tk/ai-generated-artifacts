@@ -4,8 +4,8 @@ subtitle: "リバースエンジニアリング、制御された実験、Micros
 doc-type: independent-technical-research-report
 lang: ja
 status: living-document
-revision: "r3.0 — 独立調査としての再ベースライン"
-rendered: 2026-08-08
+revision: "r3.1 — Server 2016/2019 の Safe OS DU 公開を日付付きで確認"
+rendered: 2026-08-09
 scope: "Windows Server 2016 / 2019 / 2022 / 2025 LTSC、x64、オフライン・インストールメディア servicing"
 primary-research-window: "2026-05 から 2026-08"
 retained-snapshot: "2026-06 Patch Tuesday metadata harvest（その後の実験で得られた日付付き訂正を含む）"
@@ -770,7 +770,7 @@ Microsoft が文書化する典型的な multi-boot pattern は、`-bootdata` �
 | 観測した LCU container behavior | classic large MSU/CAB | combined/UUP-derived classic container | combined/UUP-derived container | WIM/UUP/checkpoint packaging |
 | .NET update topology | runtime-specific behavior。古い media では差異あり | umbrella/child leaves | umbrella/child leaves | UUP-era .NET composition |
 | Setup DU publication | 後続 Catalog survey で row を確認 | 後続 Catalog survey で row を確認 | Microsoft が 21H2 Setup DU を文書化。Catalog row も観測 | 24H2 Setup DU として明示的に文書化 |
-| SafeOS DU | 世代単位で禁止せず publication/discovery を実測する必要あり | 同じ原則 | 明示的に文書化。2026-06 artifact を検証 | 明示的に文書化。UUP-era artifact を検証 |
+| SafeOS DU | `[MICROSOFT-DOCUMENTED 2026-07-14]` 公開を確認（KB5099548・WinRE servicing 向け Safe OS DU）。discovery/applicability は引き続き baseline 毎に実測 | `[MICROSOFT-DOCUMENTED 2026-07-14]` 公開を確認（KB5099549）。実測の原則は同じ | 明示的に文書化。2026-06 artifact を検証 | 明示的に文書化。UUP-era artifact を検証 |
 | WinPE/boot servicing | actual applicability/prereq の test が必要 | ある source-media campaign で LCU path が `0x80070032` | 古い media で servicing-stack floor problem を再現 | checkpoint/package-placement semantics が重要 |
 | PCA2023 asset provenance | 後続 servicing により配置され得る | 後続 servicing により配置され得る | media/update floor に依存 | 新しい media ほど staged asset を含む可能性が高い |
 
