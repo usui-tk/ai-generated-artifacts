@@ -894,8 +894,12 @@ $Script:PatchTargetMap = @{
     # Unattend.xml file from the .msu package', WARNING line carries
     # the code) once install.wim was bridged -- WinPE shares the
     # image-side floor, so the bridge must precede the target LCU
-    # there too (sub-phase B0). NOT routed to WinRE: WinRE is serviced
-    # by SSU + SafeOS DU, never an LCU.
+    # there too (sub-phase B0). NOT routed to WinRE by the current
+    # BridgeLcu role contract. WinRE servicing depends on the release
+    # and on the declared per-OS contract, so this routing is not
+    # evidence of any universal WinRE no-LCU rule (SPEC B.10 /
+    # B.11.3 -- the Server 2016 WinRE LCU question is tracked there
+    # as open).
     'BridgeLcu'       = @('Install', 'Boot')
     'DotNet'          = @('Install')
     'SafeOSDU'        = @('WinRE')

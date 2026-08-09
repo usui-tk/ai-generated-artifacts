@@ -724,7 +724,7 @@ base ISO:
 | `BootWimIndexes` | `[1, 2]` | Indexes inside boot.wim |
 | `WinReWimPath` | `Windows\System32\Recovery\Winre.wim` | Path inside install.wim |
 | `SupportedLanguages` | `["en-us", "ja-jp"]` | Languages configured for this OS |
-| `DefaultLanguage` | `en-us` | Used when `-OsLang` is not specified |
+| `DefaultLanguage` | `en-us` | Used when `-OsLanguage` is not specified |
 | `LCUExpandViaMum` | `true` | Use `update.mum`-based LCU expansion (true for r02+) |
 | `EnableInstallWimUpdate` | `true` | Whether P07 applies LCU to install.wim (r11.37: Server 2025 placeholder `false` corrected to `true`) |
 | `BootWimLcuPolicy` | `enabled` | Per-OS boot.wim LCU policy: `enabled` (strict) / `disabled` (leave as shipped; WinRE servicing still runs) / `tolerate` (attempt; downgrade failure to Caution, dismount `-Discard`, continue). Replaced the boolean `EnableBootWimUpdate` at r11.54 -- the 2026-07-05 4-OS E2E proved boot.wim LCU-serviceability is a per-media property (matrix: 2016 `enabled`, 2019 `disabled`, 2022 `tolerate`, 2025 `enabled`) |
@@ -869,9 +869,12 @@ Per-OS Secure Boot conversion defaults consumed by P10 / P12:
 Server 2022 has a later baseline date because the `EFI_EX` staging
 directories appeared in cumulative updates only from the 2025-2B LCU
 forward. Server 2025 ships PCA2023 staging assets pre-populated in
-its install.wim (see r08.0 Step 1 / Step 2 finding documents) and
-therefore does not require a P10 conversion to reach PCA2023
-readiness.
+its install.wim (see r08.0 Step 1 / Step 2 finding documents), so on
+that OS no LCU is needed merely to source the staging assets. The
+default P10 readiness policy nevertheless covers Server 2025 exactly
+as it covers the other generations (B.16/B.17); when the source
+media is already ready, the conversion step finds little or no
+material work to perform.
 
 ### B.4.5 `LanguageSpecific` block
 
@@ -3009,10 +3012,14 @@ in the same commit; the two are a matched pair.
 
 ### C.3.3 Cross-field consistency
 
-The config baseline's cross-field consistency is the per-`PatchModel`
-check in B.19 (`Test-PatchModelConsistency`, run at P06): for the
-declared `PatchModel`, every required `Kind` is present, no forbidden
-`Kind` appears, and every `Lines[]` entry carries a non-empty `Digest`.
+The config baseline's cross-field consistency contract is defined
+once, normatively, in B.19 and enforced at P06 by
+`Test-PatchModelConsistency`. This section deliberately restates
+nothing: B.19.1 defines the per-`PatchModel` Required Kinds (extra
+Kinds are accepted — the Forbid axis is retired), and B.19.2 defines
+the state-driven integrity-key requirement, under which a line that
+is still pre-resolution may legitimately carry no digest value yet,
+while Frozen/Approved evidence must carry the strong local hash.
 
 (The pre-v3.0 `RequiresKbIds` "dependency must be in the baseline" check
 was removed with the `wsusscn2` dependency graph; the v3.0 `Lines[]`
@@ -3061,11 +3068,11 @@ Runs on Linux pwsh 7.4.6 (CI Stage 1) and Windows PowerShell 5.1
 |:---:|:---|:---|
 | 1 | `.\Update-WindowsServerIso.ps1 -Action ListPhases` | exit 0; the registered phases (P01-P14 + P08S + A00-A03) and the full Action set pretty-printed |
 | 2 | `.\Update-WindowsServerIso.ps1 -EnvironmentInfoOnly` | exit 0; environment dump |
-| 3 | `.\Update-WindowsServerIso.ps1 -Action PrepareBuildVerify -SyntheticTestMode -DryRun -OsKey Server2019` | exit 0; P01–P03 complete, P04 reaches `New-SyntheticTestIso` |
+| 3 | `.\Update-WindowsServerIso.ps1 -Action PrepareBuildVerify -SyntheticTestMode -DryRun -OsVersion Server2019` | exit 0; P01–P03 complete, P04 reaches `New-SyntheticTestIso` |
 | 4 | `.\Update-WindowsServerIso.ps1 -Action DumpFieldClassification` | exit 0; JSON written to stdout |
 | 5 | `.\Update-WindowsServerIso.ps1 -Action RefreshAllBaselines -DryRun -OnlyOs Server2025` | exit 2 (Manual fields remain by design); supersedence dedup exercised |
 | 6 | `.\Update-WindowsServerIso.ps1 -Mode Force -OnlyLanguage ja-jp -SyntheticTestMode -DryRun` | exit 0; Force overrides Skip; OnlyLanguage filter applied |
-| 7 | `.\Update-WindowsServerIso.ps1 -Mode Initial -SyntheticTestMode -DryRun -OsKey Server2025` | exit 0; same decisions as Monthly for the baseline state |
+| 7 | `.\Update-WindowsServerIso.ps1 -Mode Initial -SyntheticTestMode -DryRun -OsVersion Server2025` | exit 0; same decisions as Monthly for the baseline state |
 
 The Windows Server 2025 / PowerShell 5.1.26100 manual smoke runs
 documented in r07.0 followups all reach exit 0 (see TESTING.md §0).
@@ -3075,32 +3082,33 @@ auto-resolved, which is the expected outcome.
 
 ## C.5 Synthetic full pipeline
 
-**Status**: normative.
+**Status**: normative for the invocation shape below; the mode's
+required contract and its execution status are each owned elsewhere
+and are not duplicated here.
 
-`-SyntheticTestMode` (§B.9) runs the full pipeline against a fabricated
-synthetic ISO. CI Stage 3 runs this end to end on a Windows runner with
-the Windows ADK pre-installed:
+`-SyntheticTestMode` runs the full pipeline against a fabricated
+synthetic ISO. The required contract for the mode and for CI STAGE 3
+is defined once in §B.9; the current trigger, run status and known
+blocker are tracked in TESTING.md (§2.5 and §6.3) as the single
+status source. As of this revision STAGE 3 is operator-dispatched
+only (`workflow_dispatch`), its runs are red at P04 (the §B.9 known
+blocker), and the workflow uploads no artifacts at all — the earlier
+wildcard and enumerated `actions/upload-artifact` steps are removed.
+The historical expectation of a clean exit with a verified synthetic
+output ISO returns to current status only once the §B.9 restoration
+criteria are met; the Artifact Content Minimization policy
+([root SPEC](https://github.com/usui-tk/ai-generated-artifacts/blob/main/SPEC.md#12-spec-ci-081-artifact-content-minimization))
+continues to bind any future artifact reintroduction.
+
+The reference invocation shape:
 
 ```powershell
 .\Update-WindowsServerIso.ps1 `
     -Action PrepareBuildVerify -Execute `
-    -OsKey Server2019 -OsLang ja-jp `
+    -OsVersion Server2019 -OsLanguage ja-jp `
     -SyntheticTestMode `
     -WorkRoot 'D:\synth-ws'
 ```
-
-Expected outcome: exit 0, output ISO at
-`D:\synth-ws\output\WS2019_ja-jp_Updated_2026-MM.iso`, P13 reports
-`Health=Healthy` (or `Warning` because the synthetic patch set has
-no real authenticode signatures).
-
-**Important**: Stage 3 MUST NOT upload any artefact containing
-Microsoft binary content. The output ISO is created and verified
-on the runner, but only logs are uploaded. This is enforced by the
-workflow's explicit `actions/upload-artifact` `path:` enumeration
-per the repository-level
-[Artifact Content Minimization](https://github.com/usui-tk/ai-generated-artifacts/blob/main/SPEC.md#12-spec-ci-081-artifact-content-minimization)
-policy.
 
 ## C.6 Monthly baseline refresh
 

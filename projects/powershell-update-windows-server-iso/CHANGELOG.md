@@ -22,7 +22,31 @@ the script and follows the
 
 ## [Unreleased]
 
-_Nothing yet._
+### Documentation
+
+- Re-audit remediation Phase A (external re-audit 2026-08-09,
+  findings R-01 through R-04 and R-06; behavior unchanged). The
+  re-audit's diagnosis — duplicated normative statements where one
+  copy was corrected and the other left behind — was verified against
+  the live tree and every residue corrected: SPEC C.3.3 no longer
+  restates the P06 consistency rules and instead points at B.19 as
+  the single normative source (the stale restatement still carried
+  the retired Forbid axis and an unconditional digest rule); the
+  SPEC C.4/C.5 invocation examples now use the public `-OsVersion`
+  and `-OsLanguage` parameters (the retired internal aliases were
+  never top-level CLI names; a fourth alias reference in the B.4
+  config-field table, found by the new guard's alias check, is
+  swept in the same change); SPEC C.5 no longer duplicates the
+  STAGE 3 execution status and defers to B.9 (contract) and
+  TESTING.md (status), stating accurately that the stage is
+  dispatch-only, red at P04, and uploads no artifacts; the
+  `PatchTargetMap` BridgeLcu comment no longer generalizes WinRE
+  servicing beyond the current role contract (routing values are
+  untouched; the Server 2016 WinRE LCU question stays open per
+  B.11.3); and SPEC B.4.4 now separates "no LCU needed to source the
+  Server 2025 staging assets" from "Server 2025 participates in the
+  default P10 readiness policy", matching B.16/B.17. Comment-only
+  script change; the single ScriptVersion bump folds at the release.
 
 ## [update-wsi-2026.08.09-r12.87] - 2026-08-09
 
