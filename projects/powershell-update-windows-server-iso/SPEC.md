@@ -1928,30 +1928,61 @@ of the discriminated union encoded in `schema/config.schema.json`.
 ### B.19.1 The discriminated union
 
 Every config declares a top-level `PatchModel` (B.4.1). Each model fixes
-which line `Kind`s are required and which are forbidden:
+which line `Kind`s are required — the measured rule set of
+`Test-PatchModelConsistency`:
 
-| `PatchModel` | OS | Required Kinds | Forbidden Kinds |
-|:---|:---|:---|:---|
-| `separate-ssu` | Server 2016 | `SSU`, `LCU` | `DotNet`, `SafeOSDU`, `SetupDU` |
-| `embedded-ssu` | Server 2019 | `LCU`, `DotNet` | `SSU`, `SafeOSDU`, `SetupDU` |
-| `embedded-ssu-du` | Server 2022 | `LCU`, `DotNet`, `SafeOSDU` | `SSU`, `SetupDU` |
-| `uup-checkpoint` | Server 2025 | `LCU`, `Checkpoint`, `DotNet`, `SafeOSDU` | `SSU` (`SetupDU` allowed) |
+| `PatchModel` | OS | Required Kinds |
+|:---|:---|:---|
+| `separate-ssu` | Server 2016 | `SSU`, `LCU` |
+| `embedded-ssu` | Server 2019 | `LCU`, `DotNet` |
+| `embedded-ssu-du` | Server 2022 | `LCU`, `DotNet`, `SafeOSDU` |
+| `uup-checkpoint` | Server 2025 | `LCU`, `Checkpoint`, `DotNet`, `SafeOSDU` |
 
-Rationale: 2016 ships its servicing stack as a standalone SSU paired
-with a standalone LCU; 2019 and 2022 embed the SSU in the combined LCU
-(2022 additionally carries a Safe OS DU for WinRE); 2025 is the UUP
+The model does NOT forbid update families by OS generation. Which Kinds
+a given baseline carries is declared by the config
+(`PatchBaseline.Lines[]`); candidate selection is defined by the
+per-Kind `DiscoveryPolicy`; the target images/media are defined by the
+servicing contract's apply plans (`ConvertTo-ConfigLines` accepts every
+Kind in the model's apply map, and `SafeOSDU`, `DotNet` and `SetupDU`
+are in the apply map of all four models); the declaration-driven tests
+verify the declared shape. A claim that a Kind is absent for a
+release/baseline MUST be backed by evidence for that release/baseline
+(a dated Catalog observation), never inferred from the OS generation
+alone — Setup Dynamic Update, for example, has been observed for
+Server 2016/2019/2022/2025 (Server 2016: KB5068794, "2025-11 Dynamic
+Update for Windows 10 Version 1607", present in a live Microsoft
+Update Catalog query on 2026-08-09; the config line's Evidence block
+carries the source URLs), and the current Server 2016 config declares
+`DotNet`, `SafeOSDU` and `SetupDU` lines.
+
+Topology rationale (unchanged, and distinct from prohibition): 2016
+ships its servicing stack as a standalone SSU paired with a standalone
+LCU; 2019 and 2022 embed the SSU in the combined LCU; 2025 is the UUP
 checkpoint model whose co-served GA baseline is the `Checkpoint` line
-(r11.52; `SSU` is forbidden for this model).
+(r11.52). A standalone monthly `SSU` line is meaningless on the
+integrated-SSU generations — a packaging-topology fact, not a
+per-family prohibition rule.
+
+#### B.19.1.1 Superseded model (historical)
+
+Through r12.85 this section additionally published a per-model
+"Forbidden Kinds" column (2016: `DotNet`/`SafeOSDU`/`SetupDU`; 2019:
+`SSU`/`SafeOSDU`/`SetupDU`; 2022: `SSU`/`SetupDU`; 2025: `SSU`). That
+column encoded a superseded per-generation absence hypothesis. The
+current runtime enforces Required Kinds only (no Forbidden set —
+measured against `Test-PatchModelConsistency`), and current configs
+declare Kinds the column forbade. The column is retained here only as
+history.
 
 ### B.19.2 The check
 
 `Test-PatchModelConsistency` enforces, over the resolved
 `PatchBaseline.Lines[]`:
 
-1. every Required Kind for the model is present at least once;
-2. no Forbidden Kind appears;
-3. every line carries a non-empty `Digest` (the Catalog primary key);
-4. an unknown `PatchModel` raises a typed error.
+1. every Required Kind for the model is present at least once
+   (non-required Kinds are accepted, not forbidden — B.19.1);
+2. every line carries a non-empty `Digest` (the Catalog primary key);
+3. an unknown `PatchModel` raises a typed error.
 
 P06 throws on any violation - the build stops before any WIM is mounted
 - and on success logs the model and line count. This is a static shape
@@ -2232,7 +2263,9 @@ fixture had fabricated the assumed Products string. Selection is now by
 TITLE via the pure `Select-SetupDuCandidate` (offline gate T30 against
 verbatim-captured rows), and rule (1) now **hard-fails** when a Kind
 inside the PatchModel's apply map resolves to 0 files (silent drops are
-reserved for by-design absences: 2016 .NET/SafeOSDU, 2019/2022 SSU;
+reserved for Kinds outside the model's apply map — a standalone monthly
+`SSU` on the integrated-SSU generations 2019/2022/2025, and a
+`Checkpoint` line outside the UUP model;
 if a month legitimately lacks an in-model Kind, an explicit skip
 decision + flag is required first).
 
@@ -2677,12 +2710,20 @@ effect):
 - The boot.wim-side binaries are stashed to
   `work/p08s_setup_binaries/`; P09 reapplies the stash after its
   Setup DU overlay step (MS ordering: Setup DU updates `sources\`,
-  then the boot.wim copies win). The reapply is dormant while no
-  SetupDU resolves (B.15) but prevents a future SetupDU from
-  silently undoing the sync.
-- For Server 2016, where no Setup Dynamic Update exists at all, the
-  serviced boot.wim is the only in-band source of matching Setup
-  binaries; P08S is therefore the working closure of the V3 gap.
+  then the boot.wim copies win). The reapply runs when a SetupDU
+  resolved for the month (B.15) and then keeps the P08S sync from
+  being silently undone by the overlay; when none resolves, there
+  is nothing to reapply against and the P08S copies stand. Whether
+  a month carries a SetupDU is a per-release/baseline resolution
+  outcome, not an OS-generation property — Setup Dynamic Update has
+  been observed for Server 2016/2019/2022/2025.
+- The invariant P08S and P09 jointly maintain is Setup-binary
+  coherence between the media `sources\` tree and the serviced
+  boot.wim. Whether the reapply step has work to do is decided by
+  the month's actual overlay sequence; in a month where no SetupDU
+  resolves, the serviced boot.wim is the in-band source of matching
+  Setup binaries — P08S is the working closure of the V3 gap either
+  way.
 
 ### B.24.4 Verification (P11)
 

@@ -78,6 +78,34 @@ the script and follows the
 
 ### Documentation
 
+- **Per-generation prohibition model retired from SPEC B.19; Setup-DU
+  absence claims corrected (alignment audit F-03, F-04).** SPEC B.19.1
+  no longer publishes a "Forbidden Kinds" column: the measured runtime
+  (`Test-PatchModelConsistency`) enforces Required Kinds only, the
+  apply map of every PatchModel accepts `SafeOSDU`/`DotNet`/`SetupDU`,
+  and the current Server 2016 config declares all three — the old
+  column encoded a superseded per-generation absence hypothesis and is
+  preserved verbatim under a new "Superseded model (historical)"
+  subsection only. B.19.1 now states the current model: config declares
+  the Kinds, DiscoveryPolicy defines candidate selection, the servicing
+  contract defines targets, declaration-driven tests verify the shape,
+  and absence claims require dated per-release/baseline evidence
+  (Server 2016 Setup DU anchored to KB5068794, present in a live
+  Catalog query on 2026-08-09). B.19.2 drops the never-implemented
+  "no Forbidden Kind appears" check line. The B.22.6 "by-design
+  absences" example is corrected to the measured out-of-apply-map set
+  (standalone SSU on 2019/2022/2025; Checkpoint outside the UUP
+  model) — the old example named 2016 .NET/SafeOSDU, which the current
+  config declares. B.24.3 replaces "For Server 2016, where no Setup
+  Dynamic Update exists at all" and the "future SetupDU" framing with
+  the P08S/P09 coherence invariant: reapply work is decided by the
+  month's actual overlay sequence, and SetupDU presence is a
+  per-release/baseline resolution outcome, not an OS-generation
+  property. The matching script comment in the P09 reapply block is
+  corrected the same way (comment-only .ps1 change; single ScriptVersion
+  bump deferred to the Phase 1 release fold per the campaign
+  adjudication).
+
 - **Stale research-report reference in the script corrected (alignment
   audit F-02).** The comment block above the 7-Zip helpers referenced
   the research report by its pre-move path and by an old section number,

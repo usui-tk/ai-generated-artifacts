@@ -22020,9 +22020,11 @@ function Invoke-BuildPhase09_AssembleIso {
         # media-dynamic-update order: the Setup DU overlay updates
         # sources\, THEN setup.exe/setuphost.exe saved from the
         # serviced boot.wim are copied over -- the boot.wim copies must
-        # win or Setup fails on the binary mismatch). Dormant while no
-        # SetupDU resolves; wired so a future SetupDU cannot silently
-        # undo the P08S sync.
+        # win or Setup fails on the binary mismatch). Runs when a
+        # SetupDU resolved for the month; the reapply then keeps the
+        # overlay from silently undoing the P08S sync. SetupDU
+        # presence is a per-release/baseline resolution outcome, not
+        # an OS-generation property.
         if ($setupDuPatches.Count -gt 0 -and -not $Script:SyntheticTestMode) {
             Set-DebugStep -Step 'reapply-setup-binaries'
             $stashDir = Join-Path $Script:WorkRoot 'work\p08s_setup_binaries'
