@@ -22,6 +22,26 @@ the script and follows the
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [update-wsi-2026.08.09-r12.89] - 2026-08-09
+
+Release fold of the third-audit remediation (external audit
+2026-08-09 19:05, finding N-01 with the family-F5 guard extension;
+Q1/Q3 adjudications): the SPEC B.16.4 restructure retiring the last
+boot.wim generalization, and the T56 family-F5 extension that closes
+the guard's measured blind spot for that formulation. The audit's
+research-report-side findings were measured against the live r3.0
+record and found to target a pre-r3.0 draft; no report correction is
+required (the dated 2016/2019 Safe OS DU confirmation lands as an
+independent research-record commit outside this release, per the
+knowledge-governance model). This release touches no script logic;
+per the adjudicated dsd precedent the identity bump is performed for
+a script-untouched maintenance release to keep the ScriptVersion /
+release-heading correspondence (`update-wsi-2026.08.09-r12.89`, tag
+`research-alignment-r12.89`; T40 pin advanced in the same change).
+F-06 stays open as REVALIDATE-pending per SPEC B.11.3.
+
 ### Changed
 
 - T56 family F5 extended (third audit 2026-08-09 19:05, §6.8/§10; the
