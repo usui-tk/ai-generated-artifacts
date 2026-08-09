@@ -11498,22 +11498,26 @@ function New-SyntheticTestIso {
 # 7-Zip helpers (ported from Deploy-AMDChipsetDriverOnWindowsServer.ps1)
 # ============================================================
 #
-# These three helpers cooperate to locate or bootstrap 7-Zip, which is
-# the Servicing Dependency Database parser's required CAB extractor
-# (SPEC Part B.19.4). The function bodies are ported verbatim from the
-# sister project except for two logger renames:
+# These three helpers cooperate to locate or bootstrap 7-Zip. Their
+# original consumer, the wsusscn2-derived Servicing Dependency Database
+# parser, was removed in the data-source migration to the Microsoft
+# Update Catalog (SPEC Part B.19 records that removal); the helpers are
+# retained as vendored canon units. The function bodies are ported
+# verbatim from the sister project except for two logger renames:
 #   Write-Caution -> Write-Caution    (same role: yellow warning)
 #   Write-Detail  -> Write-Step    (same role: informational output)
 # The HTTP calls intentionally use the raw Invoke-WebRequest rather than
 # this script's local Invoke-WebRequestWithRetry wrapper; the retry
 # semantics are different (Deploy-AMD's pattern is short-circuit on the
-# first tier that returns a parseable response) and aligning them is a
-# task for a future revision (SPEC Part B.19.4 Implementation Notes).
+# first tier that returns a parseable response).
 #
-# The decision to require 7-Zip rather than the in-box expand.exe is
-# normative; see SPEC Part B.19.4.1 and the research article
-# research/windows-servicing/windows-server-iso-update-mechanics.{en,ja}.md
-# section 7.2 for the failure-mode evidence.
+# Research basis (repository-relative path + topic; section numbers are
+# deliberately not used because the report renumbers across revisions):
+# documents/research/windows-servicing/windows-server-iso-update-mechanics.{en,ja}.md
+# -- topics: "wsusscn2.cab offline corpus handling" (safe-handling
+# rules for the large offline-scan cab) and the archived offline cab
+# cross-check tooling record (extractor preference 7-Zip -> expand.exe
+# -> cabextract).
 
 # >>> CANONICAL unit_id=pwsh.helper.get-sevenzippath version=1.0.0 hash=9fa5a18e04c0f6cb policy=canonical binding=follow-latest >>>
 function Get-SevenZipPath {

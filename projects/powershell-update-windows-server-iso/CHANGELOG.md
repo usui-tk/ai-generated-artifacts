@@ -78,6 +78,22 @@ the script and follows the
 
 ### Documentation
 
+- **Stale research-report reference in the script corrected (alignment
+  audit F-02).** The comment block above the 7-Zip helpers referenced
+  the research report by its pre-move path and by an old section number,
+  and cited SPEC Part B.19.4 — a section that no longer exists since the
+  wsusscn2-derived Servicing Dependency Database was removed in the
+  Catalog migration (its removal is recorded in SPEC Part B.19). The
+  block now states the helpers' current status (original consumer
+  removed; retained as vendored canon units), drops the dead SPEC
+  references, and cites the research report by repository-relative
+  `documents/research/...` path plus semantic topics instead of section
+  numbers, which the report renumbers across revisions. Comment-only
+  change; per the campaign adjudication the single ScriptVersion bump
+  for the audit-driven comment corrections is applied once at the
+  Phase 1 release fold. This was the only stale-path occurrence in the
+  script (measured by full enumeration).
+
 - **Research report anchored in the document set (alignment audit
   F-01, F-17).** A new SPEC introduction section, "Research basis and
   document roles", defines which material holds authority over which
