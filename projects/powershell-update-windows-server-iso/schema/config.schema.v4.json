@@ -629,6 +629,18 @@
             "type": "string"
           }
         },
+        "EvidenceClass": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "MICROSOFT-DOCUMENTED",
+              "CATALOG-VERIFIED",
+              "MEASURED"
+            ]
+          },
+          "description": "Optional evidence-kind classification. Authority for a claim rests on EvidenceClass + SourceUrls + the Integrity hash; VerifiedBy is process/tool metadata, not the authority (SPEC B.4.6)."
+        },
         "SourceUrls": {
           "type": "array",
           "items": {

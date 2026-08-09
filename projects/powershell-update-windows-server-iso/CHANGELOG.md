@@ -24,6 +24,24 @@ the script and follows the
 
 ### Changed
 
+- **Evidence authority model made explicit (alignment audit F-16, plan
+  A-1).** Config Schema v4 gains an optional `EvidenceClass` array on
+  `$defs/evidence` (`MICROSOFT-DOCUMENTED` / `CATALOG-VERIFIED` /
+  `MEASURED`), and all 24 Evidence blocks across the four
+  `data/config-Server*.json` files now carry it, derived mechanically
+  from each block's own `SourceUrls` hosts (support/learn →
+  MICROSOFT-DOCUMENTED; catalog → CATALOG-VERIFIED; both files written
+  through the canonical JSON serializer). A new SPEC B.4.6 defines the
+  model: authority for a claim rests on `EvidenceClass` + `SourceUrls`
+  + the `Integrity` hash, while `VerifiedBy`/`VerifiedAt` are
+  process/tool metadata about the recording act — a tool name neither
+  strengthens nor weakens a claim. Key names, `VerifiedBy` values, the
+  runtime writers (`auto:CatalogRefresh` / `auto:DotNetReleaseNotes`),
+  `PatchBaseline.LastVerifiedBy`, and all tests are unchanged; the
+  field is optional so runtime-written records remain valid. Key
+  renaming and the full Evidence restructure (plan option B) are
+  explicitly out of scope, registered as future candidates.
+
 - **CI redesigned against the r12 artifact set.** The four STAGE
   workflows were still written for the pre-r12 project: one deliverable,
   no repository-side regression net, and a strict-zero analyzer gate.

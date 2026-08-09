@@ -356,6 +356,10 @@
             "E1",
             "E2"
           ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED",
+            "CATALOG-VERIFIED"
+          ],
           "SourceUrls": [
             "https://support.microsoft.com/en-us/topic/june-9-2026-kb5094128-os-build-20348-5256-56823f3e-e2a4-4839-ab01-b9de5ec4cbed",
             "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5030216"
@@ -439,6 +443,9 @@
             "E1",
             "E2"
           ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED"
+          ],
           "SourceUrls": [
             "https://support.microsoft.com/help/5099540"
           ],
@@ -508,6 +515,10 @@
           "Levels": [
             "E1",
             "E2"
+          ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED",
+            "CATALOG-VERIFIED"
           ],
           "SourceUrls": [
             "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/07-14-july-cumulative-update",
@@ -582,6 +593,10 @@
             "E1",
             "E2"
           ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED",
+            "CATALOG-VERIFIED"
+          ],
           "SourceUrls": [
             "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/07-14-july-cumulative-update",
             "https://support.microsoft.com/help/KB5101005",
@@ -653,6 +668,10 @@
             "E1",
             "E2"
           ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED",
+            "CATALOG-VERIFIED"
+          ],
           "SourceUrls": [
             "https://support.microsoft.com/help/KB5099552",
             "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5099552",
@@ -720,6 +739,10 @@
           "Levels": [
             "E1",
             "E2"
+          ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED",
+            "CATALOG-VERIFIED"
           ],
           "SourceUrls": [
             "https://support.microsoft.com/en-us/topic/kb5079518-setup-dynamic-update-for-windows-server-2022-march-10-2026-1e93ff7e-93de-47cf-8140-1e4ef663b4a3",

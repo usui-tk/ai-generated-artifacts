@@ -378,6 +378,10 @@
             "E1",
             "E2"
           ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED",
+            "CATALOG-VERIFIED"
+          ],
           "SourceUrls": [
             "https://support.microsoft.com/en-us/topic/windows-server-images-for-june-2026-7d8577d4-1f36-447b-bbbf-60b68a9f4a69",
             "https://www.catalog.update.microsoft.com/Search.aspx?q=KB4132216"
@@ -451,6 +455,9 @@
             "E1",
             "E2"
           ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED"
+          ],
           "SourceUrls": [
             "https://support.microsoft.com/help/5099535"
           ],
@@ -522,6 +529,9 @@
             "E1",
             "E2"
           ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED"
+          ],
           "SourceUrls": [
             "https://support.microsoft.com/help/5099535"
           ],
@@ -589,6 +599,10 @@
           "Levels": [
             "E1",
             "E2"
+          ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED",
+            "CATALOG-VERIFIED"
           ],
           "SourceUrls": [
             "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/07-14-july-cumulative-update",
@@ -660,6 +674,10 @@
             "E1",
             "E2"
           ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED",
+            "CATALOG-VERIFIED"
+          ],
           "SourceUrls": [
             "https://support.microsoft.com/help/KB5099548",
             "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5099548",
@@ -727,6 +745,10 @@
           "Levels": [
             "E1",
             "E2"
+          ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED",
+            "CATALOG-VERIFIED"
           ],
           "SourceUrls": [
             "https://support.microsoft.com/en-us/topic/kb5068794-setup-dynamic-update-for-windows-10-version-1607-and-windows-server-2016-november-11-2025-4d2587fc-1661-420f-a46d-5a88b0b52358",

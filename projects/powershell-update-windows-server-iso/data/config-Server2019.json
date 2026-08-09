@@ -346,6 +346,10 @@
             "E1",
             "E2"
           ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED",
+            "CATALOG-VERIFIED"
+          ],
           "SourceUrls": [
             "https://support.microsoft.com/en-us/topic/june-9-2026-kb5094123-os-build-17763-8880-19adceff-e266-40ec-8a10-df4bb0e320ea",
             "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5005112"
@@ -425,6 +429,9 @@
             "E1",
             "E2"
           ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED"
+          ],
           "SourceUrls": [
             "https://support.microsoft.com/help/5099538"
           ],
@@ -495,6 +502,10 @@
           "Levels": [
             "E1",
             "E2"
+          ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED",
+            "CATALOG-VERIFIED"
           ],
           "SourceUrls": [
             "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/07-14-july-cumulative-update",
@@ -569,6 +580,10 @@
             "E1",
             "E2"
           ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED",
+            "CATALOG-VERIFIED"
+          ],
           "SourceUrls": [
             "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/07-14-july-cumulative-update",
             "https://support.microsoft.com/help/KB5101008",
@@ -641,6 +656,10 @@
             "E1",
             "E2"
           ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED",
+            "CATALOG-VERIFIED"
+          ],
           "SourceUrls": [
             "https://support.microsoft.com/help/KB5099549",
             "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5099549",
@@ -709,6 +728,10 @@
           "Levels": [
             "E1",
             "E2"
+          ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED",
+            "CATALOG-VERIFIED"
           ],
           "SourceUrls": [
             "https://support.microsoft.com/en-us/topic/kb5068795-setup-dynamic-update-for-windows-10-version-1809-and-windows-server-2019-november-11-2025-feead7c8-6d0e-486f-8848-1e7042d601cb",

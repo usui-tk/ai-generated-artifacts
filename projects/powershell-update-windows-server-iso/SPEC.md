@@ -881,6 +881,38 @@ language is a one-node addition under `LanguageSpecific` plus an
 entry in `Common.SupportedLanguages`; no changes are required in
 `PatchBaseline` or `Pca2023` (both are language-neutral).
 
+### B.4.6 Evidence authority model (Schema v4; audit F-16)
+
+**Status**: normative (r12.86+).
+
+Every `Evidence` block answers two different questions, and the fields
+divide accordingly:
+
+- **What makes the claim true** (the authority): the optional
+  `EvidenceClass` array (evidence kinds: `MICROSOFT-DOCUMENTED` — a
+  Microsoft Support / Learn publication backs the claim;
+  `CATALOG-VERIFIED` — a Microsoft Update Catalog observation backs
+  it; `MEASURED` — a locally measured result backs it), the
+  `SourceUrls` that carry the primary sources, and — once the asset is
+  resolved — the `Integrity` hash of the byte payload itself. An
+  authority claim survives tool churn: it can be re-verified by anyone
+  against the same sources and bytes.
+- **How the record was produced** (process/tool metadata): `VerifiedBy`
+  and `VerifiedAt`. `VerifiedBy` names the process or tool that wrote
+  the record (human research sessions, or the runtime writers such as
+  `auto:CatalogRefresh` / `auto:DotNetReleaseNotes`); it is provenance
+  about the recording act, **not** the ground the claim stands on. A
+  tool name in `VerifiedBy` neither strengthens nor weakens the claim
+  — the strength lives in `EvidenceClass` + `SourceUrls` + `Integrity`.
+
+`EvidenceClass` is optional in the schema (`$defs/evidence`), so
+runtime writers that do not populate it remain valid; when present it
+is derived from the block's own `SourceUrls` (as done for the 24
+current Evidence blocks across the four configs). Key names, the
+runtime, and the tests are unchanged by this model — it assigns
+meaning, not new machinery. (`PatchBaseline.LastVerifiedBy` keeps its
+existing seed-contract semantics and is untouched.)
+
 ## B.5 Phase contracts (P01–P14)
 
 **Status**: normative.

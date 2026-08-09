@@ -339,6 +339,10 @@
             "E1",
             "E2"
           ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED",
+            "CATALOG-VERIFIED"
+          ],
           "SourceUrls": [
             "https://learn.microsoft.com/en-us/windows/deployment/update/media-dynamic-update",
             "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5094125"
@@ -413,6 +417,10 @@
           "Levels": [
             "E1",
             "E2"
+          ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED",
+            "CATALOG-VERIFIED"
           ],
           "SourceUrls": [
             "https://www.catalog.update.microsoft.com/Search.aspx?q=KB5043080",
@@ -496,6 +504,9 @@
             "E1",
             "E2"
           ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED"
+          ],
           "SourceUrls": [
             "https://support.microsoft.com/help/5099536"
           ],
@@ -572,6 +583,10 @@
             "E1",
             "E2"
           ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED",
+            "CATALOG-VERIFIED"
+          ],
           "SourceUrls": [
             "https://learn.microsoft.com/en-us/dotnet/framework/release-notes/2026/07-14-july-cumulative-update",
             "https://support.microsoft.com/help/KB5100998",
@@ -646,6 +661,10 @@
           "Levels": [
             "E1",
             "E2"
+          ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED",
+            "CATALOG-VERIFIED"
           ],
           "SourceUrls": [
             "https://support.microsoft.com/help/KB5099546",
@@ -723,6 +742,10 @@
           "Levels": [
             "E1",
             "E2"
+          ],
+          "EvidenceClass": [
+            "MICROSOFT-DOCUMENTED",
+            "CATALOG-VERIFIED"
           ],
           "SourceUrls": [
             "https://support.microsoft.com/en-us/topic/kb5095966-setup-dynamic-update-for-windows-server-2025-june-9-2026-28732970-9804-483f-963c-94088060f2ed",
