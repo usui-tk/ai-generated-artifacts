@@ -1366,6 +1366,17 @@ the field-cadence matrix that governs an incremental in-place refresh
 
 ### B.14.1 Execution entry point — `A00 RebuildDataset`
 
+> **Temporary limitation (fail-closed; audit 2026-08-09 N4-01).** The
+> committed seeds still declare the legacy `Schema` `"3.0"` shape while
+> the canonical current config schema is `"4.0"` (B.4), and the
+> skeleton builder does not yet emit the v4-only policy blocks. Until
+> the v4 seed-migration campaign lands (seeds, builder, Stage 4 gates
+> and tests moved to v4 together), A00 refuses in Stage 0 — before any
+> config file is written — whenever a seed's declared `Schema` differs
+> from the canonical current version. Do not use A00 for canonical
+> dataset updates until that campaign completes; the committed v4
+> configs and the A01 in-place refresh path are unaffected.
+
 The dataset has exactly one canonical rebuild entry point. It regenerates
 `data/` from the committed seed and upstream sources and is runnable from
 empty (no pre-existing `data/config-Server*.json` required):

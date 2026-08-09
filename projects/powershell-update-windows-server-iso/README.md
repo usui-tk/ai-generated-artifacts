@@ -299,7 +299,7 @@ touching any ISO. **The refresh path is two-stage**: `RefreshSnapshots`
 populates the upstream `data/raw-*` / `data/cache-*` files from
 Microsoft Learn + Microsoft Update Catalog, then `RefreshAllBaselines`
 regenerates each `data/config-Server*.json` `PatchBaseline.Lines[]`
-from those caches. This split follows the SPEC §B.22.1 refresher architecture. `RebuildDataset` (A00) runs the whole rebuild end-to-end from the committed `data/seed/seed-Server*.json` (validate seeds -> `RefreshSnapshots` -> build each config from its seed -> `RefreshAllBaselines` Force -> verify) and is runnable from empty.
+from those caches. This split follows the SPEC §B.22.1 refresher architecture. `RebuildDataset` (A00) runs the whole rebuild end-to-end from the committed `data/seed/seed-Server*.json` (validate seeds -> `RefreshSnapshots` -> build each config from its seed -> `RefreshAllBaselines` Force -> verify) and is runnable from empty. **Temporary limitation**: until the v4 seed migration lands, A00 is fail-closed in Stage 0 (the committed seeds are still the legacy 3.0 shape) — do not use it for canonical dataset updates; see SPEC B.14.1.
 
 | Action | Admin Phase | Description |
 |:---|:-:|:---|

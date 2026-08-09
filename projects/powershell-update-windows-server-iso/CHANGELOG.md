@@ -22,7 +22,28 @@ the script and follows the
 
 ## [Unreleased]
 
-_Nothing yet._
+### Changed
+
+- A00 `RebuildDataset` is fail-closed until the v4 seed migration
+  (fourth external audit 2026-08-09 20:18, finding N4-01, P1;
+  adjudicated Q3). The audit measured — and this tree confirms — that
+  the canonical from-empty rebuild path had not followed the Schema
+  4.0 migration: all four committed seeds still declare `"3.0"`, the
+  skeleton builder copies the seed's `Schema` through and emits none
+  of the v4-only policy blocks, A00 Stage 2 writes that skeleton over
+  the production configs, and Stage 4 only counted
+  `PatchBaseline.Lines` — so a rebuild would have rolled back current
+  policy (measured: Server 2025 `Pca2023.RequiredByDefault`
+  true→false; Server 2019/2022 `Common.BootWimLcuPolicy`
+  enabled→disabled/tolerate). A00 now refuses in Stage 0, before any
+  config file is written, whenever a seed's declared `Schema` differs
+  from the canonical current version (`4.0`). SPEC B.14.1 carries the
+  temporary-limitation note, TESTING §7.0a records the open defect,
+  and both READMEs carry the operational caution. The normal Build
+  path and the A01 in-place refresh are unaffected. The full
+  correction (v4 seed contract, v4-aware builder, real Stage 4
+  gates, v4 seed-inventory tests, scratch-clone A00 acceptance) is a
+  dedicated follow-up campaign with its own handoff.
 
 ## [update-wsi-2026.08.09-r12.89] - 2026-08-09
 

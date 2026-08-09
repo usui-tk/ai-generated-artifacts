@@ -24538,6 +24538,19 @@ function Invoke-AdminPhaseA00_RebuildDataset {
         if ($seed.OsKey -ne $osKey) {
             throw ('Seed OsKey mismatch in {0}: OsKey="{1}" expected "{2}".' -f $seedFile, $seed.OsKey, $osKey)
         }
+        # Fail-closed schema-currency guard (SPEC B.14.1 temporary
+        # limitation; audit 2026-08-09 N4-01, ruling Q3): the committed
+        # seeds still carry the legacy 3.0 shape while the canonical
+        # current config schema is 4.0. Rebuilding from a legacy seed
+        # would overwrite the v4 configs with a v3 skeleton and roll
+        # back current policy, so the whole action refuses here --
+        # in Stage 0, before any config file is written. Remove this
+        # guard only as part of the v4 seed-migration campaign that
+        # brings seeds, builder, Stage 4 gates and tests to v4 together.
+        $canonicalCurrentSchema = '4.0'
+        if ([string]$seed.Schema -ne $canonicalCurrentSchema) {
+            throw ('RebuildDataset is fail-closed: {0} declares Schema "{1}" but the canonical current config schema is "{2}". The committed seeds have not yet migrated to the v4 seed contract; rebuilding now would replace the v4 configs with a legacy skeleton and roll back current policy. No config file has been written. See SPEC B.14.1 (temporary limitation).' -f $seedFile, $seed.Schema, $canonicalCurrentSchema)
+        }
         $seeds[$osKey] = $seed
         Write-Ok ('Seed OK: {0}' -f $seedFile)
     }

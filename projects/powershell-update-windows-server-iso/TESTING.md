@@ -755,6 +755,29 @@ For the full catalogue of pitfalls and fixes, see SPEC.md Part D.
 
 ---
 
+### 7.0a Open defect — A00 rebuild path is pre-v4 (fail-closed since r12.90)
+
+**Status: open — mitigated by a fail-closed guard; full fix is the v4
+seed-migration campaign.** The 2026-08-09 external audit (N4-01)
+measured that the canonical from-empty rebuild path had not followed
+the Schema 4.0 migration: all four committed seeds declare `"3.0"`,
+`Build-ConfigSkeletonFromSeed` copies the seed's `Schema` through and
+emits none of the v4-only policy blocks (`ServicingModel`,
+`DiscoveryPolicy`, `ValidationPolicy`, `Compatibility`), A00 Stage 2
+writes that skeleton over the production configs, and Stage 4 only
+counted `PatchBaseline.Lines`. Measured policy rollback if run:
+Server 2025 `Pca2023.RequiredByDefault` true -> false, Server
+2019/2022 `Common.BootWimLcuPolicy` enabled -> disabled/tolerate.
+Since r12.90 A00 refuses in Stage 0 (before any write) whenever a
+seed's declared `Schema` differs from the canonical current version;
+the guard's placement is pinned by an offline contract (T57), and
+production-config currentness plus the affected policy values are
+pinned in the schema gate. The full correction (v4 seed contract,
+v4-aware builder, real Stage 4 gates, v4 seed-inventory tests, and a
+scratch-clone A00 acceptance) is a dedicated campaign tracked outside
+this file; the normal Build path and A01 in-place refresh are
+unaffected.
+
 ## 8. Monthly baseline regeneration — agent/LLM verification procedure
 
 This section records the procedure an operator or coding agent follows

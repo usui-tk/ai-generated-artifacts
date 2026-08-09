@@ -289,7 +289,7 @@ $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 Microsoft Update Catalog から上流の `data/raw-*` / `data/cache-*` を取得し、
 `RefreshAllBaselines` が各 `data/config-Server*.json` の
 `PatchBaseline.Lines[]` をそれらキャッシュから再生成します。この分離は
-SPEC §B.22.1 の Refresher アーキテクチャに対応します。`RebuildDataset`（A00）は、コミット済みの `data/seed/seed-Server*.json` からデータセット全体を一括で再構築します（シード検証 -> `RefreshSnapshots` -> 各 config をシードから構築 -> `RefreshAllBaselines`（Force） -> 検証）。空の状態からでも実行できます。
+SPEC §B.22.1 の Refresher アーキテクチャに対応します。`RebuildDataset`（A00）は、コミット済みの `data/seed/seed-Server*.json` からデータセット全体を一括で再構築します（シード検証 -> `RefreshSnapshots` -> 各 config をシードから構築 -> `RefreshAllBaselines`（Force） -> 検証）。空の状態からでも実行できます。 **一時的制限**: v4 シード移行が完了するまで A00 は Stage 0 で fail-closed です（コミット済みシードが旧 3.0 形状のため）。正準データセットの更新には使用しないでください（SPEC B.14.1 参照）。
 
 | Action | Admin Phase | 説明 |
 |:---|:-:|:---|
