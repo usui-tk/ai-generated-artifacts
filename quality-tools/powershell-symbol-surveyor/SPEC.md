@@ -1,0 +1,1482 @@
+# pss.py Specification
+
+> _Maintained in English only per the repository-wide documentation language policy. Japanese readers should refer to the English source-of-truth together with `README.ja.md` where available._
+
+This is the formal specification for `pss.py`, the PowerShell symbol
+surveyor maintained in this directory.
+
+**Document version**: see [`VERSION`](./VERSION) (the canonical source of truth, kept in sync with `pss.py`'s `__version__`)
+**Applies to**: `pss.py` (latest mainline)
+**Status**: **Normative — adjudicated 2026-08-15. Implementation pending.**
+
+For a user-facing overview, see [`README.md`](./README.md). This document
+covers the contract between `pss.py` and its callers: CLI, fact catalogue,
+model format, normalisation rules, exit codes, and the jurisdiction boundary
+with `psa.py`. Anything not specified here may change between patch releases
+without notice.
+
+Every quantity cited in Appendix B was measured against a live checkout and is
+reproducible; see §14.
+
+---
+
+## Table of contents
+
+1. [Scope](#1-scope)
+2. [Architecture](#2-architecture)
+3. [Command-line interface](#3-command-line-interface)
+4. [Fact specifications](#4-fact-specifications)
+5. [Model format](#5-model-format)
+6. [Output formats](#6-output-formats)
+7. [Jurisdiction boundary with psa.py](#7-jurisdiction-boundary-with-psapy)
+8. [Environment requirements](#8-environment-requirements)
+9. [Exit codes](#9-exit-codes)
+10. [Hashing and normalisation](#10-hashing-and-normalisation)
+11. [The dependency graph model](#11-the-dependency-graph-model)
+12. [The variable model](#12-the-variable-model)
+13. [Self-quality gates](#13-self-quality-gates)
+14. [Test-data acquisition](#14-test-data-acquisition)
+
+Appendices:
+
+- [Appendix A — Fact catalogue index](#appendix-a--fact-catalogue-index)
+- [Appendix B — Acceptance baselines](#appendix-b--acceptance-baselines)
+- [Appendix C — Adjudicated decision record](#appendix-c--adjudicated-decision-record)
+- [Appendix D — Known pitfalls and lessons learned](#appendix-d--known-pitfalls-and-lessons-learned)
+- [Appendix E — Open items](#appendix-e--open-items)
+
+---
+
+## 1. Scope
+
+### 1.1 Purpose
+
+`pss.py` surveys a single PowerShell script and emits **facts** about its
+symbols — functions, variables, the references between them, and the regions
+the tool could not analyse. Given two such surveys of the same script, it emits
+facts about the differences.
+
+It exists to make refactoring auditable. The intended workflow is:
+
+```
+[ survey : pss.py ] -> [ modify : project / LLM ] -> [ survey + compare : pss.py ] -> [ adjudicate : the caller ]
+```
+
+The separation is load-bearing. Every surveyed refactoring tool struggles
+because it must *prove a transformation safe before performing it* — a problem
+Opdyke framed in 1992 and which is undecidable in general. By observing after
+the fact instead of predicting before it, `pss.py` avoids the undecidable step
+entirely. It does not need to know whether a change is safe; it reports what
+moved.
+
+### 1.2 Non-goals
+
+`pss.py` **does not**:
+
+- modify source files, or emit patches, edits, or rename instructions;
+- assign severity to anything it reports;
+- return a pass/fail verdict, in its exit code or anywhere else;
+- assert that a change is correct, safe, intended, or complete;
+- conclude that one symbol is a rename of another;
+- interpret governance markers, manifests, or any other repository-governance
+  construct (see §1.5).
+
+### 1.3 The fact test
+
+**A derivation is a fact if its rule is stated in this document and the same
+input yields the same value in every conforming implementation.**
+
+The moment a threshold, weight, or similarity score would be needed to reach a
+conclusion, the conclusion belongs to the caller and `pss.py` stops at the
+evidence. Concretely: the symmetric difference of two callee sets is a fact;
+"therefore these are different functions" is not.
+
+Where `pss.py` cannot resolve something, it reports the unresolved item
+together with whatever surrounding facts *are* mechanically derivable, and
+stops there. Example: for a variable read with no local declaration, `pss.py`
+cannot determine which declaration it binds to at runtime, but it can
+enumerate the enclosing function's static callers and state which of them
+declare that name. The enumeration is a fact; the conclusion is not drawn.
+
+### 1.4 Language and file scope
+
+**One PowerShell script per survey. The accepted extension is `.ps1` only.**
+`.psm1` and `.psd1` are out of scope. Cross-file resolution is out of scope.
+
+This is not a limitation adopted for convenience. PowerShell resolves variable
+reads through dynamic scoping (§12.1), so binding depends on the runtime call
+chain. The official implementation of LSP rename for PowerShell reached the
+same boundary and scoped itself to a single document
+(`PowerShellEditorServices` PR #2152).
+
+`pss.py` is **not** specific to any one project. It is designed to survey any
+single `.ps1`, and the properties of the codebase under survey are themselves
+reported as facts rather than assumed (§12.6).
+
+### 1.5 Governance neutrality (normative)
+
+`pss.py` **does not recognise, parse, or special-case managed-region markers**
+or any other governance construct. Markers are comments, and comments are
+removed by every normalisation this document defines (§10), so vendored
+regions require no special handling and receive none.
+
+Consequence: `pss.py` remains correct and useful irrespective of the state of
+the repository's canon-governance model, and a future change to that model
+requires no change to `pss.py`.
+
+Observed corollary, stated as a fact and **not** as a contract: because the
+current vendoring convention places exactly one function between a marker
+pair, the §10.2 `hash_full` of a vendored function coincides with the region
+hash computed by the governance tooling. This was measured over 58 regions
+with zero mismatches. Conforming implementations must not *depend* on this
+coincidence, and must not break if it ceases to hold.
+
+---
+
+## 2. Architecture
+
+### 2.1 Layers
+
+```
+Layer 1  extractor     .ps1  ->  symbol model
+Layer 2  model         JSON, the stable interface and the committed artifact
+Layer 3  comparator    model x model  ->  delta facts     (no parser involved)
+```
+
+The comparator reads only Layer 2. It never parses PowerShell. Consequently
+the governance-critical half of the tool has no parsing dependency at all and
+runs anywhere the model can be carried.
+
+### 2.2 Parser ownership
+
+The extractor is implemented in Python and owned in-tree. External PowerShell
+grammars were evaluated and rejected: `tree-sitter-powershell` reaches 99.6%
+agreement with the reference parser on call-graph extraction, but its shipped
+artifact is a 128,484-line generated `parser.c`, unreviewable under this
+repository's review model and requiring a Node.js toolchain to regenerate. Two
+concrete grammar defects were found during evaluation and could not have been
+fixed in-tree.
+
+### 2.3 The reference parser is a test oracle, not a runtime backend
+
+PowerShell's own `System.Management.Automation.Language.Parser` defines ground
+truth. It is used at **test time only**, to verify the Python extractor by
+differential testing. It is never invoked during a normal survey, so `pss.py`
+has no PowerShell runtime dependency at run time.
+
+Where `pwsh` is unavailable, the differential test degrades per §14.3. The
+suite narrows; it does not break.
+
+### 2.4 The model as a context artifact
+
+The model is a first-class deliverable, not an implementation detail. A
+27,229-line, 1.41 MB script does not fit in a language model's context window;
+its symbol model does. This constrains the format: readable JSON, flat records
+in preference to deep nesting, self-describing keys, and stable human-readable
+symbol identifiers rather than opaque ones — the design correction SCIP made
+over LSIF.
+
+This requirement is **quantitative, not aspirational**. Emitting one record per
+variable reference would produce approximately 4.87 MB for the reference target
+— larger than the 1.41 MB source, inverting the tool's purpose. §5.3 therefore
+tiers the model by blast radius, which brings the default survey to
+approximately 0.5 MB.
+
+### 2.5 Reuse-by-copy
+
+Per the repository's standalone-tool principle, `pss.py` imports no sibling
+tool. Shared logic travels as a verified copy, not an import.
+
+Two copies are made, both from the canonical normalized-hash implementation:
+
+- the **string/comment tokenizer**, copied verbatim and used unchanged for
+  `hash_full` (§10.2);
+- the **same tokenizer with one policy flag changed**, used for `hash_body`
+  (§10.3). The lexical rules are identical; only the disposition of string
+  *contents* differs.
+
+Conformance of the first copy is pinned by the shared golden vectors
+(§13). Conformance of the second is pinned by `pss.py`'s own golden vectors,
+because it deliberately diverges from the shared contract (§10.3).
+
+---
+
+## 3. Command-line interface
+
+```
+pss.py survey   <script.ps1> [--out <model.json>] [--format text|json] [--detail]
+pss.py compare  <before.json> <after.json> [--format text|json]
+pss.py --list-facts
+pss.py --self-check
+pss.py --version
+```
+
+| Option | Applies to | Meaning |
+|---|---|---|
+| `--out PATH` | `survey` | Write the model to PATH. Default: stdout. |
+| `--format {text,json}` | both | Output format. Default `text`. |
+| `--detail` | `survey` | Emit one record per function-local variable reference in addition to the default aggregates (§5.3). Off by default. |
+| `--list-facts` | — | Print the fact catalogue and exit. |
+| `--self-check` | — | Verify that this SPEC's §4 catalogue matches the codes compiled into `pss.py`, and exit. |
+| `--version` | — | Print version and exit. |
+
+There is deliberately no `--severity`, no `--enable`, and no suppression
+mechanism. Severity does not exist in this tool, and facts are not suppressed —
+they are filtered by the caller when the caller has decided what it cares
+about.
+
+---
+
+## 4. Fact specifications
+
+This section is normative. Facts are identified by `PSS` plus four digits,
+blocked by first digit. Blocks 1-4 are single-state facts emitted by `survey`;
+blocks 6-8 are delta facts emitted by `compare`; block 9 is the tool's
+declarations about its own limits and is emitted by both.
+
+Block 9 sharing the identifier space with ordinary facts is deliberate,
+following the .NET ApiCompat convention where `CP1001`-`CP1003` ("could not
+analyse") sit alongside the difference codes so they cannot be silently
+dropped.
+
+### 4.1 PSS1xxx — Definition inventory
+
+| Code | Fact |
+|---|---|
+| `PSS1001` | A function is defined. Carries name, start and end location, and nesting depth. |
+| `PSS1002` | A function's parameter signature: ordered parameter names, declared types where present, and whether each is mandatory. Both `param()` blocks and the inline `function f($a)` form are recognised (§10.1). |
+| `PSS1003` | A function's hash triple: `hash_full`, `hash_body`, `hash_raw` (§10). |
+| `PSS1004` | A function is defined inside another function's body. Carries the enclosing function's identifier. |
+| `PSS1005` | A function name is defined more than once in the file. Carries every definition's location and ordinal. Emitted alongside `PSS9007`. |
+
+### 4.2 PSS2xxx — Reference and binding
+
+| Code | Fact |
+|---|---|
+| `PSS2001` | A static call edge from one caller to a defined function. The caller is a defined function, or the reserved owner `<script>` for a call made at script level. Emitted only where the command name is a literal string in command position (§10.6). |
+
+> **[PROVISIONAL P01 — S1 / 2026-08-16]**
+> Basis: measured (reference target, HEAD `8fdd832`).
+> Was: "from one defined function to another."
+> Why: excluding script-level callers makes 12 functions that are invoked only
+> from top level report `PSS4003` (no static caller). With script-level edges
+> included, `PSS4003` measures 26, matching Appendix B.2; without them it
+> measures 38. The edge set matches the reference parser exactly at 1,281
+> (function-sourced 1,247 + script-sourced 34).
+> Review: confirm `<script>` as an edge source is consistent with §12.3, which
+> already reserves the same owner name for the usage map.
+| `PSS2002` | A variable declaration site. Recognised sources per §12.2. |
+| `PSS2003` | A variable reference resolved to a declaration within the same function. |
+| `PSS2004` | A scope-qualified variable reference. Carries the qualifier (`script`, `global`, `local`, `private`, or a drive such as `env`). Detected via `VariablePath.IsScript` / `IsGlobal` / `IsLocal` / `IsPrivate` and `DriveName` — see Appendix D.1. |
+| `PSS2005` | A reference to a PowerShell automatic variable. The set is closed and enumerated below. The automatic test is applied **before** the declaration test. |
+
+The automatic-variable set (53 names, lower-cased):
+
+```
+_ psitem true false null args input error matches myinvocation pscmdlet
+psboundparameters pscommandpath psscriptroot pwd host home profile lastexitcode
+pid psversiontable stacktrace this ofs shellid executioncontext consolefilename
+nestedpromptlevel psculture psuiculture psdebugcontext psemailserver pshome
+psedition islinux ismacos iswindows iscoreclr foreach switch sender eventargs
+event eventsubscriber verbosepreference erroractionpreference warningpreference
+debugpreference informationpreference progresspreference confirmpreference
+whatifpreference outputencoding
+```
+
+**Check order is normative.** A reference whose name is in this set is automatic
+even when the enclosing function appears to declare it. `$null = Get-Thing` is
+the output-discard idiom, not a declaration, and `$ProgressPreference = 'X'`
+writes a preference variable rather than declaring a local. Applying the
+declaration test first misclassifies 254 references on the reference target.
+
+> **[PROVISIONAL P02 — S1 / 2026-08-16]**
+> Basis: measured (reference target, HEAD `8fdd832`).
+> Was: no set enumerated; no check order stated.
+> Why: an unstated set makes the count irreproducible, failing the §1.3 fact
+> test. The set originates from the investigation session's
+> `03-variable-binding.ps1`, with `inputobject` removed — it is a common
+> parameter name, not an automatic variable, and its 10 references were the
+> sole cause of the Appendix B.3 error (2,014 -> 2,004).
+> Note: the inquiry reply described this as "54 names after removing
+> `inputobject`". Counting the source list gives 54 names **including**
+> `inputobject`, hence **53** here.
+> Review: confirm the count, and confirm that `sender` / `eventargs` / `event` /
+> `eventsubscriber` / `foreach` / `switch` are intended to remain.
+| `PSS2006` | A script-scope declaration made at script level. At script level an unqualified assignment declares a script-scoped variable, so `$Foo = 1` at top level and `$script:Foo` inside a function name the same entity. |
+| `PSS2007` | A variable reference occurring inside an expandable (double-quoted) string or here-string. Carries the containing string's location. These are real references and are the principal mechanism by which a text-substitution rename silently fails (§12.4). |
+| `PSS2008` | A script-scope variable's usage map: the set of functions that **write** it and the set that **read** it, with per-set counts (§12.3). One record per name in the usage-map population (§12.3). |
+
+The usage-map population is **not** the same as the `PSS2006` declaration
+population. It is the union of:
+
+1. every name referenced with the `script:` qualifier anywhere; and
+2. every name declared at script level that is referenced **without** a
+   qualifier from a function that does not declare the name locally — that is,
+   exactly the `PSS9004` condition.
+
+> **[PROVISIONAL P03 — S1 / 2026-08-16]**
+> Basis: design-choice (supplied by the SPEC-drafting session; measured here).
+> Was: population left implicit; Appendix B.3 implied the qualified-only set.
+> Why: admitting every script-level declaration adds 37 names that collide
+> accidentally with function locals (`result`, `line`, `cmd`, `payload`), which
+> would put dozens of unrelated functions into their reader sets and corrupt the
+> population that `PSS8005`-`PSS8007` depend on. Clause 2 admits only names
+> whose binding genuinely reaches the script scope; on the reference target that
+> is one name (`action`), giving a population of **156**. Measured: 156.
+> Review: confirm clause 2 is the intended reading of the reply to Q3-a.
+
+### 4.3 PSS3xxx — Soft reference
+
+A *soft reference* is a string literal whose value matches a declared symbol
+name but which is not a syntactic reference to it. These are invisible to
+name-keyed analysis and are a principal mechanism by which a rename silently
+breaks a script.
+
+| Code | Fact |
+|---|---|
+| `PSS3001` | A string literal matches a declared function name and is not in command position. |
+| `PSS3002` | A string literal matches a **script-scope** variable name. Scoped deliberately: matching against all variable names produces 8,821 hits on the reference target versus 146 when restricted to script scope (§12.5). |
+
+**String-literal population.** Both codes match against every string constant,
+**including barewords**. In PowerShell a bareword argument and a hashtable key
+are string constants, and 131 of the reference target's 146 `PSS3002` hits are
+barewords — dropping them would hide precisely the output-field-name cases a
+rename has to consider. Excluded from the population: the name token of a
+function definition, parameter names (`-Path`), keywords, and tokens inside
+brackets (type literals and attributes), none of which are string constants.
+
+Every `PSS3001` / `PSS3002` record carries **`literal_kind`**, valued `quoted`
+or `bareword`, so a caller may filter without the tool narrowing the population
+on its behalf.
+
+**Command position for `PSS3001`** is determined by the reference parser's own
+predicate: a literal is in command position exactly when its parent is a command
+and it is that command's first element. Reconstructing this from token adjacency
+under-reports (25 against 49 on the reference target).
+
+> **[PROVISIONAL P04 — S1 / 2026-08-16]**
+> Basis: measured (reference target, HEAD `8fdd832`).
+> Was: neither the population nor `literal_kind` was stated; command position
+> was not defined for this code.
+> Why: without a stated population the counts are irreproducible (§1.3). With
+> this rule `PSS3001` measures 49 (quoted 48 / bareword 1), matching Appendix
+> B.5 exactly. `PSS3002` measures 145 against a baseline of 146 — see open item
+> O3 in Appendix F.
+> Review: confirm that carrying `literal_kind` rather than narrowing the
+> population is the intended resolution of Q2-d.
+
+No surveyed tool in any ecosystem treats soft references as reportable. Visual
+Studio and IntelliJ offer to rewrite comments and strings during rename,
+implemented as plain global string replacement, opt-in, with a human preview
+step. `pss.py` reports; it never rewrites.
+
+### 4.4 PSS4xxx — Impact closure
+
+| Code | Fact |
+|---|---|
+| `PSS4001` | The transitive caller closure of a function: the set of functions that can reach it through static call edges. |
+| `PSS4002` | The transitive callee closure of a function. |
+| `PSS4003` | A defined function with no static caller and no top-level invocation. This does **not** mean unreachable — it commonly means dispatch through a data table (see `PSS9002`). |
+| `PSS4004` | A mutual-recursion group: a strongly-connected component of the call graph with more than one member. Carries every member. The call graph is not acyclic (§11.2). |
+
+### 4.5 PSS6xxx — Presence transition
+
+Emitted for both **functions** and **script-scope variables**. Every record
+carries a `symbol_kind` of `function` or `script-variable`.
+
+| Code | Fact |
+|---|---|
+| `PSS6001` | A name present in the before model is absent from the after model. |
+| `PSS6002` | A name absent from the before model is present in the after model. |
+| `PSS6003` | A name is present in both models. |
+
+`PSS6003` alone carries no information about identity. A name present in both
+may denote a different entity; §4.6 supplies the evidence that reveals this.
+
+### 4.6 PSS7xxx — Attribute change
+
+Each is emitted for a name present in both models, and each states equality or
+inequality **explicitly** rather than only reporting change. A silent absence
+and an observed equality must be distinguishable by the caller.
+
+| Code | Fact |
+|---|---|
+| `PSS7001` | Hash-triple classification, four values: `identical` / `comment-or-whitespace-only` / `string-literal-only` / `code-changed` (§10.5). |
+| `PSS7002` | Parameter signature: equal / not equal, with the difference. |
+| `PSS7003` | Callee set: equal / not equal, with the symmetric difference. |
+| `PSS7004` | Caller set: equal / not equal, with the symmetric difference. |
+| `PSS7005` | Dependency classification, four values from direct-callee-set change x transitive-callee-closure change (§11.3). |
+| `PSS7006` | Combined classification, four values from `PSS7001` x `PSS7005`: `unchanged` / `local-change` / `dependency-only` / `change-and-propagation` (§11.4). The value names are deliberately neutral; no priority or severity is attached. |
+| `PSS7007` | A script-scope variable's usage map changed: writer-set and reader-set equality plus symmetric differences, and both counts before and after. |
+
+**The same-name/different-entity case.** `hash_body` is keyed independently of
+name. Where a `hash_body` present on `B` in the before model appears on `D` in
+the after model, while `B` in the after model carries a different `hash_body`,
+`pss.py` emits both facts adjacently. The reader may conclude a rename plus a
+name reuse; `pss.py` does not.
+
+### 4.7 PSS8xxx — Graph, closure and rename-omission change
+
+| Code | Fact |
+|---|---|
+| `PSS8001` | A call edge present in the after model and absent from the before model. |
+| `PSS8002` | A call edge present in the before model and absent from the after model. |
+| `PSS8003` | A function's transitive closure differs between models, with the set difference. |
+| `PSS8004` | A soft reference's resolution state changed — most importantly, a string literal that matched a declared name before and matches none after. |
+| `PSS8005` | **Incomplete-rename candidate.** A script-scope name is present in the after model and absent from the before model, while a name present in **both** models lost usage in the same transition. Carries both names, both usage maps, and the count deltas. Derivation and rationale: §12.7 rule (b). |
+| `PSS8006` | **Producer/consumer desynchronisation candidate.** For a script-scope variable, at least one **writer** function's `PSS7001` is not `identical` while at least one **reader** function's `PSS7001` is `identical`. Carries the variable, the changed writers, and the unchanged readers. Derivation and rationale: §12.7 rule (a). |
+| `PSS8007` | **Write-site loss.** A script-scope variable retains at least one reader in the after model but its writer set became empty. Emitted only as a transition; the single-state equivalent belongs to `psa.py` (§7). Derivation: §12.7 rule (c). |
+
+`PSS8004`, `PSS8005`, `PSS8006` and `PSS8007` are the direct detectors for the
+failure modes that motivated the tool. None of them is a verdict: each names a
+candidate together with the evidence that produced it.
+
+### 4.8 PSS9xxx — Analysis limitations
+
+| Code | Fact |
+|---|---|
+| `PSS9001` | A region could not be parsed. Carries location and extent. |
+| `PSS9002` | A call site could not be statically resolved — invocation through `&` with a non-literal target, or an equivalent dynamic dispatch. |
+| `PSS9003` | A parent-scope write that cannot be tracked: `Set-Variable` / `New-Variable` with `-Scope`, or `[ref]` passing. |
+| `PSS9004` | A variable read with no resolvable declaration in the enclosing function and no scope qualifier — a dynamic-scope inheritance candidate. Carries the enclosing function's static callers and, for each, whether it declares that name. Where there are none, "zero static callers" is itself the reported fact. |
+| `PSS9005` | The comparison could not be performed for a named unit — for example a model produced under a different `model_version`. |
+| `PSS9006` | **Self-diagnostic.** A hash-triple combination outside the four reachable states of §10.5 was observed. This indicates a defect in `pss.py`, not in the surveyed script. |
+| `PSS9007` | A symbol identifier required an ordinal disambiguator (§5.2). Ordinals are position-dependent and therefore unstable across edits; a caller must not treat an ordinal-bearing identifier as a durable key. |
+
+**On `PSS9004` as a corpus measure.** In the reference target this fires 11
+times across 24,317 variable references, because that codebase qualifies
+cross-function state explicitly with `$script:` rather than relying on implicit
+inheritance. A codebase without that discipline would produce far more. The
+count is therefore a usable indicator of whether a given script is statically
+analysable at all — reported as a number, with no threshold and no judgement.
+
+---
+
+## 5. Model format
+
+JSON. Top-level shape:
+
+```json
+{
+  "pss_version": "...",
+  "model_version": "1",
+  "source": { "path": "...", "sha256": "...", "line_count": 0, "byte_count": 0 },
+  "symbols":            [ /* PSS1001-PSS1005 */ ],
+  "edges":              [ /* PSS2001 */ ],
+  "closures":           [ /* PSS4001-PSS4004 */ ],
+  "script_variables":   [ /* PSS2004, PSS2006, PSS2008 */ ],
+  "string_interpolation_references": [ /* PSS2007 */ ],
+  "local_variables":    [ /* per-function aggregates, see 5.3 */ ],
+  "soft_references":    [ /* PSS3001-PSS3002 */ ],
+  "limitations":        [ /* PSS9xxx */ ]
+}
+```
+
+> **[PROVISIONAL P05 — S1 / 2026-08-16]**
+> Basis: measured (reference target, HEAD `8fdd832`).
+> Was: `PSS2007` listed inside `script_variables`; no
+> `string_interpolation_references` collection.
+> Why: shape consequence of P06. 113 of the 118 interpolated references are
+> function-local, so filing them under `script_variables` would misname them,
+> while filing them under `local_variables` would misname the 5 that are
+> scope-qualified.
+> Review: shape change only; confirm alongside P06.
+
+### 5.1 Flat records, not trees
+
+All collections are flat record lists. Nested-tree representations are
+prohibited for the call graph and the variable usage model, for three reasons:
+
+1. **Duplication.** Shared helpers have wide fan-in; materialising a tree per
+   root duplicates the same subtree many times over.
+2. **Cycles.** The call graph contains strongly-connected components
+   (§11.2), so a tree expansion does not terminate.
+3. **Determinism.** A flat list with a defined sort order serialises
+   byte-identically; a tree built by traversal does not, without additional
+   constraints.
+
+Trees are a *view*. A caller that wants one derives it from the edge list.
+
+### 5.2 Symbol identifiers
+
+Symbol identifiers must be **stable, human-readable, and independently
+reconstructible from the source**. Opaque or ordinal identifiers are
+prohibited: LSIF's opaque global IDs are the documented reason SCIP replaced
+them, and an unreadable identifier also defeats §2.4.
+
+Grammar:
+
+```
+function/<Name>                        a top-level function
+function/<Outer>/<Inner>               a nested function
+variable:script/<name>                 a script-scope variable
+variable:local/<Function>#<name>       a function-local variable
+variable:env/<name>                    an environment variable
+variable:automatic/<name>              an automatic variable
+```
+
+Names are emitted in their source casing. Identity comparison is
+case-insensitive (§10.7).
+
+Where a function name is defined more than once, the identifier takes the form
+`function/<Name>#<ordinal>` where `<ordinal>` is the 1-based definition order.
+The tool emits `PSS1005` and `PSS9007` in that case. Ordinals are position
+dependent and therefore unstable across edits; this instability is declared
+rather than concealed.
+
+### 5.3 Tiering by blast radius (normative)
+
+The model is tiered so that per-site detail is carried exactly where a symbol's
+influence crosses a function boundary.
+
+| Class | Reference count (reference target) | Blast radius | Representation |
+|---|---:|---|---|
+| Function-local variables | 20,353 | The declaring function | **Per-function aggregate** counts by category. Individual records only under `--detail`. |
+| `$script:`-scope variables | 1,381 across 155 names | Crosses function boundaries | **One record per reference site**, plus the `PSS2008` usage map. |
+| `$env:` variables | 14 | Process / OS contract | One record per reference site. |
+| Automatic variables | 2,014 | Language-defined | Aggregate count only; not renameable. |
+| Unresolved reads | 11 | Undeterminable | One record each, with `PSS9004` evidence. |
+
+The rule is: **omit per-site detail only where an omission cannot hide a
+defect.** A function-local rename that is incomplete necessarily changes the
+declaring function's `hash_body`, so the aggregate loses no detectable
+information. A `$script:` rename that is incomplete may leave the declaring
+function *unchanged*, so per-site detail is mandatory there.
+
+**Explicit exception: `PSS2007`.** References inside expandable strings are
+emitted one record per site **regardless of scope**, in the top-level
+`string_interpolation_references` collection.
+
+> **[PROVISIONAL P06 — S1 / 2026-08-16]**
+> Basis: measured (reference target, HEAD `8fdd832`).
+> Was: no exception; §5.3 tiering applied to these references as to any other.
+> Why: 113 of the reference target's 118 interpolated references are
+> function-local, so the tiering rule would absorb them into aggregates and they
+> would not appear in a default survey. §4.2 calls these the principal mechanism
+> by which a text-substitution rename fails silently, so an omission here hides
+> exactly the defect the rule exists to expose — the tiering rule contradicts
+> itself. The cost is 28 KB. Measured: 118 records.
+> Review: confirm the dedicated collection is preferred over placing these in
+> `local_variables`; the reply to Q6-b proposed it to avoid mis-filing the 5
+> scope-qualified sites.
+
+### 5.4 Determinism
+
+Two runs of the same `pss.py` version over byte-identical input must produce
+byte-identical model output. All collections are emitted in a defined sort
+order. This is a hard requirement: without it the comparator reports tool noise
+as source change.
+
+### 5.5 Version compatibility
+
+`compare` requires both models to carry the same `model_version`. A mismatch is
+reported as `PSS9005` and does not produce a partial comparison. Comparing
+models produced under different `model_version` values is the most likely way
+to manufacture false deltas.
+
+If the two models' `source.path` values differ, `compare` still runs but emits
+that difference as a fact, so that a caller comparing two different scripts
+(rather than two states of one script) cannot mistake the result for a
+before/after delta.
+
+---
+
+## 6. Output formats
+
+**`text`** — human-oriented, one fact per line, grouped by block.
+
+**`json`** — machine-oriented. For `survey`, this is the model itself (§5). For
+`compare`, a list of delta fact records.
+
+There is no SARIF output. SARIF encodes findings with severities and is a poor
+fit for a tool that issues neither.
+
+---
+
+## 7. Jurisdiction boundary with psa.py
+
+`psa.py` and `pss.py` both read PowerShell, and must not both judge the same
+thing.
+
+> **`psa.py` judges the quality of a single state. `pss.py` describes structure
+> and change.**
+
+The following are carried in the PSS model as facts but **must never be emitted
+by `pss.py` as single-state findings**, because each is already a `psa.py` rule:
+
+| Concern | psa.py rule |
+|---|---|
+| `$Script:Foo` read but never assigned | `PSA2013` |
+| Undefined variable reference | `PSA2001` |
+| Automatic-variable shadowing | `PSA2002` |
+| Parameter shadows an automatic variable | `PSA2007` |
+| Call to an undefined function | `PSA2010` |
+
+This table is normative and must be kept in step with `psa.py`'s catalogue.
+
+**The transition carve-out.** `PSS8007` (write-site loss) overlaps the concern
+of `PSA2013` but does not collide with it, because `pss.py` emits it **only as
+a before/after transition** — "this variable had two writers and now has none".
+The single-state judgement "this variable is read but never assigned" remains
+`psa.py`'s exclusively. A conforming implementation must not emit `PSS8007`
+from `survey`.
+
+---
+
+## 8. Environment requirements
+
+| Requirement | Value |
+|---|---|
+| Python | **3.12 or later**, verified at startup; exit per §9 if unmet |
+| Python packages | **standard library only** — no `pip` dependency, at run time or test time |
+| PowerShell | not required at run time. Required at test time for differential testing; absent, the suite degrades per §14.3 |
+| PowerShell modules | **none.** The oracle uses only in-box `System.Management.Automation.Language`. PSGallery access is not required and must not be introduced |
+| Network | not required for any operation |
+
+The 3.12 floor is fixed from the measured execution environment (CPython
+3.12.3). It is a higher floor than `psa.py`, which declares none. The
+divergence is deliberate: `pss.py` states and enforces its floor so that a
+version mismatch fails loudly rather than subtly.
+
+---
+
+## 9. Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | The requested operation completed. |
+| `2` | Usage error, unreadable input, unmet environment requirement, or internal error. |
+
+**The exit code never encodes a verdict.** A survey emitting one thousand facts
+and a survey emitting none both exit `0`. This is a deliberate divergence from
+`psa.py`, whose exit code carries a pass/fail meaning and which the project
+gates on at PSA 0/0/0. Overloading the PSS exit code would make that bar
+unsatisfiable or would quietly weaken it.
+
+---
+
+## 10. Hashing and normalisation
+
+### 10.1 Recognised definition forms
+
+Both `function f { param(...) }` and `function f(...) { }` declare parameters.
+Nested function definitions are recognised and reported (`PSS1004`).
+
+### 10.2 `hash_full` — the state hash
+
+**Text hashed**: the function's full extent, `function <Name> { ... }`
+inclusive.
+
+**Normalisation**: strip comments and string literals to whitespace, collapse
+whitespace runs to a single space, strip ends. `sha256`, truncated to 16 hex
+characters.
+
+This is the repository's canonical normalized-hash contract, **copied
+verbatim** and used unchanged. Encoding-neutral: BOM and CRLF differences
+cancel.
+
+`hash_full` answers: *is this function in the same state as some reference
+copy?* It is name-sensitive by construction, so it changes on rename.
+
+### 10.3 `hash_body` — the identity hash
+
+**Text hashed**: the function's extent **minus the `function` keyword and the
+name** — from the first character after the name to the end of the extent.
+Parameter names are retained in both definition forms, because a parameter
+rename is a signature change and must remain visible via `PSS7002`.
+
+> **[PROVISIONAL P07 — S1 / 2026-08-16]**
+> Basis: measured (reference target, HEAD `8fdd832`).
+> Was: "the brace-delimited block, excluding the `function` keyword and the
+> function name. The `param()` block is included".
+> Why: §10.1 admits two definition forms. In `function f($a) { ... }` the
+> parameters sit **outside** the braces, so under the previous wording a
+> parameter rename left `hash_body` unchanged and `PSS7001` reported
+> `identical`, while the same edit to `function f { param($a) ... }` reported
+> `code-changed`. Making the value depend on syntax choice rather than content
+> contradicts §1.3. Defining the range as "the extent minus the name" is
+> form-independent.
+> Review: confirm this does not conflict with the `PSS7002` signature contract,
+> which now reports the same edit through a second, independent route.
+
+**Normalisation**: strip comments to whitespace, **retain string literal
+contents**, collapse whitespace runs to a single space, strip ends. `sha256`,
+truncated to 16 hex characters.
+
+`hash_body` answers: *is this the same function under a different name?*
+
+**Why string contents are retained (normative rationale).** The shared contract
+strips string literals, which is correct for its own purpose — detecting drift
+between a canonical body and a vendored copy, where wording differences must
+not raise false positives. Applied here it is catastrophic. Measured over the
+reference target's 480 functions:
+
+| Variant | Distinct hashes | Colliding groups | Functions involved |
+|---|---:|---:|---:|
+| Name included, strings stripped | 480 / 480 | 0 | 0 |
+| Name excluded, strings stripped | **471 / 480** | **3** | **12** |
+| Name excluded, strings retained | 480 / 480 | 0 | 0 |
+
+The three collision groups are families of near-identical functions
+distinguished *only* by a string constant — five logging wrappers differing by
+marker glyph and colour, five path getters differing by filename, two evidence
+resolvers differing by OS generation. These are precisely the constructs a
+consolidation refactoring targets, so the collisions concentrate exactly where
+the tool is needed. A collision produces the false evidence "these five
+functions are the same", which is the conclusion `pss.py` exists to prevent.
+
+`hash_body` is therefore **deliberately not** the shared contract's value, and
+a conforming implementation must not claim conformance to the shared golden
+vectors for it. It carries its own vectors (§13).
+
+### 10.4 `hash_raw` — the forensic hash
+
+**Text hashed**: the function's full extent, verbatim bytes, no normalisation.
+`sha256`, truncated to 16 hex characters.
+
+`hash_raw` answers: *did anything at all change?* It is the only value that
+detects a comment-only or whitespace-only edit.
+
+### 10.5 The hash-triple classification (normative)
+
+The three values are not independent. `hash_raw` equality implies equality of
+the other two. For a symbol compared under the same name, `hash_full` differs
+only when non-string code differs, and `hash_body` differs when non-string code
+or string contents differ; therefore `hash_full` changed with `hash_body`
+unchanged cannot occur.
+
+Exactly **four** combinations are reachable. `PSS7001` emits one of:
+
+| `hash_full` | `hash_body` | `hash_raw` | `PSS7001` value |
+|---|---|---|---|
+| same | same | same | `identical` |
+| same | same | differs | `comment-or-whitespace-only` |
+| same | differs | differs | `string-literal-only` |
+| differs | differs | differs | `code-changed` |
+
+The remaining four combinations are unreachable. Observing one is a defect in
+`pss.py`; the tool emits `PSS9006` rather than an out-of-enum value.
+
+This was verified over 2,607 same-name function comparisons across 12
+consecutive historical states of the reference target: all four reachable
+states occurred (2,395 / 13 / 9 / 190) and no unreachable state occurred.
+
+Note that `string-literal-only` is invisible to the shared drift contract by
+design, and is invisible to `hash_full` alone. It is reportable only because
+`hash_body` retains string contents.
+
+### 10.6 Command position
+
+A call edge (`PSS2001`) is emitted only where a literal command name appears in
+command position.
+
+**Inclusion.** Command position is: statement start; after `|`, `;`, `&`, an
+opening `(` or `{`, or an assignment operator; after one of the statement
+keywords `begin default do else end exit finally process return throw try`; and
+after the closing `)` of a keyword-introduced parenthesis group.
+
+**Exclusion.** A word in an otherwise-command position is *not* a command name
+when it is a PowerShell keyword; when an assignment operator follows it (a
+hashtable key or assignment target); when it starts with `-` (an operator or a
+parameter name); or when it is inside brackets (an attribute or type-literal
+context).
+
+> **[PROVISIONAL P08 — S1 / 2026-08-16]**
+> Basis: measured (reference target, HEAD `8fdd832`).
+> Was: inclusion list only, ending "This mirrors the context rules already
+> proven in `psa.py`'s `PSA2010`."
+> Why: the borrowed `PSA2010` rules were never re-derived against the AST. The
+> inclusion list omitted `return <Command>` (27 lost edges) and the token after
+> a `param(...)` group (5 lost edges); with both added the edge set matches the
+> reference parser exactly at 1,281, and the derived values follow (closure
+> membership 5,071, `PSS4003` 26, mutual-recursion groups 3). The exclusion list
+> was absent entirely: without it the named-command count reaches 10,581 against
+> a baseline of 5,048, hashtable keys alone contributing about 4,100.
+> Review: confirm the statement-keyword list is complete; `catch` and `elseif`
+> take a parenthesis or block rather than a command and are deliberately absent.
+
+### 10.7 Case sensitivity
+
+PowerShell function and variable names are **case-insensitive**. Identity
+comparison — presence transition, rename matching, usage-map keying — is
+performed on the lower-cased name.
+
+A change that alters only the casing of a name is therefore **not** a rename.
+It does change `hash_body` and `hash_raw`, so `PSS7001` will report
+`code-changed`; the accompanying `PSS6003` shows the symbol present in both
+models under the same identity. A conforming implementation must emit both,
+and must not report a `PSS6001`/`PSS6002` pair for a casing-only change.
+
+The reference target contains 2,635 distinct variable names with **zero**
+mixed-casing occurrences. The rule is stated because the property is a
+codebase's discipline, not the language's guarantee.
+
+### 10.8 Nested-scope conventions (normative, and deliberately asymmetric)
+
+Two different conventions apply, because the two questions differ:
+
+- **Hashing.** A nested function's text **is included** in the enclosing
+  function's `hash_full`, `hash_body` and `hash_raw`. Excluding it would make a
+  change confined to the nested function invisible in the enclosing function,
+  which is false.
+- **Reference attribution.** A nested function's variable references belong to
+  the **nested function only**. They are not additionally attributed to the
+  enclosing function.
+
+The asymmetry is intentional and must be stated in any conforming
+implementation's documentation. Under the second convention the reference
+population sums to the count of unique variable-expression nodes. Attributing
+nested references to both functions inflates the total by exactly the nested
+bodies' reference count — 11 in the reference target, whose single nested
+function is `Add-VRow`.
+
+---
+
+## 11. The dependency graph model
+
+### 11.1 Representation
+
+The call graph is stored as a flat edge list (`PSS2001`). Closures
+(`PSS4001`, `PSS4002`) are **derived** from it and emitted in the default
+survey, because the model's consumer should not have to compute transitive
+reachability itself (§2.4).
+
+The edge list is the master; the closures are a derived view. Measured on the
+reference target: 1,247 edges expand to 5,071 closure membership entries, a
+factor of 4.1.
+
+### 11.2 The graph is not acyclic
+
+Measured on the reference target: zero self-recursive functions, and **three
+strongly-connected components** with more than one member — two recursive
+descent parser/writer families and one diagnostic pair. Closure computation
+must therefore carry a visited set and terminate on revisit; a naive tree
+expansion does not terminate.
+
+Each such component is emitted as `PSS4004`, because a caller planning a
+refactoring needs to know which functions cannot be separated.
+
+### 11.3 The dependency classification
+
+`PSS7005` crosses the direct callee set with the transitive callee closure:
+
+| direct callee set | transitive closure | `PSS7005` value |
+|---|---|---|
+| same | same | `dependencies-unchanged` |
+| same | differs | `downstream-changed` |
+| differs | same | `direct-only-change` |
+| differs | differs | `dependencies-changed` |
+
+`downstream-changed` is the load-bearing cell. It identifies a function whose
+own call list did not change but whose reachable set did — that is, a function
+affected by a change it does not itself contain. Measured across 12 historical
+state pairs: 1,156 / 12 / 0 / 45. The `direct-only-change` cell was not
+observed in that sample but is reachable (adding a direct call to a function
+already reachable indirectly) and is therefore retained in the enum.
+
+### 11.4 The combined classification
+
+`PSS7006` crosses `PSS7001` (did the text change) with `PSS7005` (did the
+dependency context change), collapsing each to a binary:
+
+| text | dependencies | `PSS7006` value |
+|---|---|---|
+| unchanged | unchanged | `unchanged` |
+| changed | unchanged | `local-change` |
+| unchanged | changed | `dependency-only` |
+| changed | changed | `change-and-propagation` |
+
+`dependency-only` names a function that was **not edited** yet may behave
+differently. It appears in no textual diff and in no hash. Measured across 12
+historical state pairs: 1,142 / 14 / 12 / 45 — that is, of 1,213 comparisons,
+71 warranted attention and 12 of those were invisible to any text-based review.
+
+The value names are deliberately neutral. `pss.py` does not assign review
+priority; that is a judgement and belongs to the caller.
+
+---
+
+## 12. The variable model
+
+### 12.1 The scoping model
+
+Confirmed by execution against the reference PowerShell runtime:
+
+1. **Reads inherit dynamically.** A callee reads a caller's variable. Which
+   declaration a reference binds to depends on the runtime call chain and is
+   undecidable in general. This is the mechanism behind `PSS9004`.
+2. **Writes are local by default.** A callee's assignment creates a new local
+   and does not propagate to the caller. This bounds the blast radius and is
+   why `PSS9004` is read-side only.
+3. **Explicit parent-scope writes exist.** `Set-Variable -Scope N` does
+   propagate and cannot be tracked statically — hence `PSS9003`.
+
+### 12.2 Declaration sites (normative)
+
+`PSS2002` is emitted for:
+
+- a `param()` block parameter, or an inline `function f($a)` parameter;
+- a `foreach` loop variable;
+- an assignment whose left-hand side is a **variable expression**;
+- an assignment whose left-hand side is a **type-conversion wrapping a variable
+  expression** (`[int]$x = 1`);
+- `Set-Variable` / `New-Variable` with a literal `-Name`;
+- an `-OutVariable` / `-ErrorVariable` / `-WarningVariable` /
+  `-InformationVariable` / `-PipelineVariable` common parameter.
+
+`PSS2002` is **not** emitted for:
+
+- an assignment whose left-hand side is a **member expression**
+  (`$x.Property = 1`) — this is a *reference* to `$x`, not a declaration of
+  anything;
+- an assignment whose left-hand side is an **index expression** (`$x[0] = 1`) —
+  likewise a reference.
+
+The exclusion is load-bearing rather than pedantic. Measured on the reference
+target: 5,114 assignment statements decompose into 4,578 variable left-hand
+sides, 41 type-conversion left-hand sides, **407 member left-hand sides** and
+**88 index left-hand sides**. Treating the latter 495 as declarations would
+corrupt every downstream usage map.
+
+Measured frequencies of the other forms on the reference target, recorded so
+that a conforming implementation knows which paths the reference data
+exercises: `foreach` 356, `param` 948, `Set-Variable`/`New-Variable` family 3,
+`-OutVariable` family **0**, splatted references 14, brace-quoted names
+`${...}` 4, `$using:` expressions **0**.
+
+### 12.3 The usage map
+
+For every script-scope variable name, `PSS2008` carries:
+
+```json
+{
+  "id": "variable:script/OsProfile",
+  "writers": ["function/Invoke-SetupPhase02_ResolveInputs", "..."],
+  "readers": ["function/Resolve-InstallWimTargetIndexes", "..."],
+  "writer_count": 2,
+  "reader_count": 12
+}
+```
+
+A function appears in `writers` if it contains a declaration site (§12.2) for
+that name at script scope, and in `readers` if it contains any reference to it.
+The script level itself is represented by the reserved owner `<script>`.
+
+The usage map is the variable-side analogue of a function's callee set: it is
+the structural signature that survives a rename. Measured on the reference
+target, 155 script-scope names produce 115 distinct usage signatures; the
+collisions fall among narrowly-used variables, whose blast radius is
+correspondingly small. This inverse relationship between collision risk and
+consequence is a property to be reported, not a defect to be hidden.
+
+### 12.4 References inside expandable strings
+
+A variable referenced inside a double-quoted string or here-string is a real
+reference and is emitted as `PSS2007` in addition to its ordinary reference
+fact. Measured on the reference target: 118 such references across 83 strings.
+
+These matter disproportionately because the surrounding syntax defeats naive
+text substitution: `"${Foo}bar"` uses brace delimiting, and in `"$Foo.Property"`
+the reference ends at `Foo` while `.Property` is literal text. A rename
+performed by search-and-replace will corrupt or skip these sites.
+
+### 12.5 Soft-reference scoping
+
+`PSS3002` matches string literals against **script-scope variable names only**
+— specifically the `script:`-qualified names (155 on the reference target), not
+the wider `PSS2006` declaration population. Measured on the reference target:
+27,626 string literals produce 8,821 matches against the full variable-name
+population and 146 against the script-scope population — a factor of 60. The
+unrestricted variant is not actionable and is not offered.
+
+**Matching rule (normative).** Whole-literal equality, case-insensitive; the
+`$` sigil is not part of the compared text; no leading or trailing trim;
+literals that are empty or whitespace-only are skipped (671 on the reference
+target). The name side must have its **scope prefix removed** before comparison
+— see Appendix D.5.
+
+> **[PROVISIONAL P09 — S1 / 2026-08-16]**
+> Basis: measured (reference target, HEAD `8fdd832`).
+> Was: no matching rule stated; population named only as "script-scope".
+> Why: without the rule the count is irreproducible. The prefix clause is
+> load-bearing: omitting it yields 0 matches under every candidate population,
+> which is how the S1 session initially and wrongly concluded that the baseline
+> of 146 could not be reproduced.
+> Review: confirm the population is the qualified-only set (155) and not the
+> usage-map population (156), which P03 defines differently.
+
+### 12.6 The population partition
+
+Every variable reference falls into exactly one class, and each class has a
+defined detection route. The partition is stated so that no class is silently
+uncovered:
+
+| Class | Reference count | How a rename defect surfaces |
+|---|---:|---|
+| Function-local | 20,363 | `hash_body` of the declaring function (blast radius is the function) |
+| `$script:` scope (inside a function) | 1,381 | §12.7 rules (a), (b), (c) |
+| Automatic | 2,004 | Not applicable — not renameable |
+| `$env:` | 14 | Not applicable — an external contract, reported but not rename-tracked |
+| Outside any function | 555 | Script level; see §12.3 for the reserved owner |
+
+Classes are exclusive and, under the §10.8 attribution convention, sum exactly
+to the total (24,317). **`PSS9004` is not a class**: it is an annotation on the
+function-local class marking reads that carry no local declaration (11 on the
+reference target, across 5 functions and 4 names).
+
+> **[PROVISIONAL P10 — S1 / 2026-08-16]**
+> Basis: measured (reference target, HEAD `8fdd832`).
+> Was: Function-local 20,353; Automatic 2,014; `Unresolved 11` listed as a
+> sixth class; no "Outside any function" row; classes declared exclusive but
+> summing to 24,328 against a total of 24,317.
+> Why: three separate defects. Automatic falls to 2,004 under P02. The 10
+> references released by removing `inputobject` are function-local, raising that
+> class to 20,363. The 11-reference overshoot was never `PSS9004` double
+> counting: it was the measurement script traversing the nested function
+> `Add-VRow` twice, whose reference count coincidentally is also 11. Under
+> §10.8 the sum is exact.
+> Review: confirm `PSS9004` as an annotation rather than a class; the S1 session
+> initially misdiagnosed this as a subset relation.
+
+### 12.7 Rename-omission detection (normative)
+
+Three rules operate on the usage map. Each produces a **candidate with its
+evidence**, never a conclusion.
+
+**Rule (a) — producer/consumer desynchronisation → `PSS8006`.**
+For a script-scope variable present in both models: if at least one writer
+function's `PSS7001` is not `identical`, and at least one reader function's
+`PSS7001` is `identical`, emit the variable, the changed writers, and the
+unchanged readers.
+
+Rationale: if the writer renamed the variable and a reader was not touched,
+that reader still references the old name. The rule does not distinguish this
+from an ordinary value-semantics change, which is why it names a candidate.
+
+Measured noise on real history: over six consecutive state pairs of the
+reference target, spanning transitions that changed up to 42 functions, the
+rule produced 2, 0, 0, 0, 0 and 1 candidates respectively.
+
+**Rule (b) — incomplete-rename candidate → `PSS8005`.**
+Compare the script-scope name sets. A completed rename yields one name removed
+and one added. An **incomplete** rename yields a name added while the old name
+*persists* with reduced usage. Emit the added name, the persisting name, and
+both usage-count deltas.
+
+Where a removed name and an added name carry equal writer and reader counts,
+emit that correspondence as part of the evidence. On a real historical
+twelve-for-twelve renaming wave this paired every variable correctly.
+
+**Rule (c) — write-site loss → `PSS8007`.**
+A script-scope variable whose reader set is non-empty in the after model while
+its writer set became empty. Unlike (a) and (b) this is not probabilistic: a
+variable that is read and never written is broken. Emitted only as a transition
+(§7).
+
+**Verification.** The three rules were validated by injecting a realistic
+defect: in a historical state, `$script:OsProfile` — referenced by 12 functions
+— was renamed throughout except in one function, reproducing a single-site
+omission. Rule (b) reported the new name added while the old name persisted
+with readers 12 -> 1 and writers 2 -> 0; rule (c) reported the write-site loss;
+rule (a) named `Resolve-InstallWimTargetIndexes`, the function deliberately
+left behind. The three detectors are independent and mutually redundant by
+design.
+
+---
+
+## 13. Self-quality gates
+
+| Gate | Requirement |
+|---|---|
+| Syntax | `py_compile` clean |
+| Self-check | `--self-check` confirms this SPEC's §4 catalogue and the codes compiled into `pss.py` agree, exiting non-zero on drift |
+| Provisional index | `--self-check` confirms every `[PROVISIONAL Pnn]` marker in this SPEC has a row in Appendix F and vice versa; it reports the count and does **not** fail on a non-zero count (§9). Appendix F must be empty before manifest registration |
+
+> **[PROVISIONAL P13 — S1 / 2026-08-16]**
+> Basis: design-choice.
+> Was: no such gate.
+> Why: a provisional wording that is never reconciled becomes the contract by
+> default. Binding the index to `--self-check` makes that failure visible, and
+> binding the zero condition to manifest registration puts the hard gate where
+> the commitment actually happens. Reporting rather than failing keeps §9's rule
+> that the exit code carries no verdict.
+> Review: is a reporting-only gate the right strength, or should a pending
+> revision block the tool from running at all?
+| Determinism | repeated runs over identical input produce byte-identical models (§5.4) |
+| Golden vectors — shared | `hash_full` reproduces the repository's shared normalized-hash golden vectors exactly |
+| Golden vectors — own | `hash_body` reproduces `pss.py`'s own vectors, which include the collision cases of §10.3 as explicit non-collision assertions |
+| Reachability | no §10.5 unreachable combination is producible over the regression corpus (`PSS9006` count is zero) |
+| Differential test | where `pwsh` is available, extraction agrees with the reference parser on the Appendix B baselines |
+| Frozen regression | where `pwsh` is absent, extraction agrees with the committed aggregate expectations (§14.3) |
+| Static analysis | clean under the repository's Python gates |
+| Docs | bilingual README pair in lock-step; SPEC, CHANGELOG, VERSION present |
+
+Registration as a whole-tool unit sets `tested = true` on the basis of the
+self-test being green, not on the canon behavioural suite.
+
+---
+
+## 14. Test-data acquisition
+
+### 14.1 Principle
+
+**The test corpus is not stored; the procedure for obtaining it is.** The
+repository's own commit history is the corpus. This keeps the tool at two `.py`
+files, matching its siblings, and lets the corpus grow as the surveyed projects
+are maintained, rather than freezing and going stale.
+
+### 14.2 Obtaining a corpus state
+
+A corpus state is any commit that touches the target script. Retrieval:
+
+```
+git log --follow --format='%h %ad' --date=short -- <path-to-target>.ps1
+git show <commit>:<path-to-target>.ps1 > <workdir>/<commit>.ps1
+```
+
+`--follow` is required: the reference target crossed a directory move, and
+without it the history truncates at that move.
+
+The reference corpus at the time of writing spans 230 commits over
+approximately ten weeks, during which the target grew from 79 functions and
+4,093 lines to 480 functions and 27,229 lines. 116 of those commits changed the
+function-name set; 15 changed it in both directions and therefore contain
+rename, split, merge or replacement events with the author's stated intent
+recorded in the commit message. `TESTING.md` enumerates the specific state
+pairs used as labelled regression cases and the property each one exercises.
+
+### 14.3 Degradation
+
+| `pwsh` | `git` | Suite behaviour |
+|---|---|---|
+| present | present | Full differential test: extraction is compared against the reference parser over corpus states |
+| absent | present | Aggregate regression: extraction is compared against committed expected **aggregate values** (Appendix B), not full models |
+| either | absent | Synthetic fixtures only: the unit suite runs against small in-file PowerShell samples |
+
+Committing expected **aggregates** rather than expected **models** is
+deliberate: an aggregate expectation is a few kilobytes, a full model for the
+reference target is on the order of half a megabyte, and the aggregate is
+sufficient to detect an extraction regression.
+
+---
+
+## Appendix A — Fact catalogue index
+
+| Block | Category | Mode |
+|---|---|---|
+| `PSS1xxx` | Definition inventory | survey |
+| `PSS2xxx` | Reference and binding | survey |
+| `PSS3xxx` | Soft reference | survey |
+| `PSS4xxx` | Impact closure and recursion groups | survey |
+| `PSS5xxx` | *(reserved)* | — |
+| `PSS6xxx` | Presence transition (functions and script variables) | compare |
+| `PSS7xxx` | Attribute change and classification | compare |
+| `PSS8xxx` | Graph, closure and rename-omission change | compare |
+| `PSS9xxx` | Analysis limitation and self-diagnostic | both |
+
+---
+
+## Appendix B — Acceptance baselines
+
+Measured against the reference target
+`projects/powershell-update-windows-server-iso/Update-WindowsServerIso.ps1` at
+the head of `main`, using the in-box PowerShell parser as ground truth.
+Reproduce per §14.
+
+### B.1 Structural inventory
+
+| Quantity | Reference value |
+|---|---:|
+| Parse errors | 0 |
+| Function definitions | 480 |
+| Nested function definitions | 1 |
+| Duplicate function names | 0 |
+| Command invocations | 5,074 |
+| — statically named | 5,048 |
+| — dynamic | 26 |
+| `Invoke-Expression` occurrences | 0 |
+| Variable references (unique AST nodes) | 24,317 |
+| Distinct variable names (case-insensitive) | 2,635 |
+| Names with mixed casing | 0 |
+| String literals | 27,626 |
+
+### B.2 Call graph
+
+| Quantity | Reference value |
+|---|---:|
+| Intra-script call edges | 1,247 |
+| Closure membership entries | 5,071 |
+| Self-recursive functions | 0 |
+| Mutual-recursion groups (`PSS4004`) | 3 |
+| Widest transitive callee closure | 175 |
+| Widest transitive caller closure | 74 |
+| Functions with no static caller (`PSS4003`) | 26 |
+
+### B.3 Variables
+
+| Quantity | Reference value |
+|---|---:|
+| Resolved in function (`PSS2003`) | 20,353 |
+| Automatic (`PSS2005`) | 2,004 |
+| `$script:`-qualified (`PSS2004`) | 1,381 |
+| — across distinct names | 155 (usage-map population: **156**, see §12.3) |
+| Outside any function | 555 |
+| `$env:`-qualified (`PSS2004`) | 14 |
+| Unresolved (`PSS9004`) | 11, across 5 functions and 4 names |
+| References inside expandable strings (`PSS2007`) | 118, across 83 strings |
+| Distinct usage signatures over 155 script names | 115 |
+
+> **[PROVISIONAL P11 — S1 / 2026-08-16]**
+> Basis: measured (reference target, HEAD `8fdd832`).
+> Was: `Automatic (PSS2005) 2,014`; distinct names given as 155 with no
+> usage-map figure.
+> Why: consequences of P02 and P03, not independent judgements. `inputobject`
+> is not an automatic variable (-10), and the usage-map population differs from
+> the qualified-name count.
+> Review: value corrections only; confirm alongside P02 and P03.
+
+### B.4 Declaration forms
+
+| Form | Reference value |
+|---|---:|
+| Assignment statements | 5,114 |
+| — left-hand side is a variable | 4,578 |
+| — left-hand side is a type conversion | 41 |
+| — left-hand side is a member expression (**excluded**) | 407 |
+| — left-hand side is an index expression (**excluded**) | 88 |
+| `foreach` statements | 356 |
+| Parameters | 948 |
+| `Set-Variable` / `New-Variable` family | 3 |
+| `-OutVariable` family | 0 |
+| Splatted references | 14 |
+| Brace-quoted names `${...}` | 4 |
+| `$using:` expressions | 0 |
+
+### B.5 Soft references
+
+| Quantity | Reference value |
+|---|---:|
+| Function-name literals, non-invocation (`PSS3001`) | 49, across 28 functions |
+| Literals matching any variable name (**not** the rule) | 8,821 |
+| Literals matching a script-scope name (`PSS3002`) | 146 |
+
+### B.6 Hash behaviour
+
+| Quantity | Reference value |
+|---|---:|
+| Distinct `hash_full` over 480 functions | 480 |
+| Distinct `hash_body` over 480 functions | 480 |
+| Distinct name-excluded string-stripped hashes (**rejected variant**) | 471 |
+
+### B.7 Delta behaviour over 12 consecutive historical states
+
+| Quantity | Reference value |
+|---|---:|
+| Same-name function comparisons | 2,607 |
+| `PSS7001 = identical` | 2,395 |
+| `PSS7001 = comment-or-whitespace-only` | 13 |
+| `PSS7001 = string-literal-only` | 9 |
+| `PSS7001 = code-changed` | 190 |
+| Unreachable hash-triple combinations observed | 0 |
+| `PSS7005 = dependencies-unchanged` | 1,156 |
+| `PSS7005 = downstream-changed` | 12 |
+| `PSS7005 = dependencies-changed` | 45 |
+| `PSS7006 = dependency-only` | 12 |
+
+---
+
+## Appendix C — Adjudicated decision record
+
+Decisions taken by the repository owner during the design session of
+2026-08-15. Each is normative; reopening one requires an explicit decision, not
+a reinterpretation.
+
+| Ref | Decision |
+|---|---|
+| D1 | `pss.py` is governance-neutral (§1.5). It does not interpret markers, and a change to the governance model requires no change to the tool. |
+| D3 | Accepted extension is `.ps1` only. |
+| D4 | Exit codes are `0` and `2`; the exit code never encodes a verdict (§9). |
+| D5 | Three hashes: `hash_full` (shared contract, verbatim copy), `hash_body` (name excluded, **string contents retained**), `hash_raw` (§10). |
+| D6 | Nested scope uses asymmetric conventions: hashing includes the nested body, reference attribution does not (§10.8). |
+| D7 | `survey` enumerates impact sites with locations but emits no work list and no instruction. |
+| D8 | Initial `canonical_version` is `0.1.0`, promoted after the tool has been exercised on a real refactoring. |
+| D9 | Symbol identifier grammar per §5.2; ordinal disambiguation only on duplicate definition, with `PSS9007` declaring its instability. |
+| D10 | `compare` does not refuse models from different scripts; it emits the `source.path` difference as a fact (§5.5). |
+| D11 | Test data is obtained from the repository's commit history; the acquisition procedure is documented rather than the data being stored (§14). |
+| D11a | Degradation is three-tiered; expected **aggregates** are committed, not expected models (§14.3). |
+| D12 | Development is anchored on the reference target first; extension to further single-script projects follows. |
+| D13 | The graph is a flat edge list; closures are derived; mutual-recursion groups are emitted (§11). |
+| D14 | Set comparisons carry the symmetric difference and state equality explicitly (§4.6). |
+| D15 | The combined classification is emitted as a fact with neutral value names; review priority is not assigned (§11.4). |
+| D16 | The model is tiered by blast radius; per-site detail exactly where influence crosses a function boundary (§5.3). |
+| D18 | Assignment left-hand sides are classified four ways; member and index left-hand sides are references, not declarations (§12.2). |
+| D19 | References inside expandable strings are an explicit fact class (§12.4). |
+| D20 | Variable soft references are scoped to script-scope names (§12.5). |
+| D21 | Identity comparison is case-insensitive; a casing-only change is not a rename (§10.7). |
+| D22 | The variable identity anchor is the usage map — writer set, reader set and counts (§12.3). |
+| — | Rename-omission detection is the three rules of §12.7, adjudicated as the primary requirement of the tool. |
+
+---
+
+## Appendix D — Known pitfalls and lessons learned
+
+### D.1 Scope modifiers are not exposed by `DriveName`
+
+Scope modifiers are exposed by `VariablePath.IsScript` / `IsGlobal` / `IsLocal`
+/ `IsPrivate`. They are **not** exposed by `DriveName`, which is populated only
+for drive-qualified paths such as `$env:`. Testing `DriveName` alone silently
+reports zero scope-qualified variables in a script that has 1,381 of them. This
+error was made and corrected during the design investigation and is recorded so
+that a conforming implementation does not repeat it.
+
+### D.2 Regular expressions cannot enumerate function definitions
+
+A line-anchored regular expression for `function <name>` counts 482 definitions
+in the reference target, where the true figure is 480. The two extra matches are
+prose inside comment blocks that happen to begin a line with the word
+`function`:
+
+```
+        function therefore treats KbId + OS + package role as the stable key.
+        function so they cannot diverge.
+```
+
+Both appear in the corpus as spurious rename events — one as a function named
+`therefore` being deleted, one as a function named `so` being added. The
+regression suite carries both as explicit trap cases.
+
+### D.3 A hash is not sufficient to identify a rename
+
+Renames performed in practice rarely change only a name. In the reference
+corpus, a rename of a logging helper simultaneously changed the parameter name
+and dropped a type annotation, and a twelve-function renaming wave also
+rewrote the callee references inside the renamed functions' bodies, so only six
+of the twelve matched by `hash_body`. Substituting the six learned pairs
+resolved two more; the remaining four had further body changes.
+
+The lesson is structural, not incidental: `hash_body` identifies the
+*body-untouched* rename exhaustively, and the callee-set and caller-set facts
+supply the evidence for the rest. Emitting them side by side is the design;
+concluding from either alone is the defect.
+
+### D.4 A one-to-many split is not decidable from a hash
+
+A helper split into two functions produces one removal and two additions with
+no matching `hash_body`. The corpus contains such a case. `pss.py` emits the
+presence transitions and the callee-set facts and draws no conclusion.
+
+---
+
+### D.5 `VariablePath.UserPath` retains the scope prefix
+
+`VariablePath.UserPath` is **not** the bare variable name. For `$Script:Foo` it
+returns `Script:Foo`, prefix included. Any comparison against a string literal,
+a usage-map key, or another name list must lower-case **and strip a leading
+scope prefix** first.
+
+Omitting the strip is silent: it produces zero matches rather than an error. The
+S1 session hit this while checking `PSS3002` and concluded from the empty result
+that the baseline of 146 was unreproducible — the baseline was correct and the
+measurement was wrong. This is the same failure shape as D.1: an AST property
+that looks like the value you want and is not.
+
+> **[PROVISIONAL P12 — S1 / 2026-08-16]**
+> Basis: measured (reference target, HEAD `8fdd832`).
+> Was: absent.
+> Why: this pitfall cost the S1 session a wrong conclusion that reached the
+> inquiry as a claimed SPEC defect. It belongs next to D.1, which warns about
+> the neighbouring property on the same type.
+> Review: new pitfall entry; no contract change.
+
+---
+
+## Appendix E — Open items
+
+| Ref | Item |
+|---|---|
+| §3 | Whether a fact-code filter (`--include` / `--exclude`) is warranted, given that JSON output is trivially filtered downstream |
+| §7 | Whether `--self-check` should mechanically verify the `psa.py` boundary against that tool's compiled rule list, rather than relying on the table staying current by hand |
+| §11.3 | Whether the unobserved `direct-only-change` cell occurs in a wider corpus |
+| §12.3 | Whether the usage map's discriminating power should be raised by including per-function read/write counts in the signature |
+| §14 | Whether the design investigation's oracle harness may itself become a survey target once the tool is mature; circular while the tool depends on that harness for its own correctness |
+
+---
+
+## Appendix F — Provisional revisions pending review
+
+Every revision made by the S1 implementation session and not yet confirmed by
+the SPEC-drafting session. Each has an inline `[PROVISIONAL Pnn]` block at the
+point of change; `--self-check` verifies that this index and those markers agree
+in both directions.
+
+**Basis** is one of:
+
+- **measured** — settled by measurement against the reference parser. Review is
+  a confirmation that the wording matches the measurement, not a judgement call.
+- **design-choice** — a judgement supplied by the drafting session and
+  implemented here. Review confirms the reading is faithful.
+- **open** — genuinely undecided. Listed separately below.
+
+| ID | Section | Basis | Review question |
+|---|---|---|---|
+| P01 | §4.2 `PSS2001` | measured | Is `<script>` as an edge source consistent with §12.3's reserved owner? |
+| P02 | §4.2 `PSS2005` | measured | Confirm the count is 53, and that the event and enumerator names stay. |
+| P03 | §4.2 `PSS2008` | design-choice | Is clause 2 the intended reading of the Q3-a reply? |
+| P04 | §4.3 | measured | Is carrying `literal_kind` preferred over narrowing the population? |
+| P05 | §5 | measured | Shape change only; consequence of P06. |
+| P06 | §5.3 | measured | Dedicated collection, or `local_variables`? |
+| P07 | §10.3 | measured | Does the widened range conflict with the `PSS7002` contract? |
+| P08 | §10.6 | measured | Is the statement-keyword list complete? |
+| P09 | §12.5 | measured | Qualified-only (155) rather than the usage-map population (156)? |
+| P10 | §12.6 | measured | Is `PSS9004` an annotation rather than a class? |
+| P11 | Appendix B.3 | measured | Value corrections only; consequences of P02 and P03. |
+| P12 | Appendix D.5 | measured | New pitfall entry; no contract change. |
+| P13 | §13 | design-choice | Is a reporting-only gate the right strength for this index? |
+
+### F.1 Open items requiring adjudication
+
+These are **not** provisional wordings. They are questions the S1 session cannot
+close, recorded here so they are not lost.
+
+**O1 — `commands_named` cannot be reproduced by `pss.py`.**
+Appendix B.1's `Command invocations (statically named) 5,048` is an AST
+predicate: `CommandAst` whose first element is a `StringConstantExpressionAst`.
+§2.3 restricts `pwsh` to test time, so `pss.py` has no AST at run time and
+derives 5,046 from tokens. The two figures measure different things. Proposal:
+keep 5,048 as an oracle-side corpus statistic and drop it as a `pss.py`
+acceptance baseline — the load-bearing quantity is the edge set, which matches
+exactly at 1,281. Otherwise the §13 differential test fails permanently on a
+diagnostic counter.
+
+**O2 — the model is 4.5x the §2.4 size target.**
+§2.4 sets the model's purpose as a context artifact, at roughly 0.5 MB. Measured
+on the reference target: 2.27 MB as formatted JSON, 1.72 MB of content.
+
+| Collection | Size | Records |
+|---|---:|---:|
+| `closures` | 601 KB | 509 |
+| `script_variables` | 527 KB | 2,035 |
+| `symbols` | 270 KB | 480 |
+| `edges` | 173 KB | 1,281 |
+| others | 143 KB | 814 |
+
+`closures` dominates because both transitive sets are materialised for all 480
+functions. Since the Q1/Q3 replies confirm the consumer is a separate LLM
+track, this directly obstructs the tool's stated purpose. Proposal: apply the
+§5.3 tiering principle to closures — emit counts and the direct sets by default,
+materialise transitive sets on request — and reconsider whether every
+`PSS2004` site needs a record. Not implemented pending adjudication, because it
+changes the model shape.
+
+**O3 — three residual measurement gaps.**
+
+| Quantity | Baseline | Measured | Gap |
+|---|---:|---:|---:|
+| `PSS3002` | 146 | 145 | −1 |
+| String constants | 27,626 | 27,601 | −25 |
+| `commands_named` | 5,048 | 5,046 | −2 (see O1) |
+
+All three are token-reconstruction shortfalls in the string-constant population.
+They are small and none affects a load-bearing quantity, but a baseline is
+either met or it is not. Proposal: adjudicate each as "meet exactly" or "record
+the token-derived value as the `pss.py` expectation with the delta explained".
