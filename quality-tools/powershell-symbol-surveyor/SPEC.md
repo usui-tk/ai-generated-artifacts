@@ -442,7 +442,7 @@ step. `pss.py` reports; it never rewrites.
 |---|---|
 | `PSS4001` | The transitive caller closure of a function: the set of functions that can reach it through static call edges. |
 | `PSS4002` | The transitive callee closure of a function. |
-| `PSS4003` | A defined function with no static caller and no top-level invocation. This does **not** mean unreachable — it commonly means dispatch through a data table (see `PSS9002`). |
+| `PSS4003` | A defined function with no static caller and no top-level invocation. Carries **`named_by_literal`** when a `PSS3001` soft reference elsewhere in the file matches the function's name exactly; the key is **absent** (never `false`) when it does not, following the model's existing size-driven convention of omitting null/false-valued keys rather than emitting them. This is a fact about the string-literal surface only — a comment mentioning the name does not set it, because a comment is not code and is not evidence of a call path (§15.4 F1). The code does **not** mean unreachable either way — a `named_by_literal` record commonly means dispatch through a data table (see `PSS9002`); its absence is the narrower claim the tool can support (§15.5). |
 | `PSS4004` | A mutual-recursion group: a strongly-connected component of the call graph with more than one member. Carries every member. The call graph is not acyclic (§11.2). |
 
 ### 4.5 PSS6xxx — Presence transition
@@ -497,8 +497,9 @@ name reuse; `pss.py` does not.
 | `PSS8005` | **Incomplete-rename candidate.** A script-scope name is present in the after model and absent from the before model, while a name present in **both** models lost usage in the same transition. Carries both names, both usage maps, and the count deltas. Derivation and rationale: §12.7 rule (b). |
 | `PSS8006` | **Producer/consumer desynchronisation candidate.** For a script-scope variable, at least one **writer** function's `PSS7001` is not `identical` while at least one **reader** function's `PSS7001` is `identical`. Carries the variable, the changed writers, and the unchanged readers. Derivation and rationale: §12.7 rule (a). |
 | `PSS8007` | **Write-site loss.** A script-scope variable retains at least one reader in the after model but its writer set became empty. Emitted only as a transition; the single-state equivalent belongs to `psa.py` (§7). Derivation: §12.7 rule (c). |
+| `PSS8008` | **Orphaning transition.** A function's `PSS4003` presence changed between the before and after model: gained (had a static caller before, has none after) or lost (had none before, has one after). Carries the function identifier, the direction, and both models' `named_by_literal` values (§4.4) for that identifier where the function is present in both. Carries **no commit identity** — `pss.py` is git-agnostic by design (§2.1) and knows only the two models it was given; a caller that wants per-commit resolution runs `compare` over adjacent generations, in which case a sequence of `PSS8008` facts — including a gain followed by a later loss — is the correct and unremarkable representation of a function whose reachability changed more than once (§15.4 F3). |
 
-`PSS8004`, `PSS8005`, `PSS8006` and `PSS8007` are the direct detectors for the
+`PSS8004`, `PSS8005`, `PSS8006`, `PSS8007` and `PSS8008` are the direct detectors for the
 failure modes that motivated the tool. None of them is a verdict: each names a
 candidate together with the evidence that produced it.
 
@@ -1108,7 +1109,7 @@ their keys:
 | Shape | Discriminator | Meaning | Reference target |
 |---|---|---|---:|
 | closure | `record: "closure"`, keyed by `id` | one per function: the two transitive counts, and the sets under the `closure-sets` axis | 480 |
-| orphan | `code: "PSS4003"`, keyed by `id` | a function with no static caller | 26 |
+| orphan | `code: "PSS4003"`, keyed by `id` | a function with no static caller, plus `named_by_literal` (§4.4) | 26 |
 | recursion group | `code: "PSS4004"`, keyed by `members` | a strongly connected component of two or more functions | 3 |
 
 509 records against 480 functions on the reference target; 46 against 46 on the
@@ -1430,10 +1431,23 @@ the specification.
 Across 230 committed states of the reference target, nine functions are defined
 at head, have no static caller, and are named by no string literal anywhere in
 the file — unreachable as far as this model can see. Four of them were reached
-at an earlier state and lost their last caller in an identifiable commit; three
-of those four were **defined and orphaned within two days**, one of them on the
-same day. The commit that orphaned a recovery-path function announces
-"verified checkpointed resume transactions" in its subject.
+at an earlier state and lost their last caller in an identifiable commit; **two
+of those four were defined and orphaned within two days, one of them on the
+same day** (`Set-WimImageCreationTimeXml`, 0-day gap; `Restore-BootWimFromSourceIso`,
+1-day gap). The other two flipped much later — 39 and 73 days after
+definition (`Get-PatchKbId`, `Install-WindowsAdkFallback`) — so proximity in
+time is not a property of all four, only of these two. The commit that orphaned
+a recovery-path function announces "verified checkpointed resume transactions"
+in its subject.
+
+*(This paragraph was corrected on 2026-08-16 against a full 230-generation
+re-survey run with `pss.py` itself (via the ADR 0033 `corpus.py` cache),
+replacing an earlier figure of "three... within two days" that had been
+measured with the throwaway instruments retired at ADR 0033 — one of which
+carried a hard-coded absolute path and one of which silently dropped
+unreadable generations. The corrected count is two, not three; the
+`Restore-BootWimFromSourceIso` recovery-path finding and its commit subject are
+unaffected and reproduce exactly.)*
 
 Five more are vendored canonical helpers. One of them is vendored into six
 consumers and called by none of them, while its paired opposite is called by
@@ -1451,34 +1465,29 @@ five: the pair is half-wired everywhere it exists.
 
 ### 15.4 The requirements
 
-**F1 — an orphan's kind is a fact, not an inference.** A function with no static
-caller that is named by a string literal, and one that is named nowhere, are
-different observations and must be distinguishable without the consumer joining
-three collections. The data is present; the derivation is not stated.
+**F1 — an orphan's kind is a fact, not an inference (RESOLVED, P22).** A
+function with no static caller that is named by a string literal, and one that
+is named nowhere, are different observations and must be distinguishable
+without the consumer joining collections. Resolved into the record rather than
+a new code: every `PSS4003` record carries `named_by_literal` (§4.4), set from
+the existing `PSS3001` soft-reference population and nothing else. **A
+comment-only mention does not count.** `pss.py`'s tokenizer strips comments
+before any fact is derived (§2), so a name that appears only in a comment was
+never eligible to produce a `PSS3001` record and therefore does not set
+`named_by_literal`. This was checked against the reference target directly:
+three of the nine measured unreachable functions (`Get-SevenZipPath`,
+`Install-SevenZipFallback`, `Invoke-CleanupDirectories`) have their name
+appear in a comment elsewhere in the file despite having no live reference of
+any kind, and each correctly carries no `named_by_literal` key. A comment
+documents intent; it is not evidence of a call path, and treating it as one
+would make `named_by_literal` an inference rather than a fact under §1.3.
 
 **F2 — an invoked name that resolves to nothing must be emitted.** The count of
 named commands is kept and the names are not. Restoring them, with their
 positions, is what makes a call to a deleted function expressible at all. The
 collection is not a list of errors: most entries are cmdlets and external
-executables, and classifying them is the caller's work, not this tool's.
-
-**F3 — orphaning is a transition and belongs in `compare`.** *Had callers, now
-has none* is the fact that would have caught all four defects at the moment
-they were introduced. A standing orphan count would not have.
-
-**F4 — a reachability statement carries its own bound.** Any fact asserting
-that nothing reaches a symbol is emitted together with the count of unresolved
-sites in the same survey, so that a consumer cannot read *unreachable* where
-the model can only support *not reached by anything resolved*.
-
-> **[PROVISIONAL P22 - S3 / 2026-08-16]**
-> Basis: measured.
-> Was: `PSS4003` reported every function with no static caller under one code.
-> Why: measured on the reference target, 26 orphans comprise 17 correct
-> dynamic dispatches and 9 unreachable functions, of which 4 are damage.
-> Review: does the distinction belong in the record, in a new code, or in a
-> derived field, and what exactly counts as "named by a string literal" when
-> the name appears only inside a comment?
+executables, and classifying them is the caller's work, not this tool's. *Not
+yet resolved — see P23.*
 
 > **[PROVISIONAL P23 - S3 / 2026-08-16]**
 > Basis: open.
@@ -1492,25 +1501,34 @@ the model can only support *not reached by anything resolved*.
 > conventions? If filtered, the filter is a threshold and §1.3 forbids it —
 > so what is the reproducible rule?
 
-> **[PROVISIONAL P24 - S3 / 2026-08-16]**
-> Basis: measured.
-> Was: no transition fact for reachability.
-> Why: all four measured defects are transitions, and each was invisible in the
-> standing count of the state that followed it.
-> Review: which `PSS8xxx` code, and does the fact carry the identity of the
-> commit or only the before/after pair?
+**F3 — orphaning is a transition and belongs in `compare` (RESOLVED, P24).**
+*Had callers, now has none* is the fact that would have caught all four
+measured defects at the moment they were introduced. A standing orphan count
+would not have. Resolved as `PSS8008` (§4.7): a `PSS4003` presence change
+between two models, carrying direction (gained/lost) and both models'
+`named_by_literal` values, but **no commit identity** — `pss.py` stays
+git-agnostic (§2.1) and reports only what the two given models show. A caller
+that wants per-commit resolution runs `compare` across adjacent generations; a
+function whose reachability flips more than once then simply produces more
+than one `PSS8008` fact, in sequence, which is not a special case. This was
+checked against all 230 committed generations of the reference target: of the
+nine measured unreachable functions, two never had a static caller in the
+observed history, two flip more than once (gain a caller shortly after
+definition, then lose it again later), and four flip exactly once and stay
+orphaned — each of those four is one `PSS8008` fact away from being caught the
+moment it happened.
 
-> **[PROVISIONAL P25 - S3 / 2026-08-16]**
-> Basis: measured.
-> Was: `limitations` was a separate collection a consumer could ignore.
-> Why: unresolved sites on the reference target rose from 9 to 38 across the
-> measured history, so the bound on any reachability claim widened over time
-> while the claim's presentation did not change. Five external reviewers, in
-> both model families, independently asked for limitations to be first-class
-> change evidence rather than a trailing warning section; the measurement gives
-> that request a number.
-> Review: is the bound carried on each reachability record, once per model, or
-> both?
+**F4 — a reachability statement carries its own bound (RESOLVED, P25).** Any
+fact asserting that nothing reaches a symbol is emitted together with the count
+of unresolved sites in the same survey, so that a consumer cannot read
+*unreachable* where the model can only support *not reached by anything
+resolved*. Resolved as **once per model**: a new top-level `counters` entry,
+`unresolved_named_command_sites`, alongside the existing entries such as
+`commands_named` (§2.4). It is not repeated on every `PSS4003` record, because
+the bound is a property of the survey as a whole and not of any one function —
+a caller reading a `PSS4003` record already has the same model's `counters`
+alongside it. Carrying it per record would restate the same number up to 26
+times on the reference target for no additional information.
 
 ### 15.5 What this method cannot establish
 
@@ -1794,10 +1812,32 @@ a mismatch and merely reporting a pending count.
 |---|---|---|---|
 | P20 | §5.7 | open | Which shape should the symbol-scoped projection take, and what must a projected model declare about its own coverage? |
 | P21 | §5.5 | design-choice | Should axis-set normalisation be its own operation, a flag on `compare`, or folded into the §5.7 projection? |
-| P22 | §15.4 | measured | Where does an orphan's kind belong, and does a comment-only mention count as a mention? |
 | P23 | §15.4 | open | Should every unresolved invoked name be emitted, or only some — and by what rule that is not a threshold? |
-| P24 | §15.4 | measured | Which `PSS8xxx` code carries the orphaning transition, and does it identify the commit? |
-| P25 | §15.4 | measured | Is the unresolved-site bound carried per record, per model, or both? |
+
+**P22, P24 and P25 were resolved on 2026-08-16**, against a full 230-generation
+re-survey of the reference target (both corpus entries, `pss.py` run directly —
+not the throwaway instruments retired at ADR 0033), and their markers removed.
+
+- **P22** — the distinction lands **in the record**, not a new code: `PSS4003`
+  gains `named_by_literal` (§4.4), sourced from the existing `PSS3001`
+  population. A comment-only mention does **not** count, because `pss.py`
+  strips comments before any fact is derived and a comment is not evidence of
+  a call path. Checked directly: three of the nine measured unreachable
+  functions are named in a comment elsewhere in the file and are correctly
+  carrying no `named_by_literal` key under this rule.
+- **P24** — resolved as `PSS8008` (§4.7), carrying direction (gained/lost) and
+  no commit identity — `pss.py` stays git-agnostic (§2.1); a caller wanting
+  commit resolution runs `compare` across adjacent generations, and a function
+  that flips more than once simply produces more than one `PSS8008` fact. The
+  same re-survey found flapping in the reference target itself: two of the
+  nine measured functions gain and lose their last caller more than once
+  before settling.
+- **P25** — resolved as **once per model**: a new `counters` entry,
+  `unresolved_named_command_sites`, alongside the existing entries (§2.4), not
+  repeated on every `PSS4003` record.
+
+The same re-survey also corrected §15.2's "three... within two days" figure to
+two (§15.2 carries the detail and the provenance note).
 
 **P15 through P19 were resolved on 2026-08-16 by external review** and their
 markers removed. Six respondents across two model families, all with code
@@ -1849,11 +1889,9 @@ an index mismatch (§13).
 
 ### F.1 Open items requiring adjudication
 
-None outstanding beyond the P20 through P25 rows above. P22, P24 and P25 are
-**measured**: each is traced to a defect observed in the reference target's
-committed history rather than to an opinion about what a caller might want.
-§15.5 states what that method does not establish. O1, O2 and O3 were
-adjudicated on 2026-08-16:
+None outstanding beyond the P20, P21 and P23 rows above. §15.5 states what the
+observed-failure method does not establish. O1, O2 and O3 were adjudicated on
+2026-08-16:
 
 - **O1** — Appendix B is split into B-I (acceptance) and B-II (corpus
   statistics); the §13 differential test asserts B-I only. `commands_named`

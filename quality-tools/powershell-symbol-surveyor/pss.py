@@ -93,6 +93,7 @@ FACTS = {
     "PSS8005": "Incomplete-rename candidate.",
     "PSS8006": "Producer/consumer desynchronisation candidate.",
     "PSS8007": "Write-site loss.",
+    "PSS8008": "A function's PSS4003 presence changed between models (orphaning transition).",
     # PSS9xxx - analysis limitations
     "PSS9001": "A region could not be parsed.",
     "PSS9002": "A call site could not be statically resolved.",
@@ -889,6 +890,7 @@ class Survey:
         self.counters = {
             "commands_named": 0,
             "commands_dynamic": 0,
+            "unresolved_named_command_sites": 0,
             "variable_refs": 0,
             "string_literals_quoted": 0,
             "string_literals_bareword": 0,
@@ -1051,6 +1053,13 @@ class Survey:
             self.counters["commands_named"] += 1
             targets = self.func_by_lname.get(t.text.lower())
             if not targets:
+                # SPEC 15.4 F4 / P25: counted here, once per model, in
+                # counters - never repeated on each PSS4003 record (SPEC
+                # 4.4). Most of these are cmdlets and external executables
+                # (F2/P23, still open); this bound only says how many
+                # named-command sites resolved to nothing in THIS script,
+                # not which.
+                self.counters["unresolved_named_command_sites"] += 1
                 continue
             # The edge source may be <script>: a function called only from top
             # level is not an orphan, and excluding script-level edges makes 12
@@ -1398,9 +1407,19 @@ class Survey:
             e["code"] = "PSS2001"
 
         closures = sorted(self.closures, key=lambda r: r["id"])
-        no_caller = [{"code": "PSS4003", "id": fid} for fid in sorted(
-            self.func_ids[id(f)] for f in self.funcs
-            if not self.radj.get(self.func_ids[id(f)]))]
+        # PSS4003.named_by_literal (SPEC 4.4, F1/P22): sourced from the
+        # PSS3001 population only. A comment cannot produce a PSS3001 record
+        # (comments are stripped before any fact is derived, SPEC 2), so a
+        # name mentioned only in a comment correctly yields False here - the
+        # tool has no notion of "comment evidence" to draw on, by design.
+        literal_named_ids = set(
+            r["matches"] for r in self.soft_refs if r["code"] == "PSS3001")
+        no_caller = [
+            {"code": "PSS4003", "id": fid,
+             "named_by_literal": fid in literal_named_ids}
+            for fid in sorted(
+                self.func_ids[id(f)] for f in self.funcs
+                if not self.radj.get(self.func_ids[id(f)]))]
         groups = [{"code": "PSS4004", "members": sorted(g)}
                   for g in self.sccs if len(g) > 1]
         groups.sort(key=lambda r: r["members"])
