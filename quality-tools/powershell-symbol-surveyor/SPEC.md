@@ -44,6 +44,7 @@ Appendices:
 - [Appendix C — Adjudicated decision record](#appendix-c--adjudicated-decision-record)
 - [Appendix D — Known pitfalls and lessons learned](#appendix-d--known-pitfalls-and-lessons-learned)
 - [Appendix E — Open items](#appendix-e--open-items)
+- [Appendix F — Provisional revisions pending review](#appendix-f--provisional-revisions-pending-review)
 
 ---
 
@@ -184,10 +185,17 @@ tiers the model by blast radius.
 The default survey of the reference target measures approximately **0.9 MB**
 compact against a 1.41 MB source. The per-site script-variable records required
 by §5.3 account for roughly 40 per cent of that and are not reducible without
-losing the tool's primary function: they are what answers *where do I edit*. A
-consumer that needs only to reason about structure, rather than to locate edit
-sites, can omit that collection, which brings the remainder to approximately
-0.55 MB.
+losing the tool's primary function: they are what answers *where do I edit*.
+Dropping that collection would leave approximately 0.55 MB, but `pss.py` does
+not offer it as a choice: `script_variables` is a master collection and §5.6
+forbids a master collection from becoming an axis. A consumer that wants only
+structure filters the emitted model itself.
+
+A caller that must decide what it can afford before it receives anything is
+served by a cost report rather than by a guess (§3). Because the axis payloads
+are built during the survey regardless, measuring all of them and emitting only
+the measurements costs approximately three per cent over a default survey — so
+the report states exact sizes and no estimate is involved.
 
 Serialisation is **compact by default**. The readability this section requires
 is a property of self-describing keys and flat records, not of indentation,
@@ -215,8 +223,10 @@ because it deliberately diverges from the shared contract (§10.3).
 ## 3. Command-line interface
 
 ```
-pss.py survey   <script.ps1> [--out <model.json>] [--format text|json] [--detail]
+pss.py survey   <script.ps1> [--out <model.json>] [--format text|json]
+                             [--axes <axis>[,<axis>...]] [--cost] [--pretty]
 pss.py compare  <before.json> <after.json> [--format text|json]
+pss.py --capabilities
 pss.py --list-facts
 pss.py --self-check
 pss.py --version
@@ -226,15 +236,73 @@ pss.py --version
 |---|---|---|
 | `--out PATH` | `survey` | Write the model to PATH. Default: stdout. |
 | `--format {text,json}` | both | Output format. Default `text`. |
-| `--detail` | `survey` | Emit one record per function-local variable reference in addition to the default aggregates (§5.3). Off by default. |
+| `--axes LIST` | `survey` | Comma-separated materialisation axes to restore, or `all` (§5.6). Default: none. An unrecognised name exits `2`. |
+| `--cost` | `survey` | Emit only the cost report — the exact size and record count of the default model and of every axis — and not the model itself. |
+| `--pretty` | `survey` | Indent the JSON model. Default is compact (§2.4). |
+| `--capabilities` | — | Print the machine-readable capability descriptor and exit. |
 | `--list-facts` | — | Print the fact catalogue and exit. |
-| `--self-check` | — | Verify that this SPEC's §4 catalogue matches the codes compiled into `pss.py`, and exit. |
+| `--self-check` | — | Verify this SPEC against the tool's compiled catalogue, axis vocabulary and capability descriptor, and exit (§13). |
 | `--version` | — | Print version and exit. |
 
 There is deliberately no `--severity`, no `--enable`, and no suppression
 mechanism. Severity does not exist in this tool, and facts are not suppressed —
 they are filtered by the caller when the caller has decided what it cares
 about.
+
+### 3.1 The caller is expected to be a language model
+
+The model's consumer is the process that performs the refactoring, and in the
+originating use that process is another language model (§1.1). Two consequences
+are normative.
+
+**The interface must be discoverable without prose.** `--capabilities` emits a
+structured document — subcommands, the axis vocabulary of §5.6, the fact
+catalogue, exit-code meanings, available output formats and the current
+`model_version` — so that a caller can determine what it may ask for without
+parsing help text. A descriptor that has drifted from the tool is worse than no
+descriptor, because it produces confident wrong requests; §13 therefore gates
+the descriptor against this document.
+
+**The caller must be able to price a request before making it.** `--cost`
+reports the exact byte size and record count of the default model and of each
+axis, in a payload of a few hundred bytes, so that the decision costs almost
+nothing to inform. The report states what it measured (`"format"`), because a
+size figure that does not name its serialisation is not a fact under §1.3.
+
+The cost report carries **no recommendation, threshold or warning**. It says how
+large a thing is; whether that is too large is the caller's judgement and falls
+under §1.2 exactly as severity does.
+
+> **[PROVISIONAL P15 - S1 / 2026-08-16]**
+> Basis: open.
+> Was: no cost reporting existed.
+> Why: the unit of the report is contested. Bytes are model-independent and
+> satisfy §1.3; a token count would answer the consumer's actual constraint but
+> is tokenizer-specific, would require a dependency §8 forbids, and could not
+> be reproduced by a conforming implementation.
+> Review: is a byte count sufficient for a language-model caller to size a
+> request against its own budget, and if not, what would be — given that a
+> token count cannot be a fact under §1.3?
+
+> **[PROVISIONAL P16 - S1 / 2026-08-16]**
+> Basis: design-choice.
+> Was: no cost reporting existed.
+> Why: `--cost` suppresses the model so that pricing does not itself consume
+> the budget being priced, at the cost of a second invocation and a second
+> parse. The alternative is to carry the cost report inside every model, which
+> is free at request time but useless for the decision it is meant to inform.
+> Review: should the cost report be a separate mode, a field of every model, or
+> both?
+
+> **[PROVISIONAL P17 - S1 / 2026-08-16]**
+> Basis: open.
+> Was: `--list-facts` was the only machine-readable listing.
+> Why: the descriptor's contents are asserted rather than observed. The list
+> above is what this session believed a calling model needs; no calling model
+> has been asked.
+> Review: what must a capability descriptor contain for a calling model to
+> construct a correct request without trial and error, and what in the list
+> above is unnecessary?
 
 ---
 
@@ -507,7 +575,7 @@ influence crosses a function boundary.
 
 | Class | Reference count (reference target) | Blast radius | Representation |
 |---|---:|---|---|
-| Function-local variables | 20,353 | The declaring function | **Per-function aggregate** counts by category. Individual records only under `--detail`. |
+| Function-local variables | 20,353 | The declaring function | **Per-function aggregate** counts by category. Per-site records are added alongside the aggregates under the `local-sites` axis (§5.6). |
 | `$script:`-scope variables | 1,381 across 155 names | Crosses function boundaries | **One record per reference site**, plus the `PSS2008` usage map. |
 | `$env:` variables | 14 | Process / OS contract | One record per reference site. |
 | Automatic variables | 2,014 | Language-defined | Aggregate count only; not renameable. |
@@ -542,6 +610,80 @@ that difference as a fact, so that a caller comparing two different scripts
 (rather than two states of one script) cannot mistake the result for a
 before/after delta.
 
+### 5.6 Materialisation axes (normative)
+
+Some information is produced by the survey but withheld from the default model
+— either because §11.1 holds it to be derivable from a master collection, or
+because §5.3 folded it into an aggregate. A **materialisation axis** is the unit
+by which a caller asks for one such omission to be restored.
+
+| Axis | Restores | Withheld because |
+|---|---|---|
+| `closure-sets` | `transitive_callees` and `transitive_callers` on each closure record, alongside the counts | Derivable from the `edges` master (§11.1) |
+| `local-sites` | One record per function-local variable reference, alongside the retained per-function aggregates | Folded into an aggregate (§5.3) |
+
+**The vocabulary is closed.** `--axes` accepts these names and the literal
+`all`. An unrecognised name is a usage error: `pss.py` exits `2` and prints the
+valid vocabulary. It is not ignored and not treated as a no-op, because a
+caller that misspells an axis would otherwise receive a smaller model than it
+asked for and no indication that it had.
+
+**Axis-creation rule.** A collection may become an axis only where §5.3's
+tiering or §11.1's master/derived rule has already withheld it. **A master
+collection never becomes an axis.** `symbols`, `edges`, `script_variables`,
+`string_interpolation_references`, `soft_references`, `counters` and
+`limitations` are emitted unconditionally. The vocabulary is therefore bounded
+by the number of places this document deliberately withholds something — not by
+the number of things a caller might wish to filter. Filtering is the caller's
+operation on a model it already holds; an axis is a decision about what is
+produced.
+
+**An axis changes projection, never value.** Two models of the same input under
+different axis sets must agree exactly on every record they both carry. This
+follows from §1.3: were an axis able to alter a derivation, "the same input
+yields the same value" would hold only within an axis set, and the fact test
+would no longer be a property of the tool.
+
+It follows that **an analysis parameter is not an axis**. A closure truncated at
+depth *n* is a different fact, not a coarser view of the same one. Were such a
+thing ever wanted it would be specified as a new `PSS` code, whose presence in
+the default model is then an ordinary tiering question under §5.3.
+
+**A model declares its own projection.** Every model carries
+
+```json
+"materialization": {"axes": ["closure-sets"]}
+```
+
+holding the resolved axis set in sorted order (`all` resolves to the full
+vocabulary; no axes resolves to an empty list). `compare` requires the two
+models' `materialization.axes` to be **equal** and exits `2` when they are not.
+Comparing a model that carries closure sets against one that does not would
+otherwise report the absent collection as a change — tool noise of precisely the
+kind §5.4 exists to prevent, and undetectable from the delta records alone.
+
+> **[PROVISIONAL P18 - S1 / 2026-08-16]**
+> Basis: open.
+> Was: a single `--detail` switch bound both omissions together.
+> Why: the two axes above are the two places the model currently withholds
+> something, so the vocabulary is derived rather than chosen. Whether that
+> granularity matches what a calling model actually requests is untested; a
+> caller may want the closure sets for a named subset of functions rather than
+> for all 480, which the axis-creation rule as written does not express.
+> Review: is a whole-collection axis the right unit, and is the two-name
+> vocabulary too coarse?
+
+> **[PROVISIONAL P19 - S1 / 2026-08-16]**
+> Basis: design-choice.
+> Was: no named axis combinations existed.
+> Why: named presets (`minimal`, `full`) are deliberately absent. A preset is a
+> remedy for callers who cannot tell which axes they need, and `--cost` is
+> intended to remove that difficulty by pricing each axis exactly. The
+> repository's rule-of-two would in any case defer a preset until two callers
+> had asked for the same combination.
+> Review: does a caller reach for a preset in practice, and does `--cost`
+> actually displace the need for one?
+
 ---
 
 ## 6. Output formats
@@ -553,6 +695,14 @@ before/after delta.
 
 There is no SARIF output. SARIF encodes findings with severities and is a poor
 fit for a tool that issues neither.
+
+The set of machine formats is **`json` only**, and the capability descriptor
+(§3.1) carries it as a list so that an addition is an extension rather than a
+schema change. Adding YAML is not a small change and is not deferred silently:
+the Python standard library has no YAML emitter, so it would mean either
+hand-writing one — quoting, folding and escaping are where such emitters fail —
+or taking a package dependency that §8 forbids. Any future request for YAML is
+adjudicated against that cost, not against convenience.
 
 ---
 
@@ -781,16 +931,6 @@ function is `Add-VRow`.
 
 ### 11.1 Representation
 
-> **[PROVISIONAL P14 - S1 / 2026-08-16]**
-> Basis: design-choice.
-> Was: closure records materialised direct and transitive sets unconditionally.
-> Why: the review adjudicated that closures carry counts and that the sets move
-> behind a switch. Reusing `--detail`, rather than adding a second flag, keeps
-> one control for "materialise what the tiering rule omitted"; the alternative
-> is a dedicated `--closures` flag for consumers who want closure sets without
-> the 20,363 per-site local variable records.
-> Review: is `--detail` the right switch, or should the two be separable?
-
 **No data in the model may be derivable from another part of the model.** The
 sole exception is a human-readable identifier carried for legibility. An
 earlier build materialised each function's direct callee and caller sets inside
@@ -798,7 +938,11 @@ the closure records, republishing all 1,281 edges a second time, and
 materialised both transitive sets for all 480 functions — 601 KB, the largest
 collection in the model, to answer a question a consumer asks about a handful
 of functions at a time. Closure records therefore carry **counts**, which are
-actionable on their own; the sets themselves are available under `--detail`.
+actionable on their own; the sets themselves are available under the
+`closure-sets` axis (§5.6). The two withholdings are separately addressable:
+the closure sets cost 0.40 MB on the reference target, against 3.86 MB for the
+per-site local-variable records, and a caller reasoning about call structure has
+no use for the latter.
 
 The call graph is stored as a flat edge list (`PSS2001`). Closures
 (`PSS4001`, `PSS4002`) are **derived** from it and emitted in the default
@@ -1036,6 +1180,9 @@ A non-zero exit on mismatch does not conflict with §9. §9 forbids the exit cod
 from carrying a verdict **about the surveyed script**; an inconsistency between
 this document and the tool is an internal defect, the same class of condition as
 SPEC/catalogue drift.
+| Axis vocabulary | `--self-check` confirms the axis names compiled into `pss.py` and the §5.6 table agree in both directions, exiting non-zero on drift |
+| Capability descriptor | `--self-check` confirms the `--capabilities` document agrees with this SPEC on the subcommand set, the axis vocabulary, the fact catalogue, the exit-code meanings and the output-format list, exiting non-zero on drift (§3.1) |
+| Projection invariance | for every axis, a model emitted with the axis and a model emitted without it agree on every record both carry (§5.6) |
 | Determinism | repeated runs over identical input produce byte-identical models (§5.4) |
 | Golden vectors — shared | `hash_full` reproduces the repository's shared normalized-hash golden vectors exactly |
 | Golden vectors — own | `hash_body` reproduces `pss.py`'s own vectors, which include the collision cases of §10.3 as explicit non-collision assertions |
@@ -1339,7 +1486,7 @@ that looks like the value you want and is not.
 
 | Ref | Item |
 |---|---|
-| §3 | Whether a fact-code filter (`--include` / `--exclude`) is warranted, given that JSON output is trivially filtered downstream |
+| §3 | Whether a fact-code filter is warranted, given that JSON output is trivially filtered downstream. Note that `--include` is **not** available as a name for it: a fact-code filter selects among facts already produced, whereas `--axes` (§5.6) decides what is produced at all, and one flag must not read as the other |
 | §7 | Whether `--self-check` should mechanically verify the `psa.py` boundary against that tool's compiled rule list, rather than relying on the table staying current by hand |
 | §11.3 | Whether the unobserved `direct-only-change` cell occurs in a wider corpus |
 | §12.3 | Whether the usage map's discriminating power should be raised by including per-function read/write counts in the signature |
@@ -1359,7 +1506,24 @@ a mismatch and merely reporting a pending count.
 
 | ID | Section | Basis | Review question |
 |---|---|---|---|
-| P14 | §5, §11.1 | design-choice | Is `--detail` the right switch for materialising transitive closure sets? |
+| P15 | §3.1 | open | Is a byte count sufficient for a language-model caller to size a request, given that a token count cannot be a fact under §1.3? |
+| P16 | §3.1 | design-choice | Should the cost report be a separate mode, a field of every model, or both? |
+| P17 | §3.1 | open | What must the capability descriptor contain for a calling model to construct a correct request without trial and error? |
+| P18 | §5.6 | open | Is a whole-collection axis the right unit, and is the two-name vocabulary too coarse? |
+| P19 | §5.6 | design-choice | Does a caller reach for a named preset in practice, and does `--cost` displace the need for one? |
+
+**P15 through P19 are open to external review.** They concern what a calling
+language model needs, and this session settled them by proxy reasoning without
+having asked one. Each row maps one-to-one onto a question in the out-of-repo
+review pack, so that a response can be traced to the row it settles. The
+responses are evidence, not a vote: agreement within one model family is weak,
+because the respondents' errors correlate; agreement across families, and any
+single objection raising something not anticipated here, are what carry weight.
+
+P14 was resolved on 2026-08-16 and its marker removed. The question — whether
+`--detail` was the right switch for closure sets — was answered by replacing the
+switch with the axis contract of §5.6, which also supplies the rule that bounds
+how many such switches can ever exist.
 
 P01–P13 were reviewed and confirmed on 2026-08-16 and their markers removed.
 Three carried amendments, which are folded into the body text: `PSS3001` /
@@ -1369,7 +1533,8 @@ an index mismatch (§13).
 
 ### F.1 Open items requiring adjudication
 
-None. O1, O2 and O3 were adjudicated on 2026-08-16:
+None outstanding beyond the P15–P19 review rows above. O1, O2 and O3 were
+adjudicated on 2026-08-16:
 
 - **O1** — Appendix B is split into B-I (acceptance) and B-II (corpus
   statistics); the §13 differential test asserts B-I only. `commands_named`
