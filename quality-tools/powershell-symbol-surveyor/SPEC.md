@@ -36,6 +36,7 @@ reproducible; see §14.
 12. [The variable model](#12-the-variable-model)
 13. [Self-quality gates](#13-self-quality-gates)
 14. [Test-data acquisition](#14-test-data-acquisition)
+15. [Requirements derived from observed failure](#15-requirements-derived-from-observed-failure)
 
 Appendices:
 
@@ -289,6 +290,24 @@ breakdown tells it what to do when it cannot, which is the decision actually
 being made. The report states what it measured (`"format"`) and binds itself to
 its input (`source.sha256`), because a size figure that names neither its
 serialisation nor its subject is not a fact under §1.3.
+
+**The parts must sum to the whole, and the rule that makes them sum must be
+written down.** A per-collection figure is the byte length of that
+collection's compact-serialised array alone, excluding its key name, colon
+and separator; the remainder — the top-level scalars and objects, the key
+names and the structural punctuation — is reported as an `envelope` entry.
+The identity
+
+```
+sum(by_collection[*].bytes) + envelope.bytes == default_model.bytes
+```
+
+holds exactly for every model and is checkable by a consumer from the model
+file alone. `envelope` is emitted even when it would be zero, so that the
+reconciliation is testable rather than inferable. Three external reviewers,
+in both model families, independently found a 614-byte discrepancy in a
+draft report and could not account for it: a report that governs itself by
+reproducibility and cannot reconcile its own arithmetic fails its own rule.
 
 The same block is embedded in every model under a single top-level key, so that
 a stored model is self-describing and a caller can strip it in one operation.
@@ -651,11 +670,19 @@ the number of things a caller might wish to filter. Filtering is the caller's
 operation on a model it already holds; an axis is a decision about what is
 produced.
 
-**An axis changes projection, never value.** Two models of the same input under
+**An axis changes coverage, never value.** Two models of the same input under
 different axis sets must agree exactly on every record they both carry. This
 follows from §1.3: were an axis able to alter a derivation, "the same input
 yields the same value" would hold only within an axis set, and the fact test
 would no longer be a property of the tool.
+
+The distinction between coverage and presentation is load-bearing and was
+sharpened by external review. **Presentation does not change modelled values;
+materialisation changes coverage and must declare it.** An axis is
+materialisation: it adds withheld records and fields, which is why
+`materialization.axes` exists and why `compare` refuses an asymmetric pair.
+Calling that "presentation" made the invariant read as though an axis were a
+formatting choice, which it is not.
 
 It follows that **an analysis parameter is not an axis**. A closure truncated at
 depth *n* is a different fact, not a coarser view of the same one. Were such a
@@ -753,14 +780,25 @@ different variable.
 
 | Layer | Consumer | Surface | Optimises |
 |---|---|---|---|
-| **Human** | a person reading a result | `--format text`, `--pretty` | legibility |
-| **Machine** | the process consuming the model | the JSON model, §5.7 projection, `--cost`, `--capabilities` | selectivity |
+| **Human** | a person reading a result | `--format text` | legibility |
+| **Machine** | the process consuming the model | the JSON model, `--pretty`, §5.7 projection, `--cost`, `--capabilities` | selectivity |
 | **Completeness** | storage, and a consumer whose needs are unknown | the axes of §5.6 | total coverage |
 
 The human layer is **not** the axes. An axis emits a larger machine artefact —
 on the reference target `local-sites` adds 20,352 records — and nobody reads
 that. `--format text` is the human surface, and it is a summary report rather
 than a serialisation of the model.
+
+**`--pretty` is machine-layer, not human-layer.** Three external reviewers, in
+both model families, named the same misassignment. Indentation looks like a
+human concern, but `--pretty` is the one option that changes the **bytes of the
+model file**, and the model file is the machine artefact: a pretty model and a
+compact one parse to the same object and are different files, with different
+sizes, different hashes and different textual diffs. Every size figure a model
+states about itself, and every hash this tool computes over a model, refers to
+the **compact** serialisation regardless of how the file was written; each model
+carries a top-level `serialisation` field with value `compact` or `pretty` so
+that a consumer can tell which it holds.
 
 The human layer is retained deliberately and against the only evidence
 available: every external reviewer proposed dropping `--format text` from
@@ -1367,6 +1405,126 @@ sufficient to detect an extraction regression.
 
 ---
 
+## 15. Requirements derived from observed failure
+
+### 15.1 Why this section exists
+
+The requirements elsewhere in this document were settled by reasoning about
+what a caller would need, and by asking callers. Both methods share a limit:
+**a caller cannot report the failure it did not notice.** If it had noticed, the
+failure would not have happened. Asking produces the complement of the failure
+set, however well the question is put.
+
+This section is derived the other way. Each requirement below is traced to a
+defect measured in the reference target's committed history — a change that a
+language model made, believed correct, and left in place. The measurements are
+reproducible from the repository with this tool.
+
+That method is also the tool's own: §1.1 declines to establish safety before a
+change and reports what moved afterwards. Deriving the tool's requirements from
+observed damage rather than from a prediction of it applies the same rule to
+the specification.
+
+### 15.2 The measured defects
+
+Across 230 committed states of the reference target, nine functions are defined
+at head, have no static caller, and are named by no string literal anywhere in
+the file — unreachable as far as this model can see. Four of them were reached
+at an earlier state and lost their last caller in an identifiable commit; three
+of those four were **defined and orphaned within two days**, one of them on the
+same day. The commit that orphaned a recovery-path function announces
+"verified checkpointed resume transactions" in its subject.
+
+Five more are vendored canonical helpers. One of them is vendored into six
+consumers and called by none of them, while its paired opposite is called by
+five: the pair is half-wired everywhere it exists.
+
+### 15.3 What the tool could and could not show
+
+| | |
+|---|---|
+| Identifying the nine | **Derivable today** from the default model, by joining `closures`, `soft_references` and `string_interpolation_references`. |
+| Separating them from benign orphans | **Not shown.** Head carries 26 orphans; 17 are dispatched by name through a phase table and are correct. All 26 are emitted under one code, so four defects sit inside a population of seventeen non-defects. |
+| Saying when the orphaning happened | **Not available.** The signal is a transition, and the standing count is dominated by the benign majority. |
+| Detecting a call to a function that no longer exists | **Structurally impossible.** An edge is recorded only where the invoked name resolves to a defined function; a name that resolves to nothing is counted and discarded, so the model has no place to put it. |
+| Asserting unreachability | **Out of reach, and must stay so.** Head carries 38 unresolved sites, and that count has risen monotonically. The strongest available statement is *unreachable within what was resolved, against this many unresolved sites*. |
+
+### 15.4 The requirements
+
+**F1 — an orphan's kind is a fact, not an inference.** A function with no static
+caller that is named by a string literal, and one that is named nowhere, are
+different observations and must be distinguishable without the consumer joining
+three collections. The data is present; the derivation is not stated.
+
+**F2 — an invoked name that resolves to nothing must be emitted.** The count of
+named commands is kept and the names are not. Restoring them, with their
+positions, is what makes a call to a deleted function expressible at all. The
+collection is not a list of errors: most entries are cmdlets and external
+executables, and classifying them is the caller's work, not this tool's.
+
+**F3 — orphaning is a transition and belongs in `compare`.** *Had callers, now
+has none* is the fact that would have caught all four defects at the moment
+they were introduced. A standing orphan count would not have.
+
+**F4 — a reachability statement carries its own bound.** Any fact asserting
+that nothing reaches a symbol is emitted together with the count of unresolved
+sites in the same survey, so that a consumer cannot read *unreachable* where
+the model can only support *not reached by anything resolved*.
+
+> **[PROVISIONAL P22 - S3 / 2026-08-16]**
+> Basis: measured.
+> Was: `PSS4003` reported every function with no static caller under one code.
+> Why: measured on the reference target, 26 orphans comprise 17 correct
+> dynamic dispatches and 9 unreachable functions, of which 4 are damage.
+> Review: does the distinction belong in the record, in a new code, or in a
+> derived field, and what exactly counts as "named by a string literal" when
+> the name appears only inside a comment?
+
+> **[PROVISIONAL P23 - S3 / 2026-08-16]**
+> Basis: open.
+> Was: unresolved invoked names were counted and discarded.
+> Why: without them the model cannot express a call to a function that does
+> not exist, which is the first thing a caller checks after a deletion. On the
+> reference target this collection would carry 93 distinct names over 2,798
+> sites, of which 87 are cmdlets and 6 are external executables — a large
+> collection whose entries are mostly uninteresting.
+> Review: whole collection, or only names matching the file's own definition
+> conventions? If filtered, the filter is a threshold and §1.3 forbids it —
+> so what is the reproducible rule?
+
+> **[PROVISIONAL P24 - S3 / 2026-08-16]**
+> Basis: measured.
+> Was: no transition fact for reachability.
+> Why: all four measured defects are transitions, and each was invisible in the
+> standing count of the state that followed it.
+> Review: which `PSS8xxx` code, and does the fact carry the identity of the
+> commit or only the before/after pair?
+
+> **[PROVISIONAL P25 - S3 / 2026-08-16]**
+> Basis: measured.
+> Was: `limitations` was a separate collection a consumer could ignore.
+> Why: unresolved sites on the reference target rose from 9 to 38 across the
+> measured history, so the bound on any reachability claim widened over time
+> while the claim's presentation did not change. Five external reviewers, in
+> both model families, independently asked for limitations to be first-class
+> change evidence rather than a trailing warning section; the measurement gives
+> that request a number.
+> Review: is the bound carried on each reachability record, once per model, or
+> both?
+
+### 15.5 What this method cannot establish
+
+The defects above are **damage that was found**, not damage that was reported.
+No test failure is attached to any of them; they are unreachable code, and
+unreachable code does not fail. A defect that broke behaviour rather than
+leaving a remnant would not appear by this measurement, and none of the four is
+evidence that any test ever failed.
+
+The corpus is also one script by one line of authorship. Four defects in 230
+states is a rate for this corpus and not for PowerShell refactoring in general.
+
+---
+
 ## Appendix A — Fact catalogue index
 
 | Block | Category | Mode |
@@ -1636,6 +1794,10 @@ a mismatch and merely reporting a pending count.
 |---|---|---|---|
 | P20 | §5.7 | open | Which shape should the symbol-scoped projection take, and what must a projected model declare about its own coverage? |
 | P21 | §5.5 | design-choice | Should axis-set normalisation be its own operation, a flag on `compare`, or folded into the §5.7 projection? |
+| P22 | §15.4 | measured | Where does an orphan's kind belong, and does a comment-only mention count as a mention? |
+| P23 | §15.4 | open | Should every unresolved invoked name be emitted, or only some — and by what rule that is not a threshold? |
+| P24 | §15.4 | measured | Which `PSS8xxx` code carries the orphaning transition, and does it identify the commit? |
+| P25 | §15.4 | measured | Is the unresolved-site bound carried per record, per model, or both? |
 
 **P15 through P19 were resolved on 2026-08-16 by external review** and their
 markers removed. Six respondents across two model families, all with code
@@ -1687,7 +1849,10 @@ an index mismatch (§13).
 
 ### F.1 Open items requiring adjudication
 
-None outstanding beyond the P20 and P21 rows above. O1, O2 and O3 were
+None outstanding beyond the P20 through P25 rows above. P22, P24 and P25 are
+**measured**: each is traced to a defect observed in the reference target's
+committed history rather than to an opinion about what a caller might want.
+§15.5 states what that method does not establish. O1, O2 and O3 were
 adjudicated on 2026-08-16:
 
 - **O1** — Appendix B is split into B-I (acceptance) and B-II (corpus
