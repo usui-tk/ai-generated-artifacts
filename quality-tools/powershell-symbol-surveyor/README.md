@@ -1,0 +1,185 @@
+# PowerShell Symbol Surveyor
+
+Two tools live here.
+
+| File | Role |
+|:--|:--|
+| `pss.py` | The surveyor itself. Extracts a symbol model from one PowerShell script. Contract: [`SPEC.md`](./SPEC.md). |
+| `corpus.py` | Corpus manager. Pins the committed generations of a script so the surveyor can be exercised against real history. |
+
+`SPEC.md` is authoritative for `pss.py`. This README is authoritative for
+`corpus.py`; the corpus governance rules are durable in
+[ADR 0033](../../governance/adr/0033-pss-test-corpus-governance.md).
+
+---
+
+## Why a corpus
+
+The surveyor's requirements are derived from measured damage rather than from
+asking what is needed: a failure nobody noticed cannot be reported by the people
+who missed it. Deriving requirements that way needs real material, and this
+repository's own git history is exactly that — the owner controls it, and a
+committed generation never changes.
+
+A corpus entry is the unit of that material: one script, one path, one
+contiguous run of generations.
+
+---
+
+## The two rules that shape an entry
+
+**An entry never follows a rename.** `git log --follow` is a rename-detection
+heuristic, not a recorded fact, and `git show <rev>:<current path>` fails for
+every generation from before a move — silently, if the caller treats the failure
+as "skip". Pinning one path removes both failure modes by construction: every
+generation an entry records is one where the blob provably exists at that exact
+path. When a script moves, the old entry seals itself and a new entry is
+registered for the new path.
+
+Nothing is lost by refusing to follow. The script currently at
+`projects/powershell-update-windows-server-iso/` moved once, and the two entries
+covering it hold 73 and 157 generations — the same 230 that `--follow` reports,
+split at the move.
+
+**An entry is append-only.** `update` re-derives the generation list and refuses
+unless the stored list is a strict prefix of what git reports now. Growth is
+additive, so no previously measured generation changes. A rewritten or truncated
+history is refused rather than absorbed, and the refusal points at registering a
+new entry.
+
+---
+
+## Entry files
+
+Entries live in `corpus/`. Identity is the **leading four-digit number** in the
+filename. Everything between the number and `.json` is descriptive and is never
+read back, so renaming an entry file cannot break a reference and cannot go
+stale. A fifth consecutive digit is refused rather than misread as a shorter
+number, a duplicate number is refused rather than silently resolved, and
+non-conforming files are ignored but reported.
+
+The format follows the in-repo precedent set by
+`projects/bash-ol-aws-ami-builder/tests/ena/ena-driver-releases.json`: a header
+of metadata, then one record per line, so adding a generation is a one-line
+diff.
+
+```json
+{
+  "schema_version": "1.0",
+  "list_type": "pss-corpus-entry",
+  "generated_by": "quality-tools/powershell-symbol-surveyor/corpus.py",
+  "repo": "ai-generated-artifacts",
+  "script_path": "projects/powershell-update-windows-server-iso/Update-WindowsServerIso.ps1",
+  "start_rev": "7566d22cf5f09a74523418a23a7c5001502c8633",
+  "end_rev": "aade522845fa351cf4bb0f7f81fe72d79eb9bee4",
+  "count": 157,
+  "generations": [
+    { "rev": "...", "date": "2026-06-08", "blob": "...", "subject": "..." }
+  ]
+}
+```
+
+`blob` is the content hash of the script at that generation. It is an
+integrity check independent of `rev`: when a history is rewritten, commit
+hashes always change, while a blob hash changes only if the content did — so
+holding both distinguishes a rewritten history from an altered one.
+
+`start_rev`, `end_rev` and `count` restate what the records already say. The
+restatement is deliberate (the header alone shows the range) and is therefore
+verified on load rather than trusted.
+
+### Written by the tool, never by hand
+
+Entries are written only through `corpus.py`, in the same way the manifest is
+written only through `canon-manifest-tool` (ADR 0011). The `generated_by` field
+records that.
+
+### No timestamps
+
+A written entry contains no timestamp, no environment stamp, and no other
+run-dependent value. Regenerating an unchanged entry reproduces it byte for
+byte, which is what makes growth detection work at all: detection is
+regeneration plus comparison, and a file that differs on every regeneration
+cannot support it.
+
+### Sealed state is derived
+
+Whether an entry is sealed (its path no longer exists at `HEAD`) is computed on
+demand, never stored. A stored flag would be one more hand-held value able to go
+stale — the failure mode ADR 0031 removed elsewhere in this repository.
+
+---
+
+## Usage
+
+```
+# register an entry (one .ps1; directories and globs are refused)
+python3 corpus.py --repo <repo> add <path/to/Script.ps1> [--slug <text>]
+
+# derived view: identity, sealed state, range, ignored files
+python3 corpus.py --repo <repo> list
+
+# compare every entry against git now; findings only, nothing is applied
+python3 corpus.py --repo <repo> check
+
+# append newly committed generations to one entry
+python3 corpus.py --repo <repo> update <NNNN>
+```
+
+`check` reports growth and rewrite as findings and re-pins nothing. Re-pinning
+is a deliberate `update` — an adjudicated change that goes through the ordinary
+patch flow, in keeping with the machine-proposes / human-decides split of
+ADR 0011 and ADR 0027.
+
+`check` is **not** part of the standing gate battery. The scripts it watches are
+maintenance-stream property and advance at maintenance speed, so wiring it into
+the governance battery would turn ordinary project work into a governance-stream
+red. Run it when the corpus is the subject.
+
+### Analysis
+
+Three reductions run over an entry's generations. Each reports counts and
+observations and produces no verdict, matching the surveyor's own contract
+(`SPEC.md` §1.2).
+
+```
+# per-generation function removals, and whether the model still referenced them
+python3 corpus.py --repo <repo> deletions <NNNN>
+
+# caller-count transitions for named functions
+python3 corpus.py --repo <repo> transitions <NNNN> --targets Get-Foo Set-Bar
+
+# names ever defined, against those present at the last generation
+python3 corpus.py --repo <repo> ever-defined <NNNN>
+```
+
+Surveying every generation of a large script takes minutes; `--limit N`
+restricts a run to the last N generations. Analysis writes no files — its output
+is transient by design, in the same spirit as the hot/cold observation split of
+ADR 0028.
+
+A pin that no longer resolves raises an error. It is never skipped: an entry's
+records were proven to resolve when it was written, so a miss means the corpus
+is broken and must say so.
+
+---
+
+## Self-test
+
+```
+python3 test_corpus.py     # 50 checks
+```
+
+Fixtures are real git repositories built in a temporary directory, because the
+behaviour under test is git behaviour — renames, deletions, appended history,
+rewritten history. A mock would reproduce the assumptions rather than the facts,
+and every trap this tool is built around was an assumption failure.
+
+---
+
+## Registration
+
+Neither `pss.py` nor `corpus.py` is registered in the manifest yet. `pss.py`
+registers when its SPEC has no provisional items left; `corpus.py` registers
+with it. Registering the helper before the tool it serves would invert the
+order.
