@@ -263,46 +263,44 @@ parsing help text. A descriptor that has drifted from the tool is worse than no
 descriptor, because it produces confident wrong requests; §13 therefore gates
 the descriptor against this document.
 
+**Describing the command line is not enough.** A descriptor that documents how
+to invoke the tool but not what comes back leaves a caller able to make a
+request and unable to consume the reply. Six external reviewers, across two
+model families, each reported the same gap and each recovered the record shapes
+by reading sample output — which a caller without samples cannot do, and which
+guarantees nothing across versions. The descriptor therefore also carries a
+**schema for every machine output**: the record shape of each model collection,
+the identifier conventions, the join key for each collection, the delta-record
+shape emitted by `compare`, the cost-report shape, and the structured error
+payload. Ordering and determinism (§5.4) are stated there too, since a caller
+that intends to join or diff two models outside the tool depends on them.
+
+Errors are machine-readable when machine output was requested: with `--format
+json`, a usage error emits a JSON object on stderr carrying a stable category,
+the rejected value and the valid vocabulary. The exit code stays `2` per §9;
+the category distinguishes *correct the command* from *fix the environment*
+from *report a defect*, which the exit code alone cannot.
+
 **The caller must be able to price a request before making it.** `--cost`
-reports the exact byte size and record count of the default model and of each
-axis, in a payload of a few hundred bytes, so that the decision costs almost
-nothing to inform. The report states what it measured (`"format"`), because a
-size figure that does not name its serialisation is not a fact under §1.3.
+reports exact byte sizes and record counts **per collection**, plus the
+increment each axis would add, in a payload of a few hundred bytes. A single
+total tells a caller whether it can afford the request; a per-collection
+breakdown tells it what to do when it cannot, which is the decision actually
+being made. The report states what it measured (`"format"`) and binds itself to
+its input (`source.sha256`), because a size figure that names neither its
+serialisation nor its subject is not a fact under §1.3.
+
+The same block is embedded in every model under a single top-level key, so that
+a stored model is self-describing and a caller can strip it in one operation.
+The embedded block is **fixed in size** — it must not grow with the model it
+describes — and the measurement it reports is defined as the compact model
+**excluding the block itself**, so that the value is well-defined rather than
+self-referential. `--cost` is then the same computation with the model
+discarded, which keeps one derivation rather than two that can drift.
 
 The cost report carries **no recommendation, threshold or warning**. It says how
 large a thing is; whether that is too large is the caller's judgement and falls
 under §1.2 exactly as severity does.
-
-> **[PROVISIONAL P15 - S1 / 2026-08-16]**
-> Basis: open.
-> Was: no cost reporting existed.
-> Why: the unit of the report is contested. Bytes are model-independent and
-> satisfy §1.3; a token count would answer the consumer's actual constraint but
-> is tokenizer-specific, would require a dependency §8 forbids, and could not
-> be reproduced by a conforming implementation.
-> Review: is a byte count sufficient for a language-model caller to size a
-> request against its own budget, and if not, what would be — given that a
-> token count cannot be a fact under §1.3?
-
-> **[PROVISIONAL P16 - S1 / 2026-08-16]**
-> Basis: design-choice.
-> Was: no cost reporting existed.
-> Why: `--cost` suppresses the model so that pricing does not itself consume
-> the budget being priced, at the cost of a second invocation and a second
-> parse. The alternative is to carry the cost report inside every model, which
-> is free at request time but useless for the decision it is meant to inform.
-> Review: should the cost report be a separate mode, a field of every model, or
-> both?
-
-> **[PROVISIONAL P17 - S1 / 2026-08-16]**
-> Basis: open.
-> Was: `--list-facts` was the only machine-readable listing.
-> Why: the descriptor's contents are asserted rather than observed. The list
-> above is what this session believed a calling model needs; no calling model
-> has been asked.
-> Review: what must a capability descriptor contain for a calling model to
-> construct a correct request without trial and error, and what in the list
-> above is unnecessary?
 
 ---
 
@@ -622,6 +620,19 @@ by which a caller asks for one such omission to be restored.
 | `closure-sets` | `transitive_callees` and `transitive_callers` on each closure record, alongside the counts | Derivable from the `edges` master (§11.1) |
 | `local-sites` | One record per function-local variable reference, alongside the retained per-function aggregates | Folded into an aggregate (§5.3) |
 
+Neither axis adds or removes a collection: `closures` and `local_variables` are
+present in every model, and an axis only changes what a record in them carries.
+
+**Why the axes exist at all.** A caller that can write the model to a file and
+query it with code does not need them; it optimises *selectivity*, not total
+size, and §5.7 serves it instead. The axes exist for a caller that must receive
+the model whole — one without an execution environment, for which total size is
+the binding constraint. **No such caller has been observed.** Six external
+reviewers, across two model families, all had code execution and all described
+the same disk-and-query workflow; the axes are retained on the strength of the
+creation rule below rather than on observed demand, and Appendix E records the
+question as open.
+
 **The vocabulary is closed.** `--axes` accepts these names and the literal
 `all`. An unrecognised name is a usage error: `pss.py` exits `2` and prints the
 valid vocabulary. It is not ignored and not treated as a no-op, because a
@@ -630,9 +641,11 @@ asked for and no indication that it had.
 
 **Axis-creation rule.** A collection may become an axis only where §5.3's
 tiering or §11.1's master/derived rule has already withheld it. **A master
-collection never becomes an axis.** `symbols`, `edges`, `script_variables`,
-`string_interpolation_references`, `soft_references`, `counters` and
-`limitations` are emitted unconditionally. The vocabulary is therefore bounded
+collection never becomes an axis.** `symbols`, `edges`, `closures`,
+`script_variables`, `string_interpolation_references`, `local_variables`,
+`soft_references`, `counters` and `limitations` are emitted unconditionally —
+every top-level collection the model has. An axis restores *withheld content
+within* a collection, never the collection itself. The vocabulary is therefore bounded
 by the number of places this document deliberately withholds something — not by
 the number of things a caller might wish to filter. Filtering is the caller's
 operation on a model it already holds; an axis is a decision about what is
@@ -662,33 +675,128 @@ Comparing a model that carries closure sets against one that does not would
 otherwise report the absent collection as a change — tool noise of precisely the
 kind §5.4 exists to prevent, and undetectable from the delta records alone.
 
-> **[PROVISIONAL P18 - S1 / 2026-08-16]**
-> Basis: open.
-> Was: a single `--detail` switch bound both omissions together.
-> Why: the two axes above are the two places the model currently withholds
-> something, so the vocabulary is derived rather than chosen. Whether that
-> granularity matches what a calling model actually requests is untested; a
-> caller may want the closure sets for a named subset of functions rather than
-> for all 480, which the axis-creation rule as written does not express.
-> Review: is a whole-collection axis the right unit, and is the two-name
-> vocabulary too coarse?
+**Refusal on an asymmetric axis set is retained, and it is the narrower of two
+defensible readings.** Because an axis never changes a shared record's value,
+the comparison restricted to what both models carry is well defined, and two
+reviewers argued from that invariant that refusing it is the tool declining an
+operation its own specification guarantees. The counter-argument decides it:
+a `compare` result whose coverage varies silently with its inputs no longer
+means one fixed thing, and a caller is most likely to misread an absent closure
+diff as an unchanged one. Uniform meaning is worth more than the saved
+re-survey. The refusal message names which axes differed, so the caller knows
+which survey to re-run.
 
-> **[PROVISIONAL P19 - S1 / 2026-08-16]**
+> **[PROVISIONAL P21 - S2 / 2026-08-16]**
 > Basis: design-choice.
-> Was: no named axis combinations existed.
-> Why: named presets (`minimal`, `full`) are deliberately absent. A preset is a
-> remedy for callers who cannot tell which axes they need, and `--cost` is
-> intended to remove that difficulty by pricing each axis exactly. The
-> repository's rule-of-two would in any case defer a preset until two callers
-> had asked for the same combination.
-> Review: does a caller reach for a preset in practice, and does `--cost`
-> actually displace the need for one?
+> Was: refusal was the only outcome for an asymmetric pair.
+> Why: refusal is unrecoverable when the earlier source no longer exists and
+> the mismatched model cannot be regenerated. Because axes only ever add
+> emitted material, stripping a model to a smaller axis set is a deterministic
+> projection and a fact under §1.3, so the case is soluble by an explicit
+> normalisation the caller performs deliberately — which is not the same thing
+> as a comparison that quietly narrows its own coverage. Reviewers in both
+> model families reached this shape independently.
+> Review: should normalisation be its own operation, a flag on `compare`, or
+> folded into the §5.7 projection?
+
+Named presets (`minimal`, `full`) are deliberately absent. A preset is a remedy
+for a caller that cannot tell which axes it needs; `--cost` (§3.1) removes that
+difficulty by pricing each axis exactly. No reviewer asked for one.
+
+### 5.7 Symbol-scoped projection
+
+An axis chooses **how much of a collection** is emitted. A projection chooses
+**which records across all collections** concern one symbol. They are different
+operations and the second is not expressible as an axis, because it cuts across
+collections rather than selecting whole ones.
+
+The distinction is not theoretical. On the reference target the axes control
+0.40 MB and 3.86 MB of material that is **already absent by default**, while
+`script_variables` — 42 per cent of the default model — is a master collection
+and cannot be reduced at all. A caller asking *what does renaming this function
+touch* therefore has no lever: the only reduction large enough to matter is the
+one that removes the `$script:` evidence the question depends on.
+
+A projection supplies that lever. Measured against a 552,948-byte all-axis
+model, the records concerning one mid-sized function total 23,729 bytes — **4.3
+per cent**.
+
+The selection rule must be a fact under §1.3: no threshold, no score, no
+similarity. Every record whose identifying field equals the given symbol
+identifier, plus the edges incident to it on either side, plus `limitations` in
+its entirety — unconditionally, because limitations describe what is *not*
+known and filtering them would misrepresent the projection's own coverage.
+
+> **[PROVISIONAL P20 - S2 / 2026-08-16]**
+> Basis: open.
+> Was: not specified; the axis mechanism was the only size control.
+> Why: six external reviewers, unprompted and across two model families, each
+> named a symbol-scoped projection as the capability they most wanted, and five
+> ranked it first. The requirement is settled; the shape is not. Open: whether
+> it is `survey --scope <id>` (one parse, source required) or a `slice
+> <model.json> <id>` subcommand (operates on an existing model, source not
+> required, and composes with a stored artefact); which identifying fields
+> participate in the match; whether one-hop incidence is the right boundary;
+> and what a projected model declares about its own coverage so that it cannot
+> be mistaken for a whole one.
+> Review: which shape, and what must a projection declare about itself?
 
 ---
 
-## 6. Output formats
+## 6. Output formats and consumer layers
 
-**`text`** — human-oriented, one fact per line, grouped by block.
+### 6.1 The three layers (normative)
+
+The tool serves consumers with incompatible requirements, and a single output
+shape cannot serve them all. Three layers are recognised, each optimising a
+different variable.
+
+| Layer | Consumer | Surface | Optimises |
+|---|---|---|---|
+| **Human** | a person reading a result | `--format text`, `--pretty` | legibility |
+| **Machine** | the process consuming the model | the JSON model, §5.7 projection, `--cost`, `--capabilities` | selectivity |
+| **Completeness** | storage, and a consumer whose needs are unknown | the axes of §5.6 | total coverage |
+
+The human layer is **not** the axes. An axis emits a larger machine artefact —
+on the reference target `local-sites` adds 20,352 records — and nobody reads
+that. `--format text` is the human surface, and it is a summary report rather
+than a serialisation of the model.
+
+The human layer is retained deliberately and against the only evidence
+available: every external reviewer proposed dropping `--format text` from
+`survey`. All of them were language models. A population of machine consumers
+is not evidence about whether a human surface earns its place, and their
+agreement is not read as such.
+
+### 6.2 Channels must not disagree (normative)
+
+Two output channels are a projection, not a double standard — **provided they
+cannot diverge**. Three rules make that hold.
+
+**The text channel is generated from the model, not computed alongside it.** A
+second derivation path is a second opportunity to be wrong, and the divergence
+surfaces as a confident inconsistency rather than as an error.
+
+**Every value the text channel prints must be reproducible from the JSON model
+by a rule stated in this document.** A summary figure whose derivation is not
+written down is not a fact under §1.3, however correct its arithmetic. The
+closure summary is the worked example: it reports the **closure membership
+total**, the sum of `transitive_callee_count` over the closure records, which is
+5,071 on the reference target. It is not the number of closure records (480),
+and it is not the edge count (1,281). On a small corpus the membership total and
+the edge count may coincide — they do at 65 on the secondary corpus — so a label
+that does not name its derivation is not merely unclear but actively
+misleading. The label states the quantity; §13 gates the derivation.
+
+**A layer changes presentation, never a value.** This is §5.6's projection rule
+raised from the axes to the layers, and it has the same basis in §1.3: were a
+layer able to alter a derivation, "the same input yields the same value" would
+hold only within a layer.
+
+### 6.3 Formats
+
+**`text`** — human-oriented, one fact per line, grouped by block. A summary,
+not a serialisation.
 
 **`json`** — machine-oriented. For `survey`, this is the model itself (§5). For
 `compare`, a list of delta fact records.
@@ -951,7 +1059,24 @@ reachability itself (§2.4).
 
 The edge list is the master; the closures are a derived view. Measured on the
 reference target: 1,247 edges expand to 5,071 closure membership entries, a
-factor of 4.1.
+factor of 4.1. That total — the sum of `transitive_callee_count` over the
+closure records — is the quantity the human layer reports as closure membership
+(§6.2).
+
+**The `closures` collection is not homogeneous, and a caller must not size it
+from the function count.** It carries three record shapes, distinguished by
+their keys:
+
+| Shape | Discriminator | Meaning | Reference target |
+|---|---|---|---:|
+| closure | `record: "closure"`, keyed by `id` | one per function: the two transitive counts, and the sets under the `closure-sets` axis | 480 |
+| orphan | `code: "PSS4003"`, keyed by `id` | a function with no static caller | 26 |
+| recursion group | `code: "PSS4004"`, keyed by `members` | a strongly connected component of two or more functions | 3 |
+
+509 records against 480 functions on the reference target; 46 against 46 on the
+secondary corpus, which has neither an orphan nor a recursion group and so does
+not reveal the heterogeneity at all. A consumer filtering the collection must
+discriminate on the keys above rather than assume a uniform shape.
 
 ### 11.2 The graph is not acyclic
 
@@ -1183,6 +1308,7 @@ SPEC/catalogue drift.
 | Axis vocabulary | `--self-check` confirms the axis names compiled into `pss.py` and the §5.6 table agree in both directions, exiting non-zero on drift |
 | Capability descriptor | `--self-check` confirms the `--capabilities` document agrees with this SPEC on the subcommand set, the axis vocabulary, the fact catalogue, the exit-code meanings and the output-format list, exiting non-zero on drift (§3.1) |
 | Projection invariance | for every axis, a model emitted with the axis and a model emitted without it agree on every record both carry (§5.6) |
+| Channel agreement | for a common corpus, every value printed by the text channel is reproduced by applying this SPEC's stated derivation to the JSON model of the same input; a mismatch, or a printed value with no stated derivation, exits non-zero (§6.2) |
 | Determinism | repeated runs over identical input produce byte-identical models (§5.4) |
 | Golden vectors — shared | `hash_full` reproduces the repository's shared normalized-hash golden vectors exactly |
 | Golden vectors — own | `hash_body` reproduces `pss.py`'s own vectors, which include the collision cases of §10.3 as explicit non-collision assertions |
@@ -1491,6 +1617,8 @@ that looks like the value you want and is not.
 | §11.3 | Whether the unobserved `direct-only-change` cell occurs in a wider corpus |
 | §12.3 | Whether the usage map's discriminating power should be raised by including per-function read/write counts in the signature |
 | §14 | Whether the design investigation's oracle harness may itself become a survey target once the tool is mature; circular while the tool depends on that harness for its own correctness |
+| §5.6 | Whether a caller without an execution environment exists among this tool's consumers. The axes optimise total size, which binds only on such a caller; every consumer observed so far writes the model to a file and queries it. External review cannot settle this, because a respondent that could answer it is by definition one that could not have completed the review |
+| §6.1 | Whether the human layer earns its place. No human consumer has been asked, and the machine consumers who were asked are the wrong population to ask |
 
 ---
 
@@ -1506,19 +1634,45 @@ a mismatch and merely reporting a pending count.
 
 | ID | Section | Basis | Review question |
 |---|---|---|---|
-| P15 | §3.1 | open | Is a byte count sufficient for a language-model caller to size a request, given that a token count cannot be a fact under §1.3? |
-| P16 | §3.1 | design-choice | Should the cost report be a separate mode, a field of every model, or both? |
-| P17 | §3.1 | open | What must the capability descriptor contain for a calling model to construct a correct request without trial and error? |
-| P18 | §5.6 | open | Is a whole-collection axis the right unit, and is the two-name vocabulary too coarse? |
-| P19 | §5.6 | design-choice | Does a caller reach for a named preset in practice, and does `--cost` displace the need for one? |
+| P20 | §5.7 | open | Which shape should the symbol-scoped projection take, and what must a projected model declare about its own coverage? |
+| P21 | §5.5 | design-choice | Should axis-set normalisation be its own operation, a flag on `compare`, or folded into the §5.7 projection? |
 
-**P15 through P19 are open to external review.** They concern what a calling
-language model needs, and this session settled them by proxy reasoning without
-having asked one. Each row maps one-to-one onto a question in the out-of-repo
-review pack, so that a response can be traced to the row it settles. The
-responses are evidence, not a vote: agreement within one model family is weak,
-because the respondents' errors correlate; agreement across families, and any
-single objection raising something not anticipated here, are what carry weight.
+**P15 through P19 were resolved on 2026-08-16 by external review** and their
+markers removed. Six respondents across two model families, all with code
+execution, answered a structured pack; the reading rule agreed before the pack
+was sent was that agreement within one family is weak because the respondents'
+errors correlate, and that cross-family agreement and unanticipated single
+objections carry the weight.
+
+- **P15** — the unit is bytes and the constraint was confirmed unanimously
+  across families: a token count is consumer-specific and cannot be a fact
+  under §1.3. The row closes **amended**, because every respondent asked for the
+  same missing thing — per-collection bytes and records rather than a single
+  total (§3.1).
+- **P16** — both forms, unanimously across families. The separate mode is the
+  only one that can inform the request it prices; the embedded block makes a
+  stored model self-describing and prices the axes not taken. The
+  self-reference in measuring a block that is inside what it measures is closed
+  by definition in §3.1.
+- **P17** — the command-line half of the descriptor was found sufficient; the
+  output half was found absent by every respondent. Closed by requiring a
+  schema for every machine output (§3.1).
+- **P18** — closed by being answered differently than asked. The question was
+  whether a two-name axis vocabulary is too coarse; the finding was that the
+  axis is not the unit these callers want at all. Superseded by §5.7 and P20.
+- **P19** — no respondent asked for a preset. Closed as specified: none.
+
+Two findings from that review are recorded outside this appendix because they
+are defects rather than open questions: §5.6's master-collection list omitted
+two collections, and the `closures` collection's three record shapes were
+undocumented (§11.1). Both were reported by respondents in both families.
+
+**The population was uniform in a way that bounds every conclusion above.** All
+six respondents had an execution environment and all six described the same
+workflow: write the model to a file, query it with code, load only matching
+records. The finding that selectivity matters more than total size is therefore
+established for that kind of caller and for no other. Appendix E carries the
+residue.
 
 P14 was resolved on 2026-08-16 and its marker removed. The question — whether
 `--detail` was the right switch for closure sets — was answered by replacing the
@@ -1533,7 +1687,7 @@ an index mismatch (§13).
 
 ### F.1 Open items requiring adjudication
 
-None outstanding beyond the P15–P19 review rows above. O1, O2 and O3 were
+None outstanding beyond the P20 and P21 rows above. O1, O2 and O3 were
 adjudicated on 2026-08-16:
 
 - **O1** — Appendix B is split into B-I (acceptance) and B-II (corpus
