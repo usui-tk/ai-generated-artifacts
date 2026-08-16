@@ -270,7 +270,12 @@ _NUM_RE = re.compile(r'[0-9][0-9A-Za-z_.]*')
 _COMMENT_OK_BEFORE = frozenset(" \t\r\n(){}[];|,&=+")
 
 # Tokens after which the next word sits in command position (SPEC 10.6).
-_CMD_POS_OPS = frozenset(("|", ";", "&", "(", "{", "=", "+=", "-=", "*=", "/=", "%=", "??="))
+# `&&` and `||` are PowerShell 7 pipeline chain operators: the token after one
+# starts a new command. They do not occur in the reference target, so no
+# baseline moves, but omitting them would silently drop edges in any codebase
+# that uses them.
+_CMD_POS_OPS = frozenset(("|", ";", "&", "(", "{", "=", "+=", "-=", "*=", "/=",
+                          "%=", "??=", "&&", "||"))
 
 
 class Tok:
@@ -360,7 +365,7 @@ def tokenize(text):
         m = _NUM_RE.match(text, i)
         if m:
             toks.append(Tok('num', m.group(0), i, m.end())); i = m.end(); continue
-        for two in ('+=', '-=', '*=', '/=', '%=', '::', '??'):
+        for two in ('+=', '-=', '*=', '/=', '%=', '::', '??', '&&', '||'):
             if text.startswith(two, i):
                 toks.append(Tok('op', two, i, i + 2)); i += 2; break
         else:
@@ -1221,6 +1226,22 @@ class Survey:
         toks, sig = self.toks, self.sig
         depths = bracket_depths(toks, sig)
         cmd_words = set(k for k, _t in iter_command_words(toks, sig))
+
+        def is_member_name(k):
+            """A literal in member position names a .NET member, not a symbol.
+
+            The reference parser represents `$proc.ExitCode` with a string
+            constant for `ExitCode`, so a naive population treats it as a soft
+            reference to `$script:ExitCode`. Renaming that variable requires no
+            edit to `$proc.ExitCode`. 9,614 of the reference target's 27,626
+            string constants are member names, and 42 of the 146 raw PSS3002
+            hits - 29 per cent - are this false positive. PSS3001 is unaffected:
+            function names are not used as property names (measured: 0).
+            """
+            if k == 0:
+                return False
+            prev = toks[sig[k - 1]]
+            return prev.kind == 'op' and prev.text in ('.', '::')
         # The name token of a definition is part of the definition syntax, not a
         # string constant. Counting it matched all 480 definitions against
         # themselves and inflated PSS3001 from 49 to 529.
@@ -1248,7 +1269,7 @@ class Survey:
                     continue
                 kind = "bareword"
                 value = t.text
-            if kind is None:
+            if kind is None or is_member_name(k):
                 continue
             if kind == "quoted":
                 self.counters["string_literals_quoted"] += 1
@@ -1296,17 +1317,40 @@ class Survey:
             fid = self.func_ids[id(f)]
             callees = sorted(closure(fid, adj))
             callers = sorted(closure(fid, radj))
-            self.closures.append({
+            # The edge list is the master and the closures are a derived view
+            # (SPEC 11.1). Materialising the direct sets here republished all
+            # 1,281 edges a second time, and materialising both transitive sets
+            # for all 480 functions cost 601 KB - the largest collection in the
+            # model - to answer a question a consumer asks about a handful of
+            # functions at a time. Counts are actionable on their own ("97
+            # functions are downstream of this one"); the sets themselves are
+            # available under --detail. `no_static_caller` is omitted because
+            # the PSS4003 records already carry it.
+            rec = {
                 "record": "closure", "id": fid,
-                "callees": sorted(adj.get(fid, ())),
-                "callers": sorted(radj.get(fid, ())),
-                "transitive_callees": callees,
-                "transitive_callers": callers,
                 "transitive_callee_count": len(callees),
                 "transitive_caller_count": len(callers),
-                "no_static_caller": not radj.get(fid),
-            })
+            }
+            if self.detail:
+                rec["transitive_callees"] = callees
+                rec["transitive_callers"] = callers
+            self.closures.append(rec)
         self.sccs = _tarjan_scc(adj, [self.func_ids[id(f)] for f in self.funcs])
+
+    @staticmethod
+    def _emit(records):
+        """Final projection: drop the sort key and any absent-valued field.
+
+        `offset` exists to make ordering total and reproducible; it is not a
+        coordinate any consumer uses, and `line` is. A key whose value is null
+        or false carries no information that its absence does not, and on the
+        reference target those keys alone cost 164 KB.
+        """
+        out = []
+        for r in records:
+            out.append({k: v for k, v in r.items()
+                        if k != "offset" and v is not None and v is not False})
+        return out
 
     # -- model -------------------------------------------------------------
     def model(self):
@@ -1337,8 +1381,7 @@ class Survey:
                 "kind": "function",
                 "start_line": self.line_of(f.start),
                 "end_line": self.line_of(f.end),
-                "start_offset": f.start,
-                "end_offset": f.end,
+                "offset": f.start,
                 "depth": f.depth,
                 "parent": self.func_ids[id(f.parent)] if f.parent is not None else None,
                 "ordinal": f.ordinal,
@@ -1348,15 +1391,16 @@ class Survey:
                 "hash_raw": raw_hash(extent),
                 "facts": facts,
             })
-        symbols.sort(key=lambda r: (r["id"], r["start_offset"]))
+        symbols.sort(key=lambda r: (r["id"], r["offset"]))
 
         edges = sorted(self.edges.values(), key=lambda r: (r["from"], r["to"]))
         for e in edges:
             e["code"] = "PSS2001"
 
         closures = sorted(self.closures, key=lambda r: r["id"])
-        no_caller = [{"code": "PSS4003", "id": c["id"]}
-                     for c in closures if c["no_static_caller"]]
+        no_caller = [{"code": "PSS4003", "id": fid} for fid in sorted(
+            self.func_ids[id(f)] for f in self.funcs
+            if not self.radj.get(self.func_ids[id(f)]))]
         groups = [{"code": "PSS4004", "members": sorted(g)}
                   for g in self.sccs if len(g) > 1]
         groups.sort(key=lambda r: r["members"])
@@ -1387,18 +1431,18 @@ class Survey:
                 "byte_count": len(self.text.encode('utf-8')),
             },
             "counters": dict(sorted(self.counters.items())),
-            "symbols": symbols,
-            "edges": edges,
-            "closures": closures + no_caller + groups,
-            "script_variables": script_records + usage_records,
-            "string_interpolation_references": sorted(
-                self.interp_records, key=lambda r: r["offset"]),
-            "local_variables": local_records,
-            "soft_references": sorted(
-                self.soft_refs, key=lambda r: (r["code"], r["offset"])),
-            "limitations": sorted(
+            "symbols": self._emit(symbols),
+            "edges": self._emit(edges),
+            "closures": self._emit(closures + no_caller + groups),
+            "script_variables": self._emit(script_records + usage_records),
+            "string_interpolation_references": self._emit(sorted(
+                self.interp_records, key=lambda r: r["offset"])),
+            "local_variables": self._emit(local_records),
+            "soft_references": self._emit(sorted(
+                self.soft_refs, key=lambda r: (r["code"], r["offset"]))),
+            "limitations": self._emit(sorted(
                 self.limitations,
-                key=lambda r: (r["code"], r.get("line", 0), r.get("owner", ""))),
+                key=lambda r: (r["code"], r.get("line", 0), r.get("owner", "")))),
         }
 
 
@@ -1576,6 +1620,11 @@ def self_check():
                   % ", ".join(orphan_index))
             rc = EXIT_ERROR
         if not orphan_marker and not orphan_index:
+            # A pending revision is normal work in progress and does not change
+            # the exit code. A mismatch above IS a defect in this tool or its
+            # SPEC, and exits non-zero - which does not conflict with SPEC 9,
+            # because that rule forbids a verdict about the SURVEYED SCRIPT, not
+            # the reporting of an internal inconsistency.
             print("  provisional: %d revision(s) pending review, index consistent"
                   % len(inline))
             if inline:
@@ -1644,7 +1693,13 @@ def cmd_survey(args):
     survey = Survey(path, text, detail=args.detail).run()
     model = survey.model()
     if args.format == "json" or args.out:
-        payload = json.dumps(model, indent=2, sort_keys=False, ensure_ascii=False)
+        # Compact by default. SPEC 2.4 asks the model to be readable, which is a
+        # property of self-describing keys, not of indentation; the indentation
+        # cost 600 KB on the reference target.
+        if args.pretty:
+            payload = json.dumps(model, indent=2, ensure_ascii=False)
+        else:
+            payload = json.dumps(model, separators=(',', ':'), ensure_ascii=False)
         if args.out:
             with open(args.out, "w", encoding="utf-8", newline="\n") as fh:
                 fh.write(payload + "\n")
@@ -1709,7 +1764,10 @@ def build_parser():
     sp.add_argument("--out", help="write the model to PATH (default: stdout)")
     sp.add_argument("--format", choices=("text", "json"), default="text")
     sp.add_argument("--detail", action="store_true",
-                    help="emit one record per function-local variable reference")
+                    help="materialise per-site local variable records and "
+                         "transitive closure sets")
+    sp.add_argument("--pretty", action="store_true",
+                    help="indent the JSON model (default is compact)")
     sp.set_defaults(func=cmd_survey)
 
     cp = sub.add_parser("compare", help="compare two models and emit delta facts")

@@ -179,8 +179,19 @@ over LSIF.
 This requirement is **quantitative, not aspirational**. Emitting one record per
 variable reference would produce approximately 4.87 MB for the reference target
 — larger than the 1.41 MB source, inverting the tool's purpose. §5.3 therefore
-tiers the model by blast radius, which brings the default survey to
-approximately 0.5 MB.
+tiers the model by blast radius.
+
+The default survey of the reference target measures approximately **0.9 MB**
+compact against a 1.41 MB source. The per-site script-variable records required
+by §5.3 account for roughly 40 per cent of that and are not reducible without
+losing the tool's primary function: they are what answers *where do I edit*. A
+consumer that needs only to reason about structure, rather than to locate edit
+sites, can omit that collection, which brings the remainder to approximately
+0.55 MB.
+
+Serialisation is **compact by default**. The readability this section requires
+is a property of self-describing keys and flat records, not of indentation,
+which cost 600 KB on the reference target; `--pretty` remains available.
 
 ### 2.5 Reuse-by-copy
 
@@ -255,16 +266,6 @@ dropped.
 |---|---|
 | `PSS2001` | A static call edge from one caller to a defined function. The caller is a defined function, or the reserved owner `<script>` for a call made at script level. Emitted only where the command name is a literal string in command position (§10.6). |
 
-> **[PROVISIONAL P01 — S1 / 2026-08-16]**
-> Basis: measured (reference target, HEAD `8fdd832`).
-> Was: "from one defined function to another."
-> Why: excluding script-level callers makes 12 functions that are invoked only
-> from top level report `PSS4003` (no static caller). With script-level edges
-> included, `PSS4003` measures 26, matching Appendix B.2; without them it
-> measures 38. The edge set matches the reference parser exactly at 1,281
-> (function-sourced 1,247 + script-sourced 34).
-> Review: confirm `<script>` as an edge source is consistent with §12.3, which
-> already reserves the same owner name for the usage map.
 | `PSS2002` | A variable declaration site. Recognised sources per §12.2. |
 | `PSS2003` | A variable reference resolved to a declaration within the same function. |
 | `PSS2004` | A scope-qualified variable reference. Carries the qualifier (`script`, `global`, `local`, `private`, or a drive such as `env`). Detected via `VariablePath.IsScript` / `IsGlobal` / `IsLocal` / `IsPrivate` and `DriveName` — see Appendix D.1. |
@@ -289,19 +290,6 @@ the output-discard idiom, not a declaration, and `$ProgressPreference = 'X'`
 writes a preference variable rather than declaring a local. Applying the
 declaration test first misclassifies 254 references on the reference target.
 
-> **[PROVISIONAL P02 — S1 / 2026-08-16]**
-> Basis: measured (reference target, HEAD `8fdd832`).
-> Was: no set enumerated; no check order stated.
-> Why: an unstated set makes the count irreproducible, failing the §1.3 fact
-> test. The set originates from the investigation session's
-> `03-variable-binding.ps1`, with `inputobject` removed — it is a common
-> parameter name, not an automatic variable, and its 10 references were the
-> sole cause of the Appendix B.3 error (2,014 -> 2,004).
-> Note: the inquiry reply described this as "54 names after removing
-> `inputobject`". Counting the source list gives 54 names **including**
-> `inputobject`, hence **53** here.
-> Review: confirm the count, and confirm that `sender` / `eventargs` / `event` /
-> `eventsubscriber` / `foreach` / `switch` are intended to remain.
 | `PSS2006` | A script-scope declaration made at script level. At script level an unqualified assignment declares a script-scoped variable, so `$Foo = 1` at top level and `$script:Foo` inside a function name the same entity. |
 | `PSS2007` | A variable reference occurring inside an expandable (double-quoted) string or here-string. Carries the containing string's location. These are real references and are the principal mechanism by which a text-substitution rename silently fails (§12.4). |
 | `PSS2008` | A script-scope variable's usage map: the set of functions that **write** it and the set that **read** it, with per-set counts (§12.3). One record per name in the usage-map population (§12.3). |
@@ -313,17 +301,6 @@ population. It is the union of:
 2. every name declared at script level that is referenced **without** a
    qualifier from a function that does not declare the name locally — that is,
    exactly the `PSS9004` condition.
-
-> **[PROVISIONAL P03 — S1 / 2026-08-16]**
-> Basis: design-choice (supplied by the SPEC-drafting session; measured here).
-> Was: population left implicit; Appendix B.3 implied the qualified-only set.
-> Why: admitting every script-level declaration adds 37 names that collide
-> accidentally with function locals (`result`, `line`, `cmd`, `payload`), which
-> would put dozens of unrelated functions into their reader sets and corrupt the
-> population that `PSS8005`-`PSS8007` depend on. Clause 2 admits only names
-> whose binding genuinely reaches the script scope; on the reference target that
-> is one name (`action`), giving a population of **156**. Measured: 156.
-> Review: confirm clause 2 is the intended reading of the reply to Q3-a.
 
 ### 4.3 PSS3xxx — Soft reference
 
@@ -339,11 +316,24 @@ breaks a script.
 
 **String-literal population.** Both codes match against every string constant,
 **including barewords**. In PowerShell a bareword argument and a hashtable key
-are string constants, and 131 of the reference target's 146 `PSS3002` hits are
+are string constants, and 89 of the reference target's 104 `PSS3002` hits are
 barewords — dropping them would hide precisely the output-field-name cases a
-rename has to consider. Excluded from the population: the name token of a
-function definition, parameter names (`-Path`), keywords, and tokens inside
-brackets (type literals and attributes), none of which are string constants.
+rename has to consider.
+
+**Member names are excluded.** The reference parser represents a member access
+`$proc.ExitCode` with a string constant for `ExitCode`. That names a .NET
+member, not a symbol in this script: renaming `$script:ExitCode` requires no
+edit to `$proc.ExitCode`. A literal is in member position when its parent is a
+member expression and it is the member being named; the token-level equivalent
+is that the preceding significant token is `.` or `::`. On the reference target
+9,614 of 27,626 string constants are member names, and excluding them removes
+42 of 146 raw `PSS3002` hits — 29 per cent were false positives that demand no
+action. `PSS3001` is unaffected, because function names are not used as
+property names (measured: 0).
+
+Also excluded, none of which are string constants: the name token of a function
+definition, parameter names (`-Path`), keywords, and tokens inside brackets
+(type literals and attributes).
 
 Every `PSS3001` / `PSS3002` record carries **`literal_kind`**, valued `quoted`
 or `bareword`, so a caller may filter without the tool narrowing the population
@@ -354,16 +344,7 @@ predicate: a literal is in command position exactly when its parent is a command
 and it is that command's first element. Reconstructing this from token adjacency
 under-reports (25 against 49 on the reference target).
 
-> **[PROVISIONAL P04 — S1 / 2026-08-16]**
-> Basis: measured (reference target, HEAD `8fdd832`).
-> Was: neither the population nor `literal_kind` was stated; command position
-> was not defined for this code.
-> Why: without a stated population the counts are irreproducible (§1.3). With
-> this rule `PSS3001` measures 49 (quoted 48 / bareword 1), matching Appendix
-> B.5 exactly. `PSS3002` measures 145 against a baseline of 146 — see open item
-> O3 in Appendix F.
-> Review: confirm that carrying `literal_kind` rather than narrowing the
-> population is the intended resolution of Q2-d.
+
 
 No surveyed tool in any ecosystem treats soft references as reportable. Visual
 Studio and IntelliJ offer to rewrite comments and strings during rename,
@@ -394,6 +375,11 @@ carries a `symbol_kind` of `function` or `script-variable`.
 may denote a different entity; §4.6 supplies the evidence that reveals this.
 
 ### 4.6 PSS7xxx — Attribute change
+
+Several facts may report the same edit from different angles, and that is
+normal rather than duplication. A parameter rename is genuinely both a text
+change and a signature change, so `PSS7001` and `PSS7002` both fire; a consumer
+that enters from either direction must not miss it.
 
 Each is emitted for a name present in both models, and each states equality or
 inequality **explicitly** rather than only reporting change. A silent absence
@@ -472,16 +458,6 @@ JSON. Top-level shape:
 }
 ```
 
-> **[PROVISIONAL P05 — S1 / 2026-08-16]**
-> Basis: measured (reference target, HEAD `8fdd832`).
-> Was: `PSS2007` listed inside `script_variables`; no
-> `string_interpolation_references` collection.
-> Why: shape consequence of P06. 113 of the 118 interpolated references are
-> function-local, so filing them under `script_variables` would misname them,
-> while filing them under `local_variables` would misname the 5 that are
-> scope-qualified.
-> Review: shape change only; confirm alongside P06.
-
 ### 5.1 Flat records, not trees
 
 All collections are flat record lists. Nested-tree representations are
@@ -546,19 +522,6 @@ function *unchanged*, so per-site detail is mandatory there.
 **Explicit exception: `PSS2007`.** References inside expandable strings are
 emitted one record per site **regardless of scope**, in the top-level
 `string_interpolation_references` collection.
-
-> **[PROVISIONAL P06 — S1 / 2026-08-16]**
-> Basis: measured (reference target, HEAD `8fdd832`).
-> Was: no exception; §5.3 tiering applied to these references as to any other.
-> Why: 113 of the reference target's 118 interpolated references are
-> function-local, so the tiering rule would absorb them into aggregates and they
-> would not appear in a default survey. §4.2 calls these the principal mechanism
-> by which a text-substitution rename fails silently, so an omission here hides
-> exactly the defect the rule exists to expose — the tiering rule contradicts
-> itself. The cost is 28 KB. Measured: 118 records.
-> Review: confirm the dedicated collection is preferred over placing these in
-> `local_variables`; the reply to Q6-b proposed it to avoid mis-filing the 5
-> scope-qualified sites.
 
 ### 5.4 Determinism
 
@@ -685,20 +648,6 @@ name** — from the first character after the name to the end of the extent.
 Parameter names are retained in both definition forms, because a parameter
 rename is a signature change and must remain visible via `PSS7002`.
 
-> **[PROVISIONAL P07 — S1 / 2026-08-16]**
-> Basis: measured (reference target, HEAD `8fdd832`).
-> Was: "the brace-delimited block, excluding the `function` keyword and the
-> function name. The `param()` block is included".
-> Why: §10.1 admits two definition forms. In `function f($a) { ... }` the
-> parameters sit **outside** the braces, so under the previous wording a
-> parameter rename left `hash_body` unchanged and `PSS7001` reported
-> `identical`, while the same edit to `function f { param($a) ... }` reported
-> `code-changed`. Making the value depend on syntax choice rather than content
-> contradicts §1.3. Defining the range as "the extent minus the name" is
-> form-independent.
-> Review: confirm this does not conflict with the `PSS7002` signature contract,
-> which now reports the same edit through a second, independent route.
-
 **Normalisation**: strip comments to whitespace, **retain string literal
 contents**, collapse whitespace runs to a single space, strip ends. `sha256`,
 truncated to 16 hex characters.
@@ -770,10 +719,18 @@ design, and is invisible to `hash_full` alone. It is reportable only because
 A call edge (`PSS2001`) is emitted only where a literal command name appears in
 command position.
 
-**Inclusion.** Command position is: statement start; after `|`, `;`, `&`, an
-opening `(` or `{`, or an assignment operator; after one of the statement
-keywords `begin default do else end exit finally process return throw try`; and
-after the closing `)` of a keyword-introduced parenthesis group.
+**Inclusion.** Command position is: statement start; after `|`, `;`, `&`, `&&`,
+`||`, an opening `(` or `{`, or an assignment operator; after one of the
+statement keywords `begin default do else end exit finally process return throw
+try`; and after the closing `)` of a keyword-introduced parenthesis group.
+
+`&&` and `||` are the PowerShell 7 pipeline chain operators. They do not occur
+in the reference target, so no Appendix B value depends on them; they are
+stated because a codebase that uses them would otherwise lose edges silently,
+and §1.4 requires this tool to work on any single `.ps1`.
+
+`catch` and `elseif` are deliberately absent from the statement-keyword list:
+each takes a parenthesis or a block rather than a command.
 
 **Exclusion.** A word in an otherwise-command position is *not* a command name
 when it is a PowerShell keyword; when an assignment operator follows it (a
@@ -781,19 +738,7 @@ hashtable key or assignment target); when it starts with `-` (an operator or a
 parameter name); or when it is inside brackets (an attribute or type-literal
 context).
 
-> **[PROVISIONAL P08 — S1 / 2026-08-16]**
-> Basis: measured (reference target, HEAD `8fdd832`).
-> Was: inclusion list only, ending "This mirrors the context rules already
-> proven in `psa.py`'s `PSA2010`."
-> Why: the borrowed `PSA2010` rules were never re-derived against the AST. The
-> inclusion list omitted `return <Command>` (27 lost edges) and the token after
-> a `param(...)` group (5 lost edges); with both added the edge set matches the
-> reference parser exactly at 1,281, and the derived values follow (closure
-> membership 5,071, `PSS4003` 26, mutual-recursion groups 3). The exclusion list
-> was absent entirely: without it the named-command count reaches 10,581 against
-> a baseline of 5,048, hashtable keys alone contributing about 4,100.
-> Review: confirm the statement-keyword list is complete; `catch` and `elseif`
-> take a parenthesis or block rather than a command and are deliberately absent.
+
 
 ### 10.7 Case sensitivity
 
@@ -835,6 +780,25 @@ function is `Add-VRow`.
 ## 11. The dependency graph model
 
 ### 11.1 Representation
+
+> **[PROVISIONAL P14 - S1 / 2026-08-16]**
+> Basis: design-choice.
+> Was: closure records materialised direct and transitive sets unconditionally.
+> Why: the review adjudicated that closures carry counts and that the sets move
+> behind a switch. Reusing `--detail`, rather than adding a second flag, keeps
+> one control for "materialise what the tiering rule omitted"; the alternative
+> is a dedicated `--closures` flag for consumers who want closure sets without
+> the 20,363 per-site local variable records.
+> Review: is `--detail` the right switch, or should the two be separable?
+
+**No data in the model may be derivable from another part of the model.** The
+sole exception is a human-readable identifier carried for legibility. An
+earlier build materialised each function's direct callee and caller sets inside
+the closure records, republishing all 1,281 edges a second time, and
+materialised both transitive sets for all 480 functions — 601 KB, the largest
+collection in the model, to answer a question a consumer asks about a handful
+of functions at a time. Closure records therefore carry **counts**, which are
+actionable on their own; the sets themselves are available under `--detail`.
 
 The call graph is stored as a flat edge list (`PSS2001`). Closures
 (`PSS4001`, `PSS4002`) are **derived** from it and emitted in the default
@@ -995,16 +959,6 @@ literals that are empty or whitespace-only are skipped (671 on the reference
 target). The name side must have its **scope prefix removed** before comparison
 — see Appendix D.5.
 
-> **[PROVISIONAL P09 — S1 / 2026-08-16]**
-> Basis: measured (reference target, HEAD `8fdd832`).
-> Was: no matching rule stated; population named only as "script-scope".
-> Why: without the rule the count is irreproducible. The prefix clause is
-> load-bearing: omitting it yields 0 matches under every candidate population,
-> which is how the S1 session initially and wrongly concluded that the baseline
-> of 146 could not be reproduced.
-> Review: confirm the population is the qualified-only set (155) and not the
-> usage-map population (156), which P03 defines differently.
-
 ### 12.6 The population partition
 
 Every variable reference falls into exactly one class, and each class has a
@@ -1023,20 +977,6 @@ Classes are exclusive and, under the §10.8 attribution convention, sum exactly
 to the total (24,317). **`PSS9004` is not a class**: it is an annotation on the
 function-local class marking reads that carry no local declaration (11 on the
 reference target, across 5 functions and 4 names).
-
-> **[PROVISIONAL P10 — S1 / 2026-08-16]**
-> Basis: measured (reference target, HEAD `8fdd832`).
-> Was: Function-local 20,353; Automatic 2,014; `Unresolved 11` listed as a
-> sixth class; no "Outside any function" row; classes declared exclusive but
-> summing to 24,328 against a total of 24,317.
-> Why: three separate defects. Automatic falls to 2,004 under P02. The 10
-> references released by removing `inputobject` are function-local, raising that
-> class to 20,363. The 11-reference overshoot was never `PSS9004` double
-> counting: it was the measurement script traversing the nested function
-> `Add-VRow` twice, whose reference count coincidentally is also 11. Under
-> §10.8 the sum is exact.
-> Review: confirm `PSS9004` as an annotation rather than a class; the S1 session
-> initially misdiagnosed this as a subset relation.
 
 ### 12.7 Rename-omission detection (normative)
 
@@ -1090,18 +1030,12 @@ design.
 |---|---|
 | Syntax | `py_compile` clean |
 | Self-check | `--self-check` confirms this SPEC's §4 catalogue and the codes compiled into `pss.py` agree, exiting non-zero on drift |
-| Provisional index | `--self-check` confirms every `[PROVISIONAL Pnn]` marker in this SPEC has a row in Appendix F and vice versa; it reports the count and does **not** fail on a non-zero count (§9). Appendix F must be empty before manifest registration |
+| Provisional index | `--self-check` confirms every `[PROVISIONAL Pnn]` marker in this SPEC has a row in Appendix F and vice versa. A **pending** revision is normal work in progress: reported, exit code unchanged. A **mismatch** between markers and index is a defect in the tool or the document: exit code 2, as for SPEC/catalogue drift. Appendix F must be empty before manifest registration |
 
-> **[PROVISIONAL P13 — S1 / 2026-08-16]**
-> Basis: design-choice.
-> Was: no such gate.
-> Why: a provisional wording that is never reconciled becomes the contract by
-> default. Binding the index to `--self-check` makes that failure visible, and
-> binding the zero condition to manifest registration puts the hard gate where
-> the commitment actually happens. Reporting rather than failing keeps §9's rule
-> that the exit code carries no verdict.
-> Review: is a reporting-only gate the right strength, or should a pending
-> revision block the tool from running at all?
+A non-zero exit on mismatch does not conflict with §9. §9 forbids the exit code
+from carrying a verdict **about the surveyed script**; an inconsistency between
+this document and the tool is an internal defect, the same class of condition as
+SPEC/catalogue drift.
 | Determinism | repeated runs over identical input produce byte-identical models (§5.4) |
 | Golden vectors — shared | `hash_full` reproduces the repository's shared normalized-hash golden vectors exactly |
 | Golden vectors — own | `hash_body` reproduces `pss.py`'s own vectors, which include the collision cases of §10.3 as explicit non-collision assertions |
@@ -1176,12 +1110,40 @@ sufficient to detect an extraction regression.
 
 ---
 
-## Appendix B — Acceptance baselines
+## Appendix B — Acceptance baselines and corpus statistics
 
 Measured against the reference target
 `projects/powershell-update-windows-server-iso/Update-WindowsServerIso.ps1` at
 the head of `main`, using the in-box PowerShell parser as ground truth.
 Reproduce per §14.
+
+**This appendix holds two kinds of number and they must not be confused.**
+
+| Part | Contents | Role |
+|---|---|---|
+| **B-I** | Values `pss.py` must reproduce | Decides the §13 differential test |
+| **B-II** | Values that characterise the corpus | Re-measured, never asserted against `pss.py` |
+
+The distinction exists because some figures are defined by an **AST predicate**
+and a conforming implementation cannot reach them. `Command invocations
+(statically named) 5,048` is `CommandAst` whose first element is a
+`StringConstantExpressionAst`; §2.3 confines `pwsh` to test time, so `pss.py`
+has no AST at run time and derives 5,046 from tokens. Asserting an
+unreachable value would break §1.3 in the opposite direction — the fact test
+requires that every conforming implementation *can* produce the value.
+
+**B-I (acceptance).** Functions, nested definitions, duplicate names, call
+edges, closure membership, functions with no static caller, mutual-recursion
+groups, variable references, `PSS2004`, `PSS2005`, `PSS2007`, `PSS2008`,
+`PSS9004`, `PSS3001`, `PSS3002`, dynamic call sites.
+
+**B-II (corpus statistics).** Statically named command invocations, and the
+string-constant population with its breakdown. The string-constant total of
+27,626 includes 9,614 member names, which §4.3 excludes from soft-reference
+matching; the population `pss.py` reconstructs from tokens is therefore about
+18,000 and is not asserted.
+
+The §13 differential test asserts **B-I only**.
 
 ### B.1 Structural inventory
 
@@ -1226,15 +1188,6 @@ Reproduce per §14.
 | References inside expandable strings (`PSS2007`) | 118, across 83 strings |
 | Distinct usage signatures over 155 script names | 115 |
 
-> **[PROVISIONAL P11 — S1 / 2026-08-16]**
-> Basis: measured (reference target, HEAD `8fdd832`).
-> Was: `Automatic (PSS2005) 2,014`; distinct names given as 155 with no
-> usage-map figure.
-> Why: consequences of P02 and P03, not independent judgements. `inputobject`
-> is not an automatic variable (-10), and the usage-map population differs from
-> the qualified-name count.
-> Review: value corrections only; confirm alongside P02 and P03.
-
 ### B.4 Declaration forms
 
 | Form | Reference value |
@@ -1258,7 +1211,7 @@ Reproduce per §14.
 |---|---:|
 | Function-name literals, non-invocation (`PSS3001`) | 49, across 28 functions |
 | Literals matching any variable name (**not** the rule) | 8,821 |
-| Literals matching a script-scope name (`PSS3002`) | 146 |
+| Literals matching a script-scope name (`PSS3002`) | **104** (quoted 15 / bareword 89); 146 before member names are excluded per §4.3 |
 
 ### B.6 Hash behaviour
 
@@ -1380,14 +1333,6 @@ that the baseline of 146 was unreproducible — the baseline was correct and the
 measurement was wrong. This is the same failure shape as D.1: an AST property
 that looks like the value you want and is not.
 
-> **[PROVISIONAL P12 — S1 / 2026-08-16]**
-> Basis: measured (reference target, HEAD `8fdd832`).
-> Was: absent.
-> Why: this pitfall cost the S1 session a wrong conclusion that reached the
-> inquiry as a claimed SPEC defect. It belongs next to D.1, which warns about
-> the neighbouring property on the same type.
-> Review: new pitfall entry; no contract change.
-
 ---
 
 ## Appendix E — Open items
@@ -1404,79 +1349,38 @@ that looks like the value you want and is not.
 
 ## Appendix F — Provisional revisions pending review
 
-Every revision made by the S1 implementation session and not yet confirmed by
-the SPEC-drafting session. Each has an inline `[PROVISIONAL Pnn]` block at the
-point of change; `--self-check` verifies that this index and those markers agree
-in both directions.
+Revisions made by the implementation session and not yet confirmed. Each has an
+inline `[PROVISIONAL Pnn]` block at the point of change; `--self-check` verifies
+that this index and those markers agree in both directions, exiting non-zero on
+a mismatch and merely reporting a pending count.
 
-**Basis** is one of:
-
-- **measured** — settled by measurement against the reference parser. Review is
-  a confirmation that the wording matches the measurement, not a judgement call.
-- **design-choice** — a judgement supplied by the drafting session and
-  implemented here. Review confirms the reading is faithful.
-- **open** — genuinely undecided. Listed separately below.
+**Basis** is one of **measured** (settled against the reference parser),
+**design-choice** (a judgement), or **open** (undecided).
 
 | ID | Section | Basis | Review question |
 |---|---|---|---|
-| P01 | §4.2 `PSS2001` | measured | Is `<script>` as an edge source consistent with §12.3's reserved owner? |
-| P02 | §4.2 `PSS2005` | measured | Confirm the count is 53, and that the event and enumerator names stay. |
-| P03 | §4.2 `PSS2008` | design-choice | Is clause 2 the intended reading of the Q3-a reply? |
-| P04 | §4.3 | measured | Is carrying `literal_kind` preferred over narrowing the population? |
-| P05 | §5 | measured | Shape change only; consequence of P06. |
-| P06 | §5.3 | measured | Dedicated collection, or `local_variables`? |
-| P07 | §10.3 | measured | Does the widened range conflict with the `PSS7002` contract? |
-| P08 | §10.6 | measured | Is the statement-keyword list complete? |
-| P09 | §12.5 | measured | Qualified-only (155) rather than the usage-map population (156)? |
-| P10 | §12.6 | measured | Is `PSS9004` an annotation rather than a class? |
-| P11 | Appendix B.3 | measured | Value corrections only; consequences of P02 and P03. |
-| P12 | Appendix D.5 | measured | New pitfall entry; no contract change. |
-| P13 | §13 | design-choice | Is a reporting-only gate the right strength for this index? |
+| P14 | §5, §11.1 | design-choice | Is `--detail` the right switch for materialising transitive closure sets? |
+
+P01–P13 were reviewed and confirmed on 2026-08-16 and their markers removed.
+Three carried amendments, which are folded into the body text: `PSS3001` /
+`PSS3002` now exclude member names (§4.3), command position now includes `&&`
+and `||` (§10.6), and `--self-check` now distinguishes a pending revision from
+an index mismatch (§13).
 
 ### F.1 Open items requiring adjudication
 
-These are **not** provisional wordings. They are questions the S1 session cannot
-close, recorded here so they are not lost.
+None. O1, O2 and O3 were adjudicated on 2026-08-16:
 
-**O1 — `commands_named` cannot be reproduced by `pss.py`.**
-Appendix B.1's `Command invocations (statically named) 5,048` is an AST
-predicate: `CommandAst` whose first element is a `StringConstantExpressionAst`.
-§2.3 restricts `pwsh` to test time, so `pss.py` has no AST at run time and
-derives 5,046 from tokens. The two figures measure different things. Proposal:
-keep 5,048 as an oracle-side corpus statistic and drop it as a `pss.py`
-acceptance baseline — the load-bearing quantity is the edge set, which matches
-exactly at 1,281. Otherwise the §13 differential test fails permanently on a
-diagnostic counter.
-
-**O2 — the model is 4.5x the §2.4 size target.**
-§2.4 sets the model's purpose as a context artifact, at roughly 0.5 MB. Measured
-on the reference target: 2.27 MB as formatted JSON, 1.72 MB of content.
-
-| Collection | Size | Records |
-|---|---:|---:|
-| `closures` | 601 KB | 509 |
-| `script_variables` | 527 KB | 2,035 |
-| `symbols` | 270 KB | 480 |
-| `edges` | 173 KB | 1,281 |
-| others | 143 KB | 814 |
-
-`closures` dominates because both transitive sets are materialised for all 480
-functions. Since the Q1/Q3 replies confirm the consumer is a separate LLM
-track, this directly obstructs the tool's stated purpose. Proposal: apply the
-§5.3 tiering principle to closures — emit counts and the direct sets by default,
-materialise transitive sets on request — and reconsider whether every
-`PSS2004` site needs a record. Not implemented pending adjudication, because it
-changes the model shape.
-
-**O3 — three residual measurement gaps.**
-
-| Quantity | Baseline | Measured | Gap |
-|---|---:|---:|---:|
-| `PSS3002` | 146 | 145 | −1 |
-| String constants | 27,626 | 27,601 | −25 |
-| `commands_named` | 5,048 | 5,046 | −2 (see O1) |
-
-All three are token-reconstruction shortfalls in the string-constant population.
-They are small and none affects a load-bearing quantity, but a baseline is
-either met or it is not. Proposal: adjudicate each as "meet exactly" or "record
-the token-derived value as the `pss.py` expectation with the delta explained".
+- **O1** — Appendix B is split into B-I (acceptance) and B-II (corpus
+  statistics); the §13 differential test asserts B-I only. `commands_named`
+  moves to B-II because an AST-predicate value is unreachable for a conforming
+  implementation.
+- **O2** — §2.4's 0.5 MB estimate was made before §5.3 was settled and never
+  re-derived; it is corrected to 0.9 MB compact. Closure records carry counts
+  rather than materialised sets, which also repairs a violation of §11.1's
+  master/derived rule. Per-site script-variable records are retained: they are
+  what answers *where do I edit*.
+- **O3** — the `PSS3002` residual is resolved by the member-name exclusion; the
+  two occurrences at the same site were both member names and left the
+  population entirely. The string-constant and command-invocation residuals are
+  B-II statistics and are no longer asserted.
