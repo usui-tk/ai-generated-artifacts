@@ -389,6 +389,50 @@ def check_version_decision(root, text, model_def, model_all):
           % (" and ".join(moved), pss.MODEL_VERSION))
 
 
+def check_projection_invariance(text, model_all):
+    """Dropping an axis must remove records and fields, never change them (5.6).
+
+    The rule is stated over the records two models *both* carry, so the check
+    is a containment and not an equality: a wider model legitimately carries
+    records the narrower one does not, and fields on shared records that only
+    the axis materialises. What it may not do is disagree about anything the
+    narrower model says.
+
+    The narrower model's key vocabulary per collection is what defines "both
+    carry" here, and it is derived from the models rather than declared,
+    because SPEC 13.3 marks a path as `axis` without naming which axis
+    contributes it. Deriving it keeps this check independent of that
+    declaration instead of inheriting its errors.
+
+    `cost` is excluded and named rather than silently skipped: it is a
+    description *of* the model, so a narrower model's block correctly reports
+    different byte counts. Comparing it would assert that a smaller model is
+    the same size as a larger one.
+    """
+    for axis in sorted(pss.AXES):
+        narrow = pss.Survey("reference.ps1", text,
+                            axes=set(ALL_AXES) - {axis}).run().model()
+        unreproduced = []
+        for coll, narrow_records in sorted(narrow.items()):
+            if not isinstance(narrow_records, list) or coll == pss.COST_KEY:
+                continue
+            vocabulary = set()
+            for record in narrow_records:
+                vocabulary |= set(record)
+            wide = collections.Counter(
+                json.dumps({k: v for k, v in record.items() if k in vocabulary},
+                           sort_keys=True)
+                for record in model_all.get(coll, ()))
+            for serialised, count in collections.Counter(
+                    json.dumps(record, sort_keys=True)
+                    for record in narrow_records).items():
+                if count > wide.get(serialised, 0):
+                    unreproduced.append(coll)
+                    break
+        eq(sorted(set(unreproduced)), [],
+           "projection invariance: dropping %s removes without changing" % axis)
+
+
 def check_determinism(text):
     """Repeated runs over identical input produce byte-identical models (5.4).
 
@@ -730,6 +774,8 @@ def main():
         check_declared_schema(model_def, model_all)
 
         check_determinism(text)
+
+        check_projection_invariance(text, model_all)
 
         if args.pwsh and os.path.exists(args.pwsh):
             run_differential(args.pwsh, text, measured)
