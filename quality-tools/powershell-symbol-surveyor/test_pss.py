@@ -389,6 +389,34 @@ def check_version_decision(root, text, model_def, model_all):
           % (" and ".join(moved), pss.MODEL_VERSION))
 
 
+def check_determinism(text):
+    """Repeated runs over identical input produce byte-identical models (5.4).
+
+    Compared as serialised bytes rather than as parsed objects, because that is
+    what a consumer stores, hashes and diffs; two dicts can compare equal and
+    serialise differently if key order moves, and key order is part of what
+    5.4 promises.
+
+    Worth re-checking now rather than when 5.4 was written: --cost re-runs the
+    survey internally to price an absent axis (SPEC 3.1), so a model at the
+    default materialisation is now produced by four extractions rather than
+    one, and any order-dependence among them would surface here.
+    """
+    for label, axes in (("default", None), ("all-axes", ALL_AXES)):
+        runs = []
+        for _ in range(2):
+            survey = (pss.Survey("reference.ps1", text) if axes is None
+                      else pss.Survey("reference.ps1", text, axes=axes))
+            runs.append(json.dumps(survey.run().model(), separators=(",", ":"),
+                                   ensure_ascii=False).encode("utf-8"))
+        check(runs[0] == runs[1],
+              "determinism: repeated runs are byte-identical (%s)" % label,
+              "two extractions of the same input serialised to %d and %d bytes; "
+              "SPEC 5.4 promises byte-identity, which is what a consumer that "
+              "diffs or hashes two models depends on"
+              % (len(runs[0]), len(runs[1])))
+
+
 def check_declared_schema(model_def, model_all):
     """Hold the declared path set against what the pinned blob emits, both ways.
 
@@ -700,6 +728,8 @@ def main():
             check_cost_report(label, model)
 
         check_declared_schema(model_def, model_all)
+
+        check_determinism(text)
 
         if args.pwsh and os.path.exists(args.pwsh):
             run_differential(args.pwsh, text, measured)
