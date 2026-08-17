@@ -389,6 +389,44 @@ def check_version_decision(root, text, model_def, model_all):
           % (" and ".join(moved), pss.MODEL_VERSION))
 
 
+def check_declared_schema(model_def, model_all):
+    """Hold the declared path set against what the pinned blob emits, both ways.
+
+    One direction alone is not a schema check. Emitted-but-undeclared catches a
+    field that appeared without anyone saying so; declared-but-unemitted catches
+    a declaration that has outlived the field it describes. The §13.1
+    fingerprint catches neither, because it is taken over the paths a given
+    model happens to carry.
+
+    ``optional`` is the only exemption, and it is narrow on purpose: a declared
+    path that the pin does not emit passes only if it is marked data-dependent,
+    which SPEC 13.3 requires to carry its corpus evidence.
+    """
+    declared = pss.MODEL_SCHEMA
+    emitted_all = set(key_paths(model_all))
+    emitted_def = set(key_paths(model_def))
+
+    eq(sorted(emitted_all - set(declared)), [],
+       "declared schema: nothing emitted is undeclared (all-axes)")
+    eq(sorted(emitted_def - set(declared)), [],
+       "declared schema: nothing emitted is undeclared (default)")
+
+    unemitted = sorted(p for p in declared
+                       if p not in emitted_all and declared[p] != "optional")
+    eq(unemitted, [],
+       "declared schema: every non-optional path is emitted at the pin")
+
+    axis_only = sorted(p for p in declared if declared[p] == "axis")
+    eq(sorted(p for p in axis_only if p in emitted_def), [],
+       "declared schema: axis paths are absent without their axis")
+    eq(sorted(p for p in axis_only if p not in emitted_all), [],
+       "declared schema: axis paths are present with their axis")
+
+    eq(sorted(set(declared.values())), sorted(set(pss.MODEL_SCHEMA_KINDS)
+                                              & set(declared.values())),
+       "declared schema: every kind is in the declared vocabulary")
+
+
 def check_cost_report(label, model):
     """Re-derive the cost decomposition; do not re-check the block's own sums.
 
@@ -660,6 +698,8 @@ def main():
 
         for label, model in (("default", model_def), ("all-axes", model_all)):
             check_cost_report(label, model)
+
+        check_declared_schema(model_def, model_all)
 
         if args.pwsh and os.path.exists(args.pwsh):
             run_differential(args.pwsh, text, measured)

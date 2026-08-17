@@ -1554,6 +1554,7 @@ build actually runs today, and gates this SPEC requires of a *complete*
 | Baseline | `test_pss.py` re-derives every figure in Appendix B.8 from the **pinned blob** (§14.2, ADR 0034) and exits non-zero on divergence. The B.8 block is the single master: the gate carries no expected values, so the document and the check cannot drift apart. A model key path that B.8 does not record is itself a finding — an unrecorded figure is one nothing re-derives. Anchoring to a blob rather than a branch head is what keeps ordinary maintenance-stream work from turning this gate red (ADR 0029) |
 | Baseline digest | `test_pss.py` derives the acceptance block (B.8 less its `basis`), checks it against the document **by value**, and checks that `--emit-baseline-digest` — the single implementation a derived cache calls (§14.4) — reproduces the gate's own digest. A cache and this gate therefore cannot disagree about what was measured |
 | Model shape | `test_pss.py` fingerprints the emitted model's key-path set for the default and full-axis materialisations and compares both against B.8. A change of shape is a failure, not a silent event; the failure is the point at which whether `model_version` advances or is held is decided and recorded |
+| Declared schema | `--self-check` compares `pss.MODEL_SCHEMA` with §13.3 on path and kind; `test_pss.py` compares the declaration with what the pinned blob emits in both directions — emitted-but-undeclared and declared-but-unemitted are separate failures, and `optional` is the only exemption |
 | Cost report | `test_pss.py` **re-derives** the decomposition from the model — every list collection priced, `model_bytes` measured on the model less the block, `envelope` as the stated remainder — and compares by value. It does **not** re-check the block's own sum: `envelope` is computed as a remainder, so `sum + envelope == model_bytes` holds even when a whole collection is missing from the breakdown, which was demonstrated before landing |
 | Version decision | `test_pss.py` re-runs the parent commit's `pss.py` against the same pinned blob and fails when the emitted model moved — shape **or** measured values — while `MODEL_VERSION` did not (§5.5, ADR 0035). No ledger of past versions is kept: the previous state is derived, so there is no second copy to go stale (ADR 0036). Skipped, and reported as skipped, where there is no comparable parent |
 | Materialisation-stated figures | a figure that is not axis-invariant is asserted **per materialisation** and both values are re-derived — today `references_outside_functions` (485 default / 556 with `local-sites`). A single number for such a figure is unfalsifiable, the projection-side form of the basis rule (ADR 0036) |
@@ -1585,7 +1586,7 @@ should not assume any of these are currently enforced.
 | Static analysis | clean under the repository's Python gates | not yet wired into a `pss.py`-specific run |
 | Docs | bilingual README pair in lock-step; SPEC, CHANGELOG, VERSION present | `README.ja.md`, `CHANGELOG.md` and `VERSION` do not exist yet for this tool (only `README.md` and this file do) |
 | Emission coverage | every code in §4 blocks 1-4 (survey-emittable) appears as a `code` or `facts` value on at least one record somewhere in the regression corpus's models, or is documented as data-dependent-absent (e.g. `PSS1005` legitimately does not fire on a corpus with zero duplicate names) | `PSS2005`, `PSS4001`, `PSS4002` closed by manual audit. `PSS2002` open for 4 of 5 §12.2 sources (`param()`/inline-function parameters, `foreach` loop variables, `Set-Variable`/`New-Variable`, `-OutVariable` family) — `_decl_add`'s callers do not retain a site to tag (§4.2, §12.2). No automated gate yet either way; S4 |
-| Declared model schema | the key-path set the model emits is **declared** in this document and checked in both directions: every emitted path is declared, and every declared path is either exercised at the pinned generation or marked data-dependent. The §13.1 shape fingerprint is a check over *observed* paths, so an optional field the pinned generation never populates can be added or removed without moving it — the same data dependence by which one code change measures eleven removals at the pin and thirteen at an early generation (B.8, ADR 0035). This is the enumerated-constant reachability rule below, applied to the model rather than to a constant list | not written; the declaration is also owed to the §3.1 capability descriptor, so the two land together |
+| Declared model schema | **RESOLVED (ADR 0036).** §13.3 declares the 125-path set and `pss.MODEL_SCHEMA` carries it; `--self-check` holds the two together on path *and* kind, and `test_pss.py` holds the declaration against the pin in both directions. The pairing with the §3.1 descriptor is satisfied by the declaration living in the code, so `--capabilities` can serialise it rather than restate it | closed |
 | Version-decision enforcement | **RESOLVED (ADR 0036).** The parent commit's build is re-derived and compared; a model that moved without the version advancing is a failure. Measured against real history the check reddens at `44b97d1` (shape moved) and at `bc69c27` (shape identical, values moved) | closed |
 | Enumerated-constant reachability | **the generalisation of the row above.** Every constant this tool enumerates — fact codes, the assignment-operator set, the automatic-variable set, the axis vocabulary — is demonstrably reachable: some input drives it, or it is documented as data-dependent-absent. Enumerating a capability the machinery cannot exercise has now failed twice in the same shape — four fact codes defined and never emitted, and three assignment operators the tokenizer could not produce (§12.2) — and both times every gate stayed green because the check compared *names* rather than *behaviour*. `test_pss.py`'s fixtures cover the operator set; the fact catalogue and the automatic-variable set are not yet covered | S4 |
 
@@ -1595,6 +1596,170 @@ Registration as a whole-tool unit sets `tested = true` on the basis of the
 registration.
 
 ---
+
+### 13.3 The declared model schema
+
+The §13.1 fingerprint is a check over the paths a **given** model happens to
+carry. An optional field that the pinned generation never populates can appear
+or vanish without moving it — which is not hypothetical: two such fields exist,
+and they are why corpus entry `0001` carries two fingerprints across its 73
+generations. A fingerprint over observed paths is not a schema, so the path set
+is **declared** here and in `pss.MODEL_SCHEMA`, and checked in both directions.
+
+`--self-check` holds the constant against this table, the way it already does
+for the fact catalogue (§4) and the axis vocabulary (§5.6). `test_pss.py` holds
+the declaration against what the pinned blob actually emits: every emitted path
+must be declared, and every declared path must be emitted at the pin or be
+marked `optional`. The declaration lives in the code rather than only here so
+that §3.1's `--capabilities` can serialise it rather than restate it — the
+descriptor and the declaration are the same fact, and two copies of a fact
+drift (ADR 0036).
+
+| Kind | Meaning |
+|---|---|
+| `always` | present in every model, at every materialisation |
+| `axis` | present only when its axis is materialised (§5.6) |
+| `optional` | data-dependent; present when the source populates it |
+
+**The two `optional` paths, with their basis.** Measured over all 230 committed
+generations of both corpus entries at the `all-axes` materialisation:
+`/script_variables[]/in_expandable_string` and
+`/string_interpolation_references[]/qualifier` each appear in **204 of 230**
+generations. They are absent from the smaller early scripts, which is exactly
+the data dependence the fingerprint cannot police, and marking them is
+therefore a recorded measurement rather than a licence to be absent.
+
+Counts at the pinned blob: **125** paths at `all-axes`, **115** at the default
+materialisation, the difference being the ten `axis` paths.
+
+| Key path | Kind |
+|---|---|
+| `/closures` | always |
+| `/closures[]/code` | always |
+| `/closures[]/facts` | always |
+| `/closures[]/id` | always |
+| `/closures[]/members` | always |
+| `/closures[]/named_by_literal` | always |
+| `/closures[]/record` | always |
+| `/closures[]/transitive_callee_count` | always |
+| `/closures[]/transitive_callees` | axis |
+| `/closures[]/transitive_caller_count` | always |
+| `/closures[]/transitive_callers` | axis |
+| `/cost` | always |
+| `/cost/axis_increment` | always |
+| `/cost/axis_increment[]/axis` | always |
+| `/cost/axis_increment[]/bytes` | always |
+| `/cost/by_collection` | always |
+| `/cost/by_collection[]/bytes` | always |
+| `/cost/by_collection[]/collection` | always |
+| `/cost/by_collection[]/records` | always |
+| `/cost/envelope` | always |
+| `/cost/envelope/bytes` | always |
+| `/cost/format` | always |
+| `/cost/measured` | always |
+| `/cost/model_bytes` | always |
+| `/cost/source_sha256` | always |
+| `/counters` | always |
+| `/counters/assignments` | always |
+| `/counters/commands_dynamic` | always |
+| `/counters/commands_named` | always |
+| `/counters/expandable_strings` | always |
+| `/counters/interpolation_refs` | always |
+| `/counters/string_literals_bareword` | always |
+| `/counters/string_literals_quoted` | always |
+| `/counters/unresolved_named_command_sites` | always |
+| `/counters/variable_refs` | always |
+| `/edges` | always |
+| `/edges[]/code` | always |
+| `/edges[]/from` | always |
+| `/edges[]/line` | always |
+| `/edges[]/sites` | always |
+| `/edges[]/to` | always |
+| `/limitations` | always |
+| `/limitations[]/code` | always |
+| `/limitations[]/detail` | always |
+| `/limitations[]/line` | always |
+| `/limitations[]/owner` | always |
+| `/local_variables` | always |
+| `/local_variables[]/automatic_refs` | always |
+| `/local_variables[]/code` | axis |
+| `/local_variables[]/id` | axis |
+| `/local_variables[]/in_expandable_string` | axis |
+| `/local_variables[]/line` | axis |
+| `/local_variables[]/local_declared` | always |
+| `/local_variables[]/local_refs` | always |
+| `/local_variables[]/name` | axis |
+| `/local_variables[]/owner` | always |
+| `/local_variables[]/record` | always |
+| `/local_variables[]/role` | axis |
+| `/local_variables[]/unresolved_refs` | always |
+| `/materialization` | always |
+| `/materialization/axes` | always |
+| `/model_version` | always |
+| `/pss_version` | always |
+| `/script_variables` | always |
+| `/script_variables[]/code` | always |
+| `/script_variables[]/id` | always |
+| `/script_variables[]/in_expandable_string` | optional |
+| `/script_variables[]/line` | always |
+| `/script_variables[]/name` | always |
+| `/script_variables[]/owner` | always |
+| `/script_variables[]/qualifier` | always |
+| `/script_variables[]/reader_count` | always |
+| `/script_variables[]/readers` | always |
+| `/script_variables[]/record` | always |
+| `/script_variables[]/role` | always |
+| `/script_variables[]/writer_count` | always |
+| `/script_variables[]/writers` | always |
+| `/soft_references` | always |
+| `/soft_references[]/code` | always |
+| `/soft_references[]/line` | always |
+| `/soft_references[]/literal` | always |
+| `/soft_references[]/literal_kind` | always |
+| `/soft_references[]/matches` | always |
+| `/soft_references[]/owner` | always |
+| `/source` | always |
+| `/source/byte_count` | always |
+| `/source/line_count` | always |
+| `/source/path` | always |
+| `/source/sha256` | always |
+| `/string_interpolation_references` | always |
+| `/string_interpolation_references[]/code` | always |
+| `/string_interpolation_references[]/id` | always |
+| `/string_interpolation_references[]/in_expandable_string` | always |
+| `/string_interpolation_references[]/line` | always |
+| `/string_interpolation_references[]/name` | always |
+| `/string_interpolation_references[]/owner` | always |
+| `/string_interpolation_references[]/qualifier` | optional |
+| `/string_interpolation_references[]/record` | always |
+| `/string_interpolation_references[]/role` | always |
+| `/symbols` | always |
+| `/symbols[]/depth` | always |
+| `/symbols[]/end_line` | always |
+| `/symbols[]/facts` | always |
+| `/symbols[]/hash_body` | always |
+| `/symbols[]/hash_full` | always |
+| `/symbols[]/hash_raw` | always |
+| `/symbols[]/id` | always |
+| `/symbols[]/kind` | always |
+| `/symbols[]/name` | always |
+| `/symbols[]/parameters` | always |
+| `/symbols[]/parameters[]/mandatory` | always |
+| `/symbols[]/parameters[]/name` | always |
+| `/symbols[]/parameters[]/position` | always |
+| `/symbols[]/parameters[]/qualifier` | always |
+| `/symbols[]/parameters[]/type` | always |
+| `/symbols[]/parent` | always |
+| `/symbols[]/start_line` | always |
+| `/unresolved_named_commands` | always |
+| `/unresolved_named_commands[]/code` | always |
+| `/unresolved_named_commands[]/line` | axis |
+| `/unresolved_named_commands[]/name` | always |
+| `/unresolved_named_commands[]/owner` | axis |
+| `/unresolved_named_commands[]/owners` | always |
+| `/unresolved_named_commands[]/record` | always |
+| `/unresolved_named_commands[]/sites` | always |
+
 
 ## 14. Test-data acquisition
 

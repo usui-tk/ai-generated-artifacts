@@ -883,6 +883,152 @@ def bracket_depths(toks, sig):
     return depths
 
 
+# The key-path set the model emits (SPEC 13.3), declared rather than observed.
+# The 13.1 fingerprint is taken over the paths a *given* model happens to carry,
+# so an optional field the pinned generation never populates can appear or
+# vanish without moving it. Two such fields exist, and they are the reason one
+# corpus entry carries two fingerprints across its generations; each is marked
+# "optional" with the evidence recorded in SPEC 13.3 rather than asserted.
+#
+#   always    - present in every model, at every materialisation
+#   axis      - present only when its axis is materialised (SPEC 5.6)
+#   optional  - data-dependent; present when the source populates it
+#
+# Declared here, not in SPEC.md, so that --capabilities can serialise this
+# constant instead of restating it: the descriptor and the declaration are the
+# same fact, and two copies of a fact drift (ADR 0036). --self-check holds this
+# against the document, the way it already does for FACTS and AXES.
+MODEL_SCHEMA = {
+    "/closures": "always",
+    "/closures[]/code": "always",
+    "/closures[]/facts": "always",
+    "/closures[]/id": "always",
+    "/closures[]/members": "always",
+    "/closures[]/named_by_literal": "always",
+    "/closures[]/record": "always",
+    "/closures[]/transitive_callee_count": "always",
+    "/closures[]/transitive_callees": "axis",
+    "/closures[]/transitive_caller_count": "always",
+    "/closures[]/transitive_callers": "axis",
+    "/cost": "always",
+    "/cost/axis_increment": "always",
+    "/cost/axis_increment[]/axis": "always",
+    "/cost/axis_increment[]/bytes": "always",
+    "/cost/by_collection": "always",
+    "/cost/by_collection[]/bytes": "always",
+    "/cost/by_collection[]/collection": "always",
+    "/cost/by_collection[]/records": "always",
+    "/cost/envelope": "always",
+    "/cost/envelope/bytes": "always",
+    "/cost/format": "always",
+    "/cost/measured": "always",
+    "/cost/model_bytes": "always",
+    "/cost/source_sha256": "always",
+    "/counters": "always",
+    "/counters/assignments": "always",
+    "/counters/commands_dynamic": "always",
+    "/counters/commands_named": "always",
+    "/counters/expandable_strings": "always",
+    "/counters/interpolation_refs": "always",
+    "/counters/string_literals_bareword": "always",
+    "/counters/string_literals_quoted": "always",
+    "/counters/unresolved_named_command_sites": "always",
+    "/counters/variable_refs": "always",
+    "/edges": "always",
+    "/edges[]/code": "always",
+    "/edges[]/from": "always",
+    "/edges[]/line": "always",
+    "/edges[]/sites": "always",
+    "/edges[]/to": "always",
+    "/limitations": "always",
+    "/limitations[]/code": "always",
+    "/limitations[]/detail": "always",
+    "/limitations[]/line": "always",
+    "/limitations[]/owner": "always",
+    "/local_variables": "always",
+    "/local_variables[]/automatic_refs": "always",
+    "/local_variables[]/code": "axis",
+    "/local_variables[]/id": "axis",
+    "/local_variables[]/in_expandable_string": "axis",
+    "/local_variables[]/line": "axis",
+    "/local_variables[]/local_declared": "always",
+    "/local_variables[]/local_refs": "always",
+    "/local_variables[]/name": "axis",
+    "/local_variables[]/owner": "always",
+    "/local_variables[]/record": "always",
+    "/local_variables[]/role": "axis",
+    "/local_variables[]/unresolved_refs": "always",
+    "/materialization": "always",
+    "/materialization/axes": "always",
+    "/model_version": "always",
+    "/pss_version": "always",
+    "/script_variables": "always",
+    "/script_variables[]/code": "always",
+    "/script_variables[]/id": "always",
+    "/script_variables[]/in_expandable_string": "optional",
+    "/script_variables[]/line": "always",
+    "/script_variables[]/name": "always",
+    "/script_variables[]/owner": "always",
+    "/script_variables[]/qualifier": "always",
+    "/script_variables[]/reader_count": "always",
+    "/script_variables[]/readers": "always",
+    "/script_variables[]/record": "always",
+    "/script_variables[]/role": "always",
+    "/script_variables[]/writer_count": "always",
+    "/script_variables[]/writers": "always",
+    "/soft_references": "always",
+    "/soft_references[]/code": "always",
+    "/soft_references[]/line": "always",
+    "/soft_references[]/literal": "always",
+    "/soft_references[]/literal_kind": "always",
+    "/soft_references[]/matches": "always",
+    "/soft_references[]/owner": "always",
+    "/source": "always",
+    "/source/byte_count": "always",
+    "/source/line_count": "always",
+    "/source/path": "always",
+    "/source/sha256": "always",
+    "/string_interpolation_references": "always",
+    "/string_interpolation_references[]/code": "always",
+    "/string_interpolation_references[]/id": "always",
+    "/string_interpolation_references[]/in_expandable_string": "always",
+    "/string_interpolation_references[]/line": "always",
+    "/string_interpolation_references[]/name": "always",
+    "/string_interpolation_references[]/owner": "always",
+    "/string_interpolation_references[]/qualifier": "optional",
+    "/string_interpolation_references[]/record": "always",
+    "/string_interpolation_references[]/role": "always",
+    "/symbols": "always",
+    "/symbols[]/depth": "always",
+    "/symbols[]/end_line": "always",
+    "/symbols[]/facts": "always",
+    "/symbols[]/hash_body": "always",
+    "/symbols[]/hash_full": "always",
+    "/symbols[]/hash_raw": "always",
+    "/symbols[]/id": "always",
+    "/symbols[]/kind": "always",
+    "/symbols[]/name": "always",
+    "/symbols[]/parameters": "always",
+    "/symbols[]/parameters[]/mandatory": "always",
+    "/symbols[]/parameters[]/name": "always",
+    "/symbols[]/parameters[]/position": "always",
+    "/symbols[]/parameters[]/qualifier": "always",
+    "/symbols[]/parameters[]/type": "always",
+    "/symbols[]/parent": "always",
+    "/symbols[]/start_line": "always",
+    "/unresolved_named_commands": "always",
+    "/unresolved_named_commands[]/code": "always",
+    "/unresolved_named_commands[]/line": "axis",
+    "/unresolved_named_commands[]/name": "always",
+    "/unresolved_named_commands[]/owner": "axis",
+    "/unresolved_named_commands[]/owners": "always",
+    "/unresolved_named_commands[]/record": "always",
+    "/unresolved_named_commands[]/sites": "always",
+}
+
+MODEL_SCHEMA_KINDS = ("always", "axis", "optional")
+
+
 COST_KEY = "cost"
 COST_FORMAT = "json-compact"
 
@@ -1909,6 +2055,42 @@ def self_check():
         if not axis_missing_in_code and not axis_missing_in_spec:
             print("  axes     : %d in AXES, %d in SPEC.md section 5.6, agree"
                   % (len(code_axes), len(spec_axes)))
+
+    sstart = spec.find("### 13.3 The declared model schema")
+    send = spec.find("## 14. Test-data acquisition")
+    if sstart < 0 or send < 0 or send <= sstart:
+        print("  FAIL: could not locate SPEC section 13.3")
+        rc = EXIT_ERROR
+    else:
+        ssection = spec[sstart:send]
+        spec_schema = dict(re.findall(r'^\| `(/[^`]+)` \| (always|axis|optional) \|$',
+                                      ssection, re.M))
+        path_missing_in_code = sorted(set(spec_schema) - set(MODEL_SCHEMA))
+        path_missing_in_spec = sorted(set(MODEL_SCHEMA) - set(spec_schema))
+        kind_disagrees = sorted(k for k in set(spec_schema) & set(MODEL_SCHEMA)
+                                if spec_schema[k] != MODEL_SCHEMA[k])
+        if path_missing_in_code:
+            print("  FAIL: key path in SPEC.md 13.3 but not declared in pss.py: %s"
+                  % ", ".join(path_missing_in_code))
+            rc = EXIT_ERROR
+        if path_missing_in_spec:
+            print("  FAIL: key path declared in pss.py but absent from SPEC.md 13.3: %s"
+                  % ", ".join(path_missing_in_spec))
+            rc = EXIT_ERROR
+        if kind_disagrees:
+            # A kind is not decoration: "optional" is the only thing standing
+            # between a data-dependent field and a silent shape change, so a
+            # path present in both with the wrong kind is a drift, not a
+            # cosmetic difference.
+            print("  FAIL: key path declared with a different kind in pss.py and "
+                  "SPEC.md 13.3: %s"
+                  % ", ".join("%s (%s vs %s)" % (k, MODEL_SCHEMA[k], spec_schema[k])
+                              for k in kind_disagrees))
+            rc = EXIT_ERROR
+        if not path_missing_in_code and not path_missing_in_spec and not kind_disagrees:
+            print("  schema   : %d paths in MODEL_SCHEMA, %d in SPEC.md section 13.3, "
+                  "agree on path and kind"
+                  % (len(MODEL_SCHEMA), len(spec_schema)))
 
     if rc == EXIT_OK:
         print("")
