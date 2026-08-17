@@ -61,6 +61,22 @@
   the declaration-form table, statically-named commands, the string-constant population) are
   re-measured with `pwsh`, never asserted against `pss.py` - `counters.assignments` in
   particular is NOT B.4's "Assignment statements" row.
+- **The model-shape fingerprint is over OBSERVED key paths, not a declared schema**
+  (ADR 0035). It records the shape the pinned generation happens to reach, so an optional
+  field that generation never populates can be added or removed without moving it. The
+  same code change measures **eleven** removed paths against the pinned blob and
+  **thirteen** against an early generation, which is this dependence made visible. A
+  declared key-path schema, checked in both directions, is the remedy and is recorded as
+  owed in the surveyor SPEC §13.2 — not built.
+- **A shape fingerprint does not detect a content-only change and must not be used as an
+  identity** (ADR 0035). The ADR 0034 extractor fixes moved 2,302 records between fact
+  codes across the corpus and moved no key path at all. Derived model caches therefore
+  identify their producing build by a **baseline digest** over the measured acceptance
+  values (surveyor SPEC §14.4), never by `model_version` or a fingerprint.
+- **Nothing checks that a version decision was taken.** A shape or B.8 change reddens the
+  baseline gate, and clearing it requires re-stamping B.8 — which is where §5.5's advance
+  is decided — but the enforcement is a consequence of that gate rather than a gate of its
+  own. Owed in the surveyor SPEC §13.2.
 - **`corpus.py check` remains outside this battery** (ADR 0033): it watches maintenance-owned
   scripts. The baseline gate is admitted precisely because pinning removes that coupling.
 - **CI-side (GitHub Actions) coverage is a separate axis** from this local battery:

@@ -701,6 +701,30 @@ that difference as a fact, so that a caller comparing two different scripts
 (rather than two states of one script) cannot mistake the result for a
 before/after delta.
 
+**When `model_version` advances (normative, ADR 0035).** It advances whenever
+the model emitted for a fixed input can differ. Shape and content are both in
+scope: adding or removing a key path advances it, and so does a change to which
+records, codes, roles or counts the extractor produces for input it already
+handled. The test is stated against the emitted artefact rather than the size of
+the code change, because the artefact is what a consumer of this section
+compares. A change of shape alone is therefore a sufficient but not a necessary
+condition — the two extractor fixes of ADR 0034 moved records between fact codes
+and moved no key path at all, and two models straddling them would otherwise
+have satisfied the equality condition above while differing by 2,302 records.
+
+**`"1"` does not identify a model contract.** Six committed revisions of this
+tool emit `model_version = "1"` across four changes of shape and two changes of
+extractor behaviour. Versions already emitted are not renumbered; the fact is
+recorded instead, and it is normative: **two models both carrying `"1"` are not
+evidence that they are comparable**, and a caller holding such a pair should
+treat `PSS9005`'s absence as uninformative rather than as a clearance. The first
+advance is made by the first change that alters what the model emits.
+
+`model_version` and `pss_version` answer different questions — which model
+contract, and which build — and neither substitutes for the other. `pss_version`
+advances under SemVer on every landed change, like this repository's other
+tools.
+
 ### 5.6 Materialisation axes (normative)
 
 Some information is produced by the survey but withheld from the default model
@@ -1546,6 +1570,8 @@ should not assume any of these are currently enforced.
 | Static analysis | clean under the repository's Python gates | not yet wired into a `pss.py`-specific run |
 | Docs | bilingual README pair in lock-step; SPEC, CHANGELOG, VERSION present | `README.ja.md`, `CHANGELOG.md` and `VERSION` do not exist yet for this tool (only `README.md` and this file do) |
 | Emission coverage | every code in §4 blocks 1-4 (survey-emittable) appears as a `code` or `facts` value on at least one record somewhere in the regression corpus's models, or is documented as data-dependent-absent (e.g. `PSS1005` legitimately does not fire on a corpus with zero duplicate names) | `PSS2005`, `PSS4001`, `PSS4002` closed by manual audit. `PSS2002` open for 4 of 5 §12.2 sources (`param()`/inline-function parameters, `foreach` loop variables, `Set-Variable`/`New-Variable`, `-OutVariable` family) — `_decl_add`'s callers do not retain a site to tag (§4.2, §12.2). No automated gate yet either way; S4 |
+| Declared model schema | the key-path set the model emits is **declared** in this document and checked in both directions: every emitted path is declared, and every declared path is either exercised at the pinned generation or marked data-dependent. The §13.1 shape fingerprint is a check over *observed* paths, so an optional field the pinned generation never populates can be added or removed without moving it — the same data dependence by which one code change measures eleven removals at the pin and thirteen at an early generation (B.8, ADR 0035). This is the enumerated-constant reachability rule below, applied to the model rather than to a constant list | not written; the declaration is also owed to the §3.1 capability descriptor, so the two land together |
+| Version-decision enforcement | a change to shape or to any B.8 figure that lands **without** `model_version` advancing is a failure. Today the baseline gate makes such a change red, and clearing it requires re-stamping B.8 — which is where §5.5's advance is decided — but nothing checks that the decision was in fact taken, so the enforcement is a consequence of a gate rather than a gate. ADR 0035 records the policy; this row records that no automation yet holds anyone to it | needs a recorded version-to-shape correspondence to check against; not written |
 | Enumerated-constant reachability | **the generalisation of the row above.** Every constant this tool enumerates — fact codes, the assignment-operator set, the automatic-variable set, the axis vocabulary — is demonstrably reachable: some input drives it, or it is documented as data-dependent-absent. Enumerating a capability the machinery cannot exercise has now failed twice in the same shape — four fact codes defined and never emitted, and three assignment operators the tokenizer could not produce (§12.2) — and both times every gate stayed green because the check compared *names* rather than *behaviour*. `test_pss.py`'s fixtures cover the operator set; the fact catalogue and the automatic-variable set are not yet covered | S4 |
 
 Registration as a whole-tool unit sets `tested = true` on the basis of the
@@ -1593,10 +1619,11 @@ approximately ten weeks, during which the target grew from 79 functions and
 function-name set; 15 changed it in both directions and therefore contain
 rename, split, merge or replacement events with the author's stated intent
 recorded in the commit message. **`TESTING.md` does not exist yet for this
-tool** (S4, tracked in §13.2); once `test_pss.py` is built, `TESTING.md` is
-where it enumerates the specific state pairs used as labelled regression
-cases and the property each one exercises — the same role `TESTING.md` plays
-for this repository's other tools and projects.
+tool** (tracked in §13.2). `test_pss.py` now exists and covers the pinned
+generation; `TESTING.md` is where the labelled multi-state regression cases and
+the property each one exercises are enumerated once the differential suite spans
+state *pairs* (S4) — the same role `TESTING.md` plays for this repository's
+other tools and projects.
 
 ### 14.3 Degradation
 
@@ -1610,6 +1637,42 @@ Committing expected **aggregates** rather than expected **models** is
 deliberate: an aggregate expectation is a few kilobytes, a full model for the
 reference target is on the order of half a megabyte, and the aggregate is
 sufficient to detect an extraction regression.
+
+### 14.4 Derived model caches (normative, ADR 0035)
+
+Surveying every generation of the reference target is expensive enough that the
+resulting models are cached outside the repository and carried between sessions.
+Such a cache is **derived data**: it is not committed, it is not a baseline, and
+it is only usable while it is known which build produced it. That last property
+is the one that has to be engineered, because it is the one that was lost.
+
+A derived cache carries, in its header:
+
+| Field | Requirement |
+|---|---|
+| `pss_version`, `model_version` | the constants of the producing build, as emitted |
+| `model_shape` | the §13.1 fingerprints, per materialisation, as emitted |
+| `baseline_digest` | `sha256` over the canonical-JSON serialisation of the acceptance block this build re-derives from the pinned blob (B.8, the values — not the document text) |
+| `axes`, `corpus_entry`, `corpus_start_rev`, `corpus_end_rev`, `corpus_count` | what was surveyed and over which generations |
+
+`baseline_digest` is what identifies the build. `model_version` cannot do it
+while two builds may legitimately share one (§5.5, and the six that shared
+`"1"`), and a shape fingerprint cannot do it at all: the ADR 0034 extractor
+fixes changed 2,302 records across the corpus without moving a key path, so the
+before and after caches carry identical fingerprints. A digest over the measured
+values moves whenever any measured value moves, which is the property the job
+needs.
+
+**Identification must not rest on prose.** A free-text note describing how a
+cache differs from its predecessor is not a discriminator: it cannot be
+compared, and it is written by whoever already knows the answer. Two caches are
+the same cache if and only if their headers agree on the fields above.
+
+A cache is invalidated by any change to what the model emits — which, by §5.5,
+is exactly the condition that advances `model_version`. Regeneration is
+therefore batched with the change that causes it rather than performed per
+change, and the header is what proves which side of the change a given file is
+on.
 
 ---
 
@@ -1964,10 +2027,21 @@ path that occurs, arrays collapsed to `[]`, sorted, newline-joined, `sha256`
 truncated to 16 hex (the ADR 0015 width). It is taken from the pinned reference
 target rather than from a synthetic fixture, because a fixture fingerprints only
 the fields it happens to reach. Its purpose is not to fix the shape but to make
-a change of shape a gate failure: when it moves, whether `model_version`
-advances or is deliberately held is decided and recorded at that moment. It had
-not been — the version stayed `"1"` across four shape changes, ten of them field
-removals, and nothing surfaced that until the shapes were compared by hand.
+a change of shape a gate failure: when it moves, `model_version` advances per
+§5.5 and the advance is recorded at that moment. It had not been — the version
+stayed `"1"` across four shape changes, and nothing surfaced that until the
+shapes were compared by hand.
+
+A shape figure states its basis, exactly as an acceptance figure does (ADR
+0035). Measured against the pinned blob, the destructive step of those four
+removes **eleven** key paths, of which two are restored later under the
+`closure-sets` axis, leaving **nine** unrecoverable under any axis; the same
+code change measured against an early generation (entry `0001`, blob
+`7783700a`) removes **thirteen**, because two of the paths are optional fields a
+smaller script never populates. A previously recorded figure of ten is
+reproduced by neither basis and is withdrawn. This is not a detail about one
+number: a key-path count is data-dependent in the same way an acceptance figure
+is, so a bare count is unfalsifiable in the same way.
 
 ```json pss-baseline
 {

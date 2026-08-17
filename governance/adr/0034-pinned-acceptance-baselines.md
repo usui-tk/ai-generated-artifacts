@@ -108,9 +108,14 @@ a fixture only fingerprints the fields it happens to reach.
 fingerprint moves, the version decision — whether the model version advances or
 is deliberately held — is made and recorded at that moment. This decision does
 not itself set a version policy; it makes the absence of one detectable. The
-model version had been held constant across four shape changes, ten of them
-field removals, and nothing surfaced that fact until the shapes were compared
-by hand.
+model version had been held constant across four shape changes, one of them
+purely destructive, and nothing surfaced that fact until the shapes were
+compared by hand. *(Corrected by ADR 0035: the removal count originally recorded
+here was stated without its basis and is reproduced by none — eleven paths are
+removed when measured against the pinned blob, nine of them unrecoverable under
+any axis, and thirteen when the same change is measured against an early
+generation. The policy this decision deliberately left open is set by ADR
+0035.)*
 
 ## Consequences
 
