@@ -1334,6 +1334,15 @@ Confirmed by execution against the reference PowerShell runtime:
 - an assignment whose left-hand side is a **variable expression**;
 - an assignment whose left-hand side is a **type-conversion wrapping a variable
   expression** (`[int]$x = 1`);
+  
+  Both forms count under **every** assignment operator: `=`, `+=`, `-=`, `*=`,
+  `/=`, `%=` and `??=`. An implementation that recognises a subset of these
+  records a compound assignment as a reference. Three of the seven were
+  unreachable in this tool until they were tokenized ahead of the word rule —
+  `-` and `/` lead legal words (parameter names, paths) so `-=` and `/=` were
+  split, and `??=` was split by the two-character operator rule. An enumerated
+  operator that the tokenizer cannot emit is dead text; §13.1's baseline gate
+  is what makes such a gap visible rather than plausible.
 - `Set-Variable` / `New-Variable` with a literal `-Name`;
 - an `-OutVariable` / `-ErrorVariable` / `-WarningVariable` /
   `-InformationVariable` / `-PipelineVariable` common parameter.
@@ -1355,6 +1364,12 @@ a silent omission.
   anything;
 - an assignment whose left-hand side is an **index expression** (`$x[0] = 1`) —
   likewise a reference.
+- a variable standing in **member-name position** on an assignment's left-hand
+  side (`$obj.$name = 1`, `$type::$name = 1`) — `$name` is *read* to supply the
+  member's name, and the assignment targets the member. Recognising this needs
+  a look-behind for `.` or `::`, not only the look-ahead for `=`: the dynamic
+  form otherwise reaches the same corruption the two static exclusions above
+  are written to prevent, and reaches it without matching either of them.
 
 The exclusion is load-bearing rather than pedantic. Measured on the reference
 target: 5,114 assignment statements decompose into 4,578 variable left-hand

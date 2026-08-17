@@ -256,7 +256,7 @@ begin default do else end finally exit process return throw try
 
 # PowerShell automatic variables (SPEC 4.2 PSS2005). The set is enumerated here
 # because an unstated set makes the derived count irreproducible, which fails the
-# fact test (SPEC 1.3). This is the contract set: 54 names.
+# fact test (SPEC 1.3). This is the contract set: 53 names.
 #
 # `inputobject` is deliberately ABSENT. It is a common parameter name, not an
 # automatic variable; including it inflated the reference target's PSS2005 count
@@ -284,6 +284,11 @@ _WORD_RE = re.compile(r'[A-Za-z_\\/\-][A-Za-z0-9_\\/\-:]*')
 _NUM_RE = re.compile(r'[0-9][0-9A-Za-z_.]*')
 
 _COMMENT_OK_BEFORE = frozenset(" \t\r\n(){}[];|,&=+")
+
+# The two-character compound assignment operators, held as one set so the
+# tokenizer and the role test cannot enumerate different operators. `??=` is
+# three characters and is handled beside this set at both sites.
+_ASSIGN_OPS = frozenset(('+=', '-=', '*=', '/=', '%='))
 
 # Tokens after which the next word sits in command position (SPEC 10.6).
 # `&&` and `||` are PowerShell 7 pipeline chain operators: the token after one
@@ -375,6 +380,17 @@ def tokenize(text):
             m = _VAR_RE.match(text, i)
             if m:
                 toks.append(Tok('var', m.group(0), i, m.end())); i = m.end(); continue
+        # Compound assignment operators are recognised BEFORE the word rule.
+        # `-` and `/` are legal word-leading characters (parameter names, paths),
+        # so `_WORD_RE` consumed the operator's first character and `-=` / `/=`
+        # were emitted as word `-` / word `/` followed by op `=`. `??=` was split
+        # by the two-character rule below into op `??` + op `=`. Three of the
+        # seven assignment operators the reference-scan enumerates were therefore
+        # unreachable, and a compound assignment read as a reference (SPEC 12.2).
+        if text.startswith('??=', i):
+            toks.append(Tok('op', '??=', i, i + 3)); i += 3; continue
+        if text[i:i + 2] in _ASSIGN_OPS:
+            toks.append(Tok('op', text[i:i + 2], i, i + 2)); i += 2; continue
         m = _WORD_RE.match(text, i)
         if m:
             toks.append(Tok('word', m.group(0), i, m.end())); i = m.end(); continue
@@ -1029,8 +1045,17 @@ class Survey:
 
             if t.kind == 'var':
                 role = "read"
-                if nxt is not None and nxt.kind == 'op':
-                    if nxt.text in ('=', '+=', '-=', '*=', '/=', '%=', '??='):
+                prv = toks[sig[k - 1]] if k > 0 else None
+                # A variable in member-name position (`$obj.$name`, `$t::$name`)
+                # is being READ to supply the name; the assignment that follows
+                # targets the member, not the variable. Without this look-behind
+                # the look-ahead below sees `=` and declares the member name -
+                # the corruption SPEC 12.2 excludes static member left-hand
+                # sides to avoid, arriving through the dynamic form instead.
+                member_name = (prv is not None and prv.kind == 'op'
+                               and prv.text in ('.', '::'))
+                if nxt is not None and nxt.kind == 'op' and not member_name:
+                    if nxt.text == '=' or nxt.text == '??=' or nxt.text in _ASSIGN_OPS:
                         role = "write"
                     elif nxt.text in ('.', '[', '::'):
                         # A member or index left-hand side REFERENCES the
