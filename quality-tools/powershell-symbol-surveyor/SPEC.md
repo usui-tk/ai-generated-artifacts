@@ -1547,15 +1547,26 @@ are maintained, rather than freezing and going stale.
 
 ### 14.2 Obtaining a corpus state
 
-A corpus state is any commit that touches the target script. Retrieval:
+A corpus state is one generation recorded in a corpus entry under `corpus/`
+(ADR 0033). An entry pins one path and does not follow renames; the reference
+target's directory move is represented as two entries (`0001` before, `0002`
+after), not as one `--follow` walk. Retrieval is **by blob**:
 
 ```
-git log --follow --format='%h %ad' --date=short -- <path-to-target>.ps1
-git show <commit>:<path-to-target>.ps1 > <workdir>/<commit>.ps1
+python3 corpus.py list                       # entries and their generation counts
+git show <blob> > <workdir>/<rev>.ps1        # blob taken from the entry's generations[]
 ```
 
-`--follow` is required: the reference target crossed a directory move, and
-without it the history truncates at that move.
+Resolving by blob rather than by `<commit>:<path>` is required, and both halves
+of that requirement come from recorded defects. `git log --follow --reverse`
+does not compose, so a `--follow` walk silently mis-orders; and
+`git show <commit>:<current-path>` fails for any generation older than the move,
+because the path did not exist yet. A blob hash is stable under both. Where an
+entry's blob no longer resolves, the tooling raises — it does not skip the
+generation.
+
+Appendix B's measurement basis is one such pinned generation, named in that
+appendix's preamble (ADR 0034).
 
 The reference corpus at the time of writing spans 230 commits over
 approximately ten weeks, during which the target grew from 79 functions and
@@ -1735,17 +1746,40 @@ states is a rate for this corpus and not for PowerShell refactoring in general.
 
 ## Appendix B — Acceptance baselines and corpus statistics
 
-Measured against the reference target
-`projects/powershell-update-windows-server-iso/Update-WindowsServerIso.ps1` at
-the head of `main`, using the in-box PowerShell parser as ground truth.
-Reproduce per §14.
+**Measurement basis (pinned, ADR 0034).** Every figure below is measured
+against one immutable generation of the reference target, retrieved by blob
+rather than by path:
+
+| Field | Value |
+|---|---|
+| Corpus entry | `corpus/0002-projects-powershell-update-windows-server-iso.json` |
+| Generation index | `156` (the entry's last generation) |
+| Commit | `aade522845fa351cf4bb0f7f81fe72d79eb9bee4` |
+| Blob | `f2b5e6a59b4d7fde688958a19bbfcdb6ce247c01` |
+| Path at that commit | `projects/powershell-update-windows-server-iso/Update-WindowsServerIso.ps1` |
+
+The basis is **not** "the head of `main`". The reference target is a
+maintenance-stream artefact (ADR 0029) that advances independently of this
+tool; a figure measured against a branch head describes a state that stops
+existing without notice, and a gate anchored to one would turn ordinary
+maintenance work into a governance failure. A pinned blob has neither problem,
+which is what allows §13.1's baseline gate to run in the standing battery at
+all. Retrieve per §14.2; ground truth is the in-box PowerShell parser.
+
+Re-pinning to a newer generation is an explicit adjudicated act with
+re-measurement attached, never an incidental edit.
 
 **This appendix holds two kinds of number and they must not be confused.**
 
 | Part | Contents | Role |
 |---|---|---|
-| **B-I** | Values `pss.py` must reproduce | Decides the §13 differential test |
+| **B-I** | Values `pss.py` must reproduce | Asserted by the §13.1 baseline gate |
 | **B-II** | Values that characterise the corpus | Re-measured, never asserted against `pss.py` |
+
+**Every figure carries one of these two labels.** An unclassified figure is
+compared against by whoever reads it with no rule saying whether the comparison
+is meaningful — which is exactly how the declaration-form table (B.4) came to
+be measured against a counter that was never its definition.
 
 The distinction exists because some figures are defined by an **AST predicate**
 and a conforming implementation cannot reach them. `Command invocations
@@ -1757,16 +1791,31 @@ requires that every conforming implementation *can* produce the value.
 
 **B-I (acceptance).** Functions, nested definitions, duplicate names, call
 edges, closure membership, functions with no static caller, mutual-recursion
-groups, variable references, `PSS2004`, `PSS2005`, `PSS2007`, `PSS2008`,
-`PSS9004`, `PSS3001`, `PSS3002`, dynamic call sites.
+groups, variable references, `PSS2002`, `PSS2003`, `PSS2004`, `PSS2005`,
+`PSS2006`, `PSS2007`, `PSS2008`, `PSS9004`, `PSS3001`, `PSS3002`, dynamic call
+sites, and the `counters` block (B.6).
 
-**B-II (corpus statistics).** Statically named command invocations, and the
-string-constant population with its breakdown. The string-constant total of
-27,626 includes 9,614 member names, which §4.3 excludes from soft-reference
-matching; the population `pss.py` reconstructs from tokens is therefore about
-18,000 and is not asserted.
+`PSS2002` and `PSS2003` are B-I as of ADR 0034. They were previously absent
+from both lists, and that absence was load-bearing: two extractor defects
+confined to function scope — the unreachable compound-assignment operators and
+the dynamic-member-name left-hand side (both §12.2) — misclassified thirteen
+sites while every gate stayed green, because no acceptance figure covered the
+declaration side at all.
 
-The §13 differential test asserts **B-I only**.
+**B-II (corpus statistics).** Statically named command invocations; the
+string-constant population with its breakdown; and the **declaration-form
+table (B.4) in its entirety**. B.4's rows are defined by AST predicates —
+`AssignmentStatementAst` and its left-hand-side types, `ForEachStatementAst`,
+`ParameterAst` — which §2.3 puts out of `pss.py`'s reach at run time. They
+characterise the corpus and are re-measured with `pwsh`; they are never
+asserted against `pss.py`. In particular `counters.assignments` is **not** B.4's
+"Assignment statements" row and must not be compared against it (see B.6).
+
+The string-constant total of 27,626 includes 9,614 member names, which §4.3
+excludes from soft-reference matching; the population `pss.py` reconstructs
+from tokens is therefore about 18,000 and is not asserted.
+
+The §13.1 baseline gate asserts **B-I only**.
 
 ### B.1 Structural inventory
 
