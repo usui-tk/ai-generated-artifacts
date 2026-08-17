@@ -1541,6 +1541,7 @@ build actually runs today, and gates this SPEC requires of a *complete*
 | Golden vectors — shared | `hash_full` reproduces the repository's shared normalized-hash golden vectors exactly (checked by `--self-check`) |
 | Golden vectors — own | `hash_body` reproduces `pss.py`'s own vectors, which include the collision cases of §10.3 as explicit non-collision assertions (checked by `--self-check`) |
 | Baseline | `test_pss.py` re-derives every figure in Appendix B.8 from the **pinned blob** (§14.2, ADR 0034) and exits non-zero on divergence. The B.8 block is the single master: the gate carries no expected values, so the document and the check cannot drift apart. A model key path that B.8 does not record is itself a finding — an unrecorded figure is one nothing re-derives. Anchoring to a blob rather than a branch head is what keeps ordinary maintenance-stream work from turning this gate red (ADR 0029) |
+| Baseline digest | `test_pss.py` derives the acceptance block (B.8 less its `basis`), checks it against the document **by value**, and checks that `--emit-baseline-digest` — the single implementation a derived cache calls (§14.4) — reproduces the gate's own digest. A cache and this gate therefore cannot disagree about what was measured |
 | Model shape | `test_pss.py` fingerprints the emitted model's key-path set for the default and full-axis materialisations and compares both against B.8. A change of shape is a failure, not a silent event; the failure is the point at which whether `model_version` advances or is held is decided and recorded |
 | Fixtures | `test_pss.py` runs synthetic cases for the extractor rules that have actually failed — every assignment operator including the three that were unreachable, the member-name exclusions of §12.2 including the dynamic form, and the tokenizer regressions those fixes risked. These need no corpus and run even when `git` is absent (§14.3) |
 
@@ -1654,6 +1655,17 @@ A derived cache carries, in its header:
 | `model_shape` | the §13.1 fingerprints, per materialisation, as emitted |
 | `baseline_digest` | `sha256` over the canonical-JSON serialisation of the acceptance block this build re-derives from the pinned blob (B.8, the values — not the document text) |
 | `axes`, `corpus_entry`, `corpus_start_rev`, `corpus_end_rev`, `corpus_count` | what was surveyed and over which generations |
+
+The digest has **one implementation**: `test_pss.py --emit-baseline-digest`
+prints it, taking it over exactly the block the baseline gate already derives —
+Appendix B.8's block less its `basis`, serialised with sorted keys and compact
+separators. A generation script computes nothing itself; it calls this and
+copies the result. Computing it separately would put a measurement instrument
+back outside the repository, which is the defect ADR 0033 retired, and would
+let the cache and the gate disagree about what was measured. §13.1's gate
+checks that the emitted digest and the gate's own agree, and that the block
+equals B.8 by **value** — a key-set comparison would pass while a wrong figure
+inside the block went through.
 
 `baseline_digest` is what identifies the build. `model_version` cannot do it
 while two builds may legitimately share one (§5.5, and the six that shared

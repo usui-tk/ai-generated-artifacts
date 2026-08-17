@@ -25,8 +25,17 @@ is confirmed against ground truth rather than against itself. With neither, the
 synthetic fixtures still run - they cover the extractor rules that have bitten,
 and they need no corpus.
 
+**The baseline digest has one implementation, and it is this one.** A derived
+model cache identifies its producing build by a digest over the acceptance block
+(SPEC 14.4, ADR 0035). Computing that digest in a throwaway generation script
+would rebuild the defect ADR 0033 retired - a measurement instrument living
+outside the repository - and would let the cache and the gate disagree about
+what was measured. ``--emit-baseline-digest`` therefore exposes the block this
+gate already derives, and the gate checks that the two agree.
+
 Usage:
     python3 test_pss.py [--pwsh <path-to-pwsh>]
+    python3 test_pss.py --emit-baseline-digest      # SPEC 14.4 cache header
 """
 
 import argparse
@@ -201,6 +210,52 @@ def measure(model):
     }
 
 
+# --------------------------------------------------------- baseline digest
+
+def acceptance_block(model_def, model_all):
+    """The block a derived cache's ``baseline_digest`` is taken over (14.4).
+
+    It is Appendix B.8's block less its ``basis``: every value this build
+    re-derives, and nothing the document merely states. ``basis`` is excluded
+    because it is a pointer to what was measured, not a measurement - and the
+    values move whenever the pin does, so the binding is not lost.
+    """
+    block = measure(model_all)
+    block["model_shape"] = {
+        "default": shape_fingerprint(model_def),
+        "all-axes": shape_fingerprint(model_all),
+    }
+    return block
+
+
+def canonical_json(obj):
+    return json.dumps(obj, sort_keys=True, separators=(",", ":"))
+
+
+def baseline_digest(block):
+    return hashlib.sha256(canonical_json(block).encode("utf-8")).hexdigest()
+
+
+def emit_baseline_digest(baseline):
+    """Print the SPEC 14.4 cache-header identity for this build, or fail."""
+    root = repo_root()
+    if not root:
+        print(json.dumps({"error": "git-unavailable"}), file=sys.stderr)
+        return 2
+    text = read_blob(root, baseline["basis"]["blob"])
+    model_all = pss.Survey("reference.ps1", text, axes=ALL_AXES).run().model()
+    model_def = pss.Survey("reference.ps1", text).run().model()
+    block = acceptance_block(model_def, model_all)
+    print(canonical_json({
+        "baseline_digest": baseline_digest(block),
+        "pss_version": pss.__version__,
+        "model_version": pss.MODEL_VERSION,
+        "model_shape": block["model_shape"],
+        "basis": baseline["basis"],
+    }))
+    return 0
+
+
 def compare_section(measured, expected, section):
     exp = expected[section]
     got = measured[section]
@@ -365,9 +420,15 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--pwsh", default=os.environ.get("PSS_PWSH"),
                     help="path to a pwsh binary; enables the differential test")
+    ap.add_argument("--emit-baseline-digest", action="store_true",
+                    help="print this build's SPEC 14.4 cache-header identity "
+                         "and exit; no gate is run")
     args = ap.parse_args()
 
     baseline = load_baseline()
+    if args.emit_baseline_digest:
+        return emit_baseline_digest(baseline)
+
     print("== pss baseline gate ==")
     print("basis: entry %s gen %s blob %s"
           % (baseline["basis"]["corpus_entry"], baseline["basis"]["gen_index"],
@@ -397,6 +458,29 @@ def main():
            "model shape: default materialisation")
         eq(shape_fingerprint(model_all), baseline["model_shape"]["all-axes"],
            "model shape: all axes")
+
+        block = acceptance_block(model_def, model_all)
+        recorded = {k: v for k, v in baseline.items() if k != "basis"}
+        check(block == recorded,
+              "baseline digest: block equals Appendix B.8 less its basis",
+              "the digest a derived cache carries must be taken over exactly "
+              "what the document records, or the cache and the document stop "
+              "describing the same measurement (SPEC 14.4). Compared by "
+              "value, not by key name: a key-set comparison passes while a "
+              "wrong figure inside the block goes through. Differing: %s"
+              % sorted(k for k in set(block) | set(recorded)
+                       if block.get(k) != recorded.get(k)))
+
+        emitted = subprocess.run(
+            [sys.executable, os.path.abspath(__file__),
+             "--emit-baseline-digest"],
+            capture_output=True, cwd=HERE)
+        try:
+            payload = json.loads(emitted.stdout.decode("utf-8"))
+        except Exception:
+            payload = {}
+        eq(payload.get("baseline_digest"), baseline_digest(block),
+           "baseline digest: --emit-baseline-digest agrees with the gate")
 
         if args.pwsh and os.path.exists(args.pwsh):
             run_differential(args.pwsh, text, measured)
