@@ -366,19 +366,40 @@ dropped.
 
 ### 4.2 PSS2xxx — Reference and binding
 
-**`PSS2002` and `PSS2005` are catalogued and specified here (§12.2 for
-`PSS2002`), and pass `--self-check`'s codes gate (§13.1), but do not
-currently appear as a `code` or `facts` value on any emitted record** — see
-the parallel note at §4.4 for `PSS4001`/`PSS4002`, the same gap. A count
-plausibly related to each is present elsewhere as a bare, untagged field —
-`local_variables[].local_declared` for declaration sites, `local_variables[].
-automatic_refs` for automatic-variable reads — but neither field carries the
-`PSS2002` or `PSS2005` code, and neither total was confirmed against Appendix
-B.3 while writing this note (`automatic_refs` sums to 2,075 across the
-reference target against B.3's separately-sourced 2,004; the two were not
-established to be the same measurement). Whether the fix is to tag those
-fields, reconcile the counts, or formally document the untagged aggregate as
-this fact's realised form is open and not decided here (§13.2).
+**`PSS2005` is now emitted** (resolved after the note below was first
+written): every automatic-variable reference gets a `local_variables[]`
+`"reference"` record tagged `"code": "PSS2005"` under the `local-sites` axis,
+alongside the pre-existing `automatic_refs` aggregate count (`--self-check`'s
+codes gate now has a corresponding emission fact to point to; the "Emission
+coverage" row at §13.2 tracks this). **The count itself is unresolved and
+should not be trusted yet.** Three different measurements of "automatic
+variable references on the reference target" now exist and do not agree:
+Appendix B.3's `2,004` (source and method not re-derivable from this
+document alone), `pss.py`'s own emitted count `2,075`, and a fourth-session
+spot-check against real `pwsh` AST (`VariableExpressionAst` nodes whose
+unqualified name is in the automatic set) giving `1,336` — a gap too large to
+be rounding or a qualifier edge case (re-run with no qualifier filter at all:
+still `1,336`). None of the three has been established as correct here; this
+needs a dedicated investigation into where `pss.py`'s token scan and the AST
+diverge, not a guess. Do not cite any of the three numbers as settled.
+
+**`PSS2002` is now emitted, but only for one of its five recognised sources
+(§12.2).** An assignment whose left-hand side is a bare local variable
+(`role == "write"` in the underlying token scan) now gets a `code:
+"PSS2002"` record under `local-sites`, split out from the `PSS2003`
+("reference to" the same declaration) records it previously shared a code
+with. Measured on the reference target: 4,393 `PSS2002` records, matching
+`local_declared` exactly. **The other four §12.2 sources — a `param()` /
+inline-function parameter, a `foreach` loop variable, a `Set-Variable` /
+`New-Variable` `-Name`, and the `-OutVariable` family — are declarations
+`pss.py` already resolves reads against (`_decl_add`), but their call sites
+never retain a line/offset, so no `PSS2002` record exists for them yet.**
+This is a real, open gap, not an oversight papered over: closing it needs
+`_precompute_parameters`, `_record_foreach` and `_record_set_variable` to
+each start keeping a site the way the assignment path already does, which is
+untried and not scoped here. §13.2's "Emission coverage" row tracks it.
+
+The `PSS4001`/`PSS4002` gap noted at §4.4 is resolved in full — see there.
 
 | Code | Fact |
 |---|---|
@@ -472,18 +493,20 @@ step. `pss.py` reports; it never rewrites.
 
 ### 4.4 PSS4xxx — Impact closure
 
-**`PSS4001` and `PSS4002` are catalogued and specified here, and pass
-`--self-check`'s codes gate (§13.1), but do not currently appear as a `code`
-or `facts` value on any emitted record** — unlike every other row in this
-section. The `closure` record (§11.1) carries `transitive_caller_count` and
-`transitive_callee_count` as bare, untagged fields; the counts these two codes
-describe are present in the model, but not identifiably *as* `PSS4001` /
-`PSS4002` the way, say, `PSS4003` is identifiable by its `code` key.
-`--self-check`'s codes gate only confirms this document and `FACTS` agree on
-which code strings exist — it does not confirm either code is ever attached
-to output (§13.2 lists this as a gap the gate does not cover). Whether the
-fix is to tag the existing fields or to formally fold them into the untagged
-convention already used elsewhere (§5.3) is open and not decided here.
+**`PSS4001` and `PSS4002` are now emitted.** Every `closure` record (§11.1)
+carries `"facts": ["PSS4001", "PSS4002"]` alongside its two counts — both
+codes together, because one `closure` record states both facts at once and
+there is no useful way to split it into two records without duplicating
+`id`. This is **not axis-gated**: unlike `closure-sets`, `local-sites` and
+`command-sites`, the `facts` tag costs nothing per-record to compute and
+adds a small, fixed amount of text to a collection that is already present
+in the default model, so it was added unconditionally rather than folded
+into an axis. Measured effect on the reference target: the default
+(no-axis) model grows from 1,034,458 to 1,048,858 bytes, +1.4%, entirely
+from this one field across all 480 `closure` records — small enough that
+gating it behind an axis would only have added a second thing for a caller
+to remember to ask for, for a fact every record already states via its two
+existing count fields.
 
 | Code | Fact |
 |---|---|
@@ -1197,10 +1220,8 @@ no use for the latter.
 The call graph is stored as a flat edge list (`PSS2001`). Closures — the
 counts this section discusses — are **derived** from it and emitted in the
 default survey, because the model's consumer should not have to compute
-transitive reachability itself (§2.4). **The `PSS4001`/`PSS4002` labels below
-identify this pair of facts for reference in this document; the emitted
-`closure` records do not currently carry either code as a `code` or `facts`
-value (unlike every other fact code in §4) — see the note in §4.4.**
+transitive reachability itself (§2.4). Every `closure` record carries
+`"facts": ["PSS4001", "PSS4002"]` (§4.4).
 
 The edge list is the master; the closures are a derived view. Measured on the
 reference target: 1,247 edges expand to 5,071 closure membership entries, a
@@ -1316,6 +1337,16 @@ Confirmed by execution against the reference PowerShell runtime:
 - `Set-Variable` / `New-Variable` with a literal `-Name`;
 - an `-OutVariable` / `-ErrorVariable` / `-WarningVariable` /
   `-InformationVariable` / `-PipelineVariable` common parameter.
+
+**Current implementation status:** only the two assignment forms (the
+first two bullets after "an assignment whose left-hand side...") actually
+produce a `PSS2002` record today. The other four sources are resolved for
+reads (a read against a `param()`/`foreach`/`Set-Variable`/`-OutVariable`
+declaration does not misreport as `PSS9004`) but do not yet produce a
+`PSS2002` record of their own, because the code paths that register them
+(`_precompute_parameters`, `_record_foreach`, `_record_set_variable`) keep
+only the name, not a site. This is a known, tracked gap (§4.2, §13.2), not
+a silent omission.
 
 `PSS2002` is **not** emitted for:
 
@@ -1465,7 +1496,7 @@ build actually runs today, and gates this SPEC requires of a *complete*
 | Gate | Requirement |
 |---|---|
 | Syntax | `py_compile` clean |
-| Self-check | `--self-check` confirms this SPEC's §4 catalogue and the codes compiled into `pss.py`'s `FACTS` dict agree as **sets of code strings**, exiting non-zero on drift. **This does not confirm any code is ever attached to an emitted record** — see the "Emission coverage" row in §13.2, and the notes at §4.2 and §4.4 for the four codes currently known to be specified but not emitted (`PSS2002`, `PSS2005`, `PSS4001`, `PSS4002`) |
+| Self-check | `--self-check` confirms this SPEC's §4 catalogue and the codes compiled into `pss.py`'s `FACTS` dict agree as **sets of code strings**, exiting non-zero on drift. **This does not confirm any code is ever attached to an emitted record** — see the "Emission coverage" row in §13.2. `PSS2005`, `PSS4001` and `PSS4002` are now confirmed emitted by manual audit (§4.2, §4.4); `PSS2002` is confirmed emitted for one of its five §12.2 sources and not yet for the other four |
 | Provisional index | `--self-check` confirms every `[PROVISIONAL Pnn]` marker in this SPEC has a row in Appendix F and vice versa. A **pending** revision is normal work in progress: reported, exit code unchanged. A **mismatch** between markers and index is a defect in the tool or the document: exit code 2, as for SPEC/catalogue drift. Appendix F must be empty before manifest registration |
 | Axis vocabulary | `--self-check` confirms the axis names compiled into `pss.py` and the §5.6 table agree in both directions, exiting non-zero on drift |
 | Golden vectors — shared | `hash_full` reproduces the repository's shared normalized-hash golden vectors exactly (checked by `--self-check`) |
@@ -1496,7 +1527,7 @@ should not assume any of these are currently enforced.
 | Frozen regression | where `pwsh` is absent, extraction agrees with the committed aggregate expectations (§14.3) | S4 |
 | Static analysis | clean under the repository's Python gates | not yet wired into a `pss.py`-specific run |
 | Docs | bilingual README pair in lock-step; SPEC, CHANGELOG, VERSION present | `README.ja.md`, `CHANGELOG.md` and `VERSION` do not exist yet for this tool (only `README.md` and this file do) |
-| Emission coverage | every code in §4 blocks 1-4 (survey-emittable) appears as a `code` or `facts` value on at least one record somewhere in the regression corpus's models, or is documented as data-dependent-absent (e.g. `PSS1005` legitimately does not fire on a corpus with zero duplicate names) | S4; found by manual audit to currently exclude `PSS2002`, `PSS2005`, `PSS4001`, `PSS4002` (§4.2, §4.4) |
+| Emission coverage | every code in §4 blocks 1-4 (survey-emittable) appears as a `code` or `facts` value on at least one record somewhere in the regression corpus's models, or is documented as data-dependent-absent (e.g. `PSS1005` legitimately does not fire on a corpus with zero duplicate names) | `PSS2005`, `PSS4001`, `PSS4002` closed by manual audit. `PSS2002` open for 4 of 5 §12.2 sources (`param()`/inline-function parameters, `foreach` loop variables, `Set-Variable`/`New-Variable`, `-OutVariable` family) — `_decl_add`'s callers do not retain a site to tag (§4.2, §12.2). No automated gate yet either way; S4 |
 
 Registration as a whole-tool unit sets `tested = true` on the basis of the
 §13.1 self-test being green, not on the canon behavioural suite — and not on

@@ -1177,6 +1177,11 @@ class Survey:
 
             if low in AUTOMATIC_VARIABLES:
                 self._agg(owner)["automatic_refs"] += 1
+                if "local-sites" in self.axes:
+                    rec = dict(base)
+                    rec["code"] = "PSS2005"
+                    rec["id"] = "variable:automatic/%s" % low
+                    self.detail_records.append(rec)
                 continue
 
             if owner == "<script>":
@@ -1197,7 +1202,19 @@ class Survey:
                     agg["local_declared"] += 1
                 if "local-sites" in self.axes:
                     rec = dict(base)
-                    rec["code"] = "PSS2003"
+                    # PSS2002 (declaration) vs PSS2003 (reference to one) is the
+                    # same role split already used for PSS2006/PSS2004 at
+                    # <script> scope above. Coverage note (SPEC 4.2, 12.2): this
+                    # captures the assignment-derived declaration sites (the
+                    # `role == "write"` var-token case). Declarations that never
+                    # produce a var-token write here - a `param()` entry, a
+                    # `foreach` loop variable, a `Set-Variable`/`New-Variable`
+                    # `-Name` - are still counted in `local_declared` above via
+                    # `_decl_add`, but `_decl_add`'s callers do not keep a site
+                    # (line/offset) to tag, so those declarations do not yet get
+                    # a PSS2002 record here. Known gap, tracked in SPEC, not
+                    # silently absorbed.
+                    rec["code"] = "PSS2002" if role == "write" else "PSS2003"
                     rec["id"] = "variable:local/%s#%s" % (owner.split('/')[-1], name)
                     self.detail_records.append(rec)
                 continue
@@ -1360,6 +1377,7 @@ class Survey:
             # is omitted because the PSS4003 records already carry it.
             rec = {
                 "record": "closure", "id": fid,
+                "facts": ["PSS4001", "PSS4002"],
                 "transitive_callee_count": len(callees),
                 "transitive_caller_count": len(callers),
             }
