@@ -366,6 +366,20 @@ dropped.
 
 ### 4.2 PSS2xxx — Reference and binding
 
+**`PSS2002` and `PSS2005` are catalogued and specified here (§12.2 for
+`PSS2002`), and pass `--self-check`'s codes gate (§13.1), but do not
+currently appear as a `code` or `facts` value on any emitted record** — see
+the parallel note at §4.4 for `PSS4001`/`PSS4002`, the same gap. A count
+plausibly related to each is present elsewhere as a bare, untagged field —
+`local_variables[].local_declared` for declaration sites, `local_variables[].
+automatic_refs` for automatic-variable reads — but neither field carries the
+`PSS2002` or `PSS2005` code, and neither total was confirmed against Appendix
+B.3 while writing this note (`automatic_refs` sums to 2,075 across the
+reference target against B.3's separately-sourced 2,004; the two were not
+established to be the same measurement). Whether the fix is to tag those
+fields, reconcile the counts, or formally document the untagged aggregate as
+this fact's realised form is open and not decided here (§13.2).
+
 | Code | Fact |
 |---|---|
 | `PSS2001` | A static call edge from one caller to a defined function. The caller is a defined function, or the reserved owner `<script>` for a call made at script level. Emitted only where the command name is a literal string in command position (§10.6). |
@@ -457,6 +471,19 @@ implemented as plain global string replacement, opt-in, with a human preview
 step. `pss.py` reports; it never rewrites.
 
 ### 4.4 PSS4xxx — Impact closure
+
+**`PSS4001` and `PSS4002` are catalogued and specified here, and pass
+`--self-check`'s codes gate (§13.1), but do not currently appear as a `code`
+or `facts` value on any emitted record** — unlike every other row in this
+section. The `closure` record (§11.1) carries `transitive_caller_count` and
+`transitive_callee_count` as bare, untagged fields; the counts these two codes
+describe are present in the model, but not identifiably *as* `PSS4001` /
+`PSS4002` the way, say, `PSS4003` is identifiable by its `code` key.
+`--self-check`'s codes gate only confirms this document and `FACTS` agree on
+which code strings exist — it does not confirm either code is ever attached
+to output (§13.2 lists this as a gap the gate does not cover). Whether the
+fix is to tag the existing fields or to formally fold them into the untagged
+convention already used elsewhere (§5.3) is open and not decided here.
 
 | Code | Fact |
 |---|---|
@@ -1167,16 +1194,34 @@ the closure sets cost 0.40 MB on the reference target, against 3.86 MB for the
 per-site local-variable records, and a caller reasoning about call structure has
 no use for the latter.
 
-The call graph is stored as a flat edge list (`PSS2001`). Closures
-(`PSS4001`, `PSS4002`) are **derived** from it and emitted in the default
-survey, because the model's consumer should not have to compute transitive
-reachability itself (§2.4).
+The call graph is stored as a flat edge list (`PSS2001`). Closures — the
+counts this section discusses — are **derived** from it and emitted in the
+default survey, because the model's consumer should not have to compute
+transitive reachability itself (§2.4). **The `PSS4001`/`PSS4002` labels below
+identify this pair of facts for reference in this document; the emitted
+`closure` records do not currently carry either code as a `code` or `facts`
+value (unlike every other fact code in §4) — see the note in §4.4.**
 
 The edge list is the master; the closures are a derived view. Measured on the
 reference target: 1,247 edges expand to 5,071 closure membership entries, a
 factor of 4.1. That total — the sum of `transitive_callee_count` over the
 closure records — is the quantity the human layer reports as closure membership
 (§6.2).
+
+**The callee-side and caller-side totals are not the same number, and this is
+not a defect.** The sum of `transitive_caller_count` over the same closure
+records is 5,252, not 5,071. The reserved owner `<script>` (§10.6) is a
+source-only pseudo-node in this graph: it can appear as an entry in a
+function's `transitive_callers` set, but it can never appear in anyone's
+`transitive_callees` set, because `<script>` is never itself a call target and
+is never itself the subject of a closure computation (it is not one of the
+480 functions `self.funcs` iterates). Every function transitively reachable
+from `<script>` therefore carries one extra caller-side membership entry with
+no callee-side counterpart. Measured on the reference target: 181 functions
+are transitively reachable from `<script>`, and 5,252 − 5,071 = 181 exactly.
+A caller comparing the two totals, or the two widest-closure figures in
+Appendix B.2, should expect this gap and should not read it as a symmetry
+violation in the traversal.
 
 **The `closures` collection is not homogeneous, and a caller must not size it
 from the function count.** It carries three record shapes, distinguished by
@@ -1420,7 +1465,7 @@ build actually runs today, and gates this SPEC requires of a *complete*
 | Gate | Requirement |
 |---|---|
 | Syntax | `py_compile` clean |
-| Self-check | `--self-check` confirms this SPEC's §4 catalogue and the codes compiled into `pss.py` agree, exiting non-zero on drift |
+| Self-check | `--self-check` confirms this SPEC's §4 catalogue and the codes compiled into `pss.py`'s `FACTS` dict agree as **sets of code strings**, exiting non-zero on drift. **This does not confirm any code is ever attached to an emitted record** — see the "Emission coverage" row in §13.2, and the notes at §4.2 and §4.4 for the four codes currently known to be specified but not emitted (`PSS2002`, `PSS2005`, `PSS4001`, `PSS4002`) |
 | Provisional index | `--self-check` confirms every `[PROVISIONAL Pnn]` marker in this SPEC has a row in Appendix F and vice versa. A **pending** revision is normal work in progress: reported, exit code unchanged. A **mismatch** between markers and index is a defect in the tool or the document: exit code 2, as for SPEC/catalogue drift. Appendix F must be empty before manifest registration |
 | Axis vocabulary | `--self-check` confirms the axis names compiled into `pss.py` and the §5.6 table agree in both directions, exiting non-zero on drift |
 | Golden vectors — shared | `hash_full` reproduces the repository's shared normalized-hash golden vectors exactly (checked by `--self-check`) |
@@ -1451,6 +1496,7 @@ should not assume any of these are currently enforced.
 | Frozen regression | where `pwsh` is absent, extraction agrees with the committed aggregate expectations (§14.3) | S4 |
 | Static analysis | clean under the repository's Python gates | not yet wired into a `pss.py`-specific run |
 | Docs | bilingual README pair in lock-step; SPEC, CHANGELOG, VERSION present | `README.ja.md`, `CHANGELOG.md` and `VERSION` do not exist yet for this tool (only `README.md` and this file do) |
+| Emission coverage | every code in §4 blocks 1-4 (survey-emittable) appears as a `code` or `facts` value on at least one record somewhere in the regression corpus's models, or is documented as data-dependent-absent (e.g. `PSS1005` legitimately does not fire on a corpus with zero duplicate names) | S4; found by manual audit to currently exclude `PSS2002`, `PSS2005`, `PSS4001`, `PSS4002` (§4.2, §4.4) |
 
 Registration as a whole-tool unit sets `tested = true` on the basis of the
 §13.1 self-test being green, not on the canon behavioural suite — and not on
@@ -1713,11 +1759,12 @@ The §13 differential test asserts **B-I only**.
 | Quantity | Reference value |
 |---|---:|
 | Intra-script call edges | 1,247 |
-| Closure membership entries | 5,071 |
+| Closure membership entries (callee-side total) | 5,071 |
+| Closure membership entries (caller-side total) | 5,252 (see §11.1: the `<script>` pseudo-node gap, not a symmetry defect) |
 | Self-recursive functions | 0 |
 | Mutual-recursion groups (`PSS4004`) | 3 |
 | Widest transitive callee closure | 175 |
-| Widest transitive caller closure | 74 |
+| Widest transitive caller closure | 140 |
 | Functions with no static caller (`PSS4003`) | 26 |
 
 ### B.3 Variables
