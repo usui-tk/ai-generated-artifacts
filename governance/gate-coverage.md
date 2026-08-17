@@ -26,6 +26,7 @@
 | 9 | **reference-health gate** | `python3 quality-tools/reference-health-gate/refcheck.py` (+ `test_refcheck.py` 12) | **Layer-0 root docs only** (repo-root `*.md` + `.github/*.md`): R1 relative link/image targets exist; R2 referenced workflow filenames exist (paths + badge URLs); R5 STATUS current-truth zones' row-count claims == actual manifest count (ADR 0026); **R6 kind-breakdown + project-maturity claims in the same zones == the actual manifest (ADR 0031)** — probe what is written, do not dictate what must be written |
 | 10 | PSScriptAnalyzer + Pester canon suite | `Invoke-ScriptAnalyzer` (3-cell matrix, ADR 0013) + `reference-code/powershell/tests/Invoke-CanonTests.ps1` | Canon-scoped; **carry-over rule**: when `reference-code/powershell` is byte-identical (subtree hash) to the last fully-verified HEAD, results carry (P4 determinism fact) — re-run otherwise |
 | 11 | syntax gates (per project) | `bash -n` / `Parser::ParseFile` / `py_compile` | Stream-owned; the only code gates a **sandbox**-stage project owes (ADR 0024) |
+| 13 | **pss baseline gate** | `python3 quality-tools/powershell-symbol-surveyor/test_pss.py` (+ `--pwsh <path>` for the differential leg; `pss.py --self-check`) | Re-derives every figure in the surveyor SPEC's Appendix **B.8** machine-baseline block from the **pinned corpus blob** (ADR 0034) and fails on divergence, plus the model **shape fingerprints** (default + all-axes key-path sets) and synthetic fixtures for the extractor rules that have failed. **The gate holds no expected values** - B.8 is the single master it reads, so the document and the check cannot drift apart. **Anchored to a blob, not to a branch head**, so maintenance-stream edits to the reference script never turn it red (the coupling that kept `corpus.py check` out of this battery, ADR 0033). Degrades per SPEC 14.3: no `pwsh` -> frozen regression; no `git` -> fixtures only |
 | 12 | reconciliation-loop self-test | `python3 quality-tools/reconciliation-loop/test_coldloop.py` | 12 cases (needs `pip install duckdb`): DuckDB aggregation (schema-probe for absent columns), proposals wrap the pinned request contract 1.0.0, **skip-key dedup** (unchanged re-observed drift not re-proposed; changed evidence = new proposal), **append-only ledger byte-verified** (decide = appended decision record; double/unknown refused), write surface limited to `governance/state/reconciliation/`, zero-observation path. Cold path only - the hot battery stays stdlib-only |
 
 ## Named limitations & footguns (the honest edges)
@@ -53,6 +54,15 @@
   rule #9).
 - **R5 probes exactly two STATUS zones** (`| Current phase |` row, `Gates green`
   paragraph). Other numeric claims (History, prose) are unprobed by design.
+- **The pss baseline gate asserts B-I only, and not all of it.** Appendix B figures whose
+  derivation from the model has not been re-established are marked `[DERIVATION OWED]` in
+  B.3 and are deliberately NOT asserted - marking them is how ADR 0034's "no unchecked
+  baseline may exist" is satisfied without restamping a guess. B-II figures (AST predicates:
+  the declaration-form table, statically-named commands, the string-constant population) are
+  re-measured with `pwsh`, never asserted against `pss.py` - `counters.assignments` in
+  particular is NOT B.4's "Assignment statements" row.
+- **`corpus.py check` remains outside this battery** (ADR 0033): it watches maintenance-owned
+  scripts. The baseline gate is admitted precisely because pinning removes that coupling.
 - **CI-side (GitHub Actions) coverage is a separate axis** from this local battery:
   the 9 workflows run the per-project stage suites + psa self-quality + the scheduled
   cold loop; the governance battery above is local/per-phase. **TF d2w is RESOLVED**:

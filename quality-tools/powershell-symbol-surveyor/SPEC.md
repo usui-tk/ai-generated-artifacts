@@ -1516,6 +1516,9 @@ build actually runs today, and gates this SPEC requires of a *complete*
 | Axis vocabulary | `--self-check` confirms the axis names compiled into `pss.py` and the §5.6 table agree in both directions, exiting non-zero on drift |
 | Golden vectors — shared | `hash_full` reproduces the repository's shared normalized-hash golden vectors exactly (checked by `--self-check`) |
 | Golden vectors — own | `hash_body` reproduces `pss.py`'s own vectors, which include the collision cases of §10.3 as explicit non-collision assertions (checked by `--self-check`) |
+| Baseline | `test_pss.py` re-derives every figure in Appendix B.8 from the **pinned blob** (§14.2, ADR 0034) and exits non-zero on divergence. The B.8 block is the single master: the gate carries no expected values, so the document and the check cannot drift apart. A model key path that B.8 does not record is itself a finding — an unrecorded figure is one nothing re-derives. Anchoring to a blob rather than a branch head is what keeps ordinary maintenance-stream work from turning this gate red (ADR 0029) |
+| Model shape | `test_pss.py` fingerprints the emitted model's key-path set for the default and full-axis materialisations and compares both against B.8. A change of shape is a failure, not a silent event; the failure is the point at which whether `model_version` advances or is held is decided and recorded |
+| Fixtures | `test_pss.py` runs synthetic cases for the extractor rules that have actually failed — every assignment operator including the three that were unreachable, the member-name exclusions of §12.2 including the dynamic form, and the tokenizer regressions those fixes risked. These need no corpus and run even when `git` is absent (§14.3) |
 
 A non-zero exit on mismatch does not conflict with §9. §9 forbids the exit code
 from carrying a verdict **about the surveyed script**; an inconsistency between
@@ -1538,11 +1541,12 @@ should not assume any of these are currently enforced.
 | Channel agreement | for a common corpus, every value printed by the text channel is reproduced by applying this SPEC's stated derivation to the JSON model of the same input; a mismatch, or a printed value with no stated derivation, exits non-zero (§6.2) | no automation written |
 | Determinism | repeated runs over identical input produce byte-identical models (§5.4) | no automation written |
 | Reachability | no §10.5 unreachable combination is producible over the regression corpus (`PSS9006` count is zero) | S4 |
-| Differential test | where `pwsh` is available, extraction agrees with the reference parser on the Appendix B baselines | S4 (`test_pss.py`, not started) |
-| Frozen regression | where `pwsh` is absent, extraction agrees with the committed aggregate expectations (§14.3) | S4 |
+| Derivation owed | every `[DERIVATION OWED]` figure in B.3 is either re-derived from the model — with its derivation stated, as B.2's edge row now states its own — or reclassified out of B-I. Until then those figures are not asserted, and ADR 0034's rule that no unchecked baseline may exist is satisfied by their being *marked* rather than quietly carried | needs a per-figure derivation study; the B.2 edge row (1,247 = 1,281 records less 34 originating at `<script>`) is the worked example |
+| Delta baselines | Appendix B.7's figures are `compare` outputs and cannot be re-derived while `compare` refuses to run (§3) | `compare` (S3) |
 | Static analysis | clean under the repository's Python gates | not yet wired into a `pss.py`-specific run |
 | Docs | bilingual README pair in lock-step; SPEC, CHANGELOG, VERSION present | `README.ja.md`, `CHANGELOG.md` and `VERSION` do not exist yet for this tool (only `README.md` and this file do) |
 | Emission coverage | every code in §4 blocks 1-4 (survey-emittable) appears as a `code` or `facts` value on at least one record somewhere in the regression corpus's models, or is documented as data-dependent-absent (e.g. `PSS1005` legitimately does not fire on a corpus with zero duplicate names) | `PSS2005`, `PSS4001`, `PSS4002` closed by manual audit. `PSS2002` open for 4 of 5 §12.2 sources (`param()`/inline-function parameters, `foreach` loop variables, `Set-Variable`/`New-Variable`, `-OutVariable` family) — `_decl_add`'s callers do not retain a site to tag (§4.2, §12.2). No automated gate yet either way; S4 |
+| Enumerated-constant reachability | **the generalisation of the row above.** Every constant this tool enumerates — fact codes, the assignment-operator set, the automatic-variable set, the axis vocabulary — is demonstrably reachable: some input drives it, or it is documented as data-dependent-absent. Enumerating a capability the machinery cannot exercise has now failed twice in the same shape — four fact codes defined and never emitted, and three assignment operators the tokenizer could not produce (§12.2) — and both times every gate stayed green because the check compared *names* rather than *behaviour*. `test_pss.py`'s fixtures cover the operator set; the fact catalogue and the automatic-variable set are not yet covered | S4 |
 
 Registration as a whole-tool unit sets `tested = true` on the basis of the
 §13.1 self-test being green, not on the canon behavioural suite — and not on
@@ -1808,7 +1812,8 @@ requires that every conforming implementation *can* produce the value.
 edges, closure membership, functions with no static caller, mutual-recursion
 groups, variable references, `PSS2002`, `PSS2003`, `PSS2004`, `PSS2005`,
 `PSS2006`, `PSS2007`, `PSS2008`, `PSS9004`, `PSS3001`, `PSS3002`, dynamic call
-sites, and the `counters` block (B.6).
+sites, and the `counters` block. Every asserted figure is carried in machine
+form in **B.8**, which is the single master the gate reads.
 
 `PSS2002` and `PSS2003` are B-I as of ADR 0034. They were previously absent
 from both lists, and that absence was load-bearing: two extractor defects
@@ -1853,7 +1858,7 @@ The §13.1 baseline gate asserts **B-I only**.
 
 | Quantity | Reference value |
 |---|---:|
-| Intra-script call edges | 1,247 |
+| Intra-script call edges | 1,247 (function-to-function only; the `edges` collection holds 1,281 records, of which 34 originate at the `<script>` pseudo-node — see §11.1) |
 | Closure membership entries (callee-side total) | 5,071 |
 | Closure membership entries (caller-side total) | 5,252 (see §11.1: the `<script>` pseudo-node gap, not a symmetry defect) |
 | Self-recursive functions | 0 |
@@ -1866,15 +1871,37 @@ The §13.1 baseline gate asserts **B-I only**.
 
 | Quantity | Reference value |
 |---|---:|
-| Resolved in function (`PSS2003`) | 20,353 |
-| Automatic (`PSS2005`) | 2,004 |
-| `$script:`-qualified (`PSS2004`) | 1,381 |
-| — across distinct names | 155 (usage-map population: **156**, see §12.3) |
-| Outside any function | 555 |
+| Local references, total | 20,352 |
+| — read, resolved in function (`PSS2003`) | 15,950 |
+| — write, declaration site (`PSS2002`) | 4,402 |
+| Automatic (`PSS2005`) | 2,075 |
 | `$env:`-qualified (`PSS2004`) | 14 |
-| Unresolved (`PSS9004`) | 11, across 5 functions and 4 names |
-| References inside expandable strings (`PSS2007`) | 118, across 83 strings |
-| Distinct usage signatures over 155 script names | 115 |
+| Unresolved (`PSS9004`) | 11 |
+| References inside expandable strings (`PSS2007`) | 118 |
+
+The local-reference rows are split because `PSS2002` and `PSS2003` are separate
+codes as of the declaration-site work; a single "resolved in function" figure
+no longer names one quantity. The previous single figure was 20,353 against a
+total that measures 20,352 — a discrepancy that had no owner while nothing
+re-derived it.
+
+**`PSS2005` was recorded as 2,004 and is 2,075.** The correction is not a
+tuning: the reference parser, given the same 53-name automatic set, reports
+2,075 with an identical per-name distribution and an identical total variable
+reference count. 2,004 is reproducible by no committed revision of this tool
+against any of the 230 committed generations of the target — it is an orphan
+from an uncommitted instrument (ADR 0034). A third figure, 1,336, produced by a
+second throwaway measurement, is short by exactly the number of `$_`
+references.
+
+**`[DERIVATION OWED]`** — the following figures were recorded before this
+appendix was pinned, and their derivation from the model has not been
+re-established. They are **not asserted** and must not be treated as acceptance
+values until each is either re-derived or reclassified: `$script:`-qualified
+(`PSS2004`) 1,381 against a measured 1,812; distinct script names 155 (usage-map
+population 156) against a measured 197; references outside any function 555;
+distinct usage signatures 115; and the sub-counts attached to `PSS9004` and
+`PSS2007` (5 functions / 4 names, 83 strings). Tracked in §13.2.
 
 ### B.4 Declaration forms
 
@@ -1923,6 +1950,96 @@ The §13.1 baseline gate asserts **B-I only**.
 | `PSS7005 = downstream-changed` | 12 |
 | `PSS7005 = dependencies-changed` | 45 |
 | `PSS7006 = dependency-only` | 12 |
+
+### B.8 Machine baseline (B-I)
+
+The block below is **the single master** of every asserted figure. `test_pss.py`
+reads it from this document and re-derives each value from the pinned blob; it
+holds no expected numbers of its own. There is therefore no second copy to
+drift, and a figure cannot be edited here without the gate re-deriving it on the
+next run (ADR 0034).
+
+`model_shape` is the fingerprint of the emitted model's key-path set — every
+path that occurs, arrays collapsed to `[]`, sorted, newline-joined, `sha256`
+truncated to 16 hex (the ADR 0015 width). It is taken from the pinned reference
+target rather than from a synthetic fixture, because a fixture fingerprints only
+the fields it happens to reach. Its purpose is not to fix the shape but to make
+a change of shape a gate failure: when it moves, whether `model_version`
+advances or is deliberately held is decided and recorded at that moment. It had
+not been — the version stayed `"1"` across four shape changes, ten of them field
+removals, and nothing surfaced that until the shapes were compared by hand.
+
+```json pss-baseline
+{
+  "basis": {
+    "corpus_entry": "0002-projects-powershell-update-windows-server-iso.json",
+    "gen_index": 156,
+    "rev": "aade522845fa351cf4bb0f7f81fe72d79eb9bee4",
+    "blob": "f2b5e6a59b4d7fde688958a19bbfcdb6ce247c01"
+  },
+  "counters": {
+    "assignments": 4757,
+    "commands_dynamic": 26,
+    "commands_named": 5046,
+    "expandable_strings": 172,
+    "interpolation_refs": 118,
+    "string_literals_bareword": 10027,
+    "string_literals_quoted": 8010,
+    "unresolved_named_command_sites": 2796,
+    "variable_refs": 24317
+  },
+  "symbols": {
+    "total": 480,
+    "nested": 1,
+    "duplicate_names": 0
+  },
+  "facts": {
+    "symbols.PSS1001": 480,
+    "symbols.PSS1002": 480,
+    "symbols.PSS1003": 480,
+    "symbols.PSS1004": 1,
+    "closures.PSS4001": 480,
+    "closures.PSS4002": 480
+  },
+  "edges": {
+    "records": 1281,
+    "from_script": 34,
+    "function_to_function": 1247
+  },
+  "closures": {
+    "callee_side_total": 5071,
+    "caller_side_total": 5252,
+    "widest_callee": 175,
+    "widest_caller": 140
+  },
+  "local_variables": {
+    "PSS2002": 4402,
+    "PSS2003": 15950,
+    "PSS2005": 2075,
+    "aggregate_records": 465
+  },
+  "script_variables": {
+    "PSS2004": 1826,
+    "PSS2004_script": 1812,
+    "PSS2004_env": 14,
+    "PSS2006": 53,
+    "PSS2008": 156
+  },
+  "soft_references": {
+    "PSS3001": 49,
+    "PSS3002": 104
+  },
+  "string_interpolation_references": 118,
+  "limitations": {
+    "PSS9002": 26,
+    "PSS9004": 11
+  },
+  "model_shape": {
+    "default": "da702e66d9a3ffdf",
+    "all-axes": "020e2592b5ccf71f"
+  }
+}
+```
 
 ---
 
