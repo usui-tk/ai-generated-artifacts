@@ -389,6 +389,82 @@ def check_version_decision(root, text, model_def, model_all):
           % (" and ".join(moved), pss.MODEL_VERSION))
 
 
+TEXT_CHANNEL_DERIVATIONS = {
+    "functions": lambda m: len(m["symbols"]),
+    "nested definitions": lambda m: sum(1 for r in m["symbols"]
+                                        if "PSS1004" in r["facts"]),
+    "duplicate names": lambda m: sum(1 for r in m["symbols"]
+                                     if "PSS1005" in r["facts"]),
+    "named commands": lambda m: m["counters"]["commands_named"],
+    "call edges": lambda m: len(m["edges"]),
+    "from a function": lambda m: sum(1 for r in m["edges"]
+                                     if r["from"] != "<script>"),
+    "variable references": lambda m: m["counters"]["variable_refs"],
+    "scope-qualified refs": lambda m: sum(1 for r in m["script_variables"]
+                                          if r["record"] == "reference"),
+    "interpolated refs": lambda m: len(m["string_interpolation_references"]),
+    "usage-map population": lambda m: sum(1 for r in m["script_variables"]
+                                          if r["record"] == "usage_map"),
+    "unresolved reads": lambda m: sum(1 for r in m["limitations"]
+                                      if r["code"] == "PSS9004"),
+    "no static caller": lambda m: sum(1 for r in m["closures"]
+                                      if r.get("code") == "PSS4003"),
+    "recursion groups": lambda m: sum(1 for r in m["closures"]
+                                      if r.get("code") == "PSS4004"),
+    # Not len(closures): the row counts reachability *entries*, the closure
+    # sets summed, not the records that carry them. Writing the obvious
+    # derivation first and being reddened by it is the reason this check
+    # derives from the SPEC rather than from the renderer.
+    "closure entries": lambda m: sum(r.get("transitive_callee_count", 0)
+                                     for r in m["closures"]),
+}
+
+
+def check_channel_agreement(model):
+    """Every figure the text channel prints is reproduced from the JSON channel.
+
+    The two channels are one measurement rendered twice, and a caller reading
+    the text one has no way to notice when they stop agreeing. The derivations
+    here are written from the SPEC's definitions and applied to the model, not
+    lifted from ``render_text`` - a check that re-ran the renderer's own
+    expression would compare a restatement rather than a measurement, which is
+    the failure this tool has now recorded four times.
+
+    Rows the renderer prints that carry no derivation here are reported, so
+    that adding a figure to the text channel without a derivation is visible
+    rather than silently uncovered.
+    """
+    rendered = {}
+    for line in pss.render_text(model).splitlines():
+        if ":" not in line:
+            continue
+        label, _, value = line.partition(":")
+        label = label.strip(" -")
+        head = value.strip().split()[0] if value.strip() else ""
+        if head.isdigit():
+            rendered[label] = int(head)
+
+    missing = sorted(set(TEXT_CHANNEL_DERIVATIONS) - set(rendered))
+    eq(missing, [],
+       "channel agreement: every derivation has a row in the text channel")
+
+    disagreeing = {label: (rendered[label], derive(model))
+                   for label, derive in sorted(TEXT_CHANNEL_DERIVATIONS.items())
+                   if label in rendered and rendered[label] != derive(model)}
+    eq(disagreeing, {},
+       "channel agreement: text figures reproduce from the JSON channel")
+
+    # Rows without a derivation here are listed rather than ignored, so that a
+    # figure added to the text channel without one becomes visible. `lines` is
+    # a source attribute rather than a measurement; the three soft-reference
+    # rows print a split whose parts this check does not yet decompose.
+    eq(sorted(label for label in rendered
+              if label not in TEXT_CHANNEL_DERIVATIONS
+              and not label.startswith("PSS")),
+       ["function-name lits", "lines", "script-var lits", "string constants"],
+       "channel agreement: the uncovered rows are the ones recorded as uncovered")
+
+
 def check_projection_invariance(text, model_all):
     """Dropping an axis must remove records and fields, never change them (5.6).
 
@@ -776,6 +852,8 @@ def main():
         check_determinism(text)
 
         check_projection_invariance(text, model_all)
+
+        check_channel_agreement(model_all)
 
         if args.pwsh and os.path.exists(args.pwsh):
             run_differential(args.pwsh, text, measured)
