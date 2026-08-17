@@ -161,6 +161,25 @@ def measure(model):
                               for r in model["script_variables"]
                               if r.get("code") == "PSS2004")
     lvc = codes("local_variables")
+
+    # Appendix B.3's figures, each stated as a query rather than as a label.
+    # A label does not determine a query: "$script:-qualified" reads equally as
+    # the record count, the script-qualified subset, or the part of that subset
+    # occurring inside a function, and the three differ (ADR 0036).
+    script_refs = [r for r in model["script_variables"]
+                   if r.get("record") == "reference"
+                   and r.get("qualifier") == "script"]
+    usage_map = [r for r in model["script_variables"]
+                 if r.get("record") == "usage_map"]
+    signature = lambda r: (tuple(sorted(r.get("writers") or [])),
+                           tuple(sorted(r.get("readers") or [])))
+    p9004 = [r for r in model["limitations"] if r.get("code") == "PSS9004"]
+    p9004_names = set()
+    for r in p9004:
+        hit = re.search(r"'\$([^']+)'", r.get("detail") or "")
+        if hit:
+            p9004_names.add(hit.group(1))
+    interp = model["string_interpolation_references"]
     callee = [len(c.get("transitive_callees") or []) for c in closures]
     caller = [len(c.get("transitive_callers") or []) for c in closures]
 
@@ -196,16 +215,27 @@ def measure(model):
             "PSS2004_env": svq["env"],
             "PSS2006": codes("script_variables")["PSS2006"],
             "PSS2008": codes("script_variables")["PSS2008"],
+            "script_qualified_refs": len(script_refs),
+            "script_qualified_refs_in_function":
+                sum(1 for r in script_refs if r["owner"] != "<script>"),
+            "script_qualified_refs_at_script_level":
+                sum(1 for r in script_refs if r["owner"] == "<script>"),
+            "script_qualified_names": len({r["name"] for r in script_refs}),
+            "usage_signatures": len({signature(r) for r in usage_map}),
         },
         "soft_references": {
             "PSS3001": codes("soft_references")["PSS3001"],
             "PSS3002": codes("soft_references")["PSS3002"],
         },
-        "string_interpolation_references":
-            len(model["string_interpolation_references"]),
+        "string_interpolation_references": {
+            "records": len(interp),
+            "distinct_source_lines": len({r["line"] for r in interp}),
+        },
         "limitations": {
             "PSS9002": codes("limitations")["PSS9002"],
             "PSS9004": codes("limitations")["PSS9004"],
+            "PSS9004_functions": len({r.get("owner") for r in p9004}),
+            "PSS9004_names": len(p9004_names),
         },
     }
 
@@ -225,7 +255,29 @@ def acceptance_block(model_def, model_all):
         "default": shape_fingerprint(model_def),
         "all-axes": shape_fingerprint(model_all),
     }
+    block["references_outside_functions"] = {
+        "default": refs_outside_functions(model_def),
+        "all-axes": refs_outside_functions(model_all),
+    }
     return block
+
+
+def refs_outside_functions(model):
+    """Every variable reference occurring outside any function, all scopes.
+
+    Stated per materialisation because it is the one asserted figure that is
+    not axis-invariant: ``local-sites`` retains each local reference site, so
+    the script-level locals it contributes are absent from the default model.
+    A count that moves with the axes is unfalsifiable unless the axes are part
+    of its basis (ADR 0036). Its script-scope-only companion,
+    ``script_qualified_refs_at_script_level``, is axis-invariant and lives in
+    the block above; the two answer different questions and both are kept.
+    """
+    at_script = sum(1 for r in model["script_variables"]
+                    if r.get("record") == "reference"
+                    and r.get("owner") == "<script>")
+    return at_script + sum(1 for r in (model.get("local_variables") or [])
+                           if r.get("owner") == "<script>")
 
 
 def canonical_json(obj):

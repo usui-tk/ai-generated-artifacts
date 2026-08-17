@@ -1427,16 +1427,25 @@ The script level itself is represented by the reserved owner `<script>`.
 
 The usage map is the variable-side analogue of a function's callee set: it is
 the structural signature that survives a rename. Measured on the reference
-target, 155 script-scope names produce 115 distinct usage signatures; the
-collisions fall among narrowly-used variables, whose blast radius is
-correspondingly small. This inverse relationship between collision risk and
+target at the pinned blob, the 156 names carrying a usage map produce 123
+distinct usage signatures; the collisions fall among narrowly-used variables,
+whose blast radius is correspondingly small. The previously recorded pair,
+155 names and 115 signatures, is reproduced by no generation jointly: 115 is
+reproduced at generations 104-110 of entry `0002` and by none thereafter, and
+155 by none at all. They were separate measurements of separate states, which
+is why they never agreed with each other (ADR 0036). This inverse relationship between collision risk and
 consequence is a property to be reported, not a defect to be hidden.
 
 ### 12.4 References inside expandable strings
 
 A variable referenced inside a double-quoted string or here-string is a real
 reference and is emitted as `PSS2007` in addition to its ordinary reference
-fact. Measured on the reference target: 118 such references across 83 strings.
+fact. Measured on the reference target at the pinned blob: 118 such references
+on **84 distinct source lines**. The line is the unit because the model carries
+no identifier for the containing string; two expandable strings on one line are
+therefore counted once, and the figure is named for what it counts rather than
+for what it approximates. A previously recorded 83 is reproduced at generations
+88-111 of entry `0002` and not at the pin.
 
 These matter disproportionately because the surrounding syntax defeats naive
 text substitution: `"${Foo}bar"` uses brace delimiting, and in `"$Foo.Property"`
@@ -1446,7 +1455,7 @@ performed by search-and-replace will corrupt or skip these sites.
 ### 12.5 Soft-reference scoping
 
 `PSS3002` matches string literals against **script-scope variable names only**
-— specifically the `script:`-qualified names (155 on the reference target), not
+— specifically the `script:`-qualified names (198 at the pinned blob), not
 the wider `PSS2006` declaration population. Measured on the reference target:
 27,626 string literals produce 8,821 matches against the full variable-name
 population and 146 against the script-scope population — a factor of 60. The
@@ -1543,6 +1552,7 @@ build actually runs today, and gates this SPEC requires of a *complete*
 | Baseline | `test_pss.py` re-derives every figure in Appendix B.8 from the **pinned blob** (§14.2, ADR 0034) and exits non-zero on divergence. The B.8 block is the single master: the gate carries no expected values, so the document and the check cannot drift apart. A model key path that B.8 does not record is itself a finding — an unrecorded figure is one nothing re-derives. Anchoring to a blob rather than a branch head is what keeps ordinary maintenance-stream work from turning this gate red (ADR 0029) |
 | Baseline digest | `test_pss.py` derives the acceptance block (B.8 less its `basis`), checks it against the document **by value**, and checks that `--emit-baseline-digest` — the single implementation a derived cache calls (§14.4) — reproduces the gate's own digest. A cache and this gate therefore cannot disagree about what was measured |
 | Model shape | `test_pss.py` fingerprints the emitted model's key-path set for the default and full-axis materialisations and compares both against B.8. A change of shape is a failure, not a silent event; the failure is the point at which whether `model_version` advances or is held is decided and recorded |
+| Materialisation-stated figures | a figure that is not axis-invariant is asserted **per materialisation** and both values are re-derived — today `references_outside_functions` (485 default / 556 with `local-sites`). A single number for such a figure is unfalsifiable, the projection-side form of the basis rule (ADR 0036) |
 | Fixtures | `test_pss.py` runs synthetic cases for the extractor rules that have actually failed — every assignment operator including the three that were unreachable, the member-name exclusions of §12.2 including the dynamic form, and the tokenizer regressions those fixes risked. These need no corpus and run even when `git` is absent (§14.3) |
 
 A non-zero exit on mismatch does not conflict with §9. §9 forbids the exit code
@@ -1566,7 +1576,7 @@ should not assume any of these are currently enforced.
 | Channel agreement | for a common corpus, every value printed by the text channel is reproduced by applying this SPEC's stated derivation to the JSON model of the same input; a mismatch, or a printed value with no stated derivation, exits non-zero (§6.2) | no automation written |
 | Determinism | repeated runs over identical input produce byte-identical models (§5.4) | no automation written |
 | Reachability | no §10.5 unreachable combination is producible over the regression corpus (`PSS9006` count is zero) | S4 |
-| Derivation owed | every `[DERIVATION OWED]` figure in B.3 is either re-derived from the model — with its derivation stated, as B.2's edge row now states its own — or reclassified out of B-I. Until then those figures are not asserted, and ADR 0034's rule that no unchecked baseline may exist is satisfied by their being *marked* rather than quietly carried | needs a per-figure derivation study; the B.2 edge row (1,247 = 1,281 records less 34 originating at `<script>`) is the worked example |
+| Derivation owed | **RESOLVED (ADR 0036).** Every B.3 figure is re-derived by `test_pss.py` from the pinned blob, withdrawn as an orphan, or re-stamped with the state that reproduces it; a figure with no executable derivation is no longer permitted to exist | closed |
 | Delta baselines | Appendix B.7's figures are `compare` outputs and cannot be re-derived while `compare` refuses to run (§3) | `compare` (S3) |
 | Static analysis | clean under the repository's Python gates | not yet wired into a `pss.py`-specific run |
 | Docs | bilingual README pair in lock-step; SPEC, CHANGELOG, VERSION present | `README.ja.md`, `CHANGELOG.md` and `VERSION` do not exist yet for this tool (only `README.md` and this file do) |
@@ -1685,6 +1695,16 @@ is exactly the condition that advances `model_version`. Regeneration is
 therefore batched with the change that causes it rather than performed per
 change, and the header is what proves which side of the change a given file is
 on.
+
+**A digest mismatch identifies a different build; it does not by itself
+invalidate a cache.** The digest is taken over the acceptance block, and that
+block gains rows whenever a figure acquires an executable derivation — as it
+did at ADR 0036, with `pss.py` untouched. A cache whose digest no longer equals
+the current build's is stale as an *identification* and still sound as *data*
+while `model_version` and `model_shape` agree. The pairing is deliberate: the
+digest is the finer instrument and answers "which build", `model_version`
+answers "is this comparable", and reading the first as though it answered the
+second would retire caches that nothing had changed.
 
 ---
 
@@ -1969,14 +1989,27 @@ from an uncommitted instrument (ADR 0034). A third figure, 1,336, produced by a
 second throwaway measurement, is short by exactly the number of `$_`
 references.
 
-**`[DERIVATION OWED]`** — the following figures were recorded before this
-appendix was pinned, and their derivation from the model has not been
-re-established. They are **not asserted** and must not be treated as acceptance
-values until each is either re-derived or reclassified: `$script:`-qualified
-(`PSS2004`) 1,381 against a measured 1,812; distinct script names 155 (usage-map
-population 156) against a measured 197; references outside any function 555;
-distinct usage signatures 115; and the sub-counts attached to `PSS9004` and
-`PSS2007` (5 functions / 4 names, 83 strings). Tracked in §13.2.
+**The `[DERIVATION OWED]` figures are resolved (ADR 0036).** Each was recorded
+under a label that did not determine a query, against a state that was not
+recorded. Both halves were measured before this text was written: every one of
+the six committed revisions of `pss.py`, run against the pinned blob, returns
+the same values, so no figure below moved because the tool moved. What moved
+was the question being asked and the file it was asked about.
+
+| Recorded | Disposition | Derivation now stated |
+|---|---|---|
+| `$script:`-qualified (`PSS2004`) 1,381 | **re-derived exactly** | script-qualified reference records whose owner is a function — `script_qualified_refs_in_function`. The label admitted three readings (1,865 records, 1,812 `PSS2004`, 1,381 inside functions) and the recorded figure was the third |
+| usage-map population 156 | **re-derived exactly** | `PSS2008` record count, already asserted in B.8 |
+| `PSS9004` sub-counts, 5 functions / 4 names | **re-derived exactly** | distinct owners of the `PSS9004` records, and distinct variable names named in their `detail` |
+| distinct usage signatures 115 | **re-stamped to 123** | distinct (writer set, reader set) pairs over the usage map. 115 is reproduced at generations 104-110 of entry `0002` — a different state, not a different derivation |
+| `PSS2007` 83 strings | **re-stamped to 84** | distinct source lines carrying an interpolated reference (§12.4). 83 is reproduced at generations 88-111 of entry `0002` |
+| distinct script names 155, and its correction to 197 | **withdrawn** | reproduced by no generation and no revision. Both are orphans of instruments that no longer exist, in the manner of `PSS2005`'s 2,004 (ADR 0034). The measured figure is 198, asserted as `script_qualified_names` |
+| references outside any function 555 | **withdrawn; replaced by two figures** | the label covers two questions with different answers. `script_qualified_refs_at_script_level` (484, axis-invariant) is the script-scope share; `references_outside_functions` (485 default / 556 with `local-sites`) is the all-scopes total, and is the one asserted figure that is **not** axis-invariant, so it states its materialisation. 555 is reproduced by neither, at any generation |
+
+That the recorded figures point at generations 88-111, 104-110 and 132-156 is
+the finding, not an aside: they were never a snapshot of one artefact. This is
+the moving-target defect ADR 0034 named for acceptance figures, surviving in
+B.3 because the rule reached the basis and not the derivation.
 
 ### B.4 Declaration forms
 
@@ -2109,20 +2142,34 @@ is, so a bare count is unfalsifiable in the same way.
     "PSS2004_script": 1812,
     "PSS2004_env": 14,
     "PSS2006": 53,
-    "PSS2008": 156
+    "PSS2008": 156,
+    "script_qualified_refs": 1865,
+    "script_qualified_refs_in_function": 1381,
+    "script_qualified_refs_at_script_level": 484,
+    "script_qualified_names": 198,
+    "usage_signatures": 123
   },
   "soft_references": {
     "PSS3001": 49,
     "PSS3002": 104
   },
-  "string_interpolation_references": 118,
+  "string_interpolation_references": {
+    "records": 118,
+    "distinct_source_lines": 84
+  },
   "limitations": {
     "PSS9002": 26,
-    "PSS9004": 11
+    "PSS9004": 11,
+    "PSS9004_functions": 5,
+    "PSS9004_names": 4
   },
   "model_shape": {
     "default": "da702e66d9a3ffdf",
     "all-axes": "020e2592b5ccf71f"
+  },
+  "references_outside_functions": {
+    "default": 485,
+    "all-axes": 556
   }
 }
 ```
