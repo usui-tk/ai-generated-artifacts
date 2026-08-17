@@ -378,6 +378,7 @@ declaration test first misclassifies 254 references on the reference target.
 | `PSS2006` | A script-scope declaration made at script level. At script level an unqualified assignment declares a script-scoped variable, so `$Foo = 1` at top level and `$script:Foo` inside a function name the same entity. |
 | `PSS2007` | A variable reference occurring inside an expandable (double-quoted) string or here-string. Carries the containing string's location. These are real references and are the principal mechanism by which a text-substitution rename silently fails (§12.4). |
 | `PSS2008` | A script-scope variable's usage map: the set of functions that **write** it and the set that **read** it, with per-set counts (§12.3). One record per name in the usage-map population (§12.3). |
+| `PSS2009` | A command invocation site whose command name is a literal in command position (§10.6) but does not resolve to any function defined in this file (SPEC 15.4 F2 / P23). Every such name is counted, not filtered — this tool has no structural basis for telling a deleted local function from a cmdlet or an external executable, and guessing from naming convention is exactly the threshold §1.3 forbids. The default record is a **per-name aggregate** (`name`, `sites`, `owners`); one **per-site** record (`name`, `owner`, `line`) is additionally emitted per invocation under the `command-sites` axis (§5.6). |
 
 The usage-map population is **not** the same as the `PSS2006` declaration
 population. It is the union of:
@@ -533,6 +534,8 @@ JSON. Top-level shape:
   "pss_version": "...",
   "model_version": "1",
   "source": { "path": "...", "sha256": "...", "line_count": 0, "byte_count": 0 },
+  "materialization":    { "axes": [] },
+  "counters":           { /* whole-file counts, incl. unresolved_named_command_sites */ },
   "symbols":            [ /* PSS1001-PSS1005 */ ],
   "edges":              [ /* PSS2001 */ ],
   "closures":           [ /* PSS4001-PSS4004 */ ],
@@ -540,6 +543,7 @@ JSON. Top-level shape:
   "string_interpolation_references": [ /* PSS2007 */ ],
   "local_variables":    [ /* per-function aggregates, see 5.3 */ ],
   "soft_references":    [ /* PSS3001-PSS3002 */ ],
+  "unresolved_named_commands": [ /* PSS2009 */ ],
   "limitations":        [ /* PSS9xxx */ ]
 }
 ```
@@ -639,9 +643,27 @@ by which a caller asks for one such omission to be restored.
 |---|---|---|
 | `closure-sets` | `transitive_callees` and `transitive_callers` on each closure record, alongside the counts | Derivable from the `edges` master (§11.1) |
 | `local-sites` | One record per function-local variable reference, alongside the retained per-function aggregates | Folded into an aggregate (§5.3) |
+| `command-sites` | One record per unresolved command-invocation site, alongside the retained per-name aggregates | Folded into a per-name aggregate (§4.2 PSS2009 / §15.4 F2) |
 
-Neither axis adds or removes a collection: `closures` and `local_variables` are
-present in every model, and an axis only changes what a record in them carries.
+Neither axis adds or removes a collection: `closures`, `local_variables` and
+`unresolved_named_commands` are present in every model, and an axis only
+changes what a record in them carries or how many records the collection
+holds — never which collections exist.
+
+**`command-sites`, resolved (§15.4 F2 / P23).** The population is not
+withheld the way `local-sites` is folded into a per-function aggregate — it
+is folded into a per-**name** aggregate, because an unresolved command's
+identity is the invoked name, not an enclosing function. The default
+`unresolved_named_commands` record carries `name`, `sites` (the count) and
+`owners` (the sorted set of enclosing functions or `<script>`) — enough to
+answer "is there a call to this name, and from roughly where" without the
+per-site cost. `command-sites` restores one additional record per site,
+carrying `owner` and `line`. Measured on the reference target: the aggregate
+form costs 5.3% of the base model (93 names); the full site form costs 22.3%
+(2,796 sites) — the same order of magnitude that motivated `local-sites`
+originally, which is why this collection now follows the identical pattern
+rather than being emitted unconditionally in full or gated as an
+all-or-nothing collection.
 
 **Why the axes exist at all.** A caller that can write the model to a file and
 query it with code does not need them; it optimises *selectivity*, not total
@@ -663,9 +685,10 @@ asked for and no indication that it had.
 tiering or §11.1's master/derived rule has already withheld it. **A master
 collection never becomes an axis.** `symbols`, `edges`, `closures`,
 `script_variables`, `string_interpolation_references`, `local_variables`,
-`soft_references`, `counters` and `limitations` are emitted unconditionally —
-every top-level collection the model has. An axis restores *withheld content
-within* a collection, never the collection itself. The vocabulary is therefore bounded
+`soft_references`, `unresolved_named_commands`, `counters` and `limitations`
+are emitted unconditionally — every top-level collection the model has. An
+axis restores *withheld content within* a collection, never the collection
+itself. The vocabulary is therefore bounded
 by the number of places this document deliberately withholds something — not by
 the number of things a caller might wish to filter. Filtering is the caller's
 operation on a model it already holds; an axis is a decision about what is
@@ -714,18 +737,15 @@ diff as an unchanged one. Uniform meaning is worth more than the saved
 re-survey. The refusal message names which axes differed, so the caller knows
 which survey to re-run.
 
-> **[PROVISIONAL P21 - S2 / 2026-08-16]**
-> Basis: design-choice.
-> Was: refusal was the only outcome for an asymmetric pair.
-> Why: refusal is unrecoverable when the earlier source no longer exists and
-> the mismatched model cannot be regenerated. Because axes only ever add
-> emitted material, stripping a model to a smaller axis set is a deterministic
-> projection and a fact under §1.3, so the case is soluble by an explicit
-> normalisation the caller performs deliberately — which is not the same thing
-> as a comparison that quietly narrows its own coverage. Reviewers in both
-> model families reached this shape independently.
-> Review: should normalisation be its own operation, a flag on `compare`, or
-> folded into the §5.7 projection?
+**P21, resolved (§5.7).** Axis-set normalisation is not its own top-level
+operation and not a flag on `compare` — it is folded into the `slice`
+subcommand alongside the §5.7 symbol-scoped projection, because both are the
+same kind of thing: a deterministic reduction of an *existing* model, self-
+declared in the output's own `materialization` block. `slice --axes` narrows
+to a subset of the axes the input model already carries; requesting an axis
+the input never materialised is refused (an axis only ever adds material, so
+there is nothing to narrow *from*), naming which axis was unavailable and
+which the input has. See §5.7.
 
 Named presets (`minimal`, `full`) are deliberately absent. A preset is a remedy
 for a caller that cannot tell which axes it needs; `--cost` (§3.1) removes that
@@ -755,19 +775,52 @@ identifier, plus the edges incident to it on either side, plus `limitations` in
 its entirety — unconditionally, because limitations describe what is *not*
 known and filtering them would misrepresent the projection's own coverage.
 
-> **[PROVISIONAL P20 - S2 / 2026-08-16]**
-> Basis: open.
-> Was: not specified; the axis mechanism was the only size control.
-> Why: six external reviewers, unprompted and across two model families, each
-> named a symbol-scoped projection as the capability they most wanted, and five
-> ranked it first. The requirement is settled; the shape is not. Open: whether
-> it is `survey --scope <id>` (one parse, source required) or a `slice
-> <model.json> <id>` subcommand (operates on an existing model, source not
-> required, and composes with a stored artefact); which identifying fields
-> participate in the match; whether one-hop incidence is the right boundary;
-> and what a projected model declares about its own coverage so that it cannot
-> be mistaken for a whole one.
-> Review: which shape, and what must a projection declare about itself?
+**P20, resolved.** Shape: `slice <model.json>` — a subcommand over an
+*existing* model, not a `survey --scope` flag. The projection is required to
+work when the earlier source no longer exists and the model cannot be
+regenerated (§5.6's P21 motivation is the same fact applied to axes), which
+only a stored-artefact operation can guarantee; and P21 resolved axis-set
+normalisation into the same subcommand, so a single mechanism serves both
+narrowings of an existing model rather than two independent ones.
+
+`slice` takes `--scope <id>` (this projection), `--axes <subset>` (§5.6's
+normalisation), or both together — "this symbol, and only these axes" is one
+call, not two.
+
+**Identifying fields (settled).** A record participates when it carries the
+scope identifier as `id`, `from`, `to`, `owner`, or `matches`, or the
+identifier appears in its `members` or `owners` list. This is one mechanical
+rule applied uniformly across every collection, not a per-collection special
+case: `id` matches a symbol's own record and a `PSS4003` orphan record;
+`from`/`to` match an edge on either side; `owner` matches every reference or
+aggregate recorded against the enclosing function; `matches` matches a soft
+reference (`PSS3001`/`PSS3002`) that names the symbol; `members` matches a
+`PSS4004` mutual-recursion group; `owners` matches a `PSS2009` per-name
+aggregate (§5.6) against every function it was invoked from, without needing
+the `command-sites` axis to know that much. `counters` and `source` are
+whole-survey metadata, not per-symbol, and pass through unchanged. A scoped
+`script_variables` usage-map record (`PSS2008`) is a name-level summary of
+writers and readers, not itself attributable to one function via any of these
+fields, so it is not pulled into a *function*-scoped projection; a
+variable-scoped projection (`--scope variable:script/<n>`) reaches it directly
+through `id`.
+
+**Incidence boundary (settled).** One hop only, matching §4.4's edge-level
+facts (`PSS2001`/`PSS4003`/`PSS4004`): an edge is included when the scope is
+either endpoint, not when the scope is reachable through it. A caller wanting
+the transitive closure has `closures` (`PSS4001`-`PSS4002`, or the counts
+already unconditional in every model, §4.4) and can slice by each member of it
+in turn.
+
+**A projected model declares its own coverage.** `slice --scope <id>` sets
+`materialization.scope` to the identifier used, alongside the usual
+`materialization.axes`. A scope-less model has no `scope` key at all — absence
+means "whole model", not "matched everything" — so a consumer can tell a
+projection from a full survey without inspecting record counts. An unmatched
+scope is refused (exit `2`) rather than silently returning an all-empty model,
+for the same reason an unrecognised axis name is refused: a typo would
+otherwise read as "this symbol has no facts" (§1.3) instead of as the usage
+error it is.
 
 ---
 
@@ -1482,24 +1535,21 @@ any kind, and each correctly carries no `named_by_literal` key. A comment
 documents intent; it is not evidence of a call path, and treating it as one
 would make `named_by_literal` an inference rather than a fact under §1.3.
 
-**F2 — an invoked name that resolves to nothing must be emitted.** The count of
-named commands is kept and the names are not. Restoring them, with their
-positions, is what makes a call to a deleted function expressible at all. The
-collection is not a list of errors: most entries are cmdlets and external
-executables, and classifying them is the caller's work, not this tool's. *Not
-yet resolved — see P23.*
-
-> **[PROVISIONAL P23 - S3 / 2026-08-16]**
-> Basis: open.
-> Was: unresolved invoked names were counted and discarded.
-> Why: without them the model cannot express a call to a function that does
-> not exist, which is the first thing a caller checks after a deletion. On the
-> reference target this collection would carry 93 distinct names over 2,798
-> sites, of which 87 are cmdlets and 6 are external executables — a large
-> collection whose entries are mostly uninteresting.
-> Review: whole collection, or only names matching the file's own definition
-> conventions? If filtered, the filter is a threshold and §1.3 forbids it —
-> so what is the reproducible rule?
+**F2 — an invoked name that resolves to nothing must be emitted (RESOLVED,
+P23).** The count of named commands is kept and the names are not by default.
+Resolved as `PSS2009` (§4.2): a per-name aggregate (`name`, `sites`, `owners`)
+is always present — whole collection, not filtered by any naming-convention
+guess, because this tool has no structural basis for telling a deleted local
+function from a cmdlet or an external executable (§1.3 forbids guessing that
+from a threshold). Restoring per-site positions, which is what makes a call to
+a deleted function locatable rather than merely countable, is the
+`command-sites` axis (§5.6): measured at 22.3% of the base model against the
+aggregate's 5.3%, the same cost class that motivated `local-sites` originally,
+so the two axes now follow one pattern rather than each being decided
+separately. Measured against the full 230-generation reference corpus at the
+time of resolution: 93 distinct names over 2,796 sites (corrects an earlier
+estimate of 2,798, carried in this section's own provisional note without a
+fresh measurement).
 
 **F3 — orphaning is a transition and belongs in `compare` (RESOLVED, P24).**
 *Had callers, now has none* is the fact that would have caught all four
@@ -1810,9 +1860,10 @@ a mismatch and merely reporting a pending count.
 
 | ID | Section | Basis | Review question |
 |---|---|---|---|
-| P20 | §5.7 | open | Which shape should the symbol-scoped projection take, and what must a projected model declare about its own coverage? |
-| P21 | §5.5 | design-choice | Should axis-set normalisation be its own operation, a flag on `compare`, or folded into the §5.7 projection? |
-| P23 | §15.4 | open | Should every unresolved invoked name be emitted, or only some — and by what rule that is not a threshold? |
+
+No provisional revisions are outstanding. All were resolved on 2026-08-16
+(P22, P24, P25) and 2026-08-17 (P20, P21, P23); see the paragraphs below and
+the inline resolution notes at each point of change.
 
 **P22, P24 and P25 were resolved on 2026-08-16**, against a full 230-generation
 re-survey of the reference target (both corpus entries, `pss.py` run directly —
@@ -1838,6 +1889,27 @@ not the throwaway instruments retired at ADR 0033), and their markers removed.
 
 The same re-survey also corrected §15.2's "three... within two days" figure to
 two (§15.2 carries the detail and the provenance note).
+
+**P20, P21 and P23 were resolved on 2026-08-17**, against the same
+230-generation reference corpus, and their markers removed.
+
+- **P20** — shape is `slice <model.json>` (§5.7): a subcommand over an
+  existing model, not a `survey --scope` flag, because the model must remain
+  sliceable after the source no longer exists — the same fact P21 required of
+  axis normalisation. `slice` takes `--scope` and/or `--axes`.
+- **P21** — folded into the same `slice` subcommand as P20, not a `compare`
+  flag and not a separate operation: both are deterministic reductions of an
+  existing model, self-declared via `materialization`. `slice --axes` narrows
+  to a subset of what the input already carries; requesting more is refused
+  by name.
+- **P23** — resolved as `PSS2009` (§4.2), folded into the same
+  aggregate/axis-restored-site pattern as `local-sites` (§5.6), once the
+  per-site form measured at 22.3% of the base model against the aggregate
+  form's 5.3% — the same cost class that motivated `local-sites` in the first
+  place. Measured against the reference corpus: 93 distinct names over 2,796
+  sites (this section's own prior estimate of 2,798 was not re-measured before
+  being written down; corrected here per this document's own measurement
+  discipline, §15.1).
 
 **P15 through P19 were resolved on 2026-08-16 by external review** and their
 markers removed. Six respondents across two model families, all with code
@@ -1889,7 +1961,7 @@ an index mismatch (§13).
 
 ### F.1 Open items requiring adjudication
 
-None outstanding beyond the P20, P21 and P23 rows above. §15.5 states what the
+None outstanding. §15.5 states what the
 observed-failure method does not establish. O1, O2 and O3 were adjudicated on
 2026-08-16:
 

@@ -22,7 +22,8 @@ Layers (SPEC 2.1):
     Layer 3  comparator   model x model -> deltas     [not in this version]
 
 Usage:
-    python3 pss.py survey <script.ps1> [--out PATH] [--format text|json] [--detail]
+    python3 pss.py survey <script.ps1> [--out PATH] [--format text|json] [--axes AXES]
+    python3 pss.py slice <model.json> [--scope ID] [--axes AXES] [--out PATH]
     python3 pss.py compare <before.json> <after.json> [--format text|json]
     python3 pss.py --list-facts
     python3 pss.py --self-check
@@ -41,6 +42,19 @@ __version__ = "0.1.0"
 MODEL_VERSION = "1"
 
 MIN_PYTHON = (3, 12)
+
+# ---------------------------------------------------------------------------
+# Materialisation axes (SPEC 5.6). The vocabulary is closed: --self-check
+# verifies these names against the SPEC 5.6 table in both directions. A
+# master collection never becomes an axis (SPEC 5.6); an axis only restores
+# content already withheld *within* a collection that is always present.
+# ---------------------------------------------------------------------------
+AXES = {
+    "closure-sets": "transitive_callees and transitive_callers on each closure record",
+    "local-sites": "one record per function-local variable reference",
+    "command-sites": "one record per unresolved command-invocation site, "
+                     "alongside the retained per-name aggregates",
+}
 
 EXIT_OK = 0
 EXIT_ERROR = 2
@@ -65,6 +79,7 @@ FACTS = {
     "PSS2006": "A script-scope declaration made at script level.",
     "PSS2007": "A variable reference inside an expandable string or here-string.",
     "PSS2008": "A script-scope variable's usage map (writers and readers).",
+    "PSS2009": "A command invocation site whose name does not resolve to a function defined in this file.",
     # PSS3xxx - soft reference
     "PSS3001": "A string literal matches a declared function name, not in command position.",
     "PSS3002": "A string literal matches a script-scope variable name.",
@@ -853,10 +868,10 @@ def bracket_depths(toks, sig):
 
 
 class Survey:
-    def __init__(self, path, text, detail=False):
+    def __init__(self, path, text, axes=frozenset()):
         self.path = path
         self.text = text
-        self.detail = detail
+        self.axes = frozenset(axes)
         self.lines = LineIndex(text)
         self.toks = tokenize(text)
         self.sig = significant(self.toks)
@@ -886,6 +901,7 @@ class Survey:
         self.local_aggregates = {}
         self.detail_records = []
         self.soft_refs = []
+        self.unresolved_named_commands = []
         self.usage = {}
         self.counters = {
             "commands_named": 0,
@@ -1054,12 +1070,19 @@ class Survey:
             targets = self.func_by_lname.get(t.text.lower())
             if not targets:
                 # SPEC 15.4 F4 / P25: counted here, once per model, in
-                # counters - never repeated on each PSS4003 record (SPEC
+                # counters - never repeated on each PSS2009 record (SPEC
                 # 4.4). Most of these are cmdlets and external executables
-                # (F2/P23, still open); this bound only says how many
-                # named-command sites resolved to nothing in THIS script,
-                # not which.
+                # (SPEC 15.4 F2 / P23): the collection below is not a list of
+                # errors, and classifying an entry is the caller's work, not
+                # this tool's - pss.py has no structural way to tell a
+                # deleted local function from a cmdlet name (SPEC 1.3
+                # forbids guessing that from naming convention).
                 self.counters["unresolved_named_command_sites"] += 1
+                self.unresolved_named_commands.append({
+                    "code": "PSS2009", "name": t.text,
+                    "owner": self._owner_id_fast(t.start),
+                    "line": self.line_of(t.start), "offset": t.start,
+                })
                 continue
             # The edge source may be <script>: a function called only from top
             # level is not an orphan, and excluding script-level edges makes 12
@@ -1172,7 +1195,7 @@ class Survey:
                 agg["local_refs"] += 1
                 if role == "write":
                     agg["local_declared"] += 1
-                if self.detail:
+                if "local-sites" in self.axes:
                     rec = dict(base)
                     rec["code"] = "PSS2003"
                     rec["id"] = "variable:local/%s#%s" % (owner.split('/')[-1], name)
@@ -1333,14 +1356,14 @@ class Survey:
             # model - to answer a question a consumer asks about a handful of
             # functions at a time. Counts are actionable on their own ("97
             # functions are downstream of this one"); the sets themselves are
-            # available under --detail. `no_static_caller` is omitted because
-            # the PSS4003 records already carry it.
+            # available under the closure-sets axis (SPEC 5.6). `no_static_caller`
+            # is omitted because the PSS4003 records already carry it.
             rec = {
                 "record": "closure", "id": fid,
                 "transitive_callee_count": len(callees),
                 "transitive_caller_count": len(callers),
             }
-            if self.detail:
+            if "closure-sets" in self.axes:
                 rec["transitive_callees"] = callees
                 rec["transitive_callers"] = callers
             self.closures.append(rec)
@@ -1360,6 +1383,43 @@ class Survey:
             out.append({k: v for k, v in r.items()
                         if k != "offset" and v is not None and v is not False})
         return out
+
+    def _unresolved_command_records(self):
+        """SPEC 15.4 F2 / P23. A per-name aggregate is always present; the
+        `command-sites` axis additionally restores one record per site. Same
+        collection, two record shapes - the local_variables idiom (SPEC 5.3
+        aggregate / SPEC 5.6 axis-restored site), applied here because the
+        measured cost of the site-level form (22.3% of the reference
+        target's base model) matches the order of magnitude that motivated
+        that idiom the first time, not because this is a new mechanism.
+
+        `owners` groups by the SAME field `--scope` matches elsewhere
+        (`owner`, SPEC 5.7): a caller slicing to one function retains an
+        aggregate row exactly when that function is among its unresolved
+        call sites, without needing the axis to know that much.
+        """
+        by_name = {}
+        for r in self.unresolved_named_commands:
+            key = r["name"].lower()
+            agg = by_name.get(key)
+            if agg is None:
+                agg = {"name": r["name"], "sites": 0, "owners": set()}
+                by_name[key] = agg
+            agg["sites"] += 1
+            agg["owners"].add(r["owner"])
+        records = [
+            {"record": "aggregate", "code": "PSS2009", "name": a["name"],
+             "sites": a["sites"], "owners": sorted(a["owners"])}
+            for a in sorted(by_name.values(), key=lambda a: a["name"])
+        ]
+        if "command-sites" in self.axes:
+            records += [
+                {"record": "site", "code": "PSS2009", "name": r["name"],
+                 "owner": r["owner"], "line": r["line"], "offset": r["offset"]}
+                for r in sorted(self.unresolved_named_commands,
+                                key=lambda r: (r["name"], r["offset"]))
+            ]
+        return records
 
     # -- model -------------------------------------------------------------
     def model(self):
@@ -1436,7 +1496,7 @@ class Survey:
             })
 
         local_records = sorted(self.local_aggregates.values(), key=lambda r: r["owner"])
-        if self.detail:
+        if "local-sites" in self.axes:
             local_records = local_records + sorted(
                 self.detail_records, key=lambda r: (r["owner"], r["offset"]))
 
@@ -1449,6 +1509,10 @@ class Survey:
                 "line_count": len(self.lines.starts),
                 "byte_count": len(self.text.encode('utf-8')),
             },
+            # SPEC 5.6: the resolved axis set in sorted order, so a caller (or
+            # `compare`) can tell what this model does and does not carry
+            # without re-deriving it from which fields happen to be present.
+            "materialization": {"axes": sorted(self.axes)},
             "counters": dict(sorted(self.counters.items())),
             "symbols": self._emit(symbols),
             "edges": self._emit(edges),
@@ -1459,6 +1523,13 @@ class Survey:
             "local_variables": self._emit(local_records),
             "soft_references": self._emit(sorted(
                 self.soft_refs, key=lambda r: (r["code"], r["offset"]))),
+            # SPEC 15.4 F2 / P23: a per-name aggregate is always present
+            # (mirrors local_variables' per-function aggregate, SPEC 5.3);
+            # per-site records are restored by the command-sites axis
+            # (mirrors local-sites, SPEC 5.6). Same collection, two record
+            # shapes, discriminated by "record" - the established idiom,
+            # not a second mechanism.
+            "unresolved_named_commands": self._emit(self._unresolved_command_records()),
             "limitations": self._emit(sorted(
                 self.limitations,
                 key=lambda r: (r["code"], r.get("line", 0), r.get("owner", "")))),
@@ -1685,6 +1756,33 @@ def self_check():
         rc = EXIT_ERROR
     if rc == EXIT_OK:
         print("  hash_body: string-literal sensitivity confirmed (SPEC 10.3)")
+
+    # Axis vocabulary (SPEC 5.6): the AXES dict compiled into pss.py against
+    # the SPEC 5.6 table, in both directions.
+    astart = spec.find("### 5.6 Materialisation axes")
+    aend = spec.find("### 5.7")
+    if astart < 0 or aend < 0 or aend <= astart:
+        print("  FAIL: could not locate SPEC section 5.6")
+        rc = EXIT_ERROR
+    else:
+        asection = spec[astart:aend]
+        spec_axes = set(re.findall(r'^\| `([a-z-]+)` \|', asection, re.M))
+        code_axes = set(AXES)
+        axis_missing_in_code = sorted(spec_axes - code_axes)
+        axis_missing_in_spec = sorted(code_axes - spec_axes)
+        if axis_missing_in_code:
+            print("  FAIL: axis in SPEC.md 5.6 but not compiled into pss.py: %s"
+                  % ", ".join(axis_missing_in_code))
+            rc = EXIT_ERROR
+        if axis_missing_in_spec:
+            print("  FAIL: axis compiled into pss.py but absent from SPEC.md 5.6: %s"
+                  % ", ".join(axis_missing_in_spec))
+            rc = EXIT_ERROR
+        if not axis_missing_in_code and not axis_missing_in_spec:
+            print("  axes     : %d in AXES, %d in SPEC.md section 5.6, agree"
+                  % (len(code_axes), len(spec_axes)))
+
+    if rc == EXIT_OK:
         print("")
         print("  SPEC.md and FACTS are in sync (no drift detected)")
     return rc
@@ -1699,22 +1797,14 @@ def read_source(path):
     return data.decode("utf-8", errors="replace")
 
 
-def cmd_survey(args):
-    path = args.script
-    if not path.lower().endswith(".ps1"):
-        sys.stderr.write("pss.py: only .ps1 is in scope; .psm1 and .psd1 are out "
-                         "of scope (SPEC 1.4)\n")
-        return EXIT_ERROR
-    if not os.path.isfile(path):
-        sys.stderr.write("pss.py: not a readable file: %s\n" % path)
-        return EXIT_ERROR
-    text = read_source(path)
-    survey = Survey(path, text, detail=args.detail).run()
-    model = survey.model()
+def _write_model(model, args):
+    """Shared 'print or write' tail for any subcommand that emits a model.
+
+    Compact JSON by default. SPEC 2.4 asks the model to be readable, which is
+    a property of self-describing keys, not of indentation; the indentation
+    cost 600 KB on the reference target.
+    """
     if args.format == "json" or args.out:
-        # Compact by default. SPEC 2.4 asks the model to be readable, which is a
-        # property of self-describing keys, not of indentation; the indentation
-        # cost 600 KB on the reference target.
         if args.pretty:
             payload = json.dumps(model, indent=2, ensure_ascii=False)
         else:
@@ -1731,6 +1821,164 @@ def cmd_survey(args):
     else:
         print(render_text(model))
     return EXIT_OK
+
+
+def cmd_survey(args):
+    path = args.script
+    if not path.lower().endswith(".ps1"):
+        sys.stderr.write("pss.py: only .ps1 is in scope; .psm1 and .psd1 are out "
+                         "of scope (SPEC 1.4)\n")
+        return EXIT_ERROR
+    if not os.path.isfile(path):
+        sys.stderr.write("pss.py: not a readable file: %s\n" % path)
+        return EXIT_ERROR
+    try:
+        axes = parse_axes_arg(args.axes)
+    except ValueError as exc:
+        sys.stderr.write("pss.py: --axes: %s\n" % exc)
+        return EXIT_ERROR
+    text = read_source(path)
+    survey = Survey(path, text, axes=axes).run()
+    model = survey.model()
+    return _write_model(model, args)
+
+
+def _model_has_symbol(model, scope):
+    """Whether `scope` is a genuine symbol identifier in this model (SPEC
+    5.7): present as an `id` in `symbols` or in `script_variables`. Refusing
+    an unmatched scope, rather than emitting an all-empty model, keeps a typo
+    from reading as "this symbol has no facts" (SPEC 1.3: fact, not a guess
+    dressed as one)."""
+    for rec in model.get("symbols", ()):
+        if rec.get("id") == scope:
+            return True
+    for rec in model.get("script_variables", ()):
+        if rec.get("id") == scope:
+            return True
+    return False
+
+
+def _record_in_scope(r, scope):
+    """SPEC 5.7's single mechanical membership rule, applied identically
+    across every collection: a record participates when it carries `scope`
+    in one of a fixed set of identifying fields. No collection-specific
+    special-casing - the same rule reads a closure's `id`, an edge's `from`/
+    `to`, a reference site's `owner`, a soft reference's `matches`, an SCC
+    group's `members`, and an unresolved-command aggregate's `owners`,
+    because those are exactly the fields that already carry a symbol
+    identifier elsewhere in this model (SPEC 5.2)."""
+    if r.get("id") == scope or r.get("from") == scope or r.get("to") == scope:
+        return True
+    if r.get("owner") == scope or r.get("matches") == scope:
+        return True
+    for field in ("members", "owners"):
+        values = r.get(field)
+        if values is not None and scope in values:
+            return True
+    return False
+
+
+# Collections a --scope projection filters. `limitations` is deliberately
+# absent: SPEC 5.7 keeps it in full, unconditionally, because it describes
+# what could NOT be determined and filtering it would misrepresent the
+# projection's own coverage. `counters` and `source` are whole-survey
+# metadata, not per-symbol, and pass through via the shallow copy below.
+_SCOPED_COLLECTIONS = (
+    "symbols", "edges", "closures", "script_variables",
+    "string_interpolation_references", "local_variables",
+    "soft_references", "unresolved_named_commands",
+)
+
+
+def slice_model(model, scope=None, axes=None):
+    """SPEC 5.7 (symbol-scoped projection) and SPEC 5.5/P21 (axis-set
+    normalisation) unified into one deterministic reduction (P20/P21): both
+    narrow an EXISTING model by a fixed, factual rule, and both must declare
+    the narrowing in the output's own `materialization` block so the result
+    cannot be mistaken for a whole model (SPEC 5.6).
+
+    `axes`, if not None, is the exact axis subset to keep; the caller
+    (cmd_slice) has already verified it is a subset of what the input model
+    carries, so this function only ever removes materialised fields, never
+    synthesises fields that were never captured.
+    """
+    out = dict(model)
+    materialization = dict(model.get("materialization", {"axes": []}))
+    materialization["axes"] = list(materialization.get("axes", []))
+
+    if axes is not None:
+        current = frozenset(materialization["axes"])
+        dropped = current - frozenset(axes)
+        if "closure-sets" in dropped and "closures" in out:
+            out["closures"] = [
+                {k: v for k, v in r.items()
+                 if k not in ("transitive_callees", "transitive_callers")}
+                for r in out["closures"]]
+        if "local-sites" in dropped and "local_variables" in out:
+            out["local_variables"] = [
+                r for r in out["local_variables"] if r.get("record") != "reference"]
+        if "command-sites" in dropped and "unresolved_named_commands" in out:
+            out["unresolved_named_commands"] = [
+                r for r in out["unresolved_named_commands"] if r.get("record") != "site"]
+        materialization["axes"] = sorted(axes)
+
+    if scope is not None:
+        if not _model_has_symbol(model, scope):
+            raise ValueError("--scope %s matches no symbol identifier in this model"
+                             % scope)
+        for key in _SCOPED_COLLECTIONS:
+            if key in out:
+                out[key] = [r for r in out[key] if _record_in_scope(r, scope)]
+        materialization["scope"] = scope
+
+    out["materialization"] = materialization
+    return out
+
+
+def cmd_slice(args):
+    if not args.scope and not args.axes:
+        sys.stderr.write("pss.py: slice: at least one of --scope or --axes is required\n")
+        return EXIT_ERROR
+    if not os.path.isfile(args.model):
+        sys.stderr.write("pss.py: not a readable file: %s\n" % args.model)
+        return EXIT_ERROR
+    with open(args.model, "r", encoding="utf-8") as fh:
+        try:
+            model = json.load(fh)
+        except json.JSONDecodeError as exc:
+            sys.stderr.write("pss.py: slice: %s is not valid JSON (%s)\n" % (args.model, exc))
+            return EXIT_ERROR
+
+    current_axes = frozenset(model.get("materialization", {}).get("axes", []))
+    requested_axes = None
+    if args.axes is not None:
+        if args.axes.strip() == "all":
+            # 'all' on slice means "every axis the INPUT has", not the global
+            # vocabulary (survey's 'all') - slice never adds material.
+            requested_axes = current_axes
+        else:
+            try:
+                requested_axes = parse_axes_arg(args.axes)
+            except ValueError as exc:
+                sys.stderr.write("pss.py: --axes: %s\n" % exc)
+                return EXIT_ERROR
+            not_present = sorted(requested_axes - current_axes)
+            if not_present:
+                sys.stderr.write(
+                    "pss.py: slice: --axes requests %s, which the input model "
+                    "does not carry (input has: %s). An axis only restores "
+                    "what a survey already materialised; slice cannot add "
+                    "material a survey never captured.\n"
+                    % (", ".join(not_present), ", ".join(sorted(current_axes)) or "(none)"))
+                return EXIT_ERROR
+
+    try:
+        sliced = slice_model(model, scope=args.scope, axes=requested_axes)
+    except ValueError as exc:
+        sys.stderr.write("pss.py: slice: %s\n" % exc)
+        return EXIT_ERROR
+
+    return _write_model(sliced, args)
 
 
 def cmd_compare(args):
@@ -1768,6 +2016,32 @@ def cmd_list_facts(_args):
     return EXIT_OK
 
 
+def parse_axes_arg(raw):
+    """Parse a comma-separated --axes value against the SPEC 5.6 vocabulary.
+
+    Returns a frozenset. `None` or '' means no axes (SPEC 5.6: "no axes
+    resolves to an empty list"). The literal 'all' resolves to the full
+    vocabulary and must appear alone - mixing it with a named axis is not
+    obviously a superset or a mistake, so it is refused rather than guessed.
+    An unrecognised name is a usage error (SPEC 5.6): the caller raises
+    ValueError with the full valid vocabulary printed, rather than being
+    silently ignored or treated as a no-op.
+    """
+    if not raw:
+        return frozenset()
+    tokens = [t.strip() for t in raw.split(",") if t.strip()]
+    if "all" in tokens:
+        if len(tokens) > 1:
+            raise ValueError("'all' must be used alone, not combined with named axes")
+        return frozenset(AXES)
+    unknown = sorted(t for t in tokens if t not in AXES)
+    if unknown:
+        raise ValueError(
+            "unrecognised axis name(s): %s (valid: %s, or 'all')"
+            % (", ".join(unknown), ", ".join(sorted(AXES))))
+    return frozenset(tokens)
+
+
 def build_parser():
     p = argparse.ArgumentParser(
         prog="pss.py",
@@ -1782,9 +2056,10 @@ def build_parser():
     sp.add_argument("script")
     sp.add_argument("--out", help="write the model to PATH (default: stdout)")
     sp.add_argument("--format", choices=("text", "json"), default="text")
-    sp.add_argument("--detail", action="store_true",
-                    help="materialise per-site local variable records and "
-                         "transitive closure sets")
+    sp.add_argument("--axes", metavar="AXES",
+                    help="comma-separated materialisation axes to restore "
+                         "(%s, or 'all'; default: none, SPEC 5.6)"
+                         % ", ".join(sorted(AXES)))
     sp.add_argument("--pretty", action="store_true",
                     help="indent the JSON model (default is compact)")
     sp.set_defaults(func=cmd_survey)
@@ -1794,6 +2069,22 @@ def build_parser():
     cp.add_argument("after")
     cp.add_argument("--format", choices=("text", "json"), default="text")
     cp.set_defaults(func=cmd_compare)
+
+    lp = sub.add_parser("slice", help="reduce a stored model deterministically "
+                                       "(symbol scope and/or a narrower axis set)")
+    lp.add_argument("model", help="path to a model produced by 'survey'")
+    lp.add_argument("--scope", metavar="ID",
+                    help="keep only records concerning this symbol identifier, "
+                         "plus incident edges and all limitations (SPEC 5.7)")
+    lp.add_argument("--axes", metavar="AXES",
+                    help="narrow to this axis subset of what the input model "
+                         "already carries (comma-separated, or 'all' to keep "
+                         "every axis the input has; SPEC 5.5/P21)")
+    lp.add_argument("--out", help="write the sliced model to PATH (default: stdout)")
+    lp.add_argument("--format", choices=("text", "json"), default="text")
+    lp.add_argument("--pretty", action="store_true",
+                    help="indent the JSON model (default is compact)")
+    lp.set_defaults(func=cmd_slice)
     return p
 
 
