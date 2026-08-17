@@ -26,7 +26,7 @@
 | 9 | **reference-health gate** | `python3 quality-tools/reference-health-gate/refcheck.py` (+ `test_refcheck.py` 12) | **Layer-0 root docs only** (repo-root `*.md` + `.github/*.md`): R1 relative link/image targets exist; R2 referenced workflow filenames exist (paths + badge URLs); R5 STATUS current-truth zones' row-count claims == actual manifest count (ADR 0026); **R6 kind-breakdown + project-maturity claims in the same zones == the actual manifest (ADR 0031)** — probe what is written, do not dictate what must be written |
 | 10 | PSScriptAnalyzer + Pester canon suite | `Invoke-ScriptAnalyzer` (3-cell matrix, ADR 0013) + `reference-code/powershell/tests/Invoke-CanonTests.ps1` | Canon-scoped; **carry-over rule**: when `reference-code/powershell` is byte-identical (subtree hash) to the last fully-verified HEAD, results carry (P4 determinism fact) — re-run otherwise |
 | 11 | syntax gates (per project) | `bash -n` / `Parser::ParseFile` / `py_compile` | Stream-owned; the only code gates a **sandbox**-stage project owes (ADR 0024) |
-| 13 | **pss baseline gate** | `python3 quality-tools/powershell-symbol-surveyor/test_pss.py` (+ `--pwsh <path>` for the differential leg; `--emit-baseline-digest` for the SPEC §14.4 cache identity; `pss.py --self-check`) | Re-derives every figure in the surveyor SPEC's Appendix **B.8** machine-baseline block from the **pinned corpus blob** (ADR 0034) and fails on divergence, plus the model **shape fingerprints** (default + all-axes key-path sets) and synthetic fixtures for the extractor rules that have failed. Every asserted figure carries an **executable derivation** here rather than a label in the document (ADR 0036), and a figure that is not axis-invariant is asserted **per materialisation** (`references_outside_functions`, 485 default / 556 with `local-sites`). **The gate holds no expected values** - B.8 is the single master it reads, so the document and the check cannot drift apart. **Anchored to a blob, not to a branch head**, so maintenance-stream edits to the reference script never turn it red (the coupling that kept `corpus.py check` out of this battery, ADR 0033). Degrades per SPEC 14.3: no `pwsh` -> frozen regression; no `git` -> fixtures only |
+| 13 | **pss baseline gate** | `python3 quality-tools/powershell-symbol-surveyor/test_pss.py` (+ `--pwsh <path>` for the differential leg; `--emit-baseline-digest` for the SPEC §14.4 cache identity; `pss.py --self-check`) | Re-derives every figure in the surveyor SPEC's Appendix **B.8** machine-baseline block from the **pinned corpus blob** (ADR 0034) and fails on divergence, plus the model **shape fingerprints** (default + all-axes key-path sets) and synthetic fixtures for the extractor rules that have failed. Every asserted figure carries an **executable derivation** here rather than a label in the document (ADR 0036), and a figure that is not axis-invariant is asserted **per materialisation** (`references_outside_functions`, 485 default / 556 with `local-sites`). **A model that moved without `MODEL_VERSION` advancing is now a failure** (SPEC 13.1 Version decision): the parent commit's `pss.py` is re-run against the same pinned blob, so no ledger of past versions is kept to go stale. **The gate holds no expected values** - B.8 is the single master it reads, so the document and the check cannot drift apart. **Anchored to a blob, not to a branch head**, so maintenance-stream edits to the reference script never turn it red (the coupling that kept `corpus.py check` out of this battery, ADR 0033). Degrades per SPEC 14.3: no `pwsh` -> frozen regression; no `git` -> fixtures only |
 | 12 | reconciliation-loop self-test | `python3 quality-tools/reconciliation-loop/test_coldloop.py` | 12 cases (needs `pip install duckdb`): DuckDB aggregation (schema-probe for absent columns), proposals wrap the pinned request contract 1.0.0, **skip-key dedup** (unchanged re-observed drift not re-proposed; changed evidence = new proposal), **append-only ledger byte-verified** (decide = appended decision record; double/unknown refused), write surface limited to `governance/state/reconciliation/`, zero-observation path. Cold path only - the hot battery stays stdlib-only |
 
 ## Named limitations & footguns (the honest edges)
@@ -85,21 +85,11 @@
   the question being asked. `$script:`-qualified admitted three readings differing by
   hundreds. Figures now exist only as queries in `test_pss.py`, and three that no
   generation and no revision reproduces were withdrawn rather than restamped (ADR 0036).
-- **Nothing checks that a version decision was taken.** A shape or B.8 change reddens the
-  baseline gate, and clearing it requires re-stamping B.8 — which is where §5.5's advance
-  is decided — but the enforcement is a consequence of that gate rather than a gate of its
-  own. Owed in the surveyor SPEC §13.2.
-- **`corpus.py check` remains outside this battery** (ADR 0033): it watches maintenance-owned
-  scripts. The baseline gate is admitted precisely because pinning removes that coupling.
-- **CI-side (GitHub Actions) coverage is a separate axis** from this local battery:
-  the 9 workflows run the per-project stage suites + psa self-quality + the scheduled
-  cold loop; the governance battery above is local/per-phase. **TF d2w is RESOLVED**:
-  `governance/templates/repo-github-workflow.template.yml` (structural; the starting
-  point for every new workflow) codifies the six house conventions all 9 live
-  workflows already follow - existing workflows are NOT retrofitted (stream-owned,
-  already conformant). Known sibling divergence handed to the dsd stream: stage1
-  still uses the unmaintained `microsoft/psscriptanalyzer-action` that the iso
-  sibling migrated off (r07.0 Step 11).
-- **Index==body beyond row counts** (phase labels, ADR indices, version strings in
-  STATUS prose) is review-owned: sweep header + Current-phase table + Gates line +
-  Next-action together on every STATUS touch (the 2026-07-03 rule).
+- **The version-decision hole is closed (ADR 0036).** It used to read: a shape or B.8
+  change reddens the baseline gate, and clearing it requires re-stamping B.8 — which is
+  where §5.5's advance should be decided, and nothing checked that it was. The check now
+  derives the previous state from the parent commit rather than from a record, and it is
+  demonstrably able to go red: it reddens at `44b97d1` (shape moved, version held) and at
+  `bc69c27` (shape identical, measured values moved, version held). It cannot see a
+  version skipped several commits back — per ADR 0035 versions are not renumbered
+  retroactively, so per-commit is the granularity the rule actually has.

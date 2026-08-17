@@ -36,11 +36,15 @@ gate already derives, and the gate checks that the two agree.
 Usage:
     python3 test_pss.py [--pwsh <path-to-pwsh>]
     python3 test_pss.py --emit-baseline-digest      # SPEC 14.4 cache header
+
+The version-decision check needs the parent commit, so it is skipped - and says
+so - in a checkout that has none.
 """
 
 import argparse
 import collections
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -308,6 +312,83 @@ def emit_baseline_digest(baseline):
     return 0
 
 
+def previous_build(root, text):
+    """Survey the pinned blob with the ``pss.py`` of the parent commit.
+
+    Returns ``(model_def, model_all, MODEL_VERSION)`` or ``None`` when the
+    comparison cannot be made — no parent, no ``pss.py`` there, or an older
+    signature that does not accept ``axes``. Those degrade to a reported skip
+    per SPEC 14.3 rather than to a silent pass.
+
+    The old model is measured with **this** build's ``measure()`` and
+    ``shape_fingerprint`` deliberately. Measuring it with the old gate would
+    fold every change to the gate into the comparison — this very appendix
+    gained ten rows at ADR 0036 with ``pss.py`` untouched — and the question
+    asked here is whether the *model* moved.
+    """
+    rel = os.path.relpath(os.path.join(HERE, "pss.py"), root)
+    src = subprocess.run(["git", "-C", root, "show", "HEAD~1:%s" % rel],
+                         capture_output=True)
+    if src.returncode != 0:
+        return None
+    handle, path = tempfile.mkstemp(suffix="_pss_prev.py")
+    os.close(handle)
+    try:
+        with open(path, "wb") as fh:
+            fh.write(src.stdout)
+        spec = importlib.util.spec_from_file_location("pss_previous", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        model_all = module.Survey("reference.ps1", text,
+                                  axes=ALL_AXES).run().model()
+        model_def = module.Survey("reference.ps1", text).run().model()
+        return model_def, model_all, module.MODEL_VERSION
+    except Exception:
+        return None
+    finally:
+        os.unlink(path)
+        sys.modules.pop("pss_previous", None)
+
+
+def check_version_decision(root, text, model_def, model_all):
+    """A model that moved without its version advancing is a failure (ADR 0035).
+
+    Nothing recorded this before. The baseline gate reddens when a figure or a
+    shape moves, but clearing it means re-stamping B.8 — and re-stamping while
+    holding ``MODEL_VERSION`` passes every check in the battery, which is how
+    six mutually incompatible builds came to declare ``"1"``.
+
+    No ledger of past versions is kept, because a ledger is a second copy that
+    goes stale exactly the way the figures in B.3 did (ADR 0036). The previous
+    state is *derived*: the parent commit's ``pss.py``, re-run against the same
+    pinned blob. Measured against real history this is not a check that cannot
+    fail — it reddens at `44b97d1` (shape moved, version held) and at `bc69c27`
+    (shape identical, measured values moved, version held), which is why the
+    condition is shape **or** content and not shape alone.
+    """
+    previous = previous_build(root, text)
+    if previous is None:
+        print("-- no comparable parent build: version-decision check skipped "
+              "(SPEC 14.3) --")
+        return
+    prev_def, prev_all, prev_version = previous
+    moved = []
+    if shape_fingerprint(prev_def) != shape_fingerprint(model_def):
+        moved.append("shape/default")
+    if shape_fingerprint(prev_all) != shape_fingerprint(model_all):
+        moved.append("shape/all-axes")
+    if measure(prev_all) != measure(model_all):
+        moved.append("measured values")
+    check(not moved or prev_version != pss.MODEL_VERSION,
+          "version decision: a moved model advanced MODEL_VERSION",
+          "the emitted model differs from the parent commit's in %s, and "
+          "MODEL_VERSION is %r on both sides. SPEC 5.5 advances the version "
+          "whenever the model emitted for a fixed input can differ - shape "
+          "OR content - and ADR 0035 records that leaving it unadvanced is "
+          "what let one version name six incompatible builds"
+          % (" and ".join(moved), pss.MODEL_VERSION))
+
+
 def compare_section(measured, expected, section):
     exp = expected[section]
     got = measured[section]
@@ -533,6 +614,8 @@ def main():
             payload = {}
         eq(payload.get("baseline_digest"), baseline_digest(block),
            "baseline digest: --emit-baseline-digest agrees with the gate")
+
+        check_version_decision(root, text, model_def, model_all)
 
         if args.pwsh and os.path.exists(args.pwsh):
             run_differential(args.pwsh, text, measured)
