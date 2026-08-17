@@ -223,11 +223,16 @@ because it deliberately diverges from the shared contract (§10.3).
 
 ## 3. Command-line interface
 
+This section describes what this build of `pss.py` actually accepts. Design
+material that has not landed in code yet lives in §3.1 and is marked there;
+it is not repeated here as if it were live syntax.
+
 ```
 pss.py survey   <script.ps1> [--out <model.json>] [--format text|json]
-                             [--axes <axis>[,<axis>...]] [--cost] [--pretty]
+                             [--axes <axis>[,<axis>...]] [--pretty]
+pss.py slice    <model.json> [--scope <id>] [--axes <axis>[,<axis>...]]
+                             [--out <model.json>] [--format text|json] [--pretty]
 pss.py compare  <before.json> <after.json> [--format text|json]
-pss.py --capabilities
 pss.py --list-facts
 pss.py --self-check
 pss.py --version
@@ -235,14 +240,13 @@ pss.py --version
 
 | Option | Applies to | Meaning |
 |---|---|---|
-| `--out PATH` | `survey` | Write the model to PATH. Default: stdout. |
-| `--format {text,json}` | both | Output format. Default `text`. |
-| `--axes LIST` | `survey` | Comma-separated materialisation axes to restore, or `all` (§5.6). Default: none. An unrecognised name exits `2`. |
-| `--cost` | `survey` | Emit only the cost report — the exact size and record count of the default model and of every axis — and not the model itself. |
-| `--pretty` | `survey` | Indent the JSON model. Default is compact (§2.4). |
-| `--capabilities` | — | Print the machine-readable capability descriptor and exit. |
+| `--out PATH` | `survey`, `slice` | Write the model to PATH. Default: stdout. |
+| `--format {text,json}` | `survey`, `slice`, `compare` | Output format. Default `text`. |
+| `--axes LIST` | `survey`, `slice` | Comma-separated materialisation axes to restore (`survey`) or narrow to (`slice`), or `all`. Default: none (§5.6). An unrecognised name exits `2`. |
+| `--scope ID` | `slice` | Keep only records concerning this symbol identifier, plus incident edges and all limitations (§5.7). An unmatched identifier exits `2`. |
+| `--pretty` | `survey`, `slice` | Indent the JSON model. Default is compact (§2.4). |
 | `--list-facts` | — | Print the fact catalogue and exit. |
-| `--self-check` | — | Verify this SPEC against the tool's compiled catalogue, axis vocabulary and capability descriptor, and exit (§13). |
+| `--self-check` | — | Verify this SPEC's §4 catalogue, Appendix F provisional index and §5.6 axis vocabulary against the tool's compiled state, and exit (§13). |
 | `--version` | — | Print version and exit. |
 
 There is deliberately no `--severity`, no `--enable`, and no suppression
@@ -250,7 +254,22 @@ mechanism. Severity does not exist in this tool, and facts are not suppressed �
 they are filtered by the caller when the caller has decided what it cares
 about.
 
+**Current build status.** `compare` exists as a subcommand and can be invoked,
+but this build deliberately refuses to run it: it prints an explanatory
+message and exits non-zero rather than emitting an empty or partial
+comparison (§2.1; the comparator is Layer 3 and has not been built yet).
+`--cost` and `--capabilities`, discussed at length in §3.1 below as normative
+design intent, are **not present in this build's argument parser at all** —
+passing either exits `2` with argparse's generic "unrecognized arguments"
+message, not a designed error. §3.1 should be read as the specification these
+two flags must satisfy once built, not as a description of current behaviour.
+
 ### 3.1 The caller is expected to be a language model
+
+**Not yet implemented.** Everything below concerning `--cost` and
+`--capabilities` is normative design intent, pinned so that a later build has
+one target to satisfy rather than being designed at implementation time. It
+does not describe this build (§3).
 
 The model's consumer is the process that performs the refactoring, and in the
 originating use that process is another language model (§1.1). Two consequences
@@ -659,11 +678,15 @@ identity is the invoked name, not an enclosing function. The default
 answer "is there a call to this name, and from roughly where" without the
 per-site cost. `command-sites` restores one additional record per site,
 carrying `owner` and `line`. Measured on the reference target: the aggregate
-form costs 5.3% of the base model (93 names); the full site form costs 22.3%
+form costs 5.3% of the base model (93 names); the full site form costs 31.5%
 (2,796 sites) — the same order of magnitude that motivated `local-sites`
 originally, which is why this collection now follows the identical pattern
 rather than being emitted unconditionally in full or gated as an
-all-or-nothing collection.
+all-or-nothing collection. (Both figures are the compact-JSON byte length of
+the collection alone, divided by the compact default-model byte length,
+re-measured against this version of the reference target; an earlier draft of
+this section carried 22.3% for the site form, which was not reproduced on
+re-measurement and is superseded here.)
 
 **Why the axes exist at all.** A caller that can write the model to a file and
 query it with code does not need them; it optimises *selectivity*, not total
@@ -1387,31 +1410,52 @@ design.
 
 ## 13. Self-quality gates
 
+This section lists two different things and does not blur them: gates this
+build actually runs today, and gates this SPEC requires of a *complete*
+`pss.py` but which have no implementation yet (mostly owed to S4, the
+`test_pss.py` differential-test suite, which has not been started).
+
+### 13.1 Implemented today (verified by running `pss.py --self-check`)
+
 | Gate | Requirement |
 |---|---|
 | Syntax | `py_compile` clean |
 | Self-check | `--self-check` confirms this SPEC's §4 catalogue and the codes compiled into `pss.py` agree, exiting non-zero on drift |
 | Provisional index | `--self-check` confirms every `[PROVISIONAL Pnn]` marker in this SPEC has a row in Appendix F and vice versa. A **pending** revision is normal work in progress: reported, exit code unchanged. A **mismatch** between markers and index is a defect in the tool or the document: exit code 2, as for SPEC/catalogue drift. Appendix F must be empty before manifest registration |
+| Axis vocabulary | `--self-check` confirms the axis names compiled into `pss.py` and the §5.6 table agree in both directions, exiting non-zero on drift |
+| Golden vectors — shared | `hash_full` reproduces the repository's shared normalized-hash golden vectors exactly (checked by `--self-check`) |
+| Golden vectors — own | `hash_body` reproduces `pss.py`'s own vectors, which include the collision cases of §10.3 as explicit non-collision assertions (checked by `--self-check`) |
 
 A non-zero exit on mismatch does not conflict with §9. §9 forbids the exit code
 from carrying a verdict **about the surveyed script**; an inconsistency between
 this document and the tool is an internal defect, the same class of condition as
 SPEC/catalogue drift.
-| Axis vocabulary | `--self-check` confirms the axis names compiled into `pss.py` and the §5.6 table agree in both directions, exiting non-zero on drift |
-| Capability descriptor | `--self-check` confirms the `--capabilities` document agrees with this SPEC on the subcommand set, the axis vocabulary, the fact catalogue, the exit-code meanings and the output-format list, exiting non-zero on drift (§3.1) |
-| Projection invariance | for every axis, a model emitted with the axis and a model emitted without it agree on every record both carry (§5.6) |
-| Channel agreement | for a common corpus, every value printed by the text channel is reproduced by applying this SPEC's stated derivation to the JSON model of the same input; a mismatch, or a printed value with no stated derivation, exits non-zero (§6.2) |
-| Determinism | repeated runs over identical input produce byte-identical models (§5.4) |
-| Golden vectors — shared | `hash_full` reproduces the repository's shared normalized-hash golden vectors exactly |
-| Golden vectors — own | `hash_body` reproduces `pss.py`'s own vectors, which include the collision cases of §10.3 as explicit non-collision assertions |
-| Reachability | no §10.5 unreachable combination is producible over the regression corpus (`PSS9006` count is zero) |
-| Differential test | where `pwsh` is available, extraction agrees with the reference parser on the Appendix B baselines |
-| Frozen regression | where `pwsh` is absent, extraction agrees with the committed aggregate expectations (§14.3) |
-| Static analysis | clean under the repository's Python gates |
-| Docs | bilingual README pair in lock-step; SPEC, CHANGELOG, VERSION present |
+
+### 13.2 Specified, not yet built
+
+None of the rows below are checked by `--self-check` or any other automation
+in this build. They are the gates this SPEC will hold `pss.py` to once the
+corresponding feature or suite exists; listing them here now, rather than
+inventing them when the feature lands, is deliberate — the same reasoning as
+Appendix F. A caller (including an LLM caller reading this SPEC per §3.1)
+should not assume any of these are currently enforced.
+
+| Gate | Requirement | Blocked on |
+|---|---|---|
+| Capability descriptor | `--capabilities` document agrees with this SPEC on the subcommand set, the axis vocabulary, the fact catalogue, the exit-code meanings and the output-format list, exiting non-zero on drift (§3.1) | `--capabilities` does not exist yet (§3) |
+| Projection invariance | for every axis, a model emitted with the axis and a model emitted without it agree on every record both carry (§5.6) | no automation written |
+| Channel agreement | for a common corpus, every value printed by the text channel is reproduced by applying this SPEC's stated derivation to the JSON model of the same input; a mismatch, or a printed value with no stated derivation, exits non-zero (§6.2) | no automation written |
+| Determinism | repeated runs over identical input produce byte-identical models (§5.4) | no automation written |
+| Reachability | no §10.5 unreachable combination is producible over the regression corpus (`PSS9006` count is zero) | S4 |
+| Differential test | where `pwsh` is available, extraction agrees with the reference parser on the Appendix B baselines | S4 (`test_pss.py`, not started) |
+| Frozen regression | where `pwsh` is absent, extraction agrees with the committed aggregate expectations (§14.3) | S4 |
+| Static analysis | clean under the repository's Python gates | not yet wired into a `pss.py`-specific run |
+| Docs | bilingual README pair in lock-step; SPEC, CHANGELOG, VERSION present | `README.ja.md`, `CHANGELOG.md` and `VERSION` do not exist yet for this tool (only `README.md` and this file do) |
 
 Registration as a whole-tool unit sets `tested = true` on the basis of the
-self-test being green, not on the canon behavioural suite.
+§13.1 self-test being green, not on the canon behavioural suite — and not on
+§13.2, which is why §13.2's rows are listed as owed rather than as blocking
+registration.
 
 ---
 
@@ -1441,8 +1485,11 @@ approximately ten weeks, during which the target grew from 79 functions and
 4,093 lines to 480 functions and 27,229 lines. 116 of those commits changed the
 function-name set; 15 changed it in both directions and therefore contain
 rename, split, merge or replacement events with the author's stated intent
-recorded in the commit message. `TESTING.md` enumerates the specific state
-pairs used as labelled regression cases and the property each one exercises.
+recorded in the commit message. **`TESTING.md` does not exist yet for this
+tool** (S4, tracked in §13.2); once `test_pss.py` is built, `TESTING.md` is
+where it enumerates the specific state pairs used as labelled regression
+cases and the property each one exercises — the same role `TESTING.md` plays
+for this repository's other tools and projects.
 
 ### 14.3 Degradation
 
@@ -1543,7 +1590,7 @@ guess, because this tool has no structural basis for telling a deleted local
 function from a cmdlet or an external executable (§1.3 forbids guessing that
 from a threshold). Restoring per-site positions, which is what makes a call to
 a deleted function locatable rather than merely countable, is the
-`command-sites` axis (§5.6): measured at 22.3% of the base model against the
+`command-sites` axis (§5.6): measured at 31.5% of the base model against the
 aggregate's 5.3%, the same cost class that motivated `local-sites` originally,
 so the two axes now follow one pattern rather than each being decided
 separately. Measured against the full 230-generation reference corpus at the
@@ -1904,8 +1951,9 @@ two (§15.2 carries the detail and the provenance note).
   by name.
 - **P23** — resolved as `PSS2009` (§4.2), folded into the same
   aggregate/axis-restored-site pattern as `local-sites` (§5.6), once the
-  per-site form measured at 22.3% of the base model against the aggregate
-  form's 5.3% — the same cost class that motivated `local-sites` in the first
+  per-site form measured at 31.5% of the base model against the aggregate
+  form's 5.3% (revised from an earlier 22.3% draft figure, not reproduced on
+  re-measurement) — the same cost class that motivated `local-sites` in the first
   place. Measured against the reference corpus: 93 distinct names over 2,796
   sites (this section's own prior estimate of 2,798 was not re-measured before
   being written down; corrected here per this document's own measurement
