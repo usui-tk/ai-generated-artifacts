@@ -389,6 +389,47 @@ def check_version_decision(root, text, model_def, model_all):
           % (" and ".join(moved), pss.MODEL_VERSION))
 
 
+def check_cost_report(label, model):
+    """Re-derive the cost decomposition; do not re-check the block's own sums.
+
+    The first form of this check compared ``sum(by_collection) + envelope``
+    against ``model_bytes`` and nothing else. That identity is satisfied by
+    construction — ``envelope`` is computed as the remainder, so it absorbs
+    whatever the breakdown omits. Dropping a whole collection from the
+    breakdown left the check green, which was demonstrated before landing.
+    A report that governs itself by reproducibility must be reconciled against
+    an independent derivation, not against its own arithmetic; this is the
+    fourth instance in this tool of a check that compared a restatement rather
+    than a measurement (SPEC 13.2, ADR 0036).
+    """
+    cost = model.get(pss.COST_KEY)
+    if not cost:
+        check(False, "cost report: %s carries a block" % label,
+              "SPEC 3.1 embeds the block in every model")
+        return
+
+    bare = {k: v for k, v in model.items() if k != pss.COST_KEY}
+    expected = {k: (len(v), pss.compact_bytes(v))
+                for k, v in bare.items() if isinstance(v, list)}
+    reported = {row["collection"]: (row["records"], row["bytes"])
+                for row in cost["by_collection"]}
+    eq(reported, expected,
+       "cost report: every collection priced, by value (%s)" % label)
+
+    total = pss.compact_bytes(bare)
+    eq(cost["model_bytes"], total,
+       "cost report: model_bytes is the model less the block (%s)" % label)
+    eq(cost["envelope"]["bytes"],
+       total - sum(size for _, size in expected.values()),
+       "cost report: envelope is the stated remainder (%s)" % label)
+    eq(cost["source_sha256"], model["source"]["sha256"],
+       "cost report: bound to its input (%s)" % label)
+    eq(cost["format"], pss.COST_FORMAT,
+       "cost report: names its serialisation (%s)" % label)
+    eq(sorted(row["axis"] for row in cost["axis_increment"]), sorted(pss.AXES),
+       "cost report: prices every axis in the vocabulary (%s)" % label)
+
+
 def compare_section(measured, expected, section):
     exp = expected[section]
     got = measured[section]
@@ -616,6 +657,9 @@ def main():
            "baseline digest: --emit-baseline-digest agrees with the gate")
 
         check_version_decision(root, text, model_def, model_all)
+
+        for label, model in (("default", model_def), ("all-axes", model_all)):
+            check_cost_report(label, model)
 
         if args.pwsh and os.path.exists(args.pwsh):
             run_differential(args.pwsh, text, measured)

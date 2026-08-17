@@ -38,8 +38,8 @@ import os
 import re
 import sys
 
-__version__ = "0.1.0"
-MODEL_VERSION = "1"
+__version__ = "0.2.0"
+MODEL_VERSION = "2"
 
 MIN_PYTHON = (3, 12)
 
@@ -883,6 +883,64 @@ def bracket_depths(toks, sig):
     return depths
 
 
+COST_KEY = "cost"
+COST_FORMAT = "json-compact"
+
+
+def compact_bytes(obj):
+    """The serialisation every cost figure is measured in (SPEC 3.1).
+
+    A size figure that names neither its serialisation nor its subject is not a
+    fact (SPEC 1.3), so the convention is fixed here and reported as ``format``.
+    """
+    return len(json.dumps(obj, separators=(',', ':'),
+                          ensure_ascii=False).encode('utf-8'))
+
+
+def cost_block(model, axis_increments):
+    """Price a model per collection, with the remainder named rather than lost.
+
+    The per-collection figure is the byte length of that collection's compact
+    array **alone** - no key name, colon or separator - and everything else,
+    the top-level scalars and objects and all the structural punctuation, is
+    reported as ``envelope``. The two therefore sum to the whole exactly:
+
+        sum(by_collection[*].bytes) + envelope.bytes == model_bytes
+
+    and a consumer can check that from the model file without this tool.
+    ``envelope`` is emitted even when it would be zero, so the reconciliation is
+    testable rather than inferable - a report that governs itself by
+    reproducibility and cannot reconcile its own arithmetic fails its own rule.
+
+    ``model`` here never carries the block itself, which is what makes the
+    measurement well-defined rather than self-referential, and what keeps the
+    block from growing with the thing it describes: its size is set by the
+    number of collections and the number of axes, both closed vocabularies.
+
+    The report carries no threshold and no recommendation. How large a thing is
+    is a fact; whether that is too large is the caller's judgement (SPEC 1.2).
+    """
+    by_collection = []
+    total = compact_bytes(model)
+    accounted = 0
+    for key in sorted(k for k, v in model.items() if isinstance(v, list)):
+        size = compact_bytes(model[key])
+        accounted += size
+        by_collection.append({"collection": key,
+                              "records": len(model[key]),
+                              "bytes": size})
+    return {
+        "format": COST_FORMAT,
+        "measured": "the model excluding this block",
+        "source_sha256": model["source"]["sha256"],
+        "model_bytes": total,
+        "by_collection": by_collection,
+        "envelope": {"bytes": total - accounted},
+        "axis_increment": [{"axis": axis, "bytes": axis_increments[axis]}
+                           for axis in sorted(axis_increments)],
+    }
+
+
 class Survey:
     def __init__(self, path, text, axes=frozenset()):
         self.path = path
@@ -1465,7 +1523,10 @@ class Survey:
         return records
 
     # -- model -------------------------------------------------------------
-    def model(self):
+    def model(self, with_cost=True):
+        """Emit the model. ``with_cost`` is False only for the internal runs the
+        cost block itself needs, which is what keeps the measurement
+        well-defined rather than self-referential (SPEC 3.1)."""
         symbols = []
         for f in self.funcs:
             fid = self.func_ids[id(f)]
@@ -1543,7 +1604,7 @@ class Survey:
             local_records = local_records + sorted(
                 self.detail_records, key=lambda r: (r["owner"], r["offset"]))
 
-        return {
+        model = {
             "pss_version": __version__,
             "model_version": MODEL_VERSION,
             "source": {
@@ -1577,6 +1638,30 @@ class Survey:
                 self.limitations,
                 key=lambda r: (r["code"], r.get("line", 0), r.get("owner", "")))),
         }
+        if with_cost:
+            model[COST_KEY] = cost_block(model, self._axis_increments(model))
+        return model
+
+    def _axis_increments(self, model):
+        """Bytes each axis would add to this model, measured not estimated.
+
+        An axis already materialised adds nothing and is reported as zero
+        without work. An absent one is priced by re-running the survey with it,
+        because the axes are decided during extraction (SPEC 5.6) and their
+        contribution is not recoverable from a model that lacks them. That is
+        the cost of pricing a request honestly; guessing it would put a figure
+        in the model that no derivation reproduces.
+        """
+        base = compact_bytes(model)
+        out = {}
+        for axis in sorted(AXES):
+            if axis in self.axes:
+                out[axis] = 0
+                continue
+            wider = Survey(self.path, self.text,
+                           axes=self.axes | {axis}).run().model(with_cost=False)
+            out[axis] = compact_bytes(wider) - base
+        return out
 
 
 def _tarjan_scc(adj, nodes):
@@ -1883,7 +1968,40 @@ def cmd_survey(args):
     text = read_source(path)
     survey = Survey(path, text, axes=axes).run()
     model = survey.model()
+    if getattr(args, "cost", False):
+        # The same derivation with the model discarded, rather than a second
+        # one that can drift from the block every model carries (SPEC 3.1).
+        payload = model[COST_KEY]
+        if args.format == "json":
+            text_out = json.dumps(payload, indent=2, ensure_ascii=False) \
+                if args.pretty else json.dumps(payload, separators=(',', ':'),
+                                               ensure_ascii=False)
+        else:
+            text_out = _cost_text(payload)
+        sys.stdout.write(text_out + "\n")
+        return 0
     return _write_model(model, args)
+
+
+def _cost_text(payload):
+    """The text channel of the cost report. Every value printed here is a value
+    in the JSON payload, per SPEC 13.2's channel-agreement requirement; nothing
+    is computed on the way out."""
+    lines = ["cost report (%s; %s)" % (payload["format"], payload["measured"]),
+             "source sha256 : %s" % payload["source_sha256"],
+             "model bytes   : %d" % payload["model_bytes"], "",
+             "by collection:"]
+    for row in payload["by_collection"]:
+        lines.append("  %-32s %10d bytes  %8d records"
+                     % (row["collection"], row["bytes"], row["records"]))
+    lines.append("  %-32s %10d bytes" % ("envelope", payload["envelope"]["bytes"]))
+    lines.append("")
+    lines.append("axis increment:")
+    for row in payload["axis_increment"]:
+        lines.append("  %-32s %10s bytes"
+                     % (row["axis"],
+                        "unpriced" if row["bytes"] is None else row["bytes"]))
+    return "\n".join(lines)
 
 
 def _model_has_symbol(model, scope):
@@ -1975,6 +2093,15 @@ def slice_model(model, scope=None, axes=None):
         materialization["scope"] = scope
 
     out["materialization"] = materialization
+    # A sliced model is a model, so it carries a cost block describing itself
+    # rather than the model it came from. An axis it no longer carries cannot
+    # be priced from a model alone - the axes are decided during extraction
+    # (SPEC 5.6) - so that increment is reported as null rather than carried
+    # over, which would state a figure about a different artefact.
+    out.pop(COST_KEY, None)
+    kept = frozenset(materialization.get("axes", ()))
+    out[COST_KEY] = cost_block(
+        out, {axis: (0 if axis in kept else None) for axis in AXES})
     return out
 
 
@@ -2103,6 +2230,9 @@ def build_parser():
                     help="comma-separated materialisation axes to restore "
                          "(%s, or 'all'; default: none, SPEC 5.6)"
                          % ", ".join(sorted(AXES)))
+    sp.add_argument("--cost", action="store_true",
+                    help="emit only the cost report for this request and exit; "
+                         "the model is computed and discarded (SPEC 3.1)")
     sp.add_argument("--pretty", action="store_true",
                     help="indent the JSON model (default is compact)")
     sp.set_defaults(func=cmd_survey)

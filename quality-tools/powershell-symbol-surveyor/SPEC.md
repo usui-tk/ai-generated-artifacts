@@ -258,18 +258,20 @@ about.
 but this build deliberately refuses to run it: it prints an explanatory
 message and exits non-zero rather than emitting an empty or partial
 comparison (§2.1; the comparator is Layer 3 and has not been built yet).
-`--cost` and `--capabilities`, discussed at length in §3.1 below as normative
-design intent, are **not present in this build's argument parser at all** —
-passing either exits `2` with argparse's generic "unrecognized arguments"
-message, not a designed error. §3.1 should be read as the specification these
-two flags must satisfy once built, not as a description of current behaviour.
+`--cost` **is implemented** in this build, as `survey --cost`: the model is
+computed and discarded, and the report it prints is the block every model now
+carries under a single top-level key. `--capabilities` is **not present in this
+build's argument parser at all** — passing it exits `2` with argparse's generic
+"unrecognized arguments" message, not a designed error. §3.1's treatment of
+`--capabilities` should be read as the specification it must satisfy once
+built, not as a description of current behaviour.
 
 ### 3.1 The caller is expected to be a language model
 
-**Not yet implemented.** Everything below concerning `--cost` and
-`--capabilities` is normative design intent, pinned so that a later build has
-one target to satisfy rather than being designed at implementation time. It
-does not describe this build (§3).
+**Partly implemented.** `--cost` and the embedded cost block describe this
+build. Everything below concerning `--capabilities` remains normative design
+intent, pinned so that a later build has one target to satisfy rather than
+being designed at implementation time; it does not describe this build (§3).
 
 The model's consumer is the process that performs the refactoring, and in the
 originating use that process is another language model (§1.1). Two consequences
@@ -1552,6 +1554,7 @@ build actually runs today, and gates this SPEC requires of a *complete*
 | Baseline | `test_pss.py` re-derives every figure in Appendix B.8 from the **pinned blob** (§14.2, ADR 0034) and exits non-zero on divergence. The B.8 block is the single master: the gate carries no expected values, so the document and the check cannot drift apart. A model key path that B.8 does not record is itself a finding — an unrecorded figure is one nothing re-derives. Anchoring to a blob rather than a branch head is what keeps ordinary maintenance-stream work from turning this gate red (ADR 0029) |
 | Baseline digest | `test_pss.py` derives the acceptance block (B.8 less its `basis`), checks it against the document **by value**, and checks that `--emit-baseline-digest` — the single implementation a derived cache calls (§14.4) — reproduces the gate's own digest. A cache and this gate therefore cannot disagree about what was measured |
 | Model shape | `test_pss.py` fingerprints the emitted model's key-path set for the default and full-axis materialisations and compares both against B.8. A change of shape is a failure, not a silent event; the failure is the point at which whether `model_version` advances or is held is decided and recorded |
+| Cost report | `test_pss.py` **re-derives** the decomposition from the model — every list collection priced, `model_bytes` measured on the model less the block, `envelope` as the stated remainder — and compares by value. It does **not** re-check the block's own sum: `envelope` is computed as a remainder, so `sum + envelope == model_bytes` holds even when a whole collection is missing from the breakdown, which was demonstrated before landing |
 | Version decision | `test_pss.py` re-runs the parent commit's `pss.py` against the same pinned blob and fails when the emitted model moved — shape **or** measured values — while `MODEL_VERSION` did not (§5.5, ADR 0035). No ledger of past versions is kept: the previous state is derived, so there is no second copy to go stale (ADR 0036). Skipped, and reported as skipped, where there is no comparable parent |
 | Materialisation-stated figures | a figure that is not axis-invariant is asserted **per materialisation** and both values are re-derived — today `references_outside_functions` (485 default / 556 with `local-sites`). A single number for such a figure is unfalsifiable, the projection-side form of the basis rule (ADR 0036) |
 | Fixtures | `test_pss.py` runs synthetic cases for the extractor rules that have actually failed — every assignment operator including the three that were unreachable, the member-name exclusions of §12.2 including the dynamic form, and the tokenizer regressions those fixes risked. These need no corpus and run even when `git` is absent (§14.3) |
@@ -1692,7 +1695,10 @@ compared, and it is written by whoever already knows the answer. Two caches are
 the same cache if and only if their headers agree on the fields above.
 
 A cache is invalidated by any change to what the model emits — which, by §5.5,
-is exactly the condition that advances `model_version`. Regeneration is
+is exactly the condition that advances `model_version`. The first such advance
+is the one that landed `--cost`: every model gained a top-level block, the
+shape moved, and `model_version` became `"2"`. Caches produced under `"1"` are
+invalid as data from that point, not merely differently identified. Regeneration is
 therefore batched with the change that causes it rather than performed per
 change, and the header is what proves which side of the change a given file is
 on.
@@ -2165,8 +2171,8 @@ is, so a bare count is unfalsifiable in the same way.
     "PSS9004_names": 4
   },
   "model_shape": {
-    "default": "da702e66d9a3ffdf",
-    "all-axes": "020e2592b5ccf71f"
+    "default": "d40eb8a39e403dbe",
+    "all-axes": "cf0ca399f8a00dc9"
   },
   "references_outside_functions": {
     "default": 485,
