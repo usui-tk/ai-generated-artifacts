@@ -235,6 +235,7 @@ pss.py slice    <model.json> [--scope <id>] [--axes <axis>[,<axis>...]]
 pss.py compare  <before.json> <after.json> [--format text|json]
 pss.py --list-facts
 pss.py --self-check
+pss.py --capabilities
 pss.py --version
 ```
 
@@ -247,6 +248,7 @@ pss.py --version
 | `--pretty` | `survey`, `slice` | Indent the JSON model. Default is compact (§2.4). |
 | `--list-facts` | — | Print the fact catalogue and exit. |
 | `--self-check` | — | Verify this SPEC's §4 catalogue, Appendix F provisional index and §5.6 axis vocabulary against the tool's compiled state, and exit (§13). |
+| `--capabilities` | — | Print the machine-readable interface descriptor as JSON and exit (§3.1). |
 | `--version` | — | Print version and exit. |
 
 There is deliberately no `--severity`, no `--enable`, and no suppression
@@ -260,18 +262,18 @@ message and exits non-zero rather than emitting an empty or partial
 comparison (§2.1; the comparator is Layer 3 and has not been built yet).
 `--cost` **is implemented** in this build, as `survey --cost`: the model is
 computed and discarded, and the report it prints is the block every model now
-carries under a single top-level key. `--capabilities` is **not present in this
-build's argument parser at all** — passing it exits `2` with argparse's generic
-"unrecognized arguments" message, not a designed error. §3.1's treatment of
-`--capabilities` should be read as the specification it must satisfy once
-built, not as a description of current behaviour.
+carries under a single top-level key. `--capabilities` **is implemented**, and
+declares the two machine outputs this build does not produce — the delta
+records of `compare` and the structured error payload — as
+`"status": "not-implemented"` with a reason, rather than omitting them or
+describing shapes that do not exist (§3.1).
 
 ### 3.1 The caller is expected to be a language model
 
-**Partly implemented.** `--cost` and the embedded cost block describe this
-build. Everything below concerning `--capabilities` remains normative design
-intent, pinned so that a later build has one target to satisfy rather than
-being designed at implementation time; it does not describe this build (§3).
+**Implemented.** `--cost`, the embedded cost block and `--capabilities` all
+describe this build. Two of the machine outputs the descriptor is required to
+carry do not exist yet, and the descriptor says so rather than inventing them;
+the mechanism for saying so is specified below and gated in §13.
 
 The model's consumer is the process that performs the refactoring, and in the
 originating use that process is another language model (§1.1). Two consequences
@@ -285,6 +287,27 @@ parsing help text. A descriptor that has drifted from the tool is worse than no
 descriptor, because it produces confident wrong requests; §13 therefore gates
 the descriptor against this document.
 
+**The descriptor serialises; it does not restate.** Every enumeration it
+publishes is read from the constant that already holds it — `FACTS`, `AXES`,
+`MODEL_SCHEMA`, `IDENTIFIER_FORMS`, `COLLECTION_KEYS`, `EXIT_CODES` — and the
+subcommand list is read from the argument parser, so a subcommand that is
+added, removed or renamed cannot go missing from the descriptor. A descriptor
+that restated any of these would be the second copy of a fact, and two copies
+of one fact drift (ADR 0036, §13.3). §13 checks each block against the constant
+it is supposed to be reading, so a literal copied in is caught the moment the
+constant moves.
+
+**An output this build does not produce is declared, not omitted.** The
+descriptor carries an entry for every machine output listed below, each with a
+`status` of `implemented` or `not-implemented` and, in the latter case, the
+reason. Omission would be indistinguishable from an oversight, and describing a
+shape the tool does not emit is precisely the confident wrong request this
+section exists to prevent. The mark is a claim about behaviour and is gated as
+one: §13 runs `compare` and requires it to refuse, and provokes a usage error
+under `--format json` and requires the diagnostic not to be JSON. Implementing
+either without moving its mark turns the gate red, so the mark cannot drift
+into a lie and cannot be quietly left behind.
+
 **Describing the command line is not enough.** A descriptor that documents how
 to invoke the tool but not what comes back leaves a caller able to make a
 request and unable to consume the reply. Six external reviewers, across two
@@ -297,11 +320,20 @@ shape emitted by `compare`, the cost-report shape, and the structured error
 payload. Ordering and determinism (§5.4) are stated there too, since a caller
 that intends to join or diff two models outside the tool depends on them.
 
+Four of those six are carried by the declarations this SPEC already holds:
+record shapes and the cost-report shape by §13.3's key-path set, and the
+identifier conventions and join keys by §5.8. The remaining two — the delta
+record and the error payload — are the two outputs that do not exist in this
+build, and are declared `not-implemented` per the rule above.
+
 Errors are machine-readable when machine output was requested: with `--format
 json`, a usage error emits a JSON object on stderr carrying a stable category,
 the rejected value and the valid vocabulary. The exit code stays `2` per §9;
 the category distinguishes *correct the command* from *fix the environment*
-from *report a defect*, which the exit code alone cannot.
+from *report a defect*, which the exit code alone cannot. **Not built.** Every
+diagnostic in this build is plain text, at all eleven sites; the descriptor
+carries `error_payload` as `not-implemented` and §13 holds that mark against
+the behaviour.
 
 **The caller must be able to price a request before making it.** `--cost`
 reports exact byte sizes and record counts **per collection**, plus the
@@ -1637,6 +1669,7 @@ build actually runs today, and gates this SPEC requires of a *complete*
 | Channel agreement | a derivation per numeric text-channel row, applied to the model and compared with what the renderer printed |
 | Projection invariance | per axis, a survey with and without it, compared by containment on the narrower key vocabulary (§5.6) |
 | Determinism | two extractions of the pinned blob per materialisation, compared as bytes (§5.4) |
+| Capability descriptor | `test_pss.py` compares every enumerated block of `--capabilities` with the constant it is supposed to be **reading** — a literal copied into the descriptor diverges the moment the constant moves — and the subcommand set against the §3 synopsis in both directions. The `implemented` / `not-implemented` marks are then checked **against the build**: `compare` must refuse, a usage error under `--format json` must not emit JSON, `survey --format json` must emit a model, and that model must carry the cost block. A mark cannot drift into a lie, and a feature cannot land while leaving its mark behind. Needs neither `git` nor `pwsh`, so it survives every degradation level of §14.3 |
 | Identifier forms and join keys | `--self-check` compares `pss.IDENTIFIER_FORMS` and `pss.COLLECTION_KEYS` with §5.8 on name **and** value — a form that agrees on its name while disagreeing on what it matches is exactly the drift a published descriptor makes dangerous. `test_pss.py` holds the declaration against the pinned blob: every listed field populated, every join value resolving into `symbols` or `<script>`, every other identifier matching exactly one declared form, and every declared unique key unique. The form set is checked for **exercise**, not only for agreement — a form no identifier at the pin belongs to is an enumeration nothing drives (§13.2) |
 | Declared schema | `--self-check` compares `pss.MODEL_SCHEMA` with §13.3 on path and kind; `test_pss.py` compares the declaration with what the pinned blob emits in both directions — emitted-but-undeclared and declared-but-unemitted are separate failures, and `optional` is the only exemption |
 | Cost report | `test_pss.py` **re-derives** the decomposition from the model — every list collection priced, `model_bytes` measured on the model less the block, `envelope` as the stated remainder — and compares by value. It does **not** re-check the block's own sum: `envelope` is computed as a remainder, so `sum + envelope == model_bytes` holds even when a whole collection is missing from the breakdown, which was demonstrated before landing |
@@ -1660,7 +1693,7 @@ should not assume any of these are currently enforced.
 
 | Gate | Requirement | Blocked on |
 |---|---|---|
-| Capability descriptor | `--capabilities` document agrees with this SPEC on the subcommand set, the axis vocabulary, the fact catalogue, the exit-code meanings and the output-format list, exiting non-zero on drift (§3.1) | `--capabilities` does not exist yet (§3) |
+| Capability descriptor | **RESOLVED.** `--capabilities` is built and `test_pss.py` gates it two ways. Each enumerated block is compared with the constant it serialises, so the descriptor cannot become a second copy of a fact (§13.3, ADR 0036); and the `not-implemented` marks the descriptor carries for the delta record and the error payload are checked against behaviour — `compare` is run and must refuse, a usage error is provoked under `--format json` and must not emit JSON. Implementing either output without moving its mark reddens the gate, so the two outstanding items are visible in the published interface rather than absent from it | closed |
 | Projection invariance | **RESOLVED.** For each axis, `test_pss.py` surveys the pinned blob with and without it and checks **containment**, not equality: everything the narrower model says must also be said by the wider one, on the narrower model's own key vocabulary. The vocabulary is derived from the two models rather than read from §13.3, which marks a path `axis` without naming which axis contributes it — so this check does not inherit that declaration's errors. `cost` is excluded by name, because it describes the model and a smaller model is correctly a different size | closed |
 | Channel agreement | **RESOLVED for the numeric rows.** `test_pss.py` carries a derivation per text-channel figure, written from this document's definitions and applied to the model rather than lifted from `render_text` — re-running the renderer's own expression would compare a restatement, not a measurement. Three directions redden it: a text figure the JSON does not support, a new numeric row with no derivation, and a derivation whose row has vanished. Four rows remain uncovered **by name** (`lines`, and the three soft-reference rows whose printed split this check does not yet decompose), so adding a figure without a derivation is visible rather than silently uncovered | 4 rows uncovered, listed |
 | Determinism | **RESOLVED.** `test_pss.py` extracts the pinned blob twice at each materialisation and compares the **serialised bytes**, not the parsed objects: key order is part of what §5.4 promises, and two dicts can compare equal while serialising differently. Re-checked now rather than left as written, because `--cost` re-runs the survey internally to price an absent axis (§3.1), so a default-materialisation model is produced by four extractions rather than one | closed |

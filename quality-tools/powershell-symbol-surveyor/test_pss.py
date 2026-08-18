@@ -679,6 +679,136 @@ def check_collection_keys(model_all):
        "join keys: every declared identifier form is exercised at the pin")
 
 
+def _run_pss(args, text=None):
+    """Invoke pss.py as a subprocess. The descriptor is checked as shipped."""
+    with tempfile.TemporaryDirectory() as d:
+        argv = list(args)
+        if text is not None:
+            p = os.path.join(d, "sample.ps1")
+            with open(p, "w", encoding="utf-8") as fh:
+                fh.write(text)
+            argv = [a.replace("@SCRIPT@", p) for a in argv]
+        return subprocess.run(
+            [sys.executable, os.path.join(HERE, "pss.py")] + argv,
+            capture_output=True, cwd=d)
+
+
+def check_capability_descriptor():
+    """Hold the SPEC 3.1 descriptor against the declarations and the build.
+
+    Two different failures are possible and both are checked.
+
+    The descriptor may *restate* rather than serialise. Every enumerated block
+    is compared with the constant it is supposed to be reading, so a literal
+    copied into the descriptor diverges the moment the constant moves - which
+    is the entire reason SPEC 13.3 put the schema in the code.
+
+    The descriptor may be *optimistic*. Two of the four machine outputs SPEC
+    3.1 requires it to describe do not exist in this build, and they are
+    published with ``status: not-implemented``. That mark is a claim about
+    behaviour, so it is checked against behaviour: ``compare`` must actually
+    refuse, and a usage error under ``--format json`` must actually not be
+    JSON. Implementing either without moving its mark reddens this gate, which
+    is what makes the mark unable to drift into a lie.
+    """
+    out = _run_pss(["--capabilities"])
+    eq(out.returncode, 0, "descriptor: --capabilities exits 0")
+    try:
+        doc = json.loads(out.stdout.decode("utf-8"))
+    except Exception as exc:
+        check(False, "descriptor: --capabilities emits JSON", str(exc))
+        return
+
+    eq(doc.get("pss_version"), pss.__version__, "descriptor: pss_version")
+    eq(doc.get("model_version"), pss.MODEL_VERSION, "descriptor: model_version")
+
+    # Serialised, not restated: each block against the constant it reads.
+    eq(doc.get("facts"), dict(pss.FACTS), "descriptor: fact catalogue")
+    eq(doc.get("axes"), dict(pss.AXES), "descriptor: axis vocabulary")
+    eq(doc.get("exit_codes"), dict(pss.EXIT_CODES), "descriptor: exit codes")
+    eq(doc.get("model_schema"), dict(pss.MODEL_SCHEMA),
+       "descriptor: declared model schema")
+    eq(doc.get("identifier_forms"), dict(pss.IDENTIFIER_FORMS),
+       "descriptor: identifier forms")
+    eq(doc.get("script_owner"), pss.SCRIPT_OWNER, "descriptor: script owner")
+    eq(doc.get("collection_keys"),
+       {c: {f: (list(v[f]) if v[f] else (None if f == "unique" else []))
+            for f in pss.COLLECTION_KEY_FIELDS}
+        for c, v in pss.COLLECTION_KEYS.items()},
+       "descriptor: collection join keys")
+
+    # The subcommand set against the SPEC 3 synopsis, in both directions - the
+    # one block the descriptor cannot read from a constant.
+    spec_text = open(SPEC, encoding="utf-8").read()
+    syn = spec_text[spec_text.find("## 3. Command-line interface"):
+                    spec_text.find("### 3.1 ")]
+    spec_subs = set(re.findall(r'^pss\.py (\w+) ', syn, re.M))
+    eq(sorted(doc.get("subcommands", {})), sorted(spec_subs),
+       "descriptor: subcommands agree with the SPEC 3 synopsis")
+
+    eq(doc.get("machine_formats"), list(pss.MACHINE_FORMATS),
+       "descriptor: machine formats")
+    eq(sorted(set(doc.get("machine_formats", [])) - set(doc.get("formats", []))),
+       [], "descriptor: every machine format is an accepted --format value")
+
+    outputs = doc.get("machine_outputs", {})
+    eq(sorted(outputs), sorted(pss.MACHINE_OUTPUTS),
+       "descriptor: the machine-output inventory")
+    eq(sorted(k for k, v in outputs.items()
+              if v.get("status") not in pss.MACHINE_OUTPUT_STATUSES), [],
+       "descriptor: every output carries a declared status")
+    eq(sorted(k for k, v in outputs.items()
+              if v.get("status") == "not-implemented" and not v.get("reason")),
+       [], "descriptor: every not-implemented output states why")
+    eq(sorted(k for k, v in outputs.items()
+              if v.get("status") == "implemented" and v.get("reason")),
+       [], "descriptor: an implemented output carries no excuse")
+
+    # --- the marks, checked against the build rather than against themselves
+
+    with tempfile.TemporaryDirectory() as d:
+        a = os.path.join(d, "a.json")
+        with open(a, "w", encoding="utf-8") as fh:
+            fh.write("{}")
+        cmp_out = subprocess.run(
+            [sys.executable, os.path.join(HERE, "pss.py"), "compare", a, a,
+             "--format", "json"], capture_output=True, cwd=d)
+    check(outputs.get("delta_records", {}).get("status") == "not-implemented"
+          and cmp_out.returncode != 0,
+          "descriptor: the delta mark matches what compare does",
+          "declared %r, compare exited %d"
+          % (outputs.get("delta_records", {}).get("status"),
+             cmp_out.returncode))
+
+    err_out = _run_pss(["survey", "@SCRIPT@", "--format", "json",
+                        "--axes", "no-such-axis"], text="function F { }")
+    stderr_is_json = True
+    try:
+        json.loads(err_out.stderr.decode("utf-8"))
+    except Exception:
+        stderr_is_json = False
+    check(outputs.get("error_payload", {}).get("status") == "not-implemented"
+          and err_out.returncode == 2 and not stderr_is_json,
+          "descriptor: the error mark matches what a usage error does",
+          "declared %r, exit %d, stderr parses as JSON: %s"
+          % (outputs.get("error_payload", {}).get("status"),
+             err_out.returncode, stderr_is_json))
+
+    ok_out = _run_pss(["survey", "@SCRIPT@", "--format", "json"],
+                      text="function F { $x = 1 }")
+    model_ok = ok_out.returncode == 0
+    try:
+        emitted = json.loads(ok_out.stdout.decode("utf-8"))
+    except Exception:
+        emitted = None
+        model_ok = False
+    check(outputs.get("model", {}).get("status") == "implemented" and model_ok,
+          "descriptor: the model mark matches what survey does")
+    check(outputs.get("cost_report", {}).get("status") == "implemented"
+          and isinstance(emitted, dict) and pss.COST_KEY in emitted,
+          "descriptor: the cost mark matches what a model carries")
+
+
 def check_cost_report(label, model):
     """Re-derive the cost decomposition; do not re-check the block's own sums.
 
@@ -899,6 +1029,10 @@ def main():
              baseline["basis"]["blob"][:12]))
 
     run_fixtures()
+
+    # Needs neither git nor pwsh: the descriptor is a property of the build,
+    # so it stays checked at every degradation level (SPEC 14.3).
+    check_capability_descriptor()
 
     root = repo_root()
     if not root:

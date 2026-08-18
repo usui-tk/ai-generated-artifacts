@@ -1130,6 +1130,74 @@ COLLECTION_KEYS = {
 COLLECTION_KEY_FIELDS = ("unique", "symbol_refs", "identifier_refs")
 
 
+# ---------------------------------------------------------------------------
+# SPEC 3.1: the capability descriptor.
+#
+# The descriptor SERIALISES the declarations above; it does not restate them.
+# What it adds is the two things the constants cannot carry: what each exit
+# code means, and which machine outputs this build actually produces.
+# ---------------------------------------------------------------------------
+
+# Held against the SPEC 9 table by --self-check, on code AND text: an exit code
+# whose published meaning has drifted from the document is worse than one with
+# no published meaning, because a caller branches on it.
+EXIT_CODES = {
+    "0": "The requested operation completed.",
+    "2": "Usage error, unreadable input, unmet environment requirement, "
+         "or internal error.",
+}
+
+# The subset of `--format` that is a serialisation rather than a summary
+# (SPEC 6.3). Carried as a list so that an addition is an extension rather
+# than a schema change.
+MACHINE_FORMATS = ("json",)
+
+# Every machine output SPEC 3.1 requires the descriptor to describe, with the
+# status of each IN THIS BUILD.
+#
+# A descriptor that has drifted from the tool is worse than no descriptor
+# (SPEC 3.1), and the drift a descriptor is most likely to carry is optimism:
+# describing a shape the tool does not yet produce. Two of the four required
+# outputs do not exist here. They are published with an explicit status and a
+# reason rather than omitted, because omission is indistinguishable from an
+# oversight - and the mark is not a promise, it is a claim test_pss.py checks
+# against behaviour: `compare` must actually refuse, and an error under
+# `--format json` must actually not be JSON. Implementing either without
+# moving its mark turns the gate red.
+MACHINE_OUTPUTS = {
+    "model": {
+        "status": "implemented",
+        "emitted_by": "survey --format json, slice --format json",
+        "shape": "model_schema, collection_keys, identifier_forms",
+        "reason": None,
+    },
+    "cost_report": {
+        "status": "implemented",
+        "emitted_by": "survey --cost, and embedded in every model",
+        "shape": "the /cost subtree of model_schema",
+        "reason": None,
+    },
+    "delta_records": {
+        "status": "not-implemented",
+        "emitted_by": "compare --format json",
+        "shape": None,
+        "reason": "the comparator is Layer 3 and has not been built; this "
+                  "build refuses `compare` rather than emitting an empty "
+                  "comparison, which would read as 'no change' (SPEC 3)",
+    },
+    "error_payload": {
+        "status": "not-implemented",
+        "emitted_by": "stderr, when --format json was requested",
+        "shape": None,
+        "reason": "every diagnostic in this build is plain text; the "
+                  "structured category/rejected-value/vocabulary payload of "
+                  "SPEC 3.1 is design intent, not behaviour",
+    },
+}
+
+MACHINE_OUTPUT_STATUSES = ("implemented", "not-implemented")
+
+
 COST_KEY = "cost"
 COST_FORMAT = "json-compact"
 
@@ -2253,6 +2321,38 @@ def self_check():
                   "SPEC.md section 5.8, agree on every key field"
                   % (len(code_keys), len(spec_keys)))
 
+    # Exit-code meanings (SPEC 9). The descriptor publishes these and a caller
+    # branches on them, so text drift here is not cosmetic.
+    estart = spec.find("## 9. Exit codes")
+    eend = spec.find("## 10. Hashing and normalisation")
+    if estart < 0 or eend < 0 or eend <= estart:
+        print("  FAIL: could not locate SPEC section 9")
+        rc = EXIT_ERROR
+    else:
+        spec_exits = dict(re.findall(r'^\| `(\d+)` \| (.+?) \|$',
+                                     spec[estart:eend], re.M))
+        exit_missing_in_code = sorted(set(spec_exits) - set(EXIT_CODES))
+        exit_missing_in_spec = sorted(set(EXIT_CODES) - set(spec_exits))
+        text_disagrees = sorted(k for k in set(spec_exits) & set(EXIT_CODES)
+                                if spec_exits[k] != EXIT_CODES[k])
+        if exit_missing_in_code:
+            print("  FAIL: exit code in SPEC.md 9 but not compiled into "
+                  "pss.py: %s" % ", ".join(exit_missing_in_code))
+            rc = EXIT_ERROR
+        if exit_missing_in_spec:
+            print("  FAIL: exit code compiled into pss.py but absent from "
+                  "SPEC.md 9: %s" % ", ".join(exit_missing_in_spec))
+            rc = EXIT_ERROR
+        if text_disagrees:
+            print("  FAIL: exit code described differently in pss.py and "
+                  "SPEC.md 9: %s" % ", ".join(text_disagrees))
+            rc = EXIT_ERROR
+        if not (exit_missing_in_code or exit_missing_in_spec
+                or text_disagrees):
+            print("  exits    : %d codes in EXIT_CODES, %d in SPEC.md "
+                  "section 9, agree on code and meaning" % (len(EXIT_CODES),
+                                                            len(spec_exits)))
+
     sstart = spec.find("### 13.3 The declared model schema")
     send = spec.find("## 14. Test-data acquisition")
     if sstart < 0 or send < 0 or send <= sstart:
@@ -2540,6 +2640,72 @@ def cmd_compare(args):
     return EXIT_ERROR
 
 
+def capabilities_document(parser):
+    """Assemble the SPEC 3.1 descriptor from the tool's own declarations.
+
+    Every field here is READ from something the tool already holds - the
+    argument parser, FACTS, AXES, MODEL_SCHEMA, IDENTIFIER_FORMS,
+    COLLECTION_KEYS, EXIT_CODES, MACHINE_OUTPUTS. Nothing is written out a
+    second time. That is the whole design constraint: a descriptor that
+    restates a fact becomes a second copy of it, and two copies of one fact
+    drift (ADR 0036). It is also why SPEC 13.3 put the schema in the code.
+
+    The subcommand list is taken from the parser rather than from a literal,
+    so a subcommand that is added, removed or renamed cannot be missing from
+    the descriptor.
+    """
+    sub = [a for a in parser._subparsers._group_actions
+           if isinstance(a, argparse._SubParsersAction)][0]
+    subcommands = {}
+    for choice in sorted(sub.choices):
+        sp = sub.choices[choice]
+        opts = sorted(
+            o for a in sp._actions for o in a.option_strings
+            if o.startswith("--") and o != "--help")
+        subcommands[choice] = {
+            "summary": next((c.help for c in sub._choices_actions
+                             if c.dest == choice), None),
+            "options": opts,
+        }
+
+    formats = sorted(next(
+        (a.choices for a in sub.choices["survey"]._actions
+         if a.dest == "format"), ()))
+
+    return {
+        "descriptor": "pss-capabilities",
+        "spec": "SPEC 3.1",
+        "pss_version": __version__,
+        "model_version": MODEL_VERSION,
+        "subcommands": subcommands,
+        "formats": formats,
+        "machine_formats": list(MACHINE_FORMATS),
+        "exit_codes": dict(EXIT_CODES),
+        "axes": dict(AXES),
+        "facts": dict(FACTS),
+        "model_schema": dict(MODEL_SCHEMA),
+        "identifier_forms": dict(IDENTIFIER_FORMS),
+        "script_owner": SCRIPT_OWNER,
+        "collection_keys": {
+            c: {f: (list(v[f]) if v[f] else (None if f == "unique" else []))
+                for f in COLLECTION_KEY_FIELDS}
+            for c, v in COLLECTION_KEYS.items()
+        },
+        "machine_outputs": {k: dict(v) for k, v in MACHINE_OUTPUTS.items()},
+        "ordering": "Collections are emitted in a fixed key order and records "
+                    "in a documented sort order; two runs over one input are "
+                    "byte-identical (SPEC 5.4). A caller may join or diff two "
+                    "models outside the tool on that basis.",
+    }
+
+
+def cmd_capabilities(parser):
+    json.dump(capabilities_document(parser), sys.stdout,
+              sort_keys=True, separators=(',', ':'), ensure_ascii=False)
+    sys.stdout.write("\n")
+    return EXIT_OK
+
+
 def cmd_list_facts(_args):
     print("==== pss.py fact catalogue (%d codes) ====" % len(FACTS))
     blocks = {
@@ -2599,6 +2765,9 @@ def build_parser():
     p.add_argument("--list-facts", action="store_true", help="print the fact catalogue and exit")
     p.add_argument("--self-check", action="store_true",
                    help="verify SPEC section 4 against the compiled catalogue and exit")
+    p.add_argument("--capabilities", action="store_true",
+                   help="print the machine-readable interface descriptor "
+                        "(JSON) and exit (SPEC 3.1)")
     sub = p.add_subparsers(dest="command")
 
     sp = sub.add_parser("survey", help="survey a single .ps1 and emit the symbol model")
@@ -2652,6 +2821,8 @@ def main(argv=None):
         return EXIT_OK
     if args.list_facts:
         return cmd_list_facts(args)
+    if args.capabilities:
+        return cmd_capabilities(parser)
     if args.self_check:
         return self_check()
     if not getattr(args, "command", None):
