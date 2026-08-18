@@ -5,12 +5,12 @@ Two tools live here.
 | File | Role |
 |:--|:--|
 | `pss.py` | The surveyor itself. Extracts a symbol model from one PowerShell script. Contract: [`SPEC.md`](./SPEC.md). |
-| `corpus.py` | Corpus manager. Pins the committed generations of a script so the surveyor can be exercised against real history. |
 | `build_cache.py` | Derived model cache producer. Surveys every pinned generation of one entry into a cache carried between sessions. Contract: [`SPEC.md`](./SPEC.md) §14.4. |
+| `test_pss.py` | The baseline gate (§13.1), and the **corpus manager** it exercises the surveyor with: `test_pss.py corpus <subcommand>`. |
 
 `SPEC.md` is authoritative for `pss.py` and for the §14.4 cache contract.
-This README is authoritative for `corpus.py`; the corpus governance rules are
-durable in
+This README is authoritative for the corpus manager; the corpus governance
+rules are durable in
 [ADR 0033](../../governance/adr/0033-pss-test-corpus-governance.md).
 
 ---
@@ -92,9 +92,13 @@ verified on load rather than trusted.
 
 ### Written by the tool, never by hand
 
-Entries are written only through `corpus.py`, in the same way the manifest is
-written only through `canon-manifest-tool` (ADR 0011). The `generated_by` field
-records that.
+Entries are written only through the corpus manager, in the same way the
+manifest is written only through `canon-manifest-tool` (ADR 0011). The
+`generated_by` field records that. Its value still names `corpus.py`, the file
+the manager was in when the two committed entries were written: an entry is
+byte-stable by construction, which is what makes growth detection possible at
+all, so re-pointing the string would rewrite two committed artefacts to record
+a fact about the tool rather than about the entries.
 
 ### No timestamps
 
@@ -116,16 +120,16 @@ stale — the failure mode ADR 0031 removed elsewhere in this repository.
 
 ```
 # register an entry (one .ps1; directories and globs are refused)
-python3 corpus.py --repo <repo> add <path/to/Script.ps1> [--slug <text>]
+python3 test_pss.py corpus --repo <repo> add <path/to/Script.ps1> [--slug <text>]
 
 # derived view: identity, sealed state, range, ignored files
-python3 corpus.py --repo <repo> list
+python3 test_pss.py corpus --repo <repo> list
 
 # compare every entry against git now; findings only, nothing is applied
-python3 corpus.py --repo <repo> check
+python3 test_pss.py corpus --repo <repo> check
 
 # append newly committed generations to one entry
-python3 corpus.py --repo <repo> update <NNNN>
+python3 test_pss.py corpus --repo <repo> update <NNNN>
 ```
 
 `check` reports growth and rewrite as findings and re-pins nothing. Re-pinning
@@ -146,13 +150,13 @@ observations and produces no verdict, matching the surveyor's own contract
 
 ```
 # per-generation function removals, and whether the model still referenced them
-python3 corpus.py --repo <repo> deletions <NNNN>
+python3 test_pss.py corpus --repo <repo> deletions <NNNN>
 
 # caller-count transitions for named functions
-python3 corpus.py --repo <repo> transitions <NNNN> --targets Get-Foo Set-Bar
+python3 test_pss.py corpus --repo <repo> transitions <NNNN> --targets Get-Foo Set-Bar
 
 # names ever defined, against those present at the last generation
-python3 corpus.py --repo <repo> ever-defined <NNNN>
+python3 test_pss.py corpus --repo <repo> ever-defined <NNNN>
 ```
 
 Surveying every generation of a large script takes minutes; `--limit N`

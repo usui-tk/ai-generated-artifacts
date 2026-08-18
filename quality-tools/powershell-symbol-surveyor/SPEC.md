@@ -2015,7 +2015,7 @@ target's directory move is represented as two entries (`0001` before, `0002`
 after), not as one `--follow` walk. Retrieval is **by blob**:
 
 ```
-python3 corpus.py list                       # entries and their generation counts
+python3 test_pss.py corpus list              # entries and their generation counts
 git show <blob> > <workdir>/<rev>.ps1        # blob taken from the entry's generations[]
 ```
 
@@ -2175,7 +2175,7 @@ a recovery-path function announces "verified checkpointed resume transactions"
 in its subject.
 
 *(This paragraph was corrected on 2026-08-16 against a full 230-generation
-re-survey run with `pss.py` itself (via the ADR 0033 `corpus.py` cache),
+re-survey run with `pss.py` itself (via the ADR 0033 corpus manager),
 replacing an earlier figure of "three... within two days" that had been
 measured with the throwaway instruments retired at ADR 0033 — one of which
 carried a hard-coded absolute path and one of which silently dropped
