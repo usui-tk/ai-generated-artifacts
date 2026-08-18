@@ -214,13 +214,17 @@ whether the data is still comparable.
 ## Self-test
 
 ```
-python3 test_corpus.py     # 50 checks
+python3 test_pss.py        # the whole gate, corpus cases included
 ```
 
-Fixtures are real git repositories built in a temporary directory, because the
-behaviour under test is git behaviour — renames, deletions, appended history,
-rewritten history. A mock would reproduce the assumptions rather than the facts,
-and every trap this tool is built around was an assumption failure.
+The corpus cases live in `test_pss.py` alongside the surveyor's own, because
+SPEC §14.1 keeps this tool at two `.py` files and a third one for the corpus
+was a third one. Their fixtures are real git repositories built in a temporary
+directory, because the behaviour under test is git behaviour — renames,
+deletions, appended history, rewritten history. A mock would reproduce the
+assumptions rather than the facts, and every trap this tool is built around was
+an assumption failure. Needing the `git` binary rather than this checkout, they
+are skipped — and say so — where it is absent (§14.3).
 
 ---
 
