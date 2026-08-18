@@ -43,6 +43,7 @@ so - in a checkout that has none.
 
 import argparse
 import collections
+import gzip
 import hashlib
 import importlib.util
 import json
@@ -65,6 +66,14 @@ PSS = os.path.join(HERE, "pss.py")
 # coming back and says nothing about a judgement worded some other way. Each
 # entry earned its place - `broken` from PSS8007, the rest by being the words a
 # severity vocabulary reaches for first.
+# SPEC 14.4's header table, transcribed here so the generator's declaration is
+# compared with the specification rather than with another copy of itself.
+SPEC_CACHE_HEADER = (
+    "axes", "baseline_digest", "cache_kind", "corpus_count", "corpus_end_rev",
+    "corpus_entry", "corpus_start_rev", "model_shape", "model_version",
+    "pss_version", "script_path", "spec_contract",
+)
+
 JUDGEMENT_WORDS = (
     "audit", "bad", "broken", "critical", "dangerous", "harmful", "improper",
     "incorrect", "invalid", "risky", "severity", "should", "unsafe", "wrong",
@@ -847,6 +856,82 @@ def check_operating_context():
                 os.remove(in_repo)
 
 
+def check_cache_generator():
+    """Hold SPEC 14.4's producer: it copies identity, it does not compute it.
+
+    The specification had no implementation for long enough that the procedure
+    was reconstructed from prose each session, and a shipped cache carried
+    `gen_index: null` on all 230 records as a result. So the two properties
+    that failed are the two checked here.
+
+    Structurally: `build_cache.py` must not compute a digest of its own. SPEC
+    14.4 gives the digest ONE implementation and says a generation script calls
+    it and copies the result; a second implementation would let a cache and
+    this gate disagree about what was measured. `hashlib` absent from the
+    file's imports is the mechanical form of that requirement.
+
+    Behaviourally: a real two-generation cache is produced and its header
+    compared with SPEC 14.4's field set in both directions, and its records
+    checked to carry `rev` and `blob` and nothing derivable from position.
+    """
+    import ast
+    generator = os.path.join(HERE, "build_cache.py")
+    check(os.path.isfile(generator), "cache: the SPEC 14.4 producer exists")
+    if not os.path.isfile(generator):
+        return
+    with open(generator, encoding="utf-8") as fh:
+        tree = ast.parse(fh.read())
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            imported.add(node.module.split(".")[0])
+    eq(sorted(imported & {"hashlib"}), [],
+       "cache: the generator computes no digest of its own")
+
+    import build_cache
+    eq(sorted(build_cache.HEADER_FIELDS), sorted(SPEC_CACHE_HEADER),
+       "cache: the declared header matches the SPEC 14.4 field set")
+
+    with tempfile.TemporaryDirectory() as d:
+        out = os.path.join(d, "c.jsonl.gz")
+        rc = subprocess.run(
+            [sys.executable, generator, "0001", "--limit", "2",
+             "-o", out, "--quiet"], capture_output=True, cwd=d)
+        eq(rc.returncode, 0, "cache: the generator runs")
+        if rc.returncode != 0:
+            return
+        with gzip.open(out, "rt", encoding="utf-8") as fh:
+            lines = [l for l in fh.read().split("\n") if l]
+        eq(len(lines), 3, "cache: one header line and one line per generation")
+        header = json.loads(lines[0])
+        eq(sorted(header), sorted(SPEC_CACHE_HEADER),
+           "cache: the emitted header matches the SPEC 14.4 field set")
+        eq(header["axes"], sorted(pss.AXES),
+           "cache: every axis is materialised, so two caches stay comparable")
+        eq(header["model_version"], pss.MODEL_VERSION,
+           "cache: the header carries the producing build's model_version")
+
+        records = [json.loads(l) for l in lines[1:]]
+        eq(sorted({k for r in records for k in r}), ["blob", "model", "rev"],
+           "cache: a generation is identified by rev and blob, not by position")
+        eq(sorted({r["model"]["materialization"]["axes"][0] for r in records}),
+           [sorted(pss.AXES)[0]],
+           "cache: the records carry the materialisation the header declares")
+
+        # The digest is copied, not recomputed: it must equal what the one
+        # implementation emits.
+        emitted = json.loads(subprocess.run(
+            [sys.executable, os.path.join(HERE, "test_pss.py"),
+             "--emit-baseline-digest"], capture_output=True,
+            cwd=HERE).stdout.decode("utf-8"))
+        eq(header["baseline_digest"], emitted["baseline_digest"],
+           "cache: the header's digest is the one --emit-baseline-digest gives")
+        eq(header["model_shape"], emitted["model_shape"],
+           "cache: the header's shape is the one --emit-baseline-digest gives")
+
+
 def check_neutral_naming():
     """Hold the bounded part of SPEC 1.3's naming rule.
 
@@ -1228,6 +1313,7 @@ def main():
 
     # Needs neither git nor pwsh: the descriptor is a property of the build,
     # so it stays checked at every degradation level (SPEC 14.3).
+    check_cache_generator()
     check_neutral_naming()
     check_capability_descriptor()
 

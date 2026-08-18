@@ -6,9 +6,11 @@ Two tools live here.
 |:--|:--|
 | `pss.py` | The surveyor itself. Extracts a symbol model from one PowerShell script. Contract: [`SPEC.md`](./SPEC.md). |
 | `corpus.py` | Corpus manager. Pins the committed generations of a script so the surveyor can be exercised against real history. |
+| `build_cache.py` | Derived model cache producer. Surveys every pinned generation of one entry into a cache carried between sessions. Contract: [`SPEC.md`](./SPEC.md) §14.4. |
 
-`SPEC.md` is authoritative for `pss.py`. This README is authoritative for
-`corpus.py`; the corpus governance rules are durable in
+`SPEC.md` is authoritative for `pss.py` and for the §14.4 cache contract.
+This README is authoritative for `corpus.py`; the corpus governance rules are
+durable in
 [ADR 0033](../../governance/adr/0033-pss-test-corpus-governance.md).
 
 ---
@@ -164,6 +166,51 @@ is broken and must say so.
 
 ---
 
+## Derived model caches
+
+Surveying every generation of an entry costs minutes, so the models are cached
+outside the repository and carried between sessions. `build_cache.py` is the
+producer SPEC §14.4 specifies.
+
+```
+# one entry, every generation, all axes
+python3 build_cache.py 0002
+
+# exercise the generator without paying for a full run
+python3 build_cache.py 0001 --limit 2 -o /tmp/sample.jsonl.gz
+```
+
+A cache is **derived data**: never committed, never a baseline, and usable only
+while it is known which build produced it. That last property is what the
+header carries — `pss_version`, `model_version`, `model_shape`,
+`baseline_digest`, and what was surveyed over which generations.
+
+Three choices in the generator are worth knowing before reading its output.
+
+**It computes no identity of its own.** `baseline_digest` and `model_shape`
+come from `test_pss.py --emit-baseline-digest`, and are copied. A second
+implementation would let a cache and the gate that reads it disagree about what
+was measured, which is the defect ADR 0033 retired.
+
+**A generation is `rev` and `blob`, never a position.** Identity lives in the
+blob (ADR 0033). An index is derivable from the file's own order, so storing it
+would create a second source of truth for one fact — and it is the copy that
+can silently disagree. This is not hypothetical: an earlier cache, produced
+from a procedure that lived in prose rather than in a file, carried
+`gen_index: null` on all 230 of its records.
+
+**Every axis is materialised, and that is not an option.** A cache is only
+useful against another cache, and two caches materialised differently are not
+comparable. Fixing the axis set is also faster, because a model that already
+carries every axis measures no axis increments.
+
+A cache survives everything except a change to what the model emits. A digest
+that no longer matches the current build says the cache came from a *different*
+build; it does not say the data is wrong. `model_version` is what answers
+whether the data is still comparable.
+
+---
+
 ## Self-test
 
 ```
@@ -179,7 +226,7 @@ and every trap this tool is built around was an assumption failure.
 
 ## Registration
 
-Neither `pss.py` nor `corpus.py` is registered in the manifest yet. `pss.py`
-registers when its SPEC has no provisional items left; `corpus.py` registers
-with it. Registering the helper before the tool it serves would invert the
-order.
+Neither `pss.py` nor its helpers are registered in the manifest yet. `pss.py`
+registers when its SPEC has no provisional items left; `corpus.py` and
+`build_cache.py` register with it. Registering a helper before the tool it
+serves would invert the order.
