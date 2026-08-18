@@ -1029,6 +1029,107 @@ MODEL_SCHEMA = {
 MODEL_SCHEMA_KINDS = ("always", "axis", "optional")
 
 
+# ---------------------------------------------------------------------------
+# SPEC 5.8: how a caller joins the collections to each other.
+#
+# MODEL_SCHEMA says which key paths exist; it does not say which of them carry
+# an identifier, which identifier space that is, or what a caller may join on.
+# A consumer that cannot answer those three questions can read the model and
+# cannot relate one collection to another, which is the gap SPEC 3.1 names as
+# "the join key for each collection".
+#
+# These live in the code, not only in the SPEC, for the reason MODEL_SCHEMA
+# does (ADR 0036): --capabilities serialises the declaration rather than
+# restating it, so there is one copy of the fact.
+# ---------------------------------------------------------------------------
+
+# The reserved pseudo-owner (SPEC 10.6). It is a legal value wherever a symbol
+# identifier is expected, and it is deliberately NOT a member of `symbols`:
+# script level is a source position, not a definition.
+SCRIPT_OWNER = "<script>"
+
+# Anchored implicitly: the checker applies fullmatch, so a form is the whole
+# identifier or it is not that form. The forms are disjoint by construction -
+# every identifier matches exactly one - which is what lets a caller dispatch
+# on the form without an ordering rule.
+IDENTIFIER_FORMS = {
+    "function": r"function/[^/#]+(?:/[^/#]+)*(?:#[0-9]+)?",
+    "variable:automatic": r"variable:automatic/[^/]+",
+    "variable:env": r"variable:env/[^/]+",
+    "variable:local": r"variable:local/[^/#]+(?:/[^/#]+)*#[^/#]+",
+    "variable:script": r"variable:script/[^/]+",
+    "variable:unqualified": r"variable:unqualified/[^/]+",
+}
+
+# Per collection:
+#   unique          - the field tuple that identifies a record, or None where
+#                     records are not individually identified. `None` is a
+#                     statement, not an omission: a collection carrying several
+#                     record shapes (SPEC 11.1) has no single identifying key,
+#                     and a caller must not invent one.
+#   symbol_refs     - fields whose every value is a member of `symbols[].id`
+#                     or the reserved SCRIPT_OWNER. These are the joins.
+#   identifier_refs - fields carrying an identifier of some form (SPEC 5.2)
+#                     that does NOT resolve into `symbols`, because `symbols`
+#                     carries function definitions only. Separated from
+#                     symbol_refs because a caller joining on one of these
+#                     against `symbols` gets an empty result and no error.
+COLLECTION_KEYS = {
+    "closures": {
+        "unique": None,
+        "symbol_refs": ("id", "members", "transitive_callees",
+                        "transitive_callers"),
+        "identifier_refs": (),
+    },
+    "edges": {
+        # Structural, not observed: the edge store is keyed by (from, to) and
+        # `sites` counts the occurrences that fold into one record.
+        "unique": ("from", "to"),
+        "symbol_refs": ("from", "to"),
+        "identifier_refs": (),
+    },
+    "limitations": {
+        "unique": None,
+        "symbol_refs": ("owner",),
+        "identifier_refs": (),
+    },
+    "local_variables": {
+        "unique": None,
+        "symbol_refs": ("owner",),
+        "identifier_refs": ("id",),
+    },
+    "script_variables": {
+        "unique": None,
+        "symbol_refs": ("owner", "readers", "writers"),
+        "identifier_refs": ("id",),
+    },
+    "soft_references": {
+        # `matches` resolves to a function OR to a script variable, so it is
+        # not a symbol join even though most of its values happen to be one.
+        "unique": None,
+        "symbol_refs": ("owner",),
+        "identifier_refs": ("matches",),
+    },
+    "string_interpolation_references": {
+        "unique": None,
+        "symbol_refs": ("owner",),
+        "identifier_refs": ("id",),
+    },
+    "symbols": {
+        "unique": ("id",),
+        "symbol_refs": ("parent",),
+        "identifier_refs": (),
+    },
+    "unresolved_named_commands": {
+        "unique": None,
+        "symbol_refs": ("owner", "owners"),
+        "identifier_refs": (),
+    },
+}
+
+COLLECTION_KEY_FIELDS = ("unique", "symbol_refs", "identifier_refs")
+
+
 COST_KEY = "cost"
 COST_FORMAT = "json-compact"
 
@@ -1931,6 +2032,20 @@ def render_text(model):
 # ---------------------------------------------------------------------------
 # --self-check (SPEC 13)
 # ---------------------------------------------------------------------------
+def _spec_cell(cell):
+    """Parse a SPEC 5.8 table cell holding a backticked field list.
+
+    An em dash is the written form of "no fields", and is distinguished from an
+    empty cell so that a row left blank by accident does not read as a
+    deliberate declaration of nothing.
+    """
+    cell = cell.strip()
+    if cell == "\u2014":
+        return ()
+    return tuple(part.strip().strip("`") for part in cell.split(",")
+                 if part.strip())
+
+
 def self_check():
     here = os.path.dirname(os.path.abspath(__file__))
     spec_path = os.path.join(here, "SPEC.md")
@@ -2055,6 +2170,88 @@ def self_check():
         if not axis_missing_in_code and not axis_missing_in_spec:
             print("  axes     : %d in AXES, %d in SPEC.md section 5.6, agree"
                   % (len(code_axes), len(spec_axes)))
+
+    # Identifier forms and collection join keys (SPEC 5.8), in both
+    # directions, exactly as the catalogue and the axis vocabulary above. The
+    # descriptor of SPEC 3.1 serialises these constants, so a drift here would
+    # be published to callers as fact.
+    kstart = spec.find("### 5.8 Identifier forms and collection join keys")
+    kend = spec.find("## 6. Output formats")
+    fstart_5_8 = spec.find("#### Identifier forms", kstart) if kstart >= 0 else -1
+    cstart_5_8 = spec.find("#### Collection join keys", kstart) if kstart >= 0 else -1
+    if kstart < 0 or kend < 0 or fstart_5_8 < 0 or cstart_5_8 < 0 or not (
+            kstart < fstart_5_8 < cstart_5_8 < kend):
+        print("  FAIL: could not locate SPEC section 5.8 and its two tables")
+        rc = EXIT_ERROR
+    else:
+        forms_section = spec[fstart_5_8:cstart_5_8]
+        spec_forms = dict(re.findall(r'^\| `([a-z:]+)` \| `(.+?)` \|$',
+                                     forms_section, re.M))
+        form_missing_in_code = sorted(set(spec_forms) - set(IDENTIFIER_FORMS))
+        form_missing_in_spec = sorted(set(IDENTIFIER_FORMS) - set(spec_forms))
+        pattern_disagrees = sorted(
+            k for k in set(spec_forms) & set(IDENTIFIER_FORMS)
+            if spec_forms[k] != IDENTIFIER_FORMS[k])
+        if form_missing_in_code:
+            print("  FAIL: identifier form in SPEC.md 5.8 but not compiled "
+                  "into pss.py: %s" % ", ".join(form_missing_in_code))
+            rc = EXIT_ERROR
+        if form_missing_in_spec:
+            print("  FAIL: identifier form compiled into pss.py but absent "
+                  "from SPEC.md 5.8: %s" % ", ".join(form_missing_in_spec))
+            rc = EXIT_ERROR
+        if pattern_disagrees:
+            # The pattern IS the form. Agreeing on the name while disagreeing
+            # on what it matches is the drift a descriptor makes dangerous.
+            print("  FAIL: identifier form declared with a different pattern "
+                  "in pss.py and SPEC.md 5.8: %s"
+                  % ", ".join("%s (%s vs %s)"
+                              % (k, IDENTIFIER_FORMS[k], spec_forms[k])
+                              for k in pattern_disagrees))
+            rc = EXIT_ERROR
+        if not (form_missing_in_code or form_missing_in_spec
+                or pattern_disagrees):
+            print("  ident    : %d forms in IDENTIFIER_FORMS, %d in SPEC.md "
+                  "section 5.8, agree on name and pattern"
+                  % (len(IDENTIFIER_FORMS), len(spec_forms)))
+
+        keys_section = spec[cstart_5_8:kend]
+        spec_keys = {}
+        for row in re.findall(r'^\| `([a-z_]+)` \| (.+?) \| (.+?) \| (.+?) \|$',
+                              keys_section, re.M):
+            name, uniq, syms, idents = row
+            spec_keys[name] = {
+                "unique": _spec_cell(uniq) or None,
+                "symbol_refs": _spec_cell(syms),
+                "identifier_refs": _spec_cell(idents),
+            }
+        code_keys = {c: {f: (tuple(v[f]) if v[f] else (None if f == "unique"
+                                                       else ()))
+                         for f in COLLECTION_KEY_FIELDS}
+                     for c, v in COLLECTION_KEYS.items()}
+        coll_missing_in_code = sorted(set(spec_keys) - set(code_keys))
+        coll_missing_in_spec = sorted(set(code_keys) - set(spec_keys))
+        cell_disagrees = sorted(
+            "%s.%s" % (c, f)
+            for c in set(spec_keys) & set(code_keys)
+            for f in COLLECTION_KEY_FIELDS
+            if spec_keys[c][f] != code_keys[c][f])
+        if coll_missing_in_code:
+            print("  FAIL: collection in SPEC.md 5.8 but not declared in "
+                  "pss.py: %s" % ", ".join(coll_missing_in_code))
+            rc = EXIT_ERROR
+        if coll_missing_in_spec:
+            print("  FAIL: collection declared in pss.py but absent from "
+                  "SPEC.md 5.8: %s" % ", ".join(coll_missing_in_spec))
+            rc = EXIT_ERROR
+        if cell_disagrees:
+            print("  FAIL: join-key declaration differs between pss.py and "
+                  "SPEC.md 5.8: %s" % ", ".join(cell_disagrees))
+            rc = EXIT_ERROR
+        if not (coll_missing_in_code or coll_missing_in_spec or cell_disagrees):
+            print("  joins    : %d collections in COLLECTION_KEYS, %d in "
+                  "SPEC.md section 5.8, agree on every key field"
+                  % (len(code_keys), len(spec_keys)))
 
     sstart = spec.find("### 13.3 The declared model schema")
     send = spec.find("## 14. Test-data acquisition")

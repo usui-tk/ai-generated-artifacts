@@ -575,6 +575,110 @@ def check_declared_schema(model_def, model_all):
        "declared schema: every kind is in the declared vocabulary")
 
 
+def _field_values(rows, field):
+    """Every value of ``field`` across ``rows``, flattening list-valued fields.
+
+    Returns (present, values): ``present`` counts the records carrying the
+    field at all, which is what distinguishes "declared and never populated"
+    from "declared and empty".
+    """
+    present = 0
+    values = []
+    for r in rows:
+        if field not in r:
+            continue
+        present += 1
+        v = r[field]
+        values.extend(v if isinstance(v, list) else [v])
+    return present, values
+
+
+def check_collection_keys(model_all):
+    """Hold SPEC 5.8 against the pin: forms, joins, uniqueness, exercise.
+
+    The declaration is the one thing ``--capabilities`` publishes that a caller
+    will act on structurally — it decides which field it joins on. Checking
+    only that the code and the document agree would repeat the failure SPEC
+    13.2 records twice: a name compared with a name while the behaviour goes
+    unexamined. Every claim here is therefore measured against the model.
+
+    ``model_all`` rather than the default materialisation, because several of
+    the declared fields exist only under an axis; a field checked at the
+    default would read as unpopulated for a reason that is not a defect.
+    """
+    declared = pss.COLLECTION_KEYS
+    collections_in_model = sorted(k for k, v in model_all.items()
+                                  if isinstance(v, list))
+
+    eq(sorted(set(collections_in_model) - set(declared)), [],
+       "join keys: every list collection in the model is declared")
+    eq(sorted(set(declared) - set(collections_in_model)), [],
+       "join keys: every declared collection exists in the model")
+
+    symbol_ids = {r["id"] for r in model_all["symbols"]}
+    joinable = symbol_ids | {pss.SCRIPT_OWNER}
+    forms = {name: re.compile(pat) for name, pat in pss.IDENTIFIER_FORMS.items()}
+    exercised = set()
+
+    unpopulated = []
+    unresolved = {}
+    unmatched = {}
+    ambiguous = {}
+    non_unique = []
+
+    for coll in sorted(set(declared) & set(collections_in_model)):
+        rows = model_all[coll]
+        spec = declared[coll]
+        for field in tuple(spec["symbol_refs"]) + tuple(spec["identifier_refs"]):
+            present, values = _field_values(rows, field)
+            if present == 0:
+                unpopulated.append("%s.%s" % (coll, field))
+                continue
+            if field in spec["symbol_refs"]:
+                bad = sorted({v for v in values if v not in joinable})
+                if bad:
+                    unresolved["%s.%s" % (coll, field)] = bad[:3]
+            for v in {x for x in values}:
+                if v == pss.SCRIPT_OWNER:
+                    continue
+                hit = [n for n, rx in forms.items() if rx.fullmatch(v)]
+                if not hit:
+                    # Bounded: an unmatched form is usually unmatched for
+                    # thousands of values, and a failure nobody can read is a
+                    # failure nobody acts on.
+                    seen_bad = unmatched.setdefault("%s.%s" % (coll, field), [])
+                    if len(seen_bad) < 3:
+                        seen_bad.append(v)
+                elif len(hit) > 1:
+                    ambiguous.setdefault(v, hit)
+                else:
+                    exercised.add(hit[0])
+
+        uniq = spec["unique"]
+        if uniq:
+            seen = {tuple(r.get(f) for f in uniq) for r in rows}
+            if len(seen) != len(rows):
+                non_unique.append("%s on %s (%d records, %d distinct)"
+                                  % (coll, "+".join(uniq), len(rows), len(seen)))
+
+    eq(unpopulated, [],
+       "join keys: every declared field is populated at the pin")
+    eq(sorted(unresolved.items()), [],
+       "join keys: every join value resolves into symbols or <script>")
+    eq(sorted(unmatched.items()), [],
+       "join keys: every other identifier matches a declared form")
+    eq(sorted(ambiguous.items()), [],
+       "join keys: the identifier forms are disjoint")
+    eq(non_unique, [],
+       "join keys: every declared unique key is unique")
+
+    # The reachability question, asked of the form set itself: a form no
+    # identifier at the pin belongs to is an enumeration nothing drives, which
+    # is the shape of failure SPEC 13.2's last row generalises.
+    eq(sorted(set(pss.IDENTIFIER_FORMS) - exercised), [],
+       "join keys: every declared identifier form is exercised at the pin")
+
+
 def check_cost_report(label, model):
     """Re-derive the cost decomposition; do not re-check the block's own sums.
 
@@ -848,6 +952,8 @@ def main():
             check_cost_report(label, model)
 
         check_declared_schema(model_def, model_all)
+
+        check_collection_keys(model_all)
 
         check_determinism(text)
 

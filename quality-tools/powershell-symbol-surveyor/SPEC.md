@@ -650,10 +650,19 @@ variable:script/<name>                 a script-scope variable
 variable:local/<Function>#<name>       a function-local variable
 variable:env/<name>                    an environment variable
 variable:automatic/<name>              an automatic variable
+variable:unqualified/<name>            a name whose scope is not determinable
 ```
 
 Names are emitted in their source casing. Identity comparison is
 case-insensitive (§10.7).
+
+The **unqualified** form is emitted where a reference carries no scope
+qualifier and the two-pass analysis does not resolve one — inside an expandable
+string, most commonly. It was omitted from this grammar until §5.8 forced every
+identifier the tool emits to be matched by a declared form, at which point 113
+occurrences at the pinned generation had no form to belong to. It is named here
+rather than silently admitted: an identifier space a caller cannot enumerate is
+one it cannot dispatch on.
 
 Where a function name is defined more than once, the identifier takes the form
 `function/<Name>#<ordinal>` where `<ordinal>` is the 1-based definition order.
@@ -920,6 +929,77 @@ scope is refused (exit `2`) rather than silently returning an all-empty model,
 for the same reason an unrecognised axis name is refused: a typo would
 otherwise read as "this symbol has no facts" (§1.3) instead of as the usage
 error it is.
+
+### 5.8 Identifier forms and collection join keys (normative)
+
+§13.3 declares which key paths a model carries. It does not say which of those
+paths carry an **identifier**, which identifier space that identifier belongs
+to, or which of them a caller may **join** against another collection. A
+consumer holding the schema and not these three facts can read every record and
+cannot relate one collection to another — which is the gap §3.1 names as "the
+join key for each collection", and which six external reviewers recovered by
+reading sample output.
+
+The declaration lives here and in `pss.py` (`IDENTIFIER_FORMS`,
+`COLLECTION_KEYS`), held together by `--self-check` on name **and** value, for
+the reason §13.3 gives: `--capabilities` serialises it rather than restating
+it, so there is one copy of the fact (ADR 0036).
+
+#### Identifier forms
+
+Every identifier the model emits matches **exactly one** row. The patterns are
+disjoint, so a caller dispatches on form without needing an ordering rule, and
+they are applied as full matches — a form is the whole identifier or it is not
+that form. `<script>` (§10.6) is the one reserved value that is not an
+identifier: it names a source position, not a definition, and is legal wherever
+a symbol identifier is expected.
+
+| Form | Pattern |
+|---|---|
+| `function` | `function/[^/#]+(?:/[^/#]+)*(?:#[0-9]+)?` |
+| `variable:automatic` | `variable:automatic/[^/]+` |
+| `variable:env` | `variable:env/[^/]+` |
+| `variable:local` | `variable:local/[^/#]+(?:/[^/#]+)*#[^/#]+` |
+| `variable:script` | `variable:script/[^/]+` |
+| `variable:unqualified` | `variable:unqualified/[^/]+` |
+
+#### Collection join keys
+
+`symbols[].id` is the join target, and `symbols` carries **function
+definitions only** — there is no row for a variable. A field is therefore
+listed under *joins* only where every one of its values is a member of
+`symbols[].id` or is `<script>`; a field carrying an identifier that does not
+resolve there is listed separately, because joining on it against `symbols`
+returns an empty result and raises no error. `soft_references.matches` is the
+case that makes the distinction load-bearing: it resolves to a function **or**
+to a script variable (§4.3), and most of its values are the former.
+
+A **unique key** of `—` is a statement, not an omission. A collection carrying
+several record shapes (§11.1) has no single identifying key, and a caller must
+not invent one from the fields that happen to be present.
+
+| Collection | Unique key | Joins to `symbols[].id` | Other identifier fields |
+|---|---|---|---|
+| `closures` | — | `id`, `members`, `transitive_callees`, `transitive_callers` | — |
+| `edges` | `from`, `to` | `from`, `to` | — |
+| `limitations` | — | `owner` | — |
+| `local_variables` | — | `owner` | `id` |
+| `script_variables` | — | `owner`, `readers`, `writers` | `id` |
+| `soft_references` | — | `owner` | `matches` |
+| `string_interpolation_references` | — | `owner` | `id` |
+| `symbols` | `id` | `parent` | — |
+| `unresolved_named_commands` | — | `owner`, `owners` | — |
+
+`edges` is unique on `(from, to)` **structurally**, not by observation: the
+edge store is keyed by that pair and `sites` counts the occurrences folded into
+one record (§11.1).
+
+`test_pss.py` holds this table against the pinned blob: every listed field must
+appear on at least one record, every value under *joins* must resolve into
+`symbols` or be `<script>`, every value under *other identifier fields* must
+match a declared form, and every declared unique key must actually be unique.
+A field listed and never populated is an enumerated capability nothing
+exercises — the failure mode §13.2 records twice.
 
 ---
 
@@ -1557,6 +1637,7 @@ build actually runs today, and gates this SPEC requires of a *complete*
 | Channel agreement | a derivation per numeric text-channel row, applied to the model and compared with what the renderer printed |
 | Projection invariance | per axis, a survey with and without it, compared by containment on the narrower key vocabulary (§5.6) |
 | Determinism | two extractions of the pinned blob per materialisation, compared as bytes (§5.4) |
+| Identifier forms and join keys | `--self-check` compares `pss.IDENTIFIER_FORMS` and `pss.COLLECTION_KEYS` with §5.8 on name **and** value — a form that agrees on its name while disagreeing on what it matches is exactly the drift a published descriptor makes dangerous. `test_pss.py` holds the declaration against the pinned blob: every listed field populated, every join value resolving into `symbols` or `<script>`, every other identifier matching exactly one declared form, and every declared unique key unique. The form set is checked for **exercise**, not only for agreement — a form no identifier at the pin belongs to is an enumeration nothing drives (§13.2) |
 | Declared schema | `--self-check` compares `pss.MODEL_SCHEMA` with §13.3 on path and kind; `test_pss.py` compares the declaration with what the pinned blob emits in both directions — emitted-but-undeclared and declared-but-unemitted are separate failures, and `optional` is the only exemption |
 | Cost report | `test_pss.py` **re-derives** the decomposition from the model — every list collection priced, `model_bytes` measured on the model less the block, `envelope` as the stated remainder — and compares by value. It does **not** re-check the block's own sum: `envelope` is computed as a remainder, so `sum + envelope == model_bytes` holds even when a whole collection is missing from the breakdown, which was demonstrated before landing |
 | Version decision | `test_pss.py` re-runs the parent commit's `pss.py` against the same pinned blob and fails when the emitted model moved — shape **or** measured values — while `MODEL_VERSION` did not (§5.5, ADR 0035). No ledger of past versions is kept: the previous state is derived, so there is no second copy to go stale (ADR 0036). Skipped, and reported as skipped, where there is no comparable parent |
