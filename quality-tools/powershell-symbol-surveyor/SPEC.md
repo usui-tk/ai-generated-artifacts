@@ -61,7 +61,7 @@ facts about the differences.
 It exists to make refactoring auditable. The intended workflow is:
 
 ```
-[ survey : pss.py ] -> [ modify : project / LLM ] -> [ survey + compare : pss.py ] -> [ adjudicate : the caller ]
+[ survey : pss.py ] -> [ modify : project / LLM ] -> [ survey + trace : pss.py ] -> [ adjudicate : the caller ]
 ```
 
 The separation is load-bearing. Every surveyed refactoring tool struggles
@@ -99,6 +99,28 @@ stops there. Example: for a variable read with no local declaration, `pss.py`
 cannot determine which declaration it binds to at runtime, but it can
 enumerate the enclosing function's static callers and state which of them
 declare that name. The enumeration is a fact; the conclusion is not drawn.
+
+**The rule extends to names, not only to values (normative).** A name on the
+interface states what was observed; it does not state what the caller should
+conclude. This governs subcommand names, fact-code names and classification
+values alike. `PSS7006` already applies it — its four values are deliberately
+neutral and carry no priority or severity — and it applies equally one level
+up: the workflow of §1.1 gives *adjudicate* to the caller, so no subcommand may
+name that stage. `pss.py` makes a refactoring auditable; it does not audit.
+
+Two consequences already realised: the verb for relation-asserted comparison is
+`trace`, not `audit` (§4.9); and `PSS8007` names an empty writer set rather
+than declaring the variable broken. That second was not merely a wording
+preference — "broken" is a claim about run time, and it depends on
+`Set-StrictMode` and on the declaration forms this build does not yet retain
+(§12.2, §13.2), neither of which the tool observes. A judgement whose premises
+the tool cannot see is not a stronger statement than the fact; it is a weaker
+one wearing a stronger word.
+
+Only a bounded part of this is mechanically checkable, and §13.1 says which
+part: a denylist over the fact-code descriptions and the subcommand help
+strings. A denylist stops known words from returning. It does not, and is not
+claimed to, detect a judgement expressed in words nobody has listed yet.
 
 ### 1.4 Language and file scope
 
@@ -229,7 +251,8 @@ the two would make the tool useless exactly where it is meant to be used.
 
 Therefore, normatively:
 
-- **`survey` reads one file. `compare` reads two model documents. `slice` reads
+- **`survey` reads one file. `compare` and `trace` read two model documents each.
+  `slice` reads
   one.** Nothing else is read: no repository, no corpus, no configuration file,
   no network.
 - **Neither `git` nor `pwsh` is required to run any subcommand.** They are
@@ -263,7 +286,8 @@ pss.py survey   <script.ps1> [--out <model.json>] [--format text|json]
                              [--axes <axis>[,<axis>...]] [--pretty]
 pss.py slice    <model.json> [--scope <id>] [--axes <axis>[,<axis>...]]
                              [--out <model.json>] [--format text|json] [--pretty]
-pss.py compare  <before.json> <after.json> [--format text|json]
+pss.py compare  <a.json> <b.json> [--format text|json]
+pss.py trace    <before.json> <after.json> [--format text|json]
 pss.py --list-facts
 pss.py --self-check
 pss.py --capabilities
@@ -273,7 +297,7 @@ pss.py --version
 | Option | Applies to | Meaning |
 |---|---|---|
 | `--out PATH` | `survey`, `slice` | Write the model to PATH. Default: stdout. |
-| `--format {text,json}` | `survey`, `slice`, `compare` | Output format. Default `text`. |
+| `--format {text,json}` | `survey`, `slice`, `compare`, `trace` | Output format. Default `text`. |
 | `--axes LIST` | `survey`, `slice` | Comma-separated materialisation axes to restore (`survey`) or narrow to (`slice`), or `all`. Default: none (§5.6). An unrecognised name exits `2`. |
 | `--scope ID` | `slice` | Keep only records concerning this symbol identifier, plus incident edges and all limitations (§5.7). An unmatched identifier exits `2`. |
 | `--pretty` | `survey`, `slice` | Indent the JSON model. Default is compact (§2.4). |
@@ -287,15 +311,15 @@ mechanism. Severity does not exist in this tool, and facts are not suppressed �
 they are filtered by the caller when the caller has decided what it cares
 about.
 
-**Current build status.** `compare` exists as a subcommand and can be invoked,
-but this build deliberately refuses to run it: it prints an explanatory
-message and exits non-zero rather than emitting an empty or partial
+**Current build status.** `compare` and `trace` exist as subcommands and can be
+invoked, but this build deliberately refuses to run either: each prints an
+explanatory message and exits non-zero rather than emitting an empty or partial
 comparison (§2.1; the comparator is Layer 3 and has not been built yet).
 `--cost` **is implemented** in this build, as `survey --cost`: the model is
 computed and discarded, and the report it prints is the block every model now
 carries under a single top-level key. `--capabilities` **is implemented**, and
 declares the two machine outputs this build does not produce — the delta
-records of `compare` and the structured error payload — as
+records of `compare` / `trace` and the structured error payload — as
 `"status": "not-implemented"` with a reason, rather than omitting them or
 describing shapes that do not exist (§3.1).
 
@@ -334,7 +358,7 @@ descriptor carries an entry for every machine output listed below, each with a
 reason. Omission would be indistinguishable from an oversight, and describing a
 shape the tool does not emit is precisely the confident wrong request this
 section exists to prevent. The mark is a claim about behaviour and is gated as
-one: §13 runs `compare` and requires it to refuse, and provokes a usage error
+one: §13 runs `compare` and `trace` and requires each to refuse, and provokes a usage error
 under `--format json` and requires the diagnostic not to be JSON. Implementing
 either without moving its mark turns the gate red, so the mark cannot drift
 into a lie and cannot be quietly left behind.
@@ -347,7 +371,7 @@ by reading sample output — which a caller without samples cannot do, and which
 guarantees nothing across versions. The descriptor therefore also carries a
 **schema for every machine output**: the record shape of each model collection,
 the identifier conventions, the join key for each collection, the delta-record
-shape emitted by `compare`, the cost-report shape, and the structured error
+shape emitted by `compare` and `trace`, the cost-report shape, and the structured error
 payload. Ordering and determinism (§5.4) are stated there too, since a caller
 that intends to join or diff two models outside the tool depends on them.
 
@@ -411,7 +435,7 @@ under §1.2 exactly as severity does.
 
 This section is normative. Facts are identified by `PSS` plus four digits,
 blocked by first digit. Blocks 1-4 are single-state facts emitted by `survey`;
-blocks 6-8 are delta facts emitted by `compare`; block 9 is the tool's
+blocks 6-8 are delta facts emitted by `compare` and `trace` (§4.9); block 9 is the tool's
 declarations about its own limits and is emitted by both.
 
 Block 9 sharing the identifier space with ordinary facts is deliberate,
@@ -580,21 +604,21 @@ existing count fields.
 | `PSS4003` | A defined function with no static caller and no top-level invocation. Carries **`named_by_literal`** when a `PSS3001` soft reference elsewhere in the file matches the function's name exactly; the key is **absent** (never `false`) when it does not, following the model's existing size-driven convention of omitting null/false-valued keys rather than emitting them. This is a fact about the string-literal surface only — a comment mentioning the name does not set it, because a comment is not code and is not evidence of a call path (§15.4 F1). The code does **not** mean unreachable either way — a `named_by_literal` record commonly means dispatch through a data table (see `PSS9002`); its absence is the narrower claim the tool can support (§15.5). |
 | `PSS4004` | A mutual-recursion group: a strongly-connected component of the call graph with more than one member. Carries every member. The call graph is not acyclic (§11.2). |
 
-### 4.5 PSS6xxx — Presence transition
+### 4.5 PSS6xxx — Presence difference
 
 Emitted for both **functions** and **script-scope variables**. Every record
 carries a `symbol_kind` of `function` or `script-variable`.
 
 | Code | Fact |
 |---|---|
-| `PSS6001` | A name present in the before model is absent from the after model. |
-| `PSS6002` | A name absent from the before model is present in the after model. |
+| `PSS6001` | A name present in model A is absent from model B. |
+| `PSS6002` | A name absent from model A is present in model B. |
 | `PSS6003` | A name is present in both models. |
 
 `PSS6003` alone carries no information about identity. A name present in both
 may denote a different entity; §4.6 supplies the evidence that reveals this.
 
-### 4.6 PSS7xxx — Attribute change
+### 4.6 PSS7xxx — Attribute difference
 
 Several facts may report the same edit from different angles, and that is
 normal rather than duplication. A parameter rename is genuinely both a text
@@ -613,7 +637,7 @@ and an observed equality must be distinguishable by the caller.
 | `PSS7004` | Caller set: equal / not equal, with the symmetric difference. |
 | `PSS7005` | Dependency classification, four values from direct-callee-set change x transitive-callee-closure change (§11.3). |
 | `PSS7006` | Combined classification, four values from `PSS7001` x `PSS7005`: `unchanged` / `local-change` / `dependency-only` / `change-and-propagation` (§11.4). The value names are deliberately neutral; no priority or severity is attached. |
-| `PSS7007` | A script-scope variable's usage map changed: writer-set and reader-set equality plus symmetric differences, and both counts before and after. |
+| `PSS7007` | A script-scope variable's usage map differs between the models: writer-set and reader-set equality plus symmetric differences, and both counts in each model. |
 
 **The same-name/different-entity case.** `hash_body` is keyed independently of
 name. Where a `hash_body` present on `B` in the before model appears on `D` in
@@ -621,18 +645,18 @@ the after model, while `B` in the after model carries a different `hash_body`,
 `pss.py` emits both facts adjacently. The reader may conclude a rename plus a
 name reuse; `pss.py` does not.
 
-### 4.7 PSS8xxx — Graph, closure and rename-omission change
+### 4.7 PSS8xxx — Graph, closure and rename-omission
 
 | Code | Fact |
 |---|---|
-| `PSS8001` | A call edge present in the after model and absent from the before model. |
-| `PSS8002` | A call edge present in the before model and absent from the after model. |
+| `PSS8001` | A call edge present in model B and absent from model A. |
+| `PSS8002` | A call edge present in model A and absent from model B. |
 | `PSS8003` | A function's transitive closure differs between models, with the set difference. |
-| `PSS8004` | A soft reference's resolution state changed — most importantly, a string literal that matched a declared name before and matches none after. |
+| `PSS8004` | A soft reference's resolution state differs between the models — most importantly, a string literal that matches a declared name in one and matches none in the other. |
 | `PSS8005` | **Incomplete-rename candidate.** A script-scope name is present in the after model and absent from the before model, while a name present in **both** models lost usage in the same transition. Carries both names, both usage maps, and the count deltas. Derivation and rationale: §12.7 rule (b). |
 | `PSS8006` | **Producer/consumer desynchronisation candidate.** For a script-scope variable, at least one **writer** function's `PSS7001` is not `identical` while at least one **reader** function's `PSS7001` is `identical`. Carries the variable, the changed writers, and the unchanged readers. Derivation and rationale: §12.7 rule (a). |
-| `PSS8007` | **Write-site loss.** A script-scope variable retains at least one reader in the after model but its writer set became empty. Emitted only as a transition; the single-state equivalent belongs to `psa.py` (§7). Derivation: §12.7 rule (c). |
-| `PSS8008` | **Orphaning transition.** A function's `PSS4003` presence changed between the before and after model: gained (had a static caller before, has none after) or lost (had none before, has one after). Carries the function identifier, the direction, and both models' `named_by_literal` values (§4.4) for that identifier where the function is present in both. Carries **no commit identity** — `pss.py` is git-agnostic by design (§2.1) and knows only the two models it was given; a caller that wants per-commit resolution runs `compare` over adjacent generations, in which case a sequence of `PSS8008` facts — including a gain followed by a later loss — is the correct and unremarkable representation of a function whose reachability changed more than once (§15.4 F3). |
+| `PSS8007` | **No write site retained.** A script-scope variable has at least one reader in model B and an empty writer set there. What that means at run time depends on `Set-StrictMode` and on the declaration forms this build does not yet retain (§12.2, §13.2), neither of which the tool observes; the fact is the empty writer set, and the reading of it belongs to the caller (§1.1). `trace` only; the single-state equivalent belongs to `psa.py` (§7). Derivation: §12.7 rule (c). |
+| `PSS8008` | **`PSS4003` presence differs.** A function's `PSS4003` presence differs between the models: present in B and not in A, or present in A and not in B. Carries the function identifier, the direction, and both models' `named_by_literal` values (§4.4) for that identifier where the function is present in both. Carries **no commit identity** — `pss.py` is git-agnostic by design (§2.1) and knows only the two models it was given; a caller that wants per-commit resolution runs `trace` over adjacent generations, in which case a sequence of `PSS8008` facts — including a gain followed by a later loss — is the correct and unremarkable representation of a function whose reachability changed more than once (§15.4 F3). |
 
 `PSS8004`, `PSS8005`, `PSS8006`, `PSS8007` and `PSS8008` are the direct detectors for the
 failure modes that motivated the tool. None of them is a verdict: each names a
@@ -656,6 +680,36 @@ cross-function state explicitly with `$script:` rather than relying on implicit
 inheritance. A codebase without that discipline would produce far more. The
 count is therefore a usable indicator of whether a given script is statically
 analysable at all — reported as a number, with no threshold and no judgement.
+
+---
+
+### 4.9 Which verb may emit which code (normative)
+
+Two verbs read two models. They share one comparator; they differ in what the
+caller is claiming, and therefore in what may be said.
+
+- **`compare A B`** states the differences between two models and **claims no
+  relation between them**. It is the honest verb when the inputs are two files
+  whose relationship the tool cannot know (§2.6) — a candidate and an original,
+  two implementations of one routine, or two files that merely happen to be
+  compared.
+- **`trace before after`** carries the caller's assertion that `after` is a
+  **later state of** `before`. The tool cannot verify that assertion; it can
+  only require it to be made, which is why it is a verb and not a defaulted
+  flag. Nothing in a model records where it came from.
+
+Fifteen of the eighteen comparison codes hold without any relation between the
+inputs and are emitted by **both** verbs. Three require the assertion, and are
+emitted by **`trace` only**: `PSS8005`, `PSS8006` and `PSS8007` — precisely the
+three rules of §12.7. "An incomplete rename" is not a fact about two unrelated
+files; it presupposes that one was derived from the other. Emitting it for an
+arbitrary pair would not be a caveated fact but noise.
+
+The neutral fifteen are worded neutrally in §4.5–§4.7: **model A and model B**,
+and *differs* rather than *changed*. Under `trace` the same facts may be
+presented in before/after terms, because there the ordering is what the caller
+asserted. The wording is not cosmetic — a code that says "changed" has already
+assumed the relation the verb exists to declare.
 
 ---
 
@@ -1683,17 +1737,25 @@ Where a removed name and an added name carry equal writer and reader counts,
 emit that correspondence as part of the evidence. On a real historical
 twelve-for-twelve renaming wave this paired every variable correctly.
 
-**Rule (c) — write-site loss → `PSS8007`.**
+**Rule (c) — no write site retained → `PSS8007`.**
 A script-scope variable whose reader set is non-empty in the after model while
-its writer set became empty. Unlike (a) and (b) this is not probabilistic: a
-variable that is read and never written is broken. Emitted only as a transition
-(§7).
+its writer set is empty there. Unlike (a) and (b), this rule is **decidable
+within the model**: it reports a set that is empty, not a resemblance.
+
+It is **not decidable outside the model**, and the distinction matters. The
+model's writer set is not a complete account of writing — §13.2 records four
+declaration forms this build does not yet retain — and what an unwritten read
+does at run time depends on `Set-StrictMode`, which the tool does not observe.
+So the fact is the empty writer set in a model that carries readers. Calling
+the variable broken would assert both premises the tool cannot see (§1.3).
+Emitted only as a difference between two models; the single-state equivalent
+belongs to `psa.py` (§7).
 
 **Verification.** The three rules were validated by injecting a realistic
 defect: in a historical state, `$script:OsProfile` — referenced by 12 functions
 — was renamed throughout except in one function, reproducing a single-site
 omission. Rule (b) reported the new name added while the old name persisted
-with readers 12 -> 1 and writers 2 -> 0; rule (c) reported the write-site loss;
+with readers 12 -> 1 and writers 2 -> 0; rule (c) reported the absent write site;
 rule (a) named `Resolve-InstallWimTargetIndexes`, the function deliberately
 left behind. The three detectors are independent and mutually redundant by
 design.
@@ -1724,6 +1786,7 @@ build actually runs today, and gates this SPEC requires of a *complete*
 | Projection invariance | per axis, a survey with and without it, compared by containment on the narrower key vocabulary (§5.6) |
 | Determinism | two extractions of the pinned blob per materialisation, compared as bytes (§5.4) |
 | Operating context | `test_pss.py` holds §2.6 two ways. Structurally, `pss.py`'s module-level imports are parsed and compared with a declared allowlist, so the tool has no means of reaching a subprocess, a socket or an HTTP client, and a new import must move the allowlist deliberately. Behaviourally, `survey`, `slice` and `--capabilities` are run in an empty directory that is not a repository, with an environment carrying no executable search path, and their output must be **byte-identical** to the same run made inside this repository. The check exists because the corpus is reference data for the gates and the tool must not acquire a dependency on it |
+| Neutral naming | `test_pss.py` applies a denylist of judgement words to the fact-code descriptions and the subcommand help strings (§1.3), and checks the denylist actually covers every code and every subcommand rather than an empty set. **A denylist makes no completeness claim**: it stops listed words from returning and detects nothing worded some other way. SPEC prose is out of scope, because the rule itself has to be able to say the word in order to explain why a code may not |
 | Capability descriptor | `test_pss.py` compares every enumerated block of `--capabilities` with the constant it is supposed to be **reading** — a literal copied into the descriptor diverges the moment the constant moves — and the subcommand set against the §3 synopsis in both directions. The `implemented` / `not-implemented` marks are then checked **against the build**: `compare` must refuse, a usage error under `--format json` must not emit JSON, `survey --format json` must emit a model, and that model must carry the cost block. A mark cannot drift into a lie, and a feature cannot land while leaving its mark behind. Needs neither `git` nor `pwsh`, so it survives every degradation level of §14.3 |
 | Identifier forms and join keys | `--self-check` compares `pss.IDENTIFIER_FORMS` and `pss.COLLECTION_KEYS` with §5.8 on name **and** value — a form that agrees on its name while disagreeing on what it matches is exactly the drift a published descriptor makes dangerous. `test_pss.py` holds the declaration against the pinned blob: every listed field populated, every join value resolving into `symbols` or `<script>`, every other identifier matching exactly one declared form, and every declared unique key unique. The form set is checked for **exercise**, not only for agreement — a form no identifier at the pin belongs to is an enumeration nothing drives (§13.2) |
 | Declared schema | `--self-check` compares `pss.MODEL_SCHEMA` with §13.3 on path and kind; `test_pss.py` compares the declaration with what the pinned blob emits in both directions — emitted-but-undeclared and declared-but-unemitted are separate failures, and `optional` is the only exemption |
@@ -1755,7 +1818,7 @@ should not assume any of these are currently enforced.
 | Schema nullability | `--capabilities` publishes `model_schema` as key paths and kinds (`always` / `axis` / `optional`), which says whether a path is present and never says what its value may be. `/cost/axis_increment[]/bytes` is `null` in a sliced model (§5.7) and an integer in a surveyed one, so a caller reading the descriptor learns the path is always present and does not learn it can be null. Closing this means either a nullability facet in `MODEL_SCHEMA` — touching §13.3's table, `--self-check` and the descriptor together — or a separate declaration | not started; independent of `compare` and S4 |
 | Reachability | no §10.5 unreachable combination is producible over the regression corpus (`PSS9006` count is zero) | S4 |
 | Derivation owed | **RESOLVED (ADR 0036).** Every B.3 figure is re-derived by `test_pss.py` from the pinned blob, withdrawn as an orphan, or re-stamped with the state that reproduces it; a figure with no executable derivation is no longer permitted to exist | closed |
-| Delta baselines | Appendix B.7's figures are `compare` outputs and cannot be re-derived while `compare` refuses to run (§3) | `compare` (S3) |
+| Delta baselines | Appendix B.7's figures are comparator outputs and cannot be re-derived while `compare` and `trace` refuse to run (§3). **Two fixture families are needed, not one:** a `trace` pair, which corpus history supplies by construction, and a `compare` pair of independent scripts, which corpus history **cannot** supply because every pair drawn from it stands in exactly the relation `trace` asserts (§4.9) | `compare` / `trace` (S3) |
 | Static analysis | clean under the repository's Python gates | not yet wired into a `pss.py`-specific run |
 | Docs | bilingual README pair in lock-step; SPEC, CHANGELOG, VERSION present | `README.ja.md`, `CHANGELOG.md` and `VERSION` do not exist yet for this tool (only `README.md` and this file do) |
 | Emission coverage | every code in §4 blocks 1-4 (survey-emittable) appears as a `code` or `facts` value on at least one record somewhere in the regression corpus's models, or is documented as data-dependent-absent (e.g. `PSS1005` legitimately does not fire on a corpus with zero duplicate names) | `PSS2005`, `PSS4001`, `PSS4002` closed by manual audit. `PSS2002` open for 4 of 5 §12.2 sources (`param()`/inline-function parameters, `foreach` loop variables, `Set-Variable`/`New-Variable`, `-OutVariable` family) — `_decl_add`'s callers do not retain a site to tag (§4.2, §12.2). No automated gate yet either way; S4 |

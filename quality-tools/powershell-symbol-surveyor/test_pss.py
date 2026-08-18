@@ -60,6 +60,16 @@ PSS = os.path.join(HERE, "pss.py")
 # socket or an HTTP client, so the tool has no means of reading a repository, a
 # corpus or a network however its logic evolves. Widening this is a deliberate
 # act, and one that should be argued for rather than noticed afterwards.
+# SPEC 1.3. Words that state a conclusion rather than an observation. The list
+# is a denylist, so it makes no completeness claim: it stops these words from
+# coming back and says nothing about a judgement worded some other way. Each
+# entry earned its place - `broken` from PSS8007, the rest by being the words a
+# severity vocabulary reaches for first.
+JUDGEMENT_WORDS = (
+    "audit", "bad", "broken", "critical", "dangerous", "harmful", "improper",
+    "incorrect", "invalid", "risky", "severity", "should", "unsafe", "wrong",
+)
+
 PSS_ALLOWED_IMPORTS = (
     "argparse", "bisect", "hashlib", "json", "os", "re", "sys",
 )
@@ -837,6 +847,45 @@ def check_operating_context():
                 os.remove(in_repo)
 
 
+def check_neutral_naming():
+    """Hold the bounded part of SPEC 1.3's naming rule.
+
+    A name on the interface states what was observed, not what the caller
+    should conclude. Most of that rule is a matter of judgement and cannot be
+    mechanised; what CAN be mechanised is that a specific set of words does not
+    come back. So this is a denylist over exactly two surfaces - the fact-code
+    descriptions and the subcommand help strings - and its limit is stated
+    rather than glossed: it stops known words from returning and detects
+    nothing expressed in a word nobody has listed.
+
+    SPEC prose is deliberately out of scope. It discusses judgement legitimately
+    - the rule above has to be able to say the word "broken" in order to explain
+    why a code must not.
+    """
+    surfaces = {}
+    for code, text in pss.FACTS.items():
+        surfaces["FACTS[%s]" % code] = text
+    parser = pss.build_parser()
+    sub = [a for a in parser._subparsers._group_actions
+           if isinstance(a, argparse._SubParsersAction)][0]
+    for choice in sorted(sub.choices):
+        help_text = next((c.help for c in sub._choices_actions
+                          if c.dest == choice), "") or ""
+        surfaces["help[%s]" % choice] = help_text
+
+    found = sorted(
+        "%s: %s" % (where, word)
+        for where, text in surfaces.items()
+        for word in JUDGEMENT_WORDS
+        if re.search(r"\b%s\b" % word, text, re.I))
+    eq(found, [], "neutral naming: no judgement word on the fact or verb surface")
+
+    # The denylist is only meaningful if it is actually applied to something.
+    check(len(surfaces) >= len(pss.FACTS) + 3,
+          "neutral naming: the denylist covers every code and every subcommand",
+          "%d surfaces for %d codes" % (len(surfaces), len(pss.FACTS)))
+
+
 def check_capability_descriptor():
     """Hold the SPEC 3.1 descriptor against the declarations and the build.
 
@@ -914,15 +963,18 @@ def check_capability_descriptor():
         a = os.path.join(d, "a.json")
         with open(a, "w", encoding="utf-8") as fh:
             fh.write("{}")
-        cmp_out = subprocess.run(
-            [sys.executable, os.path.join(HERE, "pss.py"), "compare", a, a,
-             "--format", "json"], capture_output=True, cwd=d)
+        refused = {}
+        for verb in ("compare", "trace"):
+            refused[verb] = subprocess.run(
+                [sys.executable, os.path.join(HERE, "pss.py"), verb, a, a,
+                 "--format", "json"], capture_output=True, cwd=d).returncode
+    # Both verbs share one comparator, so one mark covers both - and the mark
+    # is only true while BOTH refuse.
     check(outputs.get("delta_records", {}).get("status") == "not-implemented"
-          and cmp_out.returncode != 0,
-          "descriptor: the delta mark matches what compare does",
-          "declared %r, compare exited %d"
-          % (outputs.get("delta_records", {}).get("status"),
-             cmp_out.returncode))
+          and all(rc != 0 for rc in refused.values()),
+          "descriptor: the delta mark matches what compare and trace do",
+          "declared %r, exits %r"
+          % (outputs.get("delta_records", {}).get("status"), refused))
 
     err_out = _run_pss(["survey", "@SCRIPT@", "--format", "json",
                         "--axes", "no-such-axis"], text="function F { }")
@@ -1176,6 +1228,7 @@ def main():
 
     # Needs neither git nor pwsh: the descriptor is a property of the build,
     # so it stays checked at every degradation level (SPEC 14.3).
+    check_neutral_naming()
     check_capability_descriptor()
 
     # SPEC 2.6, and deliberately alongside the descriptor: both describe the

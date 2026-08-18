@@ -89,8 +89,8 @@ FACTS = {
     "PSS4003": "A defined function with no static caller and no top-level invocation.",
     "PSS4004": "A mutual-recursion group (strongly-connected component).",
     # PSS6xxx - presence transition (compare)
-    "PSS6001": "A name present in the before model is absent from the after model.",
-    "PSS6002": "A name absent from the before model is present in the after model.",
+    "PSS6001": "A name present in model A is absent from model B.",
+    "PSS6002": "A name absent from model A is present in model B.",
     "PSS6003": "A name is present in both models.",
     # PSS7xxx - attribute change (compare)
     "PSS7001": "Hash-triple classification.",
@@ -99,16 +99,16 @@ FACTS = {
     "PSS7004": "Caller set equality.",
     "PSS7005": "Dependency classification.",
     "PSS7006": "Combined classification.",
-    "PSS7007": "A script-scope variable's usage map changed.",
+    "PSS7007": "A script-scope variable's usage map differs between the models.",
     # PSS8xxx - graph, closure and rename-omission change (compare)
-    "PSS8001": "A call edge present in the after model and absent from the before model.",
-    "PSS8002": "A call edge present in the before model and absent from the after model.",
+    "PSS8001": "A call edge present in model B and absent from model A.",
+    "PSS8002": "A call edge present in model A and absent from model B.",
     "PSS8003": "A function's transitive closure differs between models.",
-    "PSS8004": "A soft reference's resolution state changed.",
+    "PSS8004": "A soft reference's resolution state differs between the models.",
     "PSS8005": "Incomplete-rename candidate.",
     "PSS8006": "Producer/consumer desynchronisation candidate.",
-    "PSS8007": "Write-site loss.",
-    "PSS8008": "A function's PSS4003 presence changed between models (orphaning transition).",
+    "PSS8007": "A script-scope variable read in model B with no write site retained in it.",
+    "PSS8008": "A function's PSS4003 presence differs between the models.",
     # PSS9xxx - analysis limitations
     "PSS9001": "A region could not be parsed.",
     "PSS9002": "A call site could not be statically resolved.",
@@ -1179,11 +1179,12 @@ MACHINE_OUTPUTS = {
     },
     "delta_records": {
         "status": "not-implemented",
-        "emitted_by": "compare --format json",
+        "emitted_by": "compare --format json, trace --format json",
         "shape": None,
         "reason": "the comparator is Layer 3 and has not been built; this "
-                  "build refuses `compare` rather than emitting an empty "
-                  "comparison, which would read as 'no change' (SPEC 3)",
+                  "build refuses both `compare` and `trace` rather than "
+                  "emitting an empty comparison, which would read as "
+                  "'no change' (SPEC 3)",
     },
     "error_payload": {
         "status": "not-implemented",
@@ -2630,14 +2631,22 @@ def cmd_slice(args):
     return _write_model(sliced, args)
 
 
-def cmd_compare(args):
+def _refuse_layer3(verb):
     sys.stderr.write(
-        "pss.py: 'compare' (Layer 3) is not implemented in version %s.\n"
+        "pss.py: '%s' (Layer 3) is not implemented in version %s.\n"
         "        The comparator arrives in a later patch of this series; this\n"
         "        build ships Layer 1 and Layer 2 only. Refusing rather than\n"
         "        emitting an empty comparison, which would read as 'no change'.\n"
-        % __version__)
+        % (verb, __version__))
     return EXIT_ERROR
+
+
+def cmd_compare(_args):
+    return _refuse_layer3("compare")
+
+
+def cmd_trace(_args):
+    return _refuse_layer3("trace")
 
 
 def capabilities_document(parser):
@@ -2785,11 +2794,21 @@ def build_parser():
                     help="indent the JSON model (default is compact)")
     sp.set_defaults(func=cmd_survey)
 
-    cp = sub.add_parser("compare", help="compare two models and emit delta facts")
-    cp.add_argument("before")
-    cp.add_argument("after")
+    cp = sub.add_parser("compare", help="state the differences between two "
+                                        "models, claiming no relation between "
+                                        "them")
+    cp.add_argument("a")
+    cp.add_argument("b")
     cp.add_argument("--format", choices=("text", "json"), default="text")
     cp.set_defaults(func=cmd_compare)
+
+    tp = sub.add_parser("trace", help="state the differences between two models "
+                                      "where the caller asserts the second is a "
+                                      "later state of the first")
+    tp.add_argument("before")
+    tp.add_argument("after")
+    tp.add_argument("--format", choices=("text", "json"), default="text")
+    tp.set_defaults(func=cmd_trace)
 
     lp = sub.add_parser("slice", help="reduce a stored model deterministically "
                                        "(symbol scope and/or a narrower axis set)")
