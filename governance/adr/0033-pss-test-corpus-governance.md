@@ -92,9 +92,15 @@ reported, never dropped in silence.
 
 ### 5. Entries are tool-written and byte-stable
 
-Entries are written only through `corpus.py`, as the manifest is written only
-through `canon-manifest-tool` (ADR 0011), and record the writer in
-`generated_by`. The file format follows the in-repo precedent of
+Entries are written only through the corpus manager, as the manifest is written
+only through `canon-manifest-tool` (ADR 0011), and record the writer in
+`generated_by`. *(Factual note, 2026-08-18: the manager was `corpus.py` when
+this was decided and is now a subcommand of `test_pss.py`, per SPEC §14.1's
+two-file rule. The rule above is unchanged — only the file holding the writer
+moved. `generated_by` still reads `.../corpus.py` in the two committed entries,
+deliberately: an entry is byte-stable by construction, and re-pointing the
+string would rewrite committed artefacts to record a fact about the tool rather
+than about the entries.)* The file format follows the in-repo precedent of
 `ena-driver-releases.json`: a metadata header followed by one record per line,
 so adding a generation is a one-line diff.
 
@@ -155,7 +161,15 @@ because the copy is tool-generated, regenerable, and machine-comparable against
 its source — the distinction ADR 0031 draws between a derived view and a
 hand-maintained list.
 
-Registration is deferred. Neither `pss.py` nor `corpus.py` is a manifest unit
+Registration is deferred. Neither `pss.py` nor its apparatus is a manifest unit
 yet; `pss.py` registers when its specification has no provisional items left,
-and `corpus.py` registers with it. Registering a helper before the tool it
+and the apparatus registers with it. Registering a helper before the tool it
 serves would invert the order.
+
+*(Consequence observed 2026-08-18, recorded here rather than silently: deferring
+registration also defers every **structural** gate over that directory, because
+the derived battery lists are keyed on the manifest (ADR 0031). The tool's file
+count went from two to five in three days against a specification sentence that
+said two, and no gate could see it — the baseline gate reads the model, not the
+tree. The deferral is sound in its own terms and its cost is now measured; a
+proposal to register first is open.)*

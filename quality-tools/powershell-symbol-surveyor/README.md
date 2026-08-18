@@ -1,5 +1,7 @@
 # PowerShell Symbol Surveyor
 
+> 🇺🇸 English / 🇯🇵 [日本語](./README.ja.md)
+
 Two tools live here.
 
 | File | Role |

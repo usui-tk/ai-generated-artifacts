@@ -1024,6 +1024,47 @@ def check_cache_generator():
            "cache: the header's shape is the one --emit-baseline-digest gives")
 
 
+def check_documents():
+    """Hold SPEC 13.2's `Docs` row: the document set exists and stays coupled.
+
+    Presence is the least of it. Two couplings are what actually rot: a
+    `VERSION` file that stops agreeing with the code it names, and a bilingual
+    pair where one side gains a section and the other does not. Both are
+    mechanical, so both are checked.
+
+    Lock-step is checked **structurally** - heading levels in order, fenced
+    block count - and the limit is stated rather than glossed: this catches a
+    section present on one side and absent on the other, and says nothing about
+    whether the prose under a matching heading still agrees. A translation
+    cannot be gated; a shape can.
+    """
+    for name in ("README.md", "README.ja.md", "SPEC.md", "CHANGELOG.md",
+                 "VERSION"):
+        check(os.path.isfile(os.path.join(HERE, name)),
+              "docs: %s exists" % name)
+
+    version_file = os.path.join(HERE, "VERSION")
+    if os.path.isfile(version_file):
+        with open(version_file, encoding="utf-8") as fh:
+            eq(fh.read().strip(), pss.__version__,
+               "docs: VERSION agrees with pss.__version__")
+
+    pair = {}
+    for name in ("README.md", "README.ja.md"):
+        path = os.path.join(HERE, name)
+        if not os.path.isfile(path):
+            return
+        with open(path, encoding="utf-8") as fh:
+            text = fh.read()
+        pair[name] = ([len(m.group(1)) for m in
+                       re.finditer(r"^(#{1,6}) \S", text, re.M)],
+                      text.count("```"))
+    eq(pair["README.ja.md"][0], pair["README.md"][0],
+       "docs: the bilingual pair carries the same heading structure")
+    eq(pair["README.ja.md"][1], pair["README.md"][1],
+       "docs: the bilingual pair carries the same fenced-block count")
+
+
 def check_neutral_naming():
     """Hold the bounded part of SPEC 1.3's naming rule.
 
@@ -2686,6 +2727,7 @@ def main():
     # Needs neither git nor pwsh: the descriptor is a property of the build,
     # so it stays checked at every degradation level (SPEC 14.3).
     check_cache_generator()
+    check_documents()
     check_neutral_naming()
     check_capability_descriptor()
 

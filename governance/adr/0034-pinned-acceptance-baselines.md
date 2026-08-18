@@ -79,8 +79,8 @@ is renamed, or is graduated out.
 
 **2. Pinning is what makes the check runnable in the standing battery.** A
 baseline check anchored to a branch head would turn ordinary maintenance-stream
-work into a governance failure — the reason ADR 0033 kept `corpus.py check` out
-of the battery. A check anchored to a pinned blob has no such coupling, so it
+work into a governance failure — the reason ADR 0033 kept the corpus manager's
+`check` out of the battery. A check anchored to a pinned blob has no such coupling, so it
 is admitted to the battery rather than excluded from it. The pin is not
 bookkeeping; it is the precondition.
 
