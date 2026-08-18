@@ -5,8 +5,7 @@ Two tools live here.
 | File | Role |
 |:--|:--|
 | `pss.py` | The surveyor itself. Extracts a symbol model from one PowerShell script. Contract: [`SPEC.md`](./SPEC.md). |
-| `build_cache.py` | Derived model cache producer. Surveys every pinned generation of one entry into a cache carried between sessions. Contract: [`SPEC.md`](./SPEC.md) §14.4. |
-| `test_pss.py` | The baseline gate (§13.1), and the **corpus manager** it exercises the surveyor with: `test_pss.py corpus <subcommand>`. |
+| `test_pss.py` | The baseline gate (§13.1), and the two pieces of apparatus it exercises the surveyor with: the **corpus manager** (`test_pss.py corpus <subcommand>`, §14.2) and the **derived cache producer** (`test_pss.py cache <entry>`, §14.4). |
 
 `SPEC.md` is authoritative for `pss.py` and for the §14.4 cache contract.
 This README is authoritative for the corpus manager; the corpus governance
@@ -173,15 +172,15 @@ is broken and must say so.
 ## Derived model caches
 
 Surveying every generation of an entry costs minutes, so the models are cached
-outside the repository and carried between sessions. `build_cache.py` is the
-producer SPEC §14.4 specifies.
+outside the repository and carried between sessions. `test_pss.py cache` is
+the producer SPEC §14.4 specifies.
 
 ```
 # one entry, every generation, all axes
-python3 build_cache.py 0002
+python3 test_pss.py cache 0002
 
 # exercise the generator without paying for a full run
-python3 build_cache.py 0001 --limit 2 -o /tmp/sample.jsonl.gz
+python3 test_pss.py cache 0001 --limit 2 -o /tmp/sample.jsonl.gz
 ```
 
 A cache is **derived data**: never committed, never a baseline, and usable only
@@ -192,9 +191,12 @@ header carries — `pss_version`, `model_version`, `model_shape`,
 Three choices in the generator are worth knowing before reading its output.
 
 **It computes no identity of its own.** `baseline_digest` and `model_shape`
-come from `test_pss.py --emit-baseline-digest`, and are copied. A second
-implementation would let a cache and the gate that reads it disagree about what
-was measured, which is the defect ADR 0033 retired.
+come from the same function `--emit-baseline-digest` prints, and are copied. A
+second implementation would let a cache and the gate that reads it disagree
+about what was measured, which is the defect ADR 0033 retired. While the
+producer was its own file this was enforced by `hashlib` being absent from it;
+now it is enforced over the producer's own functions in the syntax tree, which
+is the same requirement in the form the merged file allows.
 
 **A generation is `rev` and `blob`, never a position.** Identity lives in the
 blob (ADR 0033). An index is derivable from the file's own order, so storing it
@@ -236,5 +238,5 @@ are skipped — and say so — where it is absent (§14.3).
 
 Neither `pss.py` nor its helpers are registered in the manifest yet. `pss.py`
 registers when its SPEC has no provisional items left; `corpus.py` and
-`build_cache.py` register with it. Registering a helper before the tool it
+its apparatus register with it. Registering a helper before the tool it
 serves would invert the order.

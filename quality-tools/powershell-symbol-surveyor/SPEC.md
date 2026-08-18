@@ -1786,7 +1786,7 @@ build actually runs today, and gates this SPEC requires of a *complete*
 | Projection invariance | per axis, a survey with and without it, compared by containment on the narrower key vocabulary (§5.6) |
 | Determinism | two extractions of the pinned blob per materialisation, compared as bytes (§5.4) |
 | Operating context | `test_pss.py` holds §2.6 two ways. Structurally, `pss.py`'s module-level imports are parsed and compared with a declared allowlist, so the tool has no means of reaching a subprocess, a socket or an HTTP client, and a new import must move the allowlist deliberately. Behaviourally, `survey`, `slice` and `--capabilities` are run in an empty directory that is not a repository, with an environment carrying no executable search path, and their output must be **byte-identical** to the same run made inside this repository. The check exists because the corpus is reference data for the gates and the tool must not acquire a dependency on it |
-| Cache generator | `test_pss.py` holds the SPEC §14.4 producer two ways. Structurally, `build_cache.py`'s imports are parsed and `hashlib` must be absent — the digest has one implementation, and a second would let a cache and this gate disagree about what was measured. Behaviourally, a real two-generation cache is produced and its header compared with §14.4's field set **in both directions**, its axis set required to be complete, and its records required to carry `rev` and `blob` and nothing derivable from position. The digest and shape in the header must equal what `--emit-baseline-digest` gives |
+| Cache generator | `test_pss.py` holds the SPEC §14.4 producer two ways. Structurally, this file's own syntax tree is parsed: no producer function may name `hashlib` and `baseline_digest` must have exactly one definition — the digest has one implementation, and a second would let a cache and this gate disagree about what was measured. The scope is the producer's named functions, and a function omitted from that list is not examined, so the list is checked against the module first. Behaviourally, a real two-generation cache is produced and its header compared with §14.4's field set **in both directions**, its axis set required to be complete, and its records required to carry `rev` and `blob` and nothing derivable from position. The digest and shape in the header must equal what `--emit-baseline-digest` gives |
 | Neutral naming | `test_pss.py` applies a denylist of judgement words to the fact-code descriptions and the subcommand help strings (§1.3), and checks the denylist actually covers every code and every subcommand rather than an empty set. **A denylist makes no completeness claim**: it stops listed words from returning and detects nothing worded some other way. SPEC prose is out of scope, because the rule itself has to be able to say the word in order to explain why a code may not |
 | Capability descriptor | `test_pss.py` compares every enumerated block of `--capabilities` with the constant it is supposed to be **reading** — a literal copied into the descriptor diverges the moment the constant moves — and the subcommand set against the §3 synopsis in both directions. The `implemented` / `not-implemented` marks are then checked **against the build**: `compare` must refuse, a usage error under `--format json` must not emit JSON, `survey --format json` must emit a model, and that model must carry the cost block. A mark cannot drift into a lie, and a feature cannot land while leaving its mark behind. Needs neither `git` nor `pwsh`, so it survives every degradation level of §14.3 |
 | Identifier forms and join keys | `--self-check` compares `pss.IDENTIFIER_FORMS` and `pss.COLLECTION_KEYS` with §5.8 on name **and** value — a form that agrees on its name while disagreeing on what it matches is exactly the drift a published descriptor makes dangerous. `test_pss.py` holds the declaration against the pinned blob: every listed field populated, every join value resolving into `symbols` or `<script>`, every other identifier matching exactly one declared form, and every declared unique key unique. The form set is checked for **exercise**, not only for agreement — a form no identifier at the pin belongs to is an enumeration nothing drives (§13.2) |
@@ -2007,6 +2007,16 @@ repository's own commit history is the corpus. This keeps the tool at two `.py`
 files, matching its siblings, and lets the corpus grow as the surveyed projects
 are maintained, rather than freezing and going stale.
 
+**Two files is a rule, not an observation (normative).** `pss.py` is the tool;
+`test_pss.py` is the gate and the apparatus the gate needs — the corpus manager
+(§14.2) and the cache producer (§14.4) — reached as its `corpus` and `cache`
+subcommands. The line between them is the one §2.6 already draws: `pss.py`
+reads the files it is given and nothing else, and its imports are held against
+an allowlist so it *cannot* reach a repository; everything that must reach one
+lives in the gate. A third file was added three times in three days without
+this sentence being read, which is how the count reached five; a new one is a
+decision to record here, not a side effect of adding a feature.
+
 ### 14.2 Obtaining a corpus state
 
 A corpus state is one generation recorded in a corpus entry under `corpus/`
@@ -2096,7 +2106,7 @@ cache differs from its predecessor is not a discriminator: it cannot be
 compared, and it is written by whoever already knows the answer. Two caches are
 the same cache if and only if their headers agree on the fields above.
 
-**The producer is `build_cache.py`.** For a long time this section specified a
+**The producer is `test_pss.py cache`.** For a long time this section specified a
 generator that did not exist, and the procedure lived in prose in a session
 handoff and was reconstructed from that prose each time. That is a description
 of a procedure, not a procedure, and it was paid for: a shipped cache carried
@@ -2105,10 +2115,13 @@ key the corpus does not have and nothing checked the result. The generator is
 now an artifact, so it can be gated (§13.1).
 
 Two of its properties are normative rather than incidental. It obtains
-`baseline_digest` and `model_shape` by running `test_pss.py
---emit-baseline-digest` and copying them, per the paragraph above; `hashlib` is
-absent from the file and the gate checks that it stays absent, which is the
-mechanical form of "one implementation". And a generation is written with `rev`
+`baseline_digest` and `model_shape` from the one function that derives them -
+the same one `--emit-baseline-digest` prints - and copies them, per the
+paragraph above. While the producer was a separate `build_cache.py` the
+mechanical form of "one implementation" was `hashlib` being absent from that
+file; in the merged file `hashlib` is legitimately present, so the gate reads
+the syntax tree instead and requires that no producer function names it and
+that the digest has exactly one definition (§13.1). And a generation is written with `rev`
 and `blob` only: ADR 0033 puts identity in the blob, a position is derivable
 from the file's own order, and a stored position is the copy that can disagree
 with the list it came from.

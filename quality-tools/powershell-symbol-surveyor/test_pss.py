@@ -135,8 +135,20 @@ def load_baseline():
 
 
 def repo_root():
-    out = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=HERE,
-                         capture_output=True)
+    """The repository root, or ``None``.
+
+    ``None`` covers both reasons - no git binary, and no repository - because
+    every caller here treats them the same way. It has to catch the missing
+    binary rather than let it raise: SPEC 14.3 promises that an absent `git`
+    degrades this gate to fixtures, and until now it did not, because this
+    function raised `FileNotFoundError` and took the whole run with it. The
+    documented degradation path had never once been exercised.
+    """
+    try:
+        out = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=HERE,
+                             capture_output=True)
+    except OSError:
+        return None
     return out.stdout.decode().strip() if out.returncode == 0 else None
 
 
@@ -350,23 +362,37 @@ def baseline_digest(block):
     return hashlib.sha256(canonical_json(block).encode("utf-8")).hexdigest()
 
 
+def identity_document(root, baseline):
+    """The SPEC 14.4 cache-header identity for this build.
+
+    One implementation, two consumers: ``--emit-baseline-digest`` prints it and
+    the cache producer copies it into a header. 14.4 says a generation script
+    computes nothing itself, and the reason survives the move into this file:
+    a second derivation would let a cache and the gate that reads it disagree
+    about what was measured. What used to enforce that structurally - `hashlib`
+    being absent from a separate `build_cache.py` - is now enforced by the gate
+    reading this file's own syntax tree (`check_cache_generator`).
+    """
+    text = read_blob(root, baseline["basis"]["blob"])
+    model_all = pss.Survey("reference.ps1", text, axes=ALL_AXES).run().model()
+    model_def = pss.Survey("reference.ps1", text).run().model()
+    block = acceptance_block(model_def, model_all)
+    return {
+        "baseline_digest": baseline_digest(block),
+        "pss_version": pss.__version__,
+        "model_version": pss.MODEL_VERSION,
+        "model_shape": block["model_shape"],
+        "basis": baseline["basis"],
+    }
+
+
 def emit_baseline_digest(baseline):
     """Print the SPEC 14.4 cache-header identity for this build, or fail."""
     root = repo_root()
     if not root:
         print(json.dumps({"error": "git-unavailable"}), file=sys.stderr)
         return 2
-    text = read_blob(root, baseline["basis"]["blob"])
-    model_all = pss.Survey("reference.ps1", text, axes=ALL_AXES).run().model()
-    model_def = pss.Survey("reference.ps1", text).run().model()
-    block = acceptance_block(model_def, model_all)
-    print(canonical_json({
-        "baseline_digest": baseline_digest(block),
-        "pss_version": pss.__version__,
-        "model_version": pss.MODEL_VERSION,
-        "model_shape": block["model_shape"],
-        "basis": baseline["basis"],
-    }))
+    print(canonical_json(identity_document(root, baseline)))
     return 0
 
 
@@ -886,6 +912,13 @@ def check_operating_context():
                 os.remove(in_repo)
 
 
+# The producer's own functions. Named rather than discovered, because the
+# subtree check below is only as good as its scope: a function that computes a
+# digest and is not on this list would not be looked at.
+CACHE_PRODUCER_FUNCTIONS = ("build", "cache_main", "cache_git_show",
+                            "cache_resolve_entry", "cache_canonical")
+
+
 def check_cache_generator():
     """Hold SPEC 14.4's producer: it copies identity, it does not compute it.
 
@@ -894,41 +927,69 @@ def check_cache_generator():
     `gen_index: null` on all 230 records as a result. So the two properties
     that failed are the two checked here.
 
-    Structurally: `build_cache.py` must not compute a digest of its own. SPEC
-    14.4 gives the digest ONE implementation and says a generation script calls
-    it and copies the result; a second implementation would let a cache and
-    this gate disagree about what was measured. `hashlib` absent from the
-    file's imports is the mechanical form of that requirement.
+    Structurally: the producer must compute no digest of its own. SPEC 14.4
+    gives the digest ONE implementation and says a generation script calls it
+    and copies the result; a second implementation would let a cache and this
+    gate disagree about what was measured. While the producer was a separate
+    `build_cache.py` this was `hashlib` being absent from that file's imports.
+    In one file that form is unavailable - `hashlib` is legitimately imported
+    here, twice over, for the shape fingerprint and for the digest itself - so
+    the same requirement is checked over this file's syntax tree instead,
+    scoped to the producer's own functions: none of them may name `hashlib`,
+    and the digest must have exactly one definition for them to call.
+
+    The scope is the weak point and is stated rather than glossed: a producer
+    function omitted from `CACHE_PRODUCER_FUNCTIONS` is not examined. That is
+    why the list is checked against the module first - every name on it must
+    resolve to a function that exists here.
 
     Behaviourally: a real two-generation cache is produced and its header
     compared with SPEC 14.4's field set in both directions, and its records
     checked to carry `rev` and `blob` and nothing derivable from position.
     """
     import ast
-    generator = os.path.join(HERE, "build_cache.py")
-    check(os.path.isfile(generator), "cache: the SPEC 14.4 producer exists")
-    if not os.path.isfile(generator):
-        return
-    with open(generator, encoding="utf-8") as fh:
+    with open(os.path.abspath(__file__), encoding="utf-8") as fh:
         tree = ast.parse(fh.read())
-    imported = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported.update(a.name.split(".")[0] for a in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
-            imported.add(node.module.split(".")[0])
-    eq(sorted(imported & {"hashlib"}), [],
+    defined = {n.name: n for n in tree.body
+               if isinstance(n, ast.FunctionDef)}
+
+    missing = sorted(set(CACHE_PRODUCER_FUNCTIONS) - set(defined))
+    eq(missing, [], "cache: the SPEC 14.4 producer exists")
+    if missing:
+        return
+
+    naming_hashlib = sorted(
+        name for name in CACHE_PRODUCER_FUNCTIONS
+        for node in ast.walk(defined[name])
+        if (isinstance(node, ast.Name) and node.id == "hashlib")
+        or (isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "hashlib"))
+    digest_defs = sum(1 for n in tree.body
+                      if isinstance(n, ast.FunctionDef)
+                      and n.name == "baseline_digest")
+    eq([naming_hashlib, digest_defs], [[], 1],
        "cache: the generator computes no digest of its own")
 
-    import build_cache
-    eq(sorted(build_cache.HEADER_FIELDS), sorted(SPEC_CACHE_HEADER),
+    eq(sorted(HEADER_FIELDS), sorted(SPEC_CACHE_HEADER),
        "cache: the declared header matches the SPEC 14.4 field set")
+
+    # Everything above reads this file and needs nothing else. Everything below
+    # produces a real cache, which reads pinned blobs out of git - so it
+    # degrades rather than failing where git is absent (SPEC 14.3). This was
+    # wrong until now: the behavioural leg ran unguarded and turned the whole
+    # gate red on a machine with no git, which is a gate defect and not a
+    # finding about the build.
+    if not git_available():
+        print("-- git unavailable: cache generator run skipped (SPEC 14.3) --")
+        return
 
     with tempfile.TemporaryDirectory() as d:
         out = os.path.join(d, "c.jsonl.gz")
         rc = subprocess.run(
-            [sys.executable, generator, "0001", "--limit", "2",
-             "-o", out, "--quiet"], capture_output=True, cwd=d)
+            [sys.executable, os.path.abspath(__file__), "cache", "0001",
+             "--limit", "2", "-o", out, "--quiet"],
+            capture_output=True, cwd=d)
         eq(rc.returncode, 0, "cache: the generator runs")
         if rc.returncode != 0:
             return
@@ -951,9 +1012,10 @@ def check_cache_generator():
            "cache: the records carry the materialisation the header declares")
 
         # The digest is copied, not recomputed: it must equal what the one
-        # implementation emits.
+        # implementation emits. Still taken from the shipped entry point as a
+        # subprocess, because that is what a caller runs.
         emitted = json.loads(subprocess.run(
-            [sys.executable, os.path.join(HERE, "test_pss.py"),
+            [sys.executable, os.path.abspath(__file__),
              "--emit-baseline-digest"], capture_output=True,
             cwd=HERE).stdout.decode("utf-8"))
         eq(header["baseline_digest"], emitted["baseline_digest"],
@@ -1320,6 +1382,182 @@ def run_differential(pwsh, text, measured):
 
 
 # ------------------------------------------------------------------- main
+
+# ==========================================================================
+# derived model cache producer (SPEC 14.4)
+#
+# The last of the three moves back to the two `.py` files SPEC 14.1 specifies.
+# Moved from `build_cache.py`, which existed because 14.4 specified a generator
+# that did not exist and the procedure lived in prose in a session handoff.
+#
+# Two properties are normative rather than incidental, and the move changed how
+# one of them is enforced without changing what it enforces. The producer
+# computes no identity of its own: it calls `identity_document`, the same one
+# `--emit-baseline-digest` prints, so a cache and this gate cannot disagree
+# about what was measured. That used to be structural - `hashlib` was absent
+# from a separate file and the gate checked it stayed absent - and in one file
+# it is checked over this file's own syntax tree instead, on the producer's
+# subtree rather than the whole module (`check_cache_generator`).
+#
+# The other is unchanged: a generation is written as `rev` and `blob`, never a
+# position, because ADR 0033 puts identity in the blob and a stored position is
+# the copy that can silently disagree with the list it came from.
+# ==========================================================================
+
+
+# SPEC 14.4: the header fields a derived cache must carry. Named here so the
+# gate can compare an emitted header against the specification rather than
+# against another copy of this list.
+HEADER_FIELDS = (
+    "axes",
+    "baseline_digest",
+    "cache_kind",
+    "corpus_count",
+    "corpus_end_rev",
+    "corpus_entry",
+    "corpus_start_rev",
+    "model_shape",
+    "model_version",
+    "pss_version",
+    "script_path",
+    "spec_contract",
+)
+
+CACHE_KIND = "pss-raw-cache"
+SPEC_CONTRACT = "SPEC 14.4"
+
+
+def cache_canonical(obj):
+    """The cache file's serialisation. NOT `canonical_json`: that one escapes
+    non-ASCII and this one does not, so the two produce different bytes for the
+    same object. Both are load-bearing - one is the cache format, the other is
+    part of what the digest is taken over - so they stay separate."""
+    return json.dumps(obj, sort_keys=True, separators=(',', ':'),
+                      ensure_ascii=False)
+
+
+def cache_git_show(root, blob):
+    """Read one pinned blob. Decoded as utf-8-sig: the corpus holds PowerShell
+    scripts, which carry a BOM by the repository's encoding contract, and a BOM
+    left in the text would appear in the model as a character of the source."""
+    out = subprocess.run(["git", "-C", root, "cat-file", "-p", blob],
+                         capture_output=True)
+    if out.returncode != 0:
+        raise RuntimeError("git cat-file failed for %s: %s"
+                           % (blob, out.stderr.decode("utf-8", "replace").strip()))
+    return out.stdout.decode("utf-8-sig")
+
+
+def cache_resolve_entry(name):
+    """Accept an entry number, a filename, or a path. Entry identity is the
+    leading four digits (corpus.py's rule); everything after is descriptive."""
+    if os.path.isfile(name):
+        return name
+    stem = os.path.basename(name)
+    match = re.match(r"^(\d{4})", stem)
+    if not match:
+        raise RuntimeError("not an entry number, filename or path: %s" % name)
+    number = match.group(1)
+    directory = corpus_dir(HERE)
+    for candidate in sorted(os.listdir(directory)):
+        if candidate.startswith(number) and candidate.endswith(".json"):
+            return os.path.join(directory, candidate)
+    raise RuntimeError("no corpus entry numbered %s" % number)
+
+
+def build(entry_path, out_path, limit, root, progress, baseline):
+    with open(entry_path, encoding="utf-8") as fh:
+        entry = json.load(fh)
+
+    generations = entry["generations"]
+    if limit:
+        generations = generations[:limit]
+    if not generations:
+        raise RuntimeError("entry has no generations to survey")
+
+    script_path = entry["script_path"]
+    # SPEC 14.4: the producer computes no identity of its own; it calls the
+    # one implementation and copies the result.
+    identity = identity_document(root, baseline)
+
+    header = {
+        "axes": sorted(pss.AXES),
+        "baseline_digest": identity["baseline_digest"],
+        "cache_kind": CACHE_KIND,
+        "corpus_count": len(generations),
+        "corpus_end_rev": generations[-1]["rev"],
+        "corpus_entry": os.path.basename(entry_path),
+        "corpus_start_rev": generations[0]["rev"],
+        "model_shape": identity["model_shape"],
+        "model_version": identity["model_version"],
+        "pss_version": identity["pss_version"],
+        "script_path": script_path,
+        "spec_contract": SPEC_CONTRACT,
+    }
+    missing = sorted(set(HEADER_FIELDS) - set(header))
+    extra = sorted(set(header) - set(HEADER_FIELDS))
+    if missing or extra:
+        raise RuntimeError("header does not match SPEC 14.4: missing %s, extra %s"
+                           % (missing, extra))
+
+    with gzip.open(out_path, "wt", encoding="utf-8", newline="\n") as out:
+        out.write(cache_canonical(header) + "\n")
+        for n, gen in enumerate(generations, 1):
+            text = cache_git_show(root, gen["blob"])
+            model = pss.Survey(script_path, text,
+                               axes=sorted(pss.AXES)).run().model()
+            # rev and blob only. A position is derivable from this file's own
+            # order, and ADR 0033 puts identity in the blob.
+            out.write(cache_canonical({"blob": gen["blob"], "rev": gen["rev"],
+                                 "model": model}) + "\n")
+            if progress and n % 10 == 0:
+                sys.stderr.write("  %d/%d\n" % (n, len(generations)))
+                sys.stderr.flush()
+
+    return header, len(generations)
+
+
+def cache_main(argv=None):
+    p = argparse.ArgumentParser(
+        prog="test_pss.py cache",
+        description="produce a derived model cache for one corpus entry "
+                    "(SPEC 14.4); the cache is derived data and is never "
+                    "committed")
+    p.add_argument("entry", help="corpus entry number, filename or path")
+    p.add_argument("-o", "--output",
+                   help="output path; defaults to "
+                        "pss-raw-cache-<number>.jsonl.gz in the "
+                        "working directory")
+    p.add_argument("--limit", type=int, default=0,
+                   help="survey only the first N generations (for exercising "
+                        "the generator; not a usable cache)")
+    p.add_argument("--quiet", action="store_true", help="no progress on stderr")
+    args = p.parse_args(argv)
+
+    root = repo_root()
+    if root is None:
+        sys.stderr.write("cache: not inside a git repository; the "
+                         "corpus is read from git history\n")
+        return RC_ERROR
+
+    try:
+        entry_path = cache_resolve_entry(args.entry)
+        number = re.match(r"^(\d{4})", os.path.basename(entry_path)).group(1)
+        out_path = args.output or ("pss-raw-cache-%s.jsonl.gz" % number)
+        header, count = build(entry_path, out_path, args.limit, root,
+                              not args.quiet, load_baseline())
+    except (RuntimeError, KeyError, OSError, ValueError) as exc:
+        sys.stderr.write("cache: %s\n" % exc)
+        return RC_ERROR
+
+    if not args.quiet:
+        sys.stderr.write(
+            "wrote %s\n  %d generation(s), model_version %s, "
+            "baseline_digest %s\n"
+            % (out_path, count, header["model_version"],
+               header["baseline_digest"][:16]))
+    return RC_OK
+
 
 # ==========================================================================
 # corpus manager (SPEC 14.2, ADR 0033)
@@ -2411,11 +2649,14 @@ def main():
     # beside two optional flags is a subtle thing to get right for no gain.
     if len(sys.argv) > 1 and sys.argv[1] == "corpus":
         return corpus_main(sys.argv[2:])
+    if len(sys.argv) > 1 and sys.argv[1] == "cache":
+        return cache_main(sys.argv[2:])
 
     ap = argparse.ArgumentParser(
         description=__doc__,
         epilog="`test_pss.py corpus <subcommand>` runs the corpus manager "
-               "(SPEC 14.2); `corpus --help` lists its subcommands. With no "
+               "(SPEC 14.2) and `test_pss.py cache <entry>` produces a derived "
+               "model cache (SPEC 14.4); each takes `--help`. With no "
                "arguments this file runs the gate.")
     ap.add_argument("--pwsh", default=os.environ.get("PSS_PWSH"),
                     help="path to a pwsh binary; enables the differential test")
