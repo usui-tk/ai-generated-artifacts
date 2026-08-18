@@ -54,6 +54,15 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SPEC = os.path.join(HERE, "SPEC.md")
+PSS = os.path.join(HERE, "pss.py")
+
+# SPEC 2.6. The list is the point: none of these can reach a subprocess, a
+# socket or an HTTP client, so the tool has no means of reading a repository, a
+# corpus or a network however its logic evolves. Widening this is a deliberate
+# act, and one that should be argued for rather than noticed afterwards.
+PSS_ALLOWED_IMPORTS = (
+    "argparse", "bisect", "hashlib", "json", "os", "re", "sys",
+)
 sys.path.insert(0, HERE)
 
 import pss  # noqa: E402
@@ -693,6 +702,141 @@ def _run_pss(args, text=None):
             capture_output=True, cwd=d)
 
 
+def _first_difference(a, b):
+    """Locate a byte divergence without printing two whole models.
+
+    A failure nobody can read is a failure nobody acts on, and these documents
+    run to megabytes on a real script.
+    """
+    if a == b:
+        return ""
+    for i, (x, y) in enumerate(zip(a, b)):
+        if x != y:
+            lo = max(0, i - 40)
+            return ("first differs at byte %d of %d/%d: ...%s... vs ...%s..."
+                    % (i, len(a), len(b),
+                       a[lo:i + 40].decode("utf-8", "replace"),
+                       b[lo:i + 40].decode("utf-8", "replace")))
+    return "identical prefix, lengths %d vs %d" % (len(a), len(b))
+
+
+def check_operating_context():
+    """Hold SPEC 2.6: two files and nothing else.
+
+    The corpus is reference data for these gates. The tool must not acquire a
+    dependency on it, on this repository, or on anything else the originating
+    caller does not have - a language model holding two files that are in no
+    repository at all. Both legs below exist because "it happens to work off
+    repo today" is an observation, and the invariant needs to be a property
+    that reddens when it stops holding.
+
+    Structural leg: the module-level imports are read from the source and held
+    against an allowlist. A tool that cannot import `subprocess`, `socket` or
+    `urllib` has no means of reaching a repository or a network, whatever its
+    logic does. Adding an import is then a deliberate act that must move the
+    allowlist rather than something that slips in.
+
+    Behavioural leg: the subcommands are run in an empty non-repository
+    directory with an environment carrying no executable search path, and the
+    output is compared **byte for byte** with the same run made from inside
+    this repository. Equality is the check; a bare exit code would pass even if
+    the working directory had quietly changed the answer.
+    """
+    import ast
+    with open(PSS, encoding="utf-8") as fh:
+        tree = ast.parse(fh.read())
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            imported.add(node.module.split(".")[0])
+    eq(sorted(imported), sorted(PSS_ALLOWED_IMPORTS),
+       "operating context: pss.py imports exactly the declared allowlist")
+
+    src = "function Get-Thing { param($Name) $script:Cache = $Name }\n" \
+          "function Use-Thing { $x = Get-Thing -Name 'a'; Invoke-Unknown $x }\n"
+
+    # "Inside this repository" has to mean a working directory that actually
+    # contains `.git`. `HERE` does not - the tool's own directory is several
+    # levels below the root - so a mutation keyed on the working directory
+    # would pass unnoticed if the comparison ran from there. Walk up for the
+    # root; without one, this leg has nothing to compare against and degrades
+    # (SPEC 14.3) rather than passing vacuously.
+    root = HERE
+    while not os.path.isdir(os.path.join(root, ".git")):
+        parent = os.path.dirname(root)
+        if parent == root:
+            root = None
+            break
+        root = parent
+
+    def run(cwd, script, argv, env=None):
+        return subprocess.run([sys.executable, PSS] + argv + [script],
+                              capture_output=True, cwd=cwd, env=env)
+
+    with tempfile.TemporaryDirectory() as bare:
+        # Not a repository, and an environment with no executable search path:
+        # `git` and `pwsh` are unreachable by name even if installed.
+        eq(os.path.isdir(os.path.join(bare, ".git")), False,
+           "operating context: the scratch directory is not a repository")
+        env = {"PATH": "", "HOME": bare,
+               "LC_ALL": os.environ.get("LC_ALL", "C.UTF-8")}
+
+        # The SAME relative filename in both places, so `source.path` is
+        # identical and the comparison covers the whole document including the
+        # cost block, rather than needing a field carved out of it.
+        name = "_ctx_sample.ps1"
+        script = os.path.join(bare, name)
+        with open(script, "w", encoding="utf-8") as fh:
+            fh.write(src)
+        in_repo = os.path.join(root, name) if root else None
+        if in_repo:
+            with open(in_repo, "w", encoding="utf-8") as fh:
+                fh.write(src)
+        try:
+            for label, argv in (("survey", ["survey", "--format", "json"]),
+                                ("survey --axes all",
+                                 ["survey", "--format", "json", "--axes", "all"])):
+                bare_run = run(bare, name, argv, env)
+                bare_out = bare_run.stdout
+                eq(bare_run.returncode, 0,
+                   "operating context: %s succeeds off-repository" % label)
+                if not root:
+                    continue
+                repo_out = run(root, name, argv).stdout
+                check(bare_out == repo_out,
+                      "operating context: %s is byte-identical off-repository"
+                      % label,
+                      _first_difference(bare_out, repo_out))
+
+            model = os.path.join(bare, "m.json")
+            with open(model, "wb") as fh:
+                fh.write(run(bare, name,
+                             ["survey", "--format", "json", "--axes", "all"],
+                             env).stdout)
+            sliced = subprocess.run(
+                [sys.executable, PSS, "slice", model, "--axes", "local-sites",
+                 "--format", "json"], capture_output=True, cwd=bare, env=env)
+            eq(sliced.returncode, 0, "operating context: slice succeeds off-repository")
+
+            caps = subprocess.run([sys.executable, PSS, "--capabilities"],
+                                  capture_output=True, cwd=bare, env=env)
+            eq(caps.returncode, 0,
+               "operating context: --capabilities succeeds off-repository")
+            if root:
+                from_root = subprocess.run(
+                    [sys.executable, PSS, "--capabilities"],
+                    capture_output=True, cwd=root).stdout
+                check(caps.stdout == from_root,
+                      "operating context: --capabilities is byte-identical "
+                      "off-repository",
+                      _first_difference(caps.stdout, from_root))
+        finally:
+            if in_repo and os.path.exists(in_repo):
+                os.remove(in_repo)
+
+
 def check_capability_descriptor():
     """Hold the SPEC 3.1 descriptor against the declarations and the build.
 
@@ -1033,6 +1177,10 @@ def main():
     # Needs neither git nor pwsh: the descriptor is a property of the build,
     # so it stays checked at every degradation level (SPEC 14.3).
     check_capability_descriptor()
+
+    # SPEC 2.6, and deliberately alongside the descriptor: both describe the
+    # tool as shipped, and neither needs git or pwsh.
+    check_operating_context()
 
     root = repo_root()
     if not root:

@@ -219,6 +219,37 @@ Conformance of the first copy is pinned by the shared golden vectors
 (§13). Conformance of the second is pinned by `pss.py`'s own golden vectors,
 because it deliberately diverges from the shared contract (§10.3).
 
+### 2.6 The operating context: two files, and nothing else (normative)
+
+The originating use is a language model holding **two files that are not in any
+repository** — an edit in progress, a generated candidate, a scratch copy — and
+asking what changed. The corpus of §14 exists to derive and pin the detection
+logic; it is **reference data for the gates, never a runtime input**. Conflating
+the two would make the tool useless exactly where it is meant to be used.
+
+Therefore, normatively:
+
+- **`survey` reads one file. `compare` reads two model documents. `slice` reads
+  one.** Nothing else is read: no repository, no corpus, no configuration file,
+  no network.
+- **Neither `git` nor `pwsh` is required to run any subcommand.** They are
+  required by `test_pss.py`, which is a development gate, and their absence
+  degrades that gate (§14.3) rather than the tool.
+- **The working directory has no influence.** The same inputs produce
+  byte-identical output whether the process runs inside this repository or in an
+  empty directory on a machine that has never seen it.
+- **`source.path` is a label, not a location.** It is carried into the model so
+  that a caller can tell two models apart (§5.5), and is never resolved a second
+  time.
+
+This is gated two ways rather than assumed (§13.1). Structurally: `pss.py`'s
+module imports are held against a declared allowlist, so it has no means of
+reaching a subprocess, a socket or an HTTP client — a new import is a deliberate
+act that must move the allowlist. Behaviourally: the subcommands are run in an
+empty directory that is not a repository, with an environment carrying no
+executable search path, and their output must be byte-identical to the same run
+made inside this repository.
+
 ---
 
 ## 3. Command-line interface
@@ -739,6 +770,20 @@ reported as `PSS9005` and does not produce a partial comparison. Comparing
 models produced under different `model_version` values is the most likely way
 to manufacture false deltas.
 
+**`compare` excludes the `cost` block from the delta, and says so (normative).**
+`cost` describes the model, not the script: its `source_sha256` differs by
+construction whenever the two inputs are different files, which in the
+originating use of §2.6 is always. Two models can also be **byte-identical in
+every record and differ only in `cost`** — measured: slicing a wider model down
+to an axis set reproduces a directly surveyed model exactly, while its
+`axis_increment` carries `null` for the dropped axes rather than the measured
+figures, and both models pass the precondition above. Including `cost` would
+therefore report a delta for a pair that says exactly the same thing about the
+script. The exclusion is stated in the output rather than applied silently, so a
+caller does not read the delta as covering everything the models contain. The
+projection-invariance gate (§13.2) already excludes `cost` by name on the same
+reasoning.
+
 If the two models' `source.path` values differ, `compare` still runs but emits
 that difference as a fact, so that a caller comparing two different scripts
 (rather than two states of one script) cannot mistake the result for a
@@ -865,6 +910,15 @@ models' `materialization.axes` to be **equal** and exits `2` when they are not.
 Comparing a model that carries closure sets against one that does not would
 otherwise report the absent collection as a change — tool noise of precisely the
 kind §5.4 exists to prevent, and undetectable from the delta records alone.
+
+**The same requirement applies to `materialization.scope`, for the same
+reason.** A scope-narrowed model (§5.7) carries the same axes as the model it
+came from, so an axis-only precondition admits the pair — and every symbol
+outside the scope is then reported as removed. The argument that decides the
+axis case decides this one identically: a comparison whose coverage varies
+silently with its inputs no longer means one fixed thing. `compare` therefore
+requires the two models' `materialization.scope` to be equal, where a scope-less
+model has no `scope` key at all and is equal only to another scope-less model.
 
 **Refusal on an asymmetric axis set is retained, and it is the narrower of two
 defensible readings.** Because an axis never changes a shared record's value,
@@ -1669,6 +1723,7 @@ build actually runs today, and gates this SPEC requires of a *complete*
 | Channel agreement | a derivation per numeric text-channel row, applied to the model and compared with what the renderer printed |
 | Projection invariance | per axis, a survey with and without it, compared by containment on the narrower key vocabulary (§5.6) |
 | Determinism | two extractions of the pinned blob per materialisation, compared as bytes (§5.4) |
+| Operating context | `test_pss.py` holds §2.6 two ways. Structurally, `pss.py`'s module-level imports are parsed and compared with a declared allowlist, so the tool has no means of reaching a subprocess, a socket or an HTTP client, and a new import must move the allowlist deliberately. Behaviourally, `survey`, `slice` and `--capabilities` are run in an empty directory that is not a repository, with an environment carrying no executable search path, and their output must be **byte-identical** to the same run made inside this repository. The check exists because the corpus is reference data for the gates and the tool must not acquire a dependency on it |
 | Capability descriptor | `test_pss.py` compares every enumerated block of `--capabilities` with the constant it is supposed to be **reading** — a literal copied into the descriptor diverges the moment the constant moves — and the subcommand set against the §3 synopsis in both directions. The `implemented` / `not-implemented` marks are then checked **against the build**: `compare` must refuse, a usage error under `--format json` must not emit JSON, `survey --format json` must emit a model, and that model must carry the cost block. A mark cannot drift into a lie, and a feature cannot land while leaving its mark behind. Needs neither `git` nor `pwsh`, so it survives every degradation level of §14.3 |
 | Identifier forms and join keys | `--self-check` compares `pss.IDENTIFIER_FORMS` and `pss.COLLECTION_KEYS` with §5.8 on name **and** value — a form that agrees on its name while disagreeing on what it matches is exactly the drift a published descriptor makes dangerous. `test_pss.py` holds the declaration against the pinned blob: every listed field populated, every join value resolving into `symbols` or `<script>`, every other identifier matching exactly one declared form, and every declared unique key unique. The form set is checked for **exercise**, not only for agreement — a form no identifier at the pin belongs to is an enumeration nothing drives (§13.2) |
 | Declared schema | `--self-check` compares `pss.MODEL_SCHEMA` with §13.3 on path and kind; `test_pss.py` compares the declaration with what the pinned blob emits in both directions — emitted-but-undeclared and declared-but-unemitted are separate failures, and `optional` is the only exemption |
@@ -1697,6 +1752,7 @@ should not assume any of these are currently enforced.
 | Projection invariance | **RESOLVED.** For each axis, `test_pss.py` surveys the pinned blob with and without it and checks **containment**, not equality: everything the narrower model says must also be said by the wider one, on the narrower model's own key vocabulary. The vocabulary is derived from the two models rather than read from §13.3, which marks a path `axis` without naming which axis contributes it — so this check does not inherit that declaration's errors. `cost` is excluded by name, because it describes the model and a smaller model is correctly a different size | closed |
 | Channel agreement | **RESOLVED for the numeric rows.** `test_pss.py` carries a derivation per text-channel figure, written from this document's definitions and applied to the model rather than lifted from `render_text` — re-running the renderer's own expression would compare a restatement, not a measurement. Three directions redden it: a text figure the JSON does not support, a new numeric row with no derivation, and a derivation whose row has vanished. Four rows remain uncovered **by name** (`lines`, and the three soft-reference rows whose printed split this check does not yet decompose), so adding a figure without a derivation is visible rather than silently uncovered | 4 rows uncovered, listed |
 | Determinism | **RESOLVED.** `test_pss.py` extracts the pinned blob twice at each materialisation and compares the **serialised bytes**, not the parsed objects: key order is part of what §5.4 promises, and two dicts can compare equal while serialising differently. Re-checked now rather than left as written, because `--cost` re-runs the survey internally to price an absent axis (§3.1), so a default-materialisation model is produced by four extractions rather than one | closed |
+| Schema nullability | `--capabilities` publishes `model_schema` as key paths and kinds (`always` / `axis` / `optional`), which says whether a path is present and never says what its value may be. `/cost/axis_increment[]/bytes` is `null` in a sliced model (§5.7) and an integer in a surveyed one, so a caller reading the descriptor learns the path is always present and does not learn it can be null. Closing this means either a nullability facet in `MODEL_SCHEMA` — touching §13.3's table, `--self-check` and the descriptor together — or a separate declaration | not started; independent of `compare` and S4 |
 | Reachability | no §10.5 unreachable combination is producible over the regression corpus (`PSS9006` count is zero) | S4 |
 | Derivation owed | **RESOLVED (ADR 0036).** Every B.3 figure is re-derived by `test_pss.py` from the pinned blob, withdrawn as an orphan, or re-stamped with the state that reproduces it; a figure with no executable derivation is no longer permitted to exist | closed |
 | Delta baselines | Appendix B.7's figures are `compare` outputs and cannot be re-derived while `compare` refuses to run (§3) | `compare` (S3) |
