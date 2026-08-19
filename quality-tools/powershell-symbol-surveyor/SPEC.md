@@ -429,6 +429,45 @@ The cost report carries **no recommendation, threshold or warning**. It says how
 large a thing is; whether that is too large is the caller's judgement and falls
 under §1.2 exactly as severity does.
 
+### 3.2 Consumer review (record)
+
+Twice now the interface has been settled by asking the intended consumer rather
+than by reasoning about it here, and both times the answer contradicted what
+this document would otherwise have said. The practice is recorded because the
+results are cited elsewhere in the specification as evidence, and a citation to
+an unrecorded process is not checkable.
+
+**2026-08 (first round).** Six reviewers across two model families each
+reported the same gap — the invocation is discoverable and the shape of what
+comes back is not — and each recovered the record shapes by reading sample
+output. `--capabilities` (§3.1) exists because of that.
+
+**2026-08 (second round).** Two reviewers, given real models and two competing
+delta shapes with no context beyond the kit, were asked to perform tasks rather
+than to give an opinion. Four results are load-bearing here.
+
+- §4.6's equality requirement has **two axes**, and each candidate shape
+  satisfied one and failed the other. One reviewer was actively misled by the
+  shape lacking a tally, reading an unimplemented code's silence as a clean
+  result. §6.4 exists because of that.
+- The per-subject enumeration has **named uses** — certifying a named unit as
+  examined-and-unchanged without holding the models, and catching a caller's
+  own misspelling, which silence reads as "unchanged".
+- **`PSS8008` was identified as the most review-worthy fact in the specimen
+  change and was carried by neither candidate**, a function having become
+  uncalled. It is implemented ahead of codes that were already prototyped.
+- A **specification gap** was found that this repository's own gates could not
+  have found: a command in a `foreach` condition is not in command position
+  under §10.6's inclusion list, so a real call produces no edge and its target
+  is reported `PSS4003`. The reviewer reached the truth through
+  `named_by_literal` and `PSS3001` — the honest-degradation design of §4.4
+  working as intended — but the boundary itself was undocumented.
+
+The asking is deliberately narrow. Reviewers are given tasks with answers the
+kit can support, told that being encouraging is not useful, and asked for where
+they got stuck, what they guessed, and what they got wrong. An opinion on the
+design is not solicited and has not been useful when volunteered.
+
 ---
 
 ## 4. Fact specifications
@@ -628,6 +667,24 @@ that enters from either direction must not miss it.
 Each is emitted for a name present in both models, and each states equality or
 inequality **explicitly** rather than only reporting change. A silent absence
 and an observed equality must be distinguishable by the caller.
+
+**That requirement has two axes, and a shape can satisfy one and fail the
+other.** The distinction was recovered from consumer review (§3.2) rather than
+reasoned out here, and both halves earned their place by a reviewer being
+misled without them:
+
+- **Per subject.** For a named symbol, "examined and equal" must be
+  distinguishable from "outside the compared population" — a name absent from
+  every record is otherwise ambiguous between the two, and a caller querying a
+  misspelled name reads silence as "unchanged".
+- **Per code.** For a fact code, "ran and found everything equal" must be
+  distinguishable from "did not run". A build that has not implemented a code
+  emits nothing for it, which is indistinguishable from a clean result unless
+  the output says which codes were evaluated.
+
+§6.4 gives the shape that satisfies both. Neither an enumeration of every
+subject nor a per-code tally does so alone: the first is silent per code, the
+second is silent per subject.
 
 | Code | Fact |
 |---|---|
@@ -1210,7 +1267,7 @@ hold only within a layer.
 not a serialisation.
 
 **`json`** — machine-oriented. For `survey`, this is the model itself (§5). For
-`compare`, a list of delta fact records.
+`compare` and `trace`, the delta document of §6.4.
 
 There is no SARIF output. SARIF encodes findings with severities and is a poor
 fit for a tool that issues neither.
@@ -1222,6 +1279,72 @@ the Python standard library has no YAML emitter, so it would mean either
 hand-writing one — quoting, folding and escaping are where such emitters fail —
 or taking a package dependency that §8 forbids. Any future request for YAML is
 adjudicated against that cost, not against convenience.
+
+### 6.4 The delta document (normative)
+
+`compare` and `trace` emit one JSON object with three top-level keys. The shape
+was chosen from consumer review of two competing candidates (§3.2); what
+follows records the decision and the reason, because the reason is what a later
+change has to argue against.
+
+```json
+{
+  "delta_records":     [ ... ],
+  "surveyed":          { "PSS7001": {"examined": 365, "equal": 359, "emitted": 6}, ... },
+  "examined_subjects": [ "function/...", "variable:script/...", ... ]
+}
+```
+
+**`delta_records` carries differences only, as a flat list.** Not one array per
+kind of change: a collection per code would add eighteen keys to the public
+contract, force a choice between emitting empty arrays and omitting keys — and
+an omitted key is exactly the silence §4.6 forbids — and oblige a consumer to
+learn a second vocabulary alongside the fact codes it already knows. Flat also
+keeps the eighteen codes level with one another; grouping them would put a
+claim about which distinction matters into the structure, which §1.2 reserves
+for the caller.
+
+Every record carries `code` and `subject`; `subject` is an identifier in one of
+the §5.8 forms, or the reserved `<script>`, and the delta introduces no
+identifier space of its own. Records for codes that state equality carry
+`equality`, whose values are `equal` and `differs`. Code-specific evidence
+lives under `detail`. Where a fact concerns a pair — a call edge, or the two
+names of a rename candidate — `subject` names the side the fact is about and
+`detail` names the other; a delta record has one subject.
+
+**`surveyed` is mandatory, in every shape and every build.** It is the per-code
+axis of §4.6: for each code the comparator evaluated, how many subjects were
+examined, how many were equal, how many produced a record. A code this build
+does not implement is **absent from `surveyed`**, and that absence is the
+signal — it is how a consumer distinguishes "did not run" from "ran clean",
+which is the distinction a reviewer got wrong when reading a specimen that
+omitted the tally. `--capabilities` (§3.1) states the same fact statically;
+`surveyed` states it for the run in hand, and the two must agree.
+
+**`examined_subjects` enumerates the compared population by identifier.** It is
+the per-subject axis. A tally cannot answer "was `function/X` examined?", and
+that question is not hypothetical: a caller certifying a named unit as
+unchanged between two states, or catching its own misspelling, needs the name
+and not the count. Identifiers only, once each — the per-code equality results
+for an equal subject are recoverable from `surveyed` plus that subject's
+absence from `delta_records`, so repeating them per code buys nothing and costs
+an order of magnitude.
+
+**Why not simply emit every record.** The alternative — one record per code per
+subject, equality included — satisfies §4.6 per subject and fails it per code,
+because with no tally an unimplemented code is silent. It is also, measured on
+two adjacent generations of the reference target, 2,211 records against 144.
+The intended caller is a language model holding two files (§2.6), so the
+difference decides whether the delta fits beside the models it describes or
+displaces them. `--all` restores the full enumeration for callers that need the
+delta to stand alone as a durable record with the models discarded.
+
+**The delta states its own provenance.** `source_a` and `source_b` carry each
+model's `source` block and `model_version`, and `direction` states whether the
+caller asserted succession (`trace`) or not (`compare`). A delta that cannot
+say which two models produced it is not a fact about anything, and both
+reviewers of the pre-implementation specimens raised its absence
+independently (§3.2).
 
 ---
 
@@ -1406,6 +1529,25 @@ when it is a PowerShell keyword; when an assignment operator follows it (a
 hashtable key or assignment target); when it starts with `-` (an operator or a
 parameter name); or when it is inside brackets (an attribute or type-literal
 context).
+
+**Known gap: `foreach ($x in <command>)` (§3.2, 2026-08).** The inclusion list
+covers the position after an opening `(`, which is `$x` here, and the keyword
+list does not contain `in`. So a command in a `foreach` condition — a genuine
+pipeline at run time — yields **no edge**, and a function invoked only that way
+is reported `PSS4003`, with `transitive_callee_count` understated for its
+caller. This is a gap in the list above and not an implementation defect: the
+code matches what this section says.
+
+It is recorded rather than fixed here because closing it changes the emitted
+model for a fixed input and therefore advances `model_version` (§5.5, ADR
+0035), expiring every derived cache (§14.4). It is adjudicated together with
+the other pending extractor work so that expiry happens once.
+
+The degradation is honest, and that is what made the gap findable: the target
+still carries `PSS3001` with `matches` resolving to it, and its `PSS4003`
+carries `named_by_literal: true` (§4.4). A consumer reading those two reached
+the truth. A consumer reading only the edges would not, which is why this
+paragraph exists rather than only a backlog entry.
 
 
 
@@ -1821,6 +1963,7 @@ should not assume any of these are currently enforced.
 | Reachability | no §10.5 unreachable combination is producible over the regression corpus (`PSS9006` count is zero) | S4 |
 | Derivation owed | **RESOLVED (ADR 0036).** Every B.3 figure is re-derived by `test_pss.py` from the pinned blob, withdrawn as an orphan, or re-stamped with the state that reproduces it; a figure with no executable derivation is no longer permitted to exist | closed |
 | Delta baselines | Appendix B.7's figures are comparator outputs and cannot be re-derived while `compare` and `trace` refuse to run (§3). **Two fixture families are needed, not one:** a `trace` pair, which corpus history supplies by construction, and a `compare` pair of independent scripts, which corpus history **cannot** supply because every pair drawn from it stands in exactly the relation `trace` asserts (§4.9) | `compare` / `trace` (S3) |
+| Call-site locations | a `PSS2001` edge carries one `line` and a `sites` count, so where `sites` exceeds one the remaining locations are recoverable from no shipped shape — the `command-sites` axis materialises per-site records for **unresolved** commands (`PSS2009`) only. Consumer review (§3.2) hit this on the plainest possible task, "list every place that breaks if this function is deleted", and neither reviewer could complete it from the model. Closing it means either a `lines` array on the edge record or per-site edge records under an axis; both change the emitted model and so advance `model_version` | not started; adjudicate with the other extractor work so cache expiry happens once |
 | Static analysis | clean under the repository's Python gates | not yet wired into a `pss.py`-specific run |
 | Docs | **RESOLVED.** `README.md`, `README.ja.md`, `SPEC.md`, `CHANGELOG.md` and `VERSION` all exist, and `test_pss.py` holds them rather than leaving their presence to inspection: each file must exist, `VERSION` must equal `pss.__version__` (one version, two places, so the file cannot go stale against the code), and the bilingual pair must be in **lock-step on structure** — the same heading text ordering by level, the same number of fenced blocks. Lock-step is checked structurally rather than by translation, and that limit is stated: it catches a section added to one and not the other, and says nothing about whether a paragraph's content still agrees | closed |
 | Emission coverage | every code in §4 blocks 1-4 (survey-emittable) appears as a `code` or `facts` value on at least one record somewhere in the regression corpus's models, or is documented as data-dependent-absent (e.g. `PSS1005` legitimately does not fire on a corpus with zero duplicate names) | `PSS2005`, `PSS4001`, `PSS4002` closed by manual audit. `PSS2002` open for 4 of 5 §12.2 sources (`param()`/inline-function parameters, `foreach` loop variables, `Set-Variable`/`New-Variable`, `-OutVariable` family) — `_decl_add`'s callers do not retain a site to tag (§4.2, §12.2). No automated gate yet either way; S4 |

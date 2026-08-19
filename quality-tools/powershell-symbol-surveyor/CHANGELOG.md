@@ -41,6 +41,19 @@ time, and are marked as such.
   omitted from that list is not examined, so the list is checked against the
   module first.
 
+### Known gaps recorded
+
+- **`foreach ($x in <command>)` is not command position (§10.6).** A real call
+  yields no edge and its target is reported `PSS4003`. This matches what §10.6
+  says, so it is a gap in the specification rather than an implementation
+  defect. Not fixed here: closing it advances `model_version` and expires every
+  derived cache, so it is adjudicated with the other extractor work to expire
+  them once. Found by consumer review; the `PSS3001` / `named_by_literal`
+  fallback made it recoverable, which is how it was found.
+- **Call-site locations for multi-site edges (§13.2).** A `PSS2001` edge
+  carries one `line` and a `sites` count; the remaining locations are in no
+  shipped shape. Both reviewers failed the same task on it.
+
 ### Fixed
 
 - **SPEC §14.3's `git` degradation had never run.** `repo_root` raised
@@ -52,6 +65,17 @@ time, and are marked as such.
 
 ### Added
 
+- **The delta document has a specified shape (§6.4).** `compare` and `trace`
+  emit `delta_records` (differences only, flat, one subject each), `surveyed`
+  (a per-code tally, mandatory in every build) and `examined_subjects` (the
+  compared population by identifier), plus the provenance of both models.
+  `--all` restores the full per-code enumeration. Chosen by consumer review of
+  two competing candidates rather than decided here (§3.2).
+- **§3.2 records the consumer-review practice** and the results other sections
+  cite as evidence.
+- **§4.6's equality requirement is stated as two axes** — per subject and per
+  code — because a shape can satisfy one and fail the other, and a reviewer was
+  misled by one that did.
 - **The file inventory is gated (§14.1, §13.1).** The two-`.py` rule was
   normative from the first commit and enforced by nothing, which is how the
   directory reached five files in three days. The gate enumerates the file set
