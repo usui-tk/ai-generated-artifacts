@@ -65,6 +65,24 @@ time, and are marked as such.
 
 ### Added
 
+- **Value nullability is declared, serialised and gated (§13.3).** The
+  schema's kinds (`always` / `axis` / `optional`) state presence and never
+  said what a value may be. Grounding found exactly three paths that carry
+  JSON `null` in real output — `/symbols[]/parameters[]/qualifier` (903 on
+  the pinned blob), `/symbols[]/parameters[]/type` (26), and
+  `/cost/axis_increment[]/bytes` on sliced models (§5.6) — the first two
+  previously unrecorded. `pss.NULLABLE_PATHS` declares them once with the
+  fact each null states; `--capabilities` serialises it (`nullable_paths`),
+  `--self-check` holds it against the new §13.3 subsection in both
+  directions, and the gate holds it against reality: every observed null is
+  declared and **every declared path is exercised**, so the mark can neither
+  lag reality nor outrun it. The complement is now a stated contract: every
+  other path's value is never null — absence is key omission (`optional`),
+  the model's existing convention. Descriptor-only; the emitted model is
+  unchanged, `model_version` stays `"2"`, caches remain valid. The gate
+  grows 274 → 280 (274 without `pwsh`, 105 without `git`). Whether the two
+  parameter nulls should instead become key omissions is a model change and
+  is deferred to the version-advancement arc as a consumer question.
 - **Appendix B.7 is pinned and gated (delta baselines).** The former table
   ("Delta behaviour over 12 consecutive historical states") is withdrawn, not
   restamped: measured with the shipped comparator over all 229 consecutive

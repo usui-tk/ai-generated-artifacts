@@ -1939,6 +1939,7 @@ build actually runs today, and gates this SPEC requires of a *complete*
 | Materialisation-stated figures | a figure that is not axis-invariant is asserted **per materialisation** and both values are re-derived — today `references_outside_functions` (485 default / 556 with `local-sites`). A single number for such a figure is unfalsifiable, the projection-side form of the basis rule (ADR 0036) |
 | Fixtures | `test_pss.py` runs synthetic cases for the extractor rules that have actually failed — every assignment operator including the three that were unreachable, the member-name exclusions of §12.2 including the dynamic form, and the tokenizer regressions those fixes risked. These need no corpus and run even when `git` is absent (§14.3) |
 | Delta baselines | Appendix B.7 pins comparator outputs and the gate re-derives them three ways: `trace` and `compare` over an adjudicated pair of committed generations (retrieved by blob, never by branch head — the ADR 0034 anchoring, so maintenance work cannot redden it), and `compare` over two independent fixture scripts embedded in the gate — the pair corpus history cannot supply, because every pair drawn from an entry stands in the relation `trace` asserts (§4.9). Fixture identity is held by the emitted document's own `source.sha256` against the recorded basis, so the embedded text cannot drift from what the block claims was measured. The corpus legs need `git` and degrade by name without it; the fixture leg runs at every degradation level (§14.3). The `Publish-ReleaseArtifacts` fixture deliberately carries the §10.6 [F4] instance, so adjudicating [F4] reddens these figures rather than moving them silently |
+| Value nullability | `--self-check` compares `pss.NULLABLE_PATHS` with the §13.3 nullability table in both directions and requires each entry to be a declared key path; `test_pss.py` holds the declaration against reality on the pinned blob and a slice of it — every observed null path is declared, and every declared path actually carries a null somewhere the gate exercises, so the mark can neither lag reality nor outrun it. `--capabilities` serialises the declaration (`nullable_paths`), checked as serialised, not restated |
 
 A non-zero exit on mismatch does not conflict with §9. §9 forbids the exit code
 from carrying a verdict **about the surveyed script**; an inconsistency between
@@ -1960,7 +1961,6 @@ should not assume any of these are currently enforced.
 | Projection invariance | **RESOLVED.** For each axis, `test_pss.py` surveys the pinned blob with and without it and checks **containment**, not equality: everything the narrower model says must also be said by the wider one, on the narrower model's own key vocabulary. The vocabulary is derived from the two models rather than read from §13.3, which marks a path `axis` without naming which axis contributes it — so this check does not inherit that declaration's errors. `cost` is excluded by name, because it describes the model and a smaller model is correctly a different size | closed |
 | Channel agreement | **RESOLVED for the numeric rows.** `test_pss.py` carries a derivation per text-channel figure, written from this document's definitions and applied to the model rather than lifted from `render_text` — re-running the renderer's own expression would compare a restatement, not a measurement. Three directions redden it: a text figure the JSON does not support, a new numeric row with no derivation, and a derivation whose row has vanished. Four rows remain uncovered **by name** (`lines`, and the three soft-reference rows whose printed split this check does not yet decompose), so adding a figure without a derivation is visible rather than silently uncovered | 4 rows uncovered, listed |
 | Determinism | **RESOLVED.** `test_pss.py` extracts the pinned blob twice at each materialisation and compares the **serialised bytes**, not the parsed objects: key order is part of what §5.4 promises, and two dicts can compare equal while serialising differently. Re-checked now rather than left as written, because `--cost` re-runs the survey internally to price an absent axis (§3.1), so a default-materialisation model is produced by four extractions rather than one | closed |
-| Schema nullability | `--capabilities` publishes `model_schema` as key paths and kinds (`always` / `axis` / `optional`), which says whether a path is present and never says what its value may be. `/cost/axis_increment[]/bytes` is `null` in a sliced model (§5.7) and an integer in a surveyed one, so a caller reading the descriptor learns the path is always present and does not learn it can be null. Closing this means either a nullability facet in `MODEL_SCHEMA` — touching §13.3's table, `--self-check` and the descriptor together — or a separate declaration | not started; independent of `compare` and S4 |
 | Reachability | no §10.5 unreachable combination is producible over the regression corpus (`PSS9006` count is zero) | S4 |
 | Derivation owed | **RESOLVED (ADR 0036).** Every B.3 figure is re-derived by `test_pss.py` from the pinned blob, withdrawn as an orphan, or re-stamped with the state that reproduces it; a figure with no executable derivation is no longer permitted to exist | closed |
 | Call-site locations | a `PSS2001` edge carries one `line` and a `sites` count, so where `sites` exceeds one the remaining locations are recoverable from no shipped shape — the `command-sites` axis materialises per-site records for **unresolved** commands (`PSS2009`) only. Consumer review (§3.2) hit this on the plainest possible task, "list every place that breaks if this function is deleted", and neither reviewer could complete it from the model. Closing it means either a `lines` array on the edge record or per-site edge records under an axis; both change the emitted model and so advance `model_version` | not started; adjudicate with the other extractor work so cache expiry happens once |
@@ -2140,6 +2140,29 @@ materialisation, the difference being the ten `axis` paths.
 | `/unresolved_named_commands[]/owners` | always |
 | `/unresolved_named_commands[]/record` | always |
 | `/unresolved_named_commands[]/sites` | always |
+
+#### Value nullability
+
+The table above declares **presence**, not values. **Exactly the paths below
+may carry JSON `null`; every other path's value is never null.** Absence is
+expressed by omitting the key (kind `optional`) — the model's existing
+size-driven convention (§4.4, `named_by_literal`: absent, never `false`).
+Null is reserved for the three facts below, where the key must stay so the
+record shape is uniform and the value's unavailability is itself the fact.
+
+`--capabilities` serialises the declaration (`nullable_paths`);
+`--self-check` holds this table against `pss.NULLABLE_PATHS` in both
+directions and requires every row to be a declared key path. `test_pss.py`
+holds the declaration against reality on the pinned blob and a slice of it:
+every observed null is declared, and **every declared path is exercised** — a
+nullable mark nothing drives is an enumeration nothing checks (the §13.2
+rule, applied to values).
+
+| Path | Null states |
+|---|---|
+| `/symbols[]/parameters[]/qualifier` | the parameter is declared without a scope qualifier |
+| `/symbols[]/parameters[]/type` | the parameter is declared without a type constraint |
+| `/cost/axis_increment[]/bytes` | the model is a slice (§5.7) that no longer carries the axis; the increment cannot be priced from this model (§5.6), and a carried-over figure would describe a different artefact |
 
 
 ## 14. Test-data acquisition

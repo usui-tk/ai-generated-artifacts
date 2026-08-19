@@ -659,6 +659,50 @@ def check_declared_schema(model_def, model_all):
        "declared schema: every kind is in the declared vocabulary")
 
 
+
+def check_value_nullability(model_def, model_all):
+    """SPEC 13.3, the Value nullability subsection, held against reality.
+
+    Two directions, like every declaration this gate checks. Observed nulls
+    must all be declared - an undeclared null is the crash the declaration
+    exists to prevent. And every declared path must actually carry a null
+    somewhere this gate can point to - a nullable mark nothing drives is an
+    enumeration nothing checks. The slice supplies the third path: a sliced
+    model is a model (SPEC 5.6), and it is the only place the cost increment
+    legitimately cannot be priced.
+    """
+    def null_paths(obj, prefix="", out=None):
+        if out is None:
+            out = set()
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                p = prefix + "/" + k if prefix else "/" + k
+                if v is None:
+                    out.add(p)
+                else:
+                    null_paths(v, p, out)
+        elif isinstance(obj, list):
+            for v in obj:
+                null_paths(v, prefix + "[]", out)
+        return out
+
+    observed = set()
+    for label, model in (("default", model_def), ("all-axes", model_all)):
+        got = null_paths(model)
+        eq(sorted(got - set(pss.NULLABLE_PATHS)), [],
+           "nullability: every observed null in the %s model is declared"
+           % label)
+        observed |= got
+
+    sliced = pss.slice_model(model_all, axes={"closure-sets"})
+    got = null_paths(sliced)
+    eq(sorted(got - set(pss.NULLABLE_PATHS)), [],
+       "nullability: every observed null in a sliced model is declared")
+    observed |= got
+
+    eq(sorted(set(pss.NULLABLE_PATHS) - observed), [],
+       "nullability: every declared path is exercised by an observed null")
+
 def _field_values(rows, field):
     """Every value of ``field`` across ``rows``, flattening list-valued fields.
 
@@ -1705,6 +1749,10 @@ def check_capability_descriptor():
     eq(doc.get("exit_codes"), dict(pss.EXIT_CODES), "descriptor: exit codes")
     eq(doc.get("model_schema"), dict(pss.MODEL_SCHEMA),
        "descriptor: declared model schema")
+    eq(doc.get("nullable_paths"), dict(pss.NULLABLE_PATHS),
+       "descriptor: nullable paths")
+    eq(sorted(set(pss.NULLABLE_PATHS) - set(pss.MODEL_SCHEMA)), [],
+       "descriptor: every nullable path is a declared key path")
     eq(doc.get("identifier_forms"), dict(pss.IDENTIFIER_FORMS),
        "descriptor: identifier forms")
     eq(doc.get("script_owner"), pss.SCRIPT_OWNER, "descriptor: script owner")
@@ -3400,6 +3448,8 @@ def main():
             check_cost_report(label, model)
 
         check_declared_schema(model_def, model_all)
+
+        check_value_nullability(model_def, model_all)
 
         check_collection_keys(model_all)
 

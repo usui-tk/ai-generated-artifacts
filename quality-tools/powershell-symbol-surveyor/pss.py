@@ -1029,6 +1029,29 @@ MODEL_SCHEMA = {
 MODEL_SCHEMA_KINDS = ("always", "axis", "optional")
 
 
+# SPEC 13.3, value nullability. MODEL_SCHEMA says which key paths exist and
+# when; it says nothing about what a value may be. Exactly these paths may
+# carry JSON null, each with the fact its null states; every other path's
+# value is never null - absence is expressed by omitting the key (kind
+# `optional`), the model's existing size-driven convention (SPEC 4.4,
+# `named_by_literal`: absent, never false). Null is reserved for the cases
+# where the key must stay - a uniform record shape - and the value's
+# unavailability is itself the fact.
+#
+# One copy of the fact (ADR 0036): --capabilities serialises this dict, and
+# --self-check holds it against the SPEC 13.3 nullability table in both
+# directions.
+NULLABLE_PATHS = {
+    "/symbols[]/parameters[]/qualifier":
+        "the parameter is declared without a scope qualifier",
+    "/symbols[]/parameters[]/type":
+        "the parameter is declared without a type constraint",
+    "/cost/axis_increment[]/bytes":
+        "the model is a slice (SPEC 5.7) that no longer carries the axis, so "
+        "the increment cannot be priced from this model (SPEC 5.6)",
+}
+
+
 # ---------------------------------------------------------------------------
 # SPEC 5.8: how a caller joins the collections to each other.
 #
@@ -2423,6 +2446,38 @@ def self_check():
                   "agree on path and kind"
                   % (len(MODEL_SCHEMA), len(spec_schema)))
 
+        # Value nullability (the SPEC 13.3 subsection). The machine fact is
+        # the path set; the "null states" prose is documentation and lives
+        # once, in the code, serialised via --capabilities. A nullable path
+        # must also be a declared key path - a mark on a path the schema does
+        # not carry marks nothing.
+        nstart = ssection.find("#### Value nullability")
+        if nstart < 0:
+            print("  FAIL: could not locate the SPEC 13.3 Value nullability "
+                  "subsection")
+            rc = EXIT_ERROR
+        else:
+            nsection = ssection[nstart:]
+            spec_nullable = set(re.findall(r'^\| `(/[^`]+)` \|', nsection, re.M))
+            null_missing_in_code = sorted(spec_nullable - set(NULLABLE_PATHS))
+            null_missing_in_spec = sorted(set(NULLABLE_PATHS) - spec_nullable)
+            undeclared = sorted(set(NULLABLE_PATHS) - set(MODEL_SCHEMA))
+            if null_missing_in_code:
+                print("  FAIL: nullable in SPEC.md 13.3 but not declared in "
+                      "pss.py: %s" % ", ".join(null_missing_in_code))
+                rc = EXIT_ERROR
+            if null_missing_in_spec:
+                print("  FAIL: nullable declared in pss.py but absent from "
+                      "SPEC.md 13.3: %s" % ", ".join(null_missing_in_spec))
+                rc = EXIT_ERROR
+            if undeclared:
+                print("  FAIL: nullable path is not a declared key path: %s"
+                      % ", ".join(undeclared))
+                rc = EXIT_ERROR
+            if not (null_missing_in_code or null_missing_in_spec or undeclared):
+                print("  nullable : %d paths, SPEC.md 13.3 and pss.py agree; "
+                      "all are declared key paths" % len(NULLABLE_PATHS))
+
     if rc == EXIT_OK:
         print("")
         print("  SPEC.md and FACTS are in sync (no drift detected)")
@@ -3393,6 +3448,7 @@ def capabilities_document(parser):
         "axes": dict(AXES),
         "facts": dict(FACTS),
         "model_schema": dict(MODEL_SCHEMA),
+        "nullable_paths": dict(NULLABLE_PATHS),
         "identifier_forms": dict(IDENTIFIER_FORMS),
         "script_owner": SCRIPT_OWNER,
         "collection_keys": {
