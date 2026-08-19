@@ -1174,6 +1174,71 @@ def check_comparator():
             if r["code"] == "PSS8008"], ["lost"],
            "comparator: PSS8008's direction follows the argument order")
 
+        # SPEC 11.3 / 11.4: the load-bearing cells. `downstream-changed` and
+        # `dependency-only` name a function whose own text and own call list
+        # are untouched and whose reachable set moved - invisible to any
+        # textual diff of it, which is the whole reason the codes exist. A
+        # three-function chain where the innermost gains a callee produces
+        # exactly that for the outermost.
+        chain_a = ("function Leaf { 'a' }\n"
+                   "function Extra { 'x' }\n"
+                   "function Middle { Leaf }\n"
+                   "function Outer { Middle }\n"
+                   "Outer\n")
+        chain_b = ("function Leaf { 'a' }\n"
+                   "function Extra { 'x' }\n"
+                   "function Middle { Leaf; Extra }\n"
+                   "function Outer { Middle }\n"
+                   "Outer\n")
+        for name, text in (("p", chain_a), ("q", chain_b)):
+            out = _run_pss(["survey", "@SCRIPT@", "--format", "json"],
+                           text=text)
+            paths[name] = os.path.join(d, name + ".json")
+            with open(paths[name], "wb") as fh:
+                fh.write(out.stdout)
+
+        rc, chain = run("compare", "p", "q")
+        by_code = {}
+        for r in chain["delta_records"]:
+            by_code.setdefault(r["code"], {})[r["subject"]] = r
+        eq(by_code.get("PSS7005", {}).get("function/Outer", {})
+           .get("detail", {}).get("classification"), "downstream-changed",
+           "comparator: PSS7005 names a moved closure behind an unchanged "
+           "call list")
+        eq(by_code.get("PSS7006", {}).get("function/Outer", {})
+           .get("detail", {}).get("classification"), "dependency-only",
+           "comparator: PSS7006 names a function no diff of it would show")
+        eq(sorted(by_code.get("PSS8003", {}).get("function/Outer", {})
+                  .get("detail", {}).get("added", [])), ["function/Extra"],
+           "comparator: PSS8003 states which member entered the closure")
+        # The closure is derived from `edges`, not read from the axis, so it
+        # must answer for a default model - which is what these fixtures are.
+        eq(sorted(chain["surveyed"]), sorted(pss.COMPARATOR_CODES),
+           "comparator: every code answers for a model with no axis restored")
+
+        # SPEC 4.7: PSS8004 is the half-finished-rename shape - a literal that
+        # resolves in one model and matches nothing in the other.
+        lit_a = ("function Handler { 'a' }\n"
+                 "$route = @{ k = 'Handler' }\n")
+        lit_b = ("function Renamed { 'a' }\n"
+                 "$route = @{ k = 'Handler' }\n")
+        for name, text in (("r", lit_a), ("s", lit_b)):
+            out = _run_pss(["survey", "@SCRIPT@", "--format", "json"],
+                           text=text)
+            paths[name] = os.path.join(d, name + ".json")
+            with open(paths[name], "wb") as fh:
+                fh.write(out.stdout)
+        rc, lit = run("compare", "r", "s")
+        stale = [r for r in lit["delta_records"] if r["code"] == "PSS8004"]
+        eq([r["subject"] for r in stale], ["Handler"],
+           "comparator: PSS8004 names the literal whose resolution moved")
+        check(stale and stale[0]["detail"].get("resolves_a")
+              == "function/Handler"
+              and "resolves_b" not in stale[0]["detail"],
+              "comparator: PSS8004 states what it resolved to and that it "
+              "no longer does",
+              "detail was %r" % (stale[0]["detail"] if stale else None))
+
         # SPEC 5.5: a precondition failure refuses; it does not compare
         # partially, because a partial delta reads as a complete one.
         with open(paths["a"], encoding="utf-8") as fh:

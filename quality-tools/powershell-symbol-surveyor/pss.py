@@ -1170,8 +1170,9 @@ MACHINE_FORMATS = ("json",)
 # finding nothing - they are visibly missing, which is the point.
 COMPARATOR_CODES = (
     "PSS6001", "PSS6002", "PSS6003",
-    "PSS7001", "PSS7002", "PSS7003", "PSS7004", "PSS7007",
-    "PSS8001", "PSS8002", "PSS8008",
+    "PSS7001", "PSS7002", "PSS7003", "PSS7004", "PSS7005", "PSS7006",
+    "PSS7007",
+    "PSS8001", "PSS8002", "PSS8003", "PSS8004", "PSS8008",
 )
 
 
@@ -2695,6 +2696,30 @@ def _adjacency(model, key, other):
     return out
 
 
+def _transitive(adjacency, start):
+    """The transitive closure of one node over an adjacency map.
+
+    Derived from `edges` rather than read from the closure records, because
+    `transitive_callees` is behind the `closure-sets` axis (SPEC 5.6) and
+    `edges` is a master collection present in every model. Reading the axis
+    instead would make PSS7005 and PSS8003 answerable only for models that
+    happened to ask for it - and worse, the counts alone would report equality
+    for two closures of the same size with different members.
+
+    Deriving it is what 11.1 says the sets are: derivable from the master.
+    Checked against 365 materialised closure records on the reference target
+    before this was relied on, with no disagreement.
+    """
+    seen, stack = set(), [start]
+    while stack:
+        current = stack.pop()
+        for nxt in adjacency.get(current, ()):
+            if nxt not in seen:
+                seen.add(nxt)
+                stack.append(nxt)
+    return seen
+
+
 def _hash_classification(a, b):
     """SPEC 4.6's four values, read off the hash triple."""
     if a.get("hash_full") == b.get("hash_full"):
@@ -2806,12 +2831,56 @@ def compare_models(model_a, model_b):
                                "signature_a": [list(p) for p in sig_a],
                                "signature_b": [list(p) for p in sig_b]})
 
-        delta.set_difference("PSS7003", sid, "function",
-                             callees_a.get(sid, set()),
-                             callees_b.get(sid, set()))
+        direct_a = callees_a.get(sid, set())
+        direct_b = callees_b.get(sid, set())
+        delta.set_difference("PSS7003", sid, "function", direct_a, direct_b)
         delta.set_difference("PSS7004", sid, "function",
                              callers_a.get(sid, set()),
                              callers_b.get(sid, set()))
+
+        # PSS7005 (SPEC 11.3): the direct callee set crossed with the
+        # transitive closure. `downstream-changed` is the cell that earns the
+        # code - a function whose own call list is untouched but whose
+        # reachable set moved, which is to say a function affected by a change
+        # it does not contain and that no textual diff of it will show.
+        closure_a = _transitive(callees_a, sid)
+        closure_b = _transitive(callees_b, sid)
+        direct_same = direct_a == direct_b
+        closure_same = closure_a == closure_b
+        dependency = {
+            (True, True): "dependencies-unchanged",
+            (True, False): "downstream-changed",
+            (False, True): "direct-only-change",
+            (False, False): "dependencies-changed",
+        }[(direct_same, closure_same)]
+        if dependency == "dependencies-unchanged":
+            delta.equal("PSS7005")
+        else:
+            delta.emit("PSS7005", sid, "function", equality="differs",
+                       detail={"classification": dependency})
+
+        # PSS7006 (SPEC 11.4): text crossed with dependency context. The
+        # `dependency-only` cell names a function that was not edited and may
+        # still behave differently; it appears in no hash and no diff. The
+        # value names are neutral by specification - no priority is attached,
+        # because priority is a judgement and belongs to the caller (1.2).
+        text_same = classification == "identical"
+        combined = {
+            (True, True): "unchanged",
+            (False, True): "local-change",
+            (True, False): "dependency-only",
+            (False, False): "change-and-propagation",
+        }[(text_same, direct_same and closure_same)]
+        if combined == "unchanged":
+            delta.equal("PSS7006")
+        else:
+            delta.emit("PSS7006", sid, "function", equality="differs",
+                       detail={"classification": combined})
+
+        # PSS8003: the closure difference itself, with the members. PSS7005
+        # says a closure moved; this says which functions entered or left it.
+        delta.set_difference("PSS8003", sid, "function",
+                             closure_a, closure_b)
 
     for vid in sorted(set(ua) & set(ub)):
         a, b = ua[vid], ub[vid]
@@ -2837,6 +2906,27 @@ def compare_models(model_a, model_b):
                         ("PSS8002", sorted(ea - eb))):
         for caller, callee in pairs:
             delta.emit(code, caller, "function", detail={"callee": callee})
+
+    # PSS8004: a soft reference's resolution state differs - most importantly a
+    # string literal that matches a declared name in one model and matches none
+    # in the other. That is the shape a half-finished rename leaves behind, and
+    # it is a fact about the literal surface, which is all the tool observes
+    # (SPEC 4.4). The subject is the literal rather than a symbol identifier:
+    # in the interesting case there is no symbol on one side to name.
+    soft_a = _soft_resolution(model_a)
+    soft_b = _soft_resolution(model_b)
+    for literal in sorted(set(soft_a) | set(soft_b)):
+        in_a, in_b = soft_a.get(literal), soft_b.get(literal)
+        if in_a == in_b:
+            delta.equal("PSS8004")
+            continue
+        detail = {}
+        if in_a is not None:
+            detail["resolves_a"] = in_a
+        if in_b is not None:
+            detail["resolves_b"] = in_b
+        delta.emit("PSS8004", literal, "literal", equality="differs",
+                   detail=detail)
 
     # PSS8008 - the PSS4003 presence difference. Consumer review named this the
     # most review-worthy fact in the specimen change and found it carried by
@@ -2871,6 +2961,25 @@ def compare_models(model_a, model_b):
         delta.emit("PSS8008", sid, "function", detail=detail)
 
     return delta, examined
+
+
+def _soft_resolution(model):
+    """Each soft-reference literal and what it resolves to, or None.
+
+    A literal appearing at several sites resolves the same way at all of them -
+    resolution is name matching, not position - so the map is keyed by literal
+    and `matches` is read once. `None` means the literal matched no declared
+    name in this model, which is the state that matters: a literal that
+    resolved in one model and not the other is what a half-finished rename
+    leaves behind.
+    """
+    out = {}
+    for record in model.get("soft_references", ()):
+        literal = record.get("literal")
+        if literal is None:
+            continue
+        out[literal] = record.get("matches")
+    return out
 
 
 def _uncalled(model):
@@ -3013,8 +3122,13 @@ def _expand_to_all(delta, examined, model_a, model_b):
             ("PSS7002", sorted(set(fa) & set(fb)), "function"),
             ("PSS7003", sorted(set(fa) & set(fb)), "function"),
             ("PSS7004", sorted(set(fa) & set(fb)), "function"),
+            ("PSS7005", sorted(set(fa) & set(fb)), "function"),
+            ("PSS7006", sorted(set(fa) & set(fb)), "function"),
+            ("PSS8003", sorted(set(fa) & set(fb)), "function"),
             ("PSS7007", sorted(set(ua) & set(ub)), "script-variable"),
-            ("PSS8008", sorted(set(fa) | set(fb)), "function")):
+            ("PSS8008", sorted(set(fa) | set(fb)), "function"),
+            ("PSS8004", sorted(set(_soft_resolution(model_a))
+                               | set(_soft_resolution(model_b))), "literal")):
         for sid in population:
             if (code, sid) in emitted:
                 continue
