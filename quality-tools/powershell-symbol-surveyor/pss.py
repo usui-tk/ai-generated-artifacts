@@ -1175,6 +1175,12 @@ COMPARATOR_CODES = (
     "PSS8001", "PSS8002", "PSS8003", "PSS8004", "PSS8008",
 )
 
+# The three rules of SPEC 12.7. They presuppose that one model is a later
+# state of the other, which the tool cannot verify and only the caller can
+# assert - so they are emitted by `trace` and never by `compare` (SPEC 4.9).
+# "An incomplete rename" is not a fact about two unrelated files.
+SUCCESSION_CODES = ("PSS8005", "PSS8006", "PSS8007")
+
 
 MACHINE_OUTPUTS = {
     "model": {
@@ -1202,14 +1208,16 @@ MACHINE_OUTPUTS = {
             "equality_values": ("equal", "differs"),
             "directions": ("unrelated", "caller-asserted-succession"),
             "codes_evaluated": COMPARATOR_CODES,
+            "codes_evaluated_by_trace_only": SUCCESSION_CODES,
         },
         "reason": None,
-        "coverage": "a code absent from `codes_evaluated` above, and from a "
-                    "run's `surveyed` tally, did NOT run - which is not the "
-                    "same as running and finding nothing. This build "
-                    "evaluates ten of the eighteen comparison codes; the "
-                    "rest emit nothing and say so here rather than by "
-                    "silence (SPEC 6.4)",
+        "coverage": "a code absent from a run's `surveyed` tally did NOT "
+                    "run, which is not the same as running and finding "
+                    "nothing. `compare` evaluates the fifteen codes that "
+                    "hold without a claim of succession; `trace` evaluates "
+                    "those and the three of SPEC 12.7, which presuppose that "
+                    "the caller has asserted one model is a later state of "
+                    "the other. All eighteen are implemented (SPEC 6.4)",
     },
     "error_payload": {
         "status": "not-implemented",
@@ -2777,7 +2785,7 @@ class _Delta(object):
 
 
 def compare_models(model_a, model_b):
-    """The neutral fifteen, of which this build implements ten.
+    """The neutral fifteen, all of which this build implements.
 
     Neutral in wording as well as in scope: model A and model B, `differs`
     rather than `changed`. A code that says "changed" has already assumed the
@@ -2994,6 +3002,124 @@ def _uncalled(model):
             if c.get("code") == "PSS4003"}
 
 
+def trace_models(model_before, model_after):
+    """The neutral fifteen plus the three rules of SPEC 12.7.
+
+    A layer, not a second comparator. Everything the neutral codes say holds
+    for any two models and is computed once; these three add what only a
+    caller's assertion of succession licenses. Each produces a **candidate with
+    its evidence** and never a conclusion - the tool cannot tell an omitted
+    rename from an ordinary change of value semantics, and saying which is the
+    caller's judgement (SPEC 1.2).
+    """
+    delta, examined = compare_models(model_before, model_after)
+    for code in SUCCESSION_CODES:
+        delta.tally[code] = {"examined": 0, "equal": 0, "emitted": 0}
+
+    before = _usage_maps(model_before)
+    after = _usage_maps(model_after)
+    functions_before = _functions(model_before)
+    functions_after = _functions(model_after)
+
+    # Which functions changed textually. Rule (a) reads this, and reads it from
+    # the same hash triple PSS7001 uses rather than recomputing a notion of
+    # "changed" that could disagree with the code the caller already has.
+    #
+    # The rule is specified over writer and reader *functions*, and `<script>`
+    # is not one - it is the top level, has no `PSS7001`, and cannot be
+    # classified as changed or unchanged. Treating its absence from the symbol
+    # table as "changed" made the rule fire on 106 of 140 variables where the
+    # specification measures at most 2 per state pair; the count was the signal
+    # that the population was wrong, not the threshold.
+    def classified(fid):
+        a, b = functions_before.get(fid), functions_after.get(fid)
+        if a is None or b is None:
+            return None
+        return _hash_classification(a, b) == "identical"
+
+    # Rule (a), PSS8006: a writer changed and a reader did not. If the writer
+    # renamed the variable and the reader was left behind, the reader still
+    # references the old name - but an ordinary change of value semantics looks
+    # the same from here, which is why the evidence travels and the verdict
+    # does not.
+    for vid in sorted(set(before) & set(after)):
+        delta.tally["PSS8006"]["examined"] += 1
+        writers = sorted(after[vid].get("writers", ()))
+        readers = sorted(after[vid].get("readers", ()))
+        changed_writers = [w for w in writers if classified(w) is False]
+        unchanged_readers = [r for r in readers if classified(r) is True]
+        if not (changed_writers and unchanged_readers):
+            delta.tally["PSS8006"]["equal"] += 1
+            continue
+        delta.tally["PSS8006"]["emitted"] += 1
+        delta.records.append({
+            "code": "PSS8006", "subject": vid,
+            "subject_kind": "script-variable",
+            "detail": {"changed_writers": changed_writers,
+                       "unchanged_readers": unchanged_readers}})
+
+    # Rule (b), PSS8005: a name appears while an old name persists with reduced
+    # usage. A completed rename removes one name and adds one; an incomplete
+    # one leaves the old name behind, still read from somewhere.
+    added = sorted(set(after) - set(before))
+    removed = sorted(set(before) - set(after))
+    persisting = sorted(set(before) & set(after))
+
+    def usage_counts(record):
+        return (len(record.get("writers", ())), len(record.get("readers", ())))
+
+    for new_name in added:
+        delta.tally["PSS8005"]["examined"] += 1
+        evidence = []
+        for old_name in persisting:
+            was, now = usage_counts(before[old_name]), usage_counts(after[old_name])
+            if now < was:
+                evidence.append({
+                    "persisting": old_name,
+                    "writers_before": was[0], "writers_after": now[0],
+                    "readers_before": was[1], "readers_after": now[1]})
+        # A removed name whose counts equal the added name's is reported as a
+        # correspondence, not as an identification: equal counts are evidence
+        # of a pairing and not proof of one (SPEC 12.7 rule (b)).
+        new_counts = usage_counts(after[new_name])
+        matched = [old for old in removed
+                   if usage_counts(before[old]) == new_counts]
+        if not evidence and not matched:
+            delta.tally["PSS8005"]["equal"] += 1
+            continue
+        delta.tally["PSS8005"]["emitted"] += 1
+        detail = {"added": new_name}
+        if evidence:
+            detail["persisting_with_reduced_usage"] = evidence
+        if matched:
+            detail["count_correspondence"] = matched
+        delta.records.append({
+            "code": "PSS8005", "subject": new_name,
+            "subject_kind": "script-variable", "detail": detail})
+
+    # Rule (c), PSS8007: readers and no writers in the after model. Unlike the
+    # other two this is decidable within the model - it reports a set that is
+    # empty, not a resemblance. It is NOT decidable outside it: the writer set
+    # is not a complete account of writing (SPEC 13.2 records four declaration
+    # forms this build does not retain), and what an unwritten read does at run
+    # time depends on `Set-StrictMode`, which the tool does not observe. So the
+    # fact is the empty writer set, and the word "broken" appears nowhere.
+    for vid in sorted(after):
+        delta.tally["PSS8007"]["examined"] += 1
+        record = after[vid]
+        readers = sorted(record.get("readers", ()))
+        if not readers or record.get("writers"):
+            delta.tally["PSS8007"]["equal"] += 1
+            continue
+        delta.tally["PSS8007"]["emitted"] += 1
+        delta.records.append({
+            "code": "PSS8007", "subject": vid,
+            "subject_kind": "script-variable",
+            "detail": {"readers": readers, "writer_count": 0}})
+
+    return delta, examined
+
+
 def _provenance(model_a, model_b, direction):
     """SPEC 6.4: the delta states which two models produced it.
 
@@ -3071,7 +3197,15 @@ def _check_preconditions(model_a, model_b, verb):
 
 
 def _delta_document(model_a, model_b, direction, want_all):
-    delta, examined = compare_models(model_a, model_b)
+    # The verb decides which codes may be said, not how they are computed.
+    # `trace` runs the same comparator and adds the rule layer on top, so the
+    # succession-only codes cannot leak into `compare` by accident: they are
+    # not in the tally `compare` builds at all, and a code absent from the
+    # tally reads as "did not run", which is exactly true here (SPEC 4.9, 6.4).
+    if direction == "caller-asserted-succession":
+        delta, examined = trace_models(model_a, model_b)
+    else:
+        delta, examined = compare_models(model_a, model_b)
 
     document = _provenance(model_a, model_b, direction)
     document["delta_records"] = delta.records

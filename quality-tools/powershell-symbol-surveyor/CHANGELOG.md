@@ -70,8 +70,10 @@ time, and are marked as such.
   both, differing only in the assertion the caller makes, and `--capabilities`
   moves `delta_records` off `not-implemented` — enforced by the descriptor
   gate, so the mark cannot move without the behaviour.
-  **Fifteen of the eighteen comparison codes are evaluated** — every code
-  that holds without a claim of succession;
+  **All eighteen comparison codes are evaluated.** `compare` runs the fifteen
+  that hold without a claim of succession; `trace` runs those and the three
+  rules of §12.7 (`PSS8005`–`PSS8007`), which presuppose that the caller has
+  asserted one model is a later state of the other;
   the other eight are absent from `surveyed`, which is how a caller tells "did
   not run" from "ran clean". `trace`'s three succession-only codes
   (`PSS8005`–`PSS8007`) are not among them yet.

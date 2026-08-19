@@ -1239,6 +1239,82 @@ def check_comparator():
               "no longer does",
               "detail was %r" % (stale[0]["detail"] if stale else None))
 
+        # SPEC 12.7 / 4.9: the three rules are `trace`'s. The verification the
+        # specification records is reproduced here in miniature - a variable
+        # renamed everywhere except one function - because that is the defect
+        # the rules exist to surface, and each of the three should see it from
+        # a different angle.
+        # `$script:TopLevel` is written at the top level and read by a function
+        # that does not change. `<script>` is not a function and has no
+        # PSS7001, so rule (a) must not classify it at all - counting its
+        # absence from the symbol table as "changed" fires the rule on nearly
+        # every variable, which is how the misreading was caught on real data.
+        intact = ("$script:TopLevel = 0\n"
+                  "function Set-It { $script:Config = 1 }\n"
+                  "function Read-A { $script:Config }\n"
+                  "function Read-B { $script:Config; $script:TopLevel }\n"
+                  "Set-It; Read-A; Read-B\n")
+        omitted = ("$script:TopLevel = 1\n"
+                   "function Set-It { $script:Settings = 1 }\n"
+                   "function Read-A { $script:Settings }\n"
+                   "function Read-B { $script:Config; $script:TopLevel }\n"
+                   "Set-It; Read-A; Read-B\n")
+        for name, text in (("x", intact), ("y", omitted)):
+            out = _run_pss(["survey", "@SCRIPT@", "--format", "json"],
+                           text=text)
+            paths[name] = os.path.join(d, name + ".json")
+            with open(paths[name], "wb") as fh:
+                fh.write(out.stdout)
+
+        rc, traced_rules = run("trace", "x", "y")
+        eq(rc, 0, "succession: trace runs over the rename fixture")
+        emitted = {}
+        for r in traced_rules["delta_records"]:
+            emitted.setdefault(r["code"], []).append(r)
+
+        # Rule (b): the new name appears while the old one persists with
+        # reduced usage. The old name is still read from the function that was
+        # left behind, which is precisely why it persists.
+        eq(sorted(r["subject"] for r in emitted.get("PSS8005", ())),
+           ["variable:script/Settings"],
+           "succession: PSS8005 names the added name")
+        check(any("persisting_with_reduced_usage" in r["detail"]
+                  or "count_correspondence" in r["detail"]
+                  for r in emitted.get("PSS8005", ())),
+              "succession: PSS8005 carries the evidence and not a verdict")
+
+        # Rule (a) is specified over writer and reader *functions*. `<script>`
+        # writes `TopLevel` and an unchanged function reads it; if the top
+        # level were classified as changed, the rule would fire here. It must
+        # not - the variable's only writer cannot be classified at all.
+        eq(sorted(r["subject"] for r in emitted.get("PSS8006", ())), [],
+           "succession: PSS8006 does not classify the top level as changed")
+
+        # Rule (c): readers with no writer in the after model. Decidable
+        # within the model - an empty set, not a resemblance - and the record
+        # says exactly that. The word the specification refuses is checked
+        # for, because the whole point is that the tool does not say it.
+        eq(sorted(r["subject"] for r in emitted.get("PSS8007", ())),
+           ["variable:script/Config"],
+           "succession: PSS8007 names the variable read with no write site")
+        check("broken" not in json.dumps(traced_rules).lower(),
+              "succession: no rule calls anything broken",
+              "PSS8007 asserts an empty writer set, not a defect - the "
+              "premises for that verdict are outside the model (SPEC 12.7)")
+
+        # SPEC 4.9: these three presuppose the caller's assertion. `compare`
+        # must not merely omit the records - the codes must be absent from its
+        # tally, so their silence reads as 'did not run' rather than 'clean'.
+        rc, plain = run("compare", "x", "y")
+        eq(sorted(set(plain["surveyed"]) & set(pss.SUCCESSION_CODES)), [],
+           "succession: compare does not tally the succession-only codes")
+        eq(sorted(set(r["code"] for r in plain["delta_records"])
+                  & set(pss.SUCCESSION_CODES)), [],
+           "succession: compare emits no succession-only record")
+        eq(sorted(set(traced_rules["surveyed"]) - set(plain["surveyed"])),
+           sorted(pss.SUCCESSION_CODES),
+           "succession: trace tallies exactly the three that compare cannot")
+
         # SPEC 5.5: a precondition failure refuses; it does not compare
         # partially, because a partial delta reads as a complete one.
         with open(paths["a"], encoding="utf-8") as fh:
@@ -1509,6 +1585,11 @@ def check_capability_descriptor():
         if produced["compare"][1] else {}
     eq(sorted(tallied), sorted(pss.COMPARATOR_CODES),
        "delta: surveyed tallies exactly the codes this build evaluates")
+    eq([sorted(declared.get("shape", {}).get("codes_evaluated", ())),
+        sorted(declared.get("shape", {})
+               .get("codes_evaluated_by_trace_only", ()))],
+       [sorted(pss.COMPARATOR_CODES), sorted(pss.SUCCESSION_CODES)],
+       "delta: the descriptor publishes which codes each verb evaluates")
     eq(sorted(k for k, v in tallied.items()
               if sorted(v) != ["emitted", "equal", "examined"]), [],
        "delta: every tally states examined, equal and emitted")
