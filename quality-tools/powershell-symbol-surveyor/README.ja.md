@@ -190,6 +190,28 @@ ADR 0033 が退治した欠陥そのものです。生成器が独立したフ�
 
 ---
 
+## 2 つのモデルを比較する
+
+`compare A B` は差異を述べ、入力間の関係については**いかなる主張もしません**。
+`trace before after` は「2 つ目が 1 つ目の後の状態である」という**呼び出し側の主張**を伴います。
+ツールにはその主張を検証できず、述べることを要求できるだけです。
+だからこそフラグではなく動詞になっています。
+
+```
+python3 pss.py compare a.json b.json --format json
+python3 pss.py trace before.json after.json --format json --out delta.json
+python3 pss.py compare a.json b.json --all      # 主体ごとに等価性を明示する
+```
+
+出力は `delta_records`（差異のみ）、`surveyed`（コード別の集計）、
+`examined_subjects`（比較母集団を識別子で列挙）を持ちます。3 つとも必要です:
+`surveyed` に無いコードは**実行されていない**のであって、実行して何も見つからなかったのとは
+異なります。`examined_subjects` に無い名前は比較されていないのであって、
+変更が無かったのとは異なります。本ビルドは 18 コードのうち 10 を評価します。
+
+`model_version`・軸集合・スコープが一致しない場合は、部分的に比較せず**拒否します**。
+部分的な差分は完全な差分として読まれてしまうためです。
+
 ## 自己テスト
 
 ```

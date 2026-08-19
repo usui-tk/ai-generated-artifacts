@@ -65,6 +65,16 @@ time, and are marked as such.
 
 ### Added
 
+- **`compare` and `trace` work.** Both verbs ran as refusals for the whole life
+  of the tool; they now emit the §6.4 delta document. One comparator serves
+  both, differing only in the assertion the caller makes, and `--capabilities`
+  moves `delta_records` off `not-implemented` — enforced by the descriptor
+  gate, so the mark cannot move without the behaviour.
+  **Ten of the eighteen comparison codes are evaluated**
+  (`PSS6001`–`PSS6003`, `PSS7001`–`PSS7004`, `PSS7007`, `PSS8001`, `PSS8002`);
+  the other eight are absent from `surveyed`, which is how a caller tells "did
+  not run" from "ran clean". `trace`'s three succession-only codes
+  (`PSS8005`–`PSS8007`) are not among them yet.
 - **The delta document has a specified shape (§6.4).** `compare` and `trace`
   emit `delta_records` (differences only, flat, one subject each), `surveyed`
   (a per-code tally, mandatory in every build) and `examined_subjects` (the

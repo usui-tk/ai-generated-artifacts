@@ -1164,6 +1164,17 @@ MACHINE_FORMATS = ("json",)
 # against behaviour: `compare` must actually refuse, and an error under
 # `--format json` must actually not be JSON. Implementing either without
 # moving its mark turns the gate red.
+# Which codes this build evaluates. `surveyed` reports a tally for each, and a
+# code absent from that tally means "did not run" rather than "ran clean"
+# (SPEC 6.4). Codes not listed here are therefore not silently reported as
+# finding nothing - they are visibly missing, which is the point.
+COMPARATOR_CODES = (
+    "PSS6001", "PSS6002", "PSS6003",
+    "PSS7001", "PSS7002", "PSS7003", "PSS7004", "PSS7007",
+    "PSS8001", "PSS8002",
+)
+
+
 MACHINE_OUTPUTS = {
     "model": {
         "status": "implemented",
@@ -1178,13 +1189,26 @@ MACHINE_OUTPUTS = {
         "reason": None,
     },
     "delta_records": {
-        "status": "not-implemented",
+        "status": "implemented",
         "emitted_by": "compare --format json, trace --format json",
-        "shape": None,
-        "reason": "the comparator is Layer 3 and has not been built; this "
-                  "build refuses both `compare` and `trace` rather than "
-                  "emitting an empty comparison, which would read as "
-                  "'no change' (SPEC 3)",
+        "shape": {
+            "top_level": ("delta_records", "surveyed", "examined_subjects",
+                          "direction", "source_a", "source_b", "excluded"),
+            "record": {
+                "always": ("code", "subject", "subject_kind"),
+                "conditional": ("equality", "detail"),
+            },
+            "equality_values": ("equal", "differs"),
+            "directions": ("unrelated", "caller-asserted-succession"),
+            "codes_evaluated": COMPARATOR_CODES,
+        },
+        "reason": None,
+        "coverage": "a code absent from `codes_evaluated` above, and from a "
+                    "run's `surveyed` tally, did NOT run - which is not the "
+                    "same as running and finding nothing. This build "
+                    "evaluates ten of the eighteen comparison codes; the "
+                    "rest emit nothing and say so here rather than by "
+                    "silence (SPEC 6.4)",
     },
     "error_payload": {
         "status": "not-implemented",
@@ -2631,22 +2655,405 @@ def cmd_slice(args):
     return _write_model(sliced, args)
 
 
-def _refuse_layer3(verb):
-    sys.stderr.write(
-        "pss.py: '%s' (Layer 3) is not implemented in version %s.\n"
-        "        The comparator arrives in a later patch of this series; this\n"
-        "        build ships Layer 1 and Layer 2 only. Refusing rather than\n"
-        "        emitting an empty comparison, which would read as 'no change'.\n"
-        % (verb, __version__))
-    return EXIT_ERROR
+# --------------------------------------------------------------------------
+# Layer 3: the comparator (SPEC 4.5-4.9, 5.5, 5.7, 6.4)
+# --------------------------------------------------------------------------
+#
+# One comparator, two verbs. `compare` claims no relation between its inputs;
+# `trace` carries the caller's assertion that B is a later state of A. The
+# assertion is unverifiable, so the tool requires it to be stated rather than
+# inferring it - which is why these are verbs and not a defaulted flag.
+#
+# Only three codes need the assertion (PSS8005/8006/8007, SPEC 4.9). The other
+# fifteen hold for any two models, so `trace` is this comparator plus one rule
+# layer, and no comparison logic is written twice.
+
+def _functions(model):
+    return {s["id"]: s for s in model.get("symbols", ())
+            if s.get("kind") == "function"}
 
 
-def cmd_compare(_args):
-    return _refuse_layer3("compare")
+def _usage_maps(model):
+    """The usage-map records only.
+
+    `script_variables` mixes two grains: one record per reference site, and one
+    usage map per variable. PSS7007 is specified over the map, so taking the
+    whole collection would compare reference sites against usage maps.
+    """
+    return {v["id"]: v for v in model.get("script_variables", ())
+            if v.get("record") == "usage_map"}
 
 
-def cmd_trace(_args):
-    return _refuse_layer3("trace")
+def _edge_pairs(model):
+    return {(e["from"], e["to"]) for e in model.get("edges", ())}
+
+
+def _adjacency(model, key, other):
+    out = {}
+    for e in model.get("edges", ()):
+        out.setdefault(e[key], set()).add(e[other])
+    return out
+
+
+def _hash_classification(a, b):
+    """SPEC 4.6's four values, read off the hash triple."""
+    if a.get("hash_full") == b.get("hash_full"):
+        return "identical"
+    if a.get("hash_body") == b.get("hash_body"):
+        return "comment-or-whitespace-only"
+    if a.get("hash_raw") == b.get("hash_raw"):
+        return "string-literal-only"
+    return "code-changed"
+
+
+def _parameter_signature(symbol):
+    return [(p.get("name"), p.get("type"), p.get("mandatory"), p.get("position"))
+            for p in symbol.get("parameters", ())]
+
+
+class _Delta(object):
+    """Accumulates records and the per-code tally together.
+
+    Together rather than separately, because the tally is the per-code half of
+    SPEC 4.6 and a tally derived after the fact from the records cannot state
+    how many subjects were examined - only how many produced output. Every
+    subject that is looked at is counted here at the moment it is looked at.
+    """
+
+    def __init__(self):
+        self.records = []
+        self.tally = dict((code, {"examined": 0, "equal": 0, "emitted": 0})
+                          for code in COMPARATOR_CODES)
+
+    def equal(self, code):
+        self.tally[code]["examined"] += 1
+        self.tally[code]["equal"] += 1
+
+    def emit(self, code, subject, subject_kind, equality=None, detail=None):
+        slot = self.tally[code]
+        slot["examined"] += 1
+        slot["emitted"] += 1
+        record = {"code": code, "subject": subject,
+                  "subject_kind": subject_kind}
+        if equality is not None:
+            record["equality"] = equality
+        if detail is not None:
+            record["detail"] = detail
+        self.records.append(record)
+
+    def set_difference(self, code, subject, subject_kind, a_set, b_set):
+        """The shape shared by every code that compares two sets."""
+        if a_set == b_set:
+            self.equal(code)
+            return
+        self.emit(code, subject, subject_kind, equality="differs",
+                  detail={"added": sorted(b_set - a_set),
+                          "removed": sorted(a_set - b_set)})
+
+
+def compare_models(model_a, model_b):
+    """The neutral fifteen, of which this build implements ten.
+
+    Neutral in wording as well as in scope: model A and model B, `differs`
+    rather than `changed`. A code that says "changed" has already assumed the
+    relation that `trace` exists to declare (SPEC 4.9).
+    """
+    delta = _Delta()
+
+    fa, fb = _functions(model_a), _functions(model_b)
+    ua, ub = _usage_maps(model_a), _usage_maps(model_b)
+
+    # PSS6001/6002/6003 - presence. Every name in either model is examined, and
+    # `examined_subjects` below carries them by identifier so that "examined
+    # and equal" is answerable per subject and not only per code (SPEC 6.4).
+    examined = []
+    for present_a, present_b, kind in ((fa, fb, "function"),
+                                       (ua, ub, "script-variable")):
+        for sid in sorted(set(present_a) | set(present_b)):
+            examined.append(sid)
+            in_a, in_b = sid in present_a, sid in present_b
+            if in_a and in_b:
+                delta.equal("PSS6003")
+            elif in_a:
+                delta.emit("PSS6001", sid, kind)
+            else:
+                delta.emit("PSS6002", sid, kind)
+
+    callees_a = _adjacency(model_a, "from", "to")
+    callees_b = _adjacency(model_b, "from", "to")
+    callers_a = _adjacency(model_a, "to", "from")
+    callers_b = _adjacency(model_b, "to", "from")
+
+    for sid in sorted(set(fa) & set(fb)):
+        a, b = fa[sid], fb[sid]
+
+        classification = _hash_classification(a, b)
+        if classification == "identical":
+            delta.equal("PSS7001")
+        else:
+            delta.emit("PSS7001", sid, "function", equality="differs",
+                       detail={"classification": classification})
+
+        sig_a, sig_b = _parameter_signature(a), _parameter_signature(b)
+        if sig_a == sig_b:
+            delta.equal("PSS7002")
+        else:
+            names_a = set(p[0] for p in sig_a)
+            names_b = set(p[0] for p in sig_b)
+            delta.emit("PSS7002", sid, "function", equality="differs",
+                       detail={"added": sorted(names_b - names_a),
+                               "removed": sorted(names_a - names_b),
+                               "signature_a": [list(p) for p in sig_a],
+                               "signature_b": [list(p) for p in sig_b]})
+
+        delta.set_difference("PSS7003", sid, "function",
+                             callees_a.get(sid, set()),
+                             callees_b.get(sid, set()))
+        delta.set_difference("PSS7004", sid, "function",
+                             callers_a.get(sid, set()),
+                             callers_b.get(sid, set()))
+
+    for vid in sorted(set(ua) & set(ub)):
+        a, b = ua[vid], ub[vid]
+        wa, wb = set(a.get("writers", ())), set(b.get("writers", ()))
+        ra, rb = set(a.get("readers", ())), set(b.get("readers", ()))
+        if (wa, ra) == (wb, rb):
+            delta.equal("PSS7007")
+            continue
+        delta.emit("PSS7007", vid, "script-variable", equality="differs",
+                   detail={
+                       "writers": {"added": sorted(wb - wa),
+                                   "removed": sorted(wa - wb),
+                                   "count_a": len(wa), "count_b": len(wb)},
+                       "readers": {"added": sorted(rb - ra),
+                                   "removed": sorted(ra - rb),
+                                   "count_a": len(ra), "count_b": len(rb)}})
+
+    # PSS8001/8002 - edges. The subject is the calling side and the callee goes
+    # in `detail`: a delta record has one subject (SPEC 6.4), and the edge store
+    # is keyed by (from, to) rather than observed as a symbol.
+    ea, eb = _edge_pairs(model_a), _edge_pairs(model_b)
+    for code, pairs in (("PSS8001", sorted(eb - ea)),
+                        ("PSS8002", sorted(ea - eb))):
+        for caller, callee in pairs:
+            delta.emit(code, caller, "function", detail={"callee": callee})
+
+    return delta, examined
+
+
+def _provenance(model_a, model_b, direction):
+    """SPEC 6.4: the delta states which two models produced it.
+
+    A delta that cannot name its inputs is not a fact about anything. Both
+    reviewers of the pre-implementation specimens raised its absence
+    independently (SPEC 3.2).
+    """
+    return {
+        "direction": direction,
+        "source_a": {"source": model_a.get("source"),
+                     "model_version": model_a.get("model_version"),
+                     "pss_version": model_a.get("pss_version")},
+        "source_b": {"source": model_b.get("source"),
+                     "model_version": model_b.get("model_version"),
+                     "pss_version": model_b.get("pss_version")},
+    }
+
+
+def _load_model(path, label):
+    if not os.path.isfile(path):
+        sys.stderr.write("pss.py: not a readable file: %s\n" % path)
+        return None
+    with open(path, "r", encoding="utf-8") as fh:
+        try:
+            return json.load(fh)
+        except json.JSONDecodeError as exc:
+            sys.stderr.write("pss.py: %s: %s is not valid JSON (%s)\n"
+                             % (label, path, exc))
+            return None
+
+
+def _check_preconditions(model_a, model_b, verb):
+    """SPEC 5.5 and 5.7. A failure refuses; it does not compare partially.
+
+    Comparing models produced under different contracts is the most direct way
+    to manufacture a false delta, so the answer is no answer rather than a
+    qualified one.
+    """
+    va = model_a.get("model_version")
+    vb = model_b.get("model_version")
+    if va != vb:
+        sys.stderr.write(
+            "pss.py: %s: PSS9005 - the models carry different model_version "
+            "values (%s and %s). A model_version advances whenever the model "
+            "emitted for a fixed input can differ (SPEC 5.5), so a delta "
+            "across the boundary would report differences the scripts do not "
+            "have. No partial comparison is produced.\n" % (verb, va, vb))
+        return False
+
+    axes_a = sorted(model_a.get("materialization", {}).get("axes", ()))
+    axes_b = sorted(model_b.get("materialization", {}).get("axes", ()))
+    if axes_a != axes_b:
+        sys.stderr.write(
+            "pss.py: %s: PSS9005 - the models materialise different axis sets "
+            "(%s and %s). An axis controls how much of a collection is "
+            "emitted (SPEC 5.6), so the narrower model would report absences "
+            "that are projection and not difference. Use 'slice --axes' to "
+            "bring both to one axis set first.\n"
+            % (verb, "[%s]" % ", ".join(axes_a) if axes_a else "[]",
+               "[%s]" % ", ".join(axes_b) if axes_b else "[]"))
+        return False
+
+    scope_a = model_a.get("materialization", {}).get("scope")
+    scope_b = model_b.get("materialization", {}).get("scope")
+    if scope_a != scope_b:
+        sys.stderr.write(
+            "pss.py: %s: PSS9005 - the models carry different projection "
+            "scopes (%s and %s). A projection selects which records concern "
+            "one symbol (SPEC 5.7); comparing across two of them reports the "
+            "projection rather than the scripts.\n"
+            % (verb, scope_a or "(none)", scope_b or "(none)"))
+        return False
+
+    return True
+
+
+def _delta_document(model_a, model_b, direction, want_all):
+    delta, examined = compare_models(model_a, model_b)
+
+    document = _provenance(model_a, model_b, direction)
+    document["delta_records"] = delta.records
+    document["surveyed"] = delta.tally
+    document["examined_subjects"] = examined
+
+    # SPEC 5.5: `cost` describes the model, not the script, and two models can
+    # be identical in every record and differ only there. Stated in the output
+    # rather than applied silently, so the delta is not read as covering
+    # everything the models contain.
+    document["excluded"] = ["cost"]
+
+    if model_a.get("source", {}).get("path") != \
+            model_b.get("source", {}).get("path"):
+        document["source_path_differs"] = True
+
+    if want_all:
+        document["delta_records"] = _expand_to_all(delta, examined,
+                                                   model_a, model_b)
+    return document
+
+
+def _expand_to_all(delta, examined, model_a, model_b):
+    """`--all`: state every code for every subject, equality included.
+
+    For a caller that keeps the delta and discards the models, so that the
+    record has to stand alone. The default omits equal subjects because the
+    intended caller is a language model holding two files (SPEC 2.6) and the
+    difference is an order of magnitude - but omitting is a choice about size,
+    never about what was measured, which is why `surveyed` is present either
+    way.
+    """
+    emitted = set((r["code"], r["subject"]) for r in delta.records)
+    records = list(delta.records)
+
+    fa, fb = _functions(model_a), _functions(model_b)
+    ua, ub = _usage_maps(model_a), _usage_maps(model_b)
+
+    for sid in examined:
+        if ("PSS6001", sid) in emitted or ("PSS6002", sid) in emitted:
+            continue
+        kind = "function" if sid in fa or sid in fb else "script-variable"
+        records.append({"code": "PSS6003", "subject": sid,
+                        "subject_kind": kind})
+
+    for code, population, kind in (
+            ("PSS7001", sorted(set(fa) & set(fb)), "function"),
+            ("PSS7002", sorted(set(fa) & set(fb)), "function"),
+            ("PSS7003", sorted(set(fa) & set(fb)), "function"),
+            ("PSS7004", sorted(set(fa) & set(fb)), "function"),
+            ("PSS7007", sorted(set(ua) & set(ub)), "script-variable")):
+        for sid in population:
+            if (code, sid) in emitted:
+                continue
+            records.append({"code": code, "subject": sid,
+                            "subject_kind": kind, "equality": "equal"})
+
+    records.sort(key=lambda r: (r["code"], r["subject"]))
+    return records
+
+
+def _render_delta_text(document, verb):
+    lines = ["==== pss.py %s ====" % verb]
+    a = document["source_a"]["source"] or {}
+    b = document["source_b"]["source"] or {}
+    lines.append("model A    : %s" % a.get("path", "(unknown)"))
+    lines.append("model B    : %s" % b.get("path", "(unknown)"))
+    lines.append("direction  : %s" % document["direction"])
+    lines.append("excluded   : %s" % ", ".join(document["excluded"]))
+    if document.get("source_path_differs"):
+        lines.append("note       : the two models name different source paths")
+    lines.append("")
+    lines.append("-- per code (examined / equal / emitted) --")
+    for code in sorted(document["surveyed"]):
+        t = document["surveyed"][code]
+        lines.append("%-8s %6d %8d %9d   %s"
+                     % (code, t["examined"], t["equal"], t["emitted"],
+                        FACTS.get(code, "")[:44]))
+    lines.append("")
+    lines.append("-- records --")
+    if not document["delta_records"]:
+        lines.append("(none: every code above examined its population and "
+                     "found it equal)")
+    for record in document["delta_records"]:
+        detail = record.get("detail")
+        lines.append("%-8s %-52s %s"
+                     % (record["code"], record["subject"],
+                        json.dumps(detail, separators=(',', ':'),
+                                   ensure_ascii=False) if detail else
+                        record.get("equality", "")))
+    lines.append("")
+    lines.append("examined subjects: %d" % len(document["examined_subjects"]))
+    return "\n".join(lines) + "\n"
+
+
+def _run_comparison(args, verb, path_a, path_b, direction):
+    model_a = _load_model(path_a, verb)
+    if model_a is None:
+        return EXIT_ERROR
+    model_b = _load_model(path_b, verb)
+    if model_b is None:
+        return EXIT_ERROR
+
+    if not _check_preconditions(model_a, model_b, verb):
+        return EXIT_ERROR
+
+    document = _delta_document(model_a, model_b, direction,
+                               getattr(args, "all", False))
+
+    if args.format == "json" or getattr(args, "out", None):
+        if getattr(args, "pretty", False):
+            text = json.dumps(document, indent=2, ensure_ascii=False)
+        else:
+            text = json.dumps(document, separators=(',', ':'),
+                              ensure_ascii=False)
+    else:
+        text = _render_delta_text(document, verb)
+
+    out = getattr(args, "out", None)
+    payload = text if text.endswith("\n") else text + "\n"
+    if out:
+        with open(out, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(payload)
+    else:
+        sys.stdout.write(payload)
+    return EXIT_OK
+
+
+def cmd_compare(args):
+    return _run_comparison(args, "compare", args.a, args.b, "unrelated")
+
+
+def cmd_trace(args):
+    return _run_comparison(args, "trace", args.before, args.after,
+                           "caller-asserted-succession")
 
 
 def capabilities_document(parser):
@@ -2800,6 +3207,14 @@ def build_parser():
     cp.add_argument("a")
     cp.add_argument("b")
     cp.add_argument("--format", choices=("text", "json"), default="text")
+    cp.add_argument("--out", metavar="PATH",
+                     help="write the delta document here instead of stdout")
+    cp.add_argument("--pretty", action="store_true",
+                     help="indent the JSON delta document")
+    cp.add_argument("--all", action="store_true",
+                     help="state every code for every subject, equality "
+                          "included, for a delta that must stand alone "
+                          "without the models (SPEC 6.4)")
     cp.set_defaults(func=cmd_compare)
 
     tp = sub.add_parser("trace", help="state the differences between two models "
@@ -2808,6 +3223,14 @@ def build_parser():
     tp.add_argument("before")
     tp.add_argument("after")
     tp.add_argument("--format", choices=("text", "json"), default="text")
+    tp.add_argument("--out", metavar="PATH",
+                     help="write the delta document here instead of stdout")
+    tp.add_argument("--pretty", action="store_true",
+                     help="indent the JSON delta document")
+    tp.add_argument("--all", action="store_true",
+                     help="state every code for every subject, equality "
+                          "included, for a delta that must stand alone "
+                          "without the models (SPEC 6.4)")
     tp.set_defaults(func=cmd_trace)
 
     lp = sub.add_parser("slice", help="reduce a stored model deterministically "

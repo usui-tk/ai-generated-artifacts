@@ -219,6 +219,29 @@ whether the data is still comparable.
 
 ---
 
+## Comparing two models
+
+`compare A B` states the differences and claims no relation between the inputs.
+`trace before after` carries the caller's assertion that the second is a later
+state of the first — an assertion the tool cannot verify and can only require
+to be made, which is why it is a verb and not a defaulted flag.
+
+```
+python3 pss.py compare a.json b.json --format json
+python3 pss.py trace before.json after.json --format json --out delta.json
+python3 pss.py compare a.json b.json --all      # equality stated per subject
+```
+
+The output carries `delta_records` (differences only), `surveyed` (a per-code
+tally) and `examined_subjects` (the compared population by identifier). All
+three are needed: a code missing from `surveyed` **did not run**, which is not
+the same as running and finding nothing, and a name missing from
+`examined_subjects` was never compared, which is not the same as being
+unchanged. This build evaluates ten of the eighteen codes.
+
+A `model_version`, axis-set or scope mismatch **refuses** rather than comparing
+partially, because a partial delta reads as a complete one.
+
 ## Self-test
 
 ```

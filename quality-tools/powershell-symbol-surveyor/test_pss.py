@@ -1028,6 +1028,129 @@ SURVEYOR_FILES = ("CHANGELOG.md", "README.ja.md", "README.md", "SPEC.md",
                   "VERSION", "pss.py", "test_pss.py")
 
 
+def check_comparator():
+    """Hold SPEC 4.9, 5.5 and 6.4 against what the comparator actually does.
+
+    Properties, not a transcription. A gate that recomputed the deltas would
+    be a second implementation and would agree with the first by construction;
+    what is checked here is what the specification promises a caller.
+
+    The population is built from real fixtures rather than the corpus, so the
+    check runs wherever `pss.py` does. Identity of a model with itself is the
+    one case whose answer is knowable without reimplementing anything: every
+    code must examine its population and find all of it equal.
+    """
+    with tempfile.TemporaryDirectory() as d:
+        script = ("$script:Shared = 1\n"
+                  "function Alpha { param([string]$Name) $script:Shared }\n"
+                  "function Beta { Alpha -Name 'x' }\n"
+                  "Beta\n")
+        changed = ("$script:Shared = 1\n"
+                   "function Alpha { param([string]$Name, [int]$Extra) "
+                   "$script:Shared }\n"
+                   "function Gamma { Alpha -Name 'y' }\n"
+                   "Gamma\n")
+        paths = {}
+        for name, text in (("a", script), ("b", changed)):
+            out = _run_pss(["survey", "@SCRIPT@", "--format", "json"],
+                           text=text)
+            paths[name] = os.path.join(d, name + ".json")
+            with open(paths[name], "wb") as fh:
+                fh.write(out.stdout)
+
+        def run(verb, x, y, *extra):
+            r = subprocess.run(
+                [sys.executable, os.path.join(HERE, "pss.py"), verb,
+                 paths[x], paths[y], "--format", "json"] + list(extra),
+                capture_output=True, cwd=d)
+            try:
+                return r.returncode, json.loads(r.stdout.decode("utf-8"))
+            except Exception:
+                return r.returncode, None
+
+        rc, same = run("compare", "a", "a")
+        eq(rc, 0, "comparator: a model compares against itself")
+        if same is None:
+            check(False, "comparator: a model compares against itself",
+                  "no JSON document")
+            return
+        eq(same["delta_records"], [],
+           "comparator: identity produces no difference record")
+        eq(sorted(k for k, v in same["surveyed"].items()
+                  if v["examined"] != v["equal"] or v["emitted"]), [],
+           "comparator: identity finds every examined subject equal")
+        check(any(v["examined"] for v in same["surveyed"].values()),
+              "comparator: identity examines a non-empty population",
+              "every code examined nothing, so equality is vacuous")
+
+        rc, delta = run("compare", "a", "b")
+        eq(rc, 0, "comparator: two models compare")
+
+        # SPEC 6.4: `surveyed` is stated for every evaluated code even when
+        # nothing differs, and `examined_subjects` names the population. The
+        # two answer different questions and neither substitutes.
+        eq(sorted(delta["surveyed"]), sorted(pss.COMPARATOR_CODES),
+           "comparator: the tally covers every code this build evaluates")
+        check(len(delta["examined_subjects"]) == len(set(delta["examined_subjects"])),
+              "comparator: the examined population lists each subject once")
+        emitted_subjects = set(r["subject"] for r in delta["delta_records"])
+        eq(sorted(s for s in emitted_subjects
+                  if s not in set(delta["examined_subjects"])
+                  and s != "<script>"), [],
+           "comparator: every record's subject is in the examined population")
+
+        # SPEC 4.9: three codes require the caller's assertion of succession
+        # and must never appear under `compare`.
+        eq(sorted(set(r["code"] for r in delta["delta_records"])
+                  & {"PSS8005", "PSS8006", "PSS8007"}), [],
+           "comparator: compare emits no succession-only code")
+
+        # SPEC 5.5: cost is excluded, and the exclusion is stated rather than
+        # applied silently.
+        eq(delta.get("excluded"), ["cost"],
+           "comparator: the cost exclusion is stated in the output")
+
+        # SPEC 6.4: provenance. A delta that cannot name its inputs is not a
+        # fact about anything.
+        check(delta["source_a"]["source"] != delta["source_b"]["source"],
+              "comparator: the delta names both models it came from")
+        eq(delta["direction"], "unrelated",
+           "comparator: compare claims no relation between its inputs")
+        rc, traced = run("trace", "a", "b")
+        eq([rc, traced["direction"]], [0, "caller-asserted-succession"],
+           "comparator: trace carries the caller's succession assertion")
+
+        # SPEC 6.4: --all restores the enumeration without changing the tally,
+        # because omitting equal subjects is a choice about size and never
+        # about what was measured.
+        rc, full = run("compare", "a", "b", "--all")
+        eq(full["surveyed"], delta["surveyed"],
+           "comparator: --all changes the records, never the tally")
+        check(len(full["delta_records"]) > len(delta["delta_records"]),
+              "comparator: --all states more than the default does")
+        eq(sorted(set(r["code"] for r in delta["delta_records"])
+                  - set(r["code"] for r in full["delta_records"])), [],
+           "comparator: --all states everything the default did")
+
+        # SPEC 5.5: a precondition failure refuses; it does not compare
+        # partially, because a partial delta reads as a complete one.
+        with open(paths["a"], encoding="utf-8") as fh:
+            model = json.load(fh)
+        model["model_version"] = str(int(pss.MODEL_VERSION) + 1)
+        other = os.path.join(d, "other.json")
+        with open(other, "w", encoding="utf-8") as fh:
+            json.dump(model, fh)
+        r = subprocess.run(
+            [sys.executable, os.path.join(HERE, "pss.py"), "compare",
+             paths["a"], other, "--format", "json"],
+            capture_output=True, cwd=d)
+        check(r.returncode != 0 and not r.stdout.strip(),
+              "comparator: a model_version mismatch refuses and emits nothing",
+              "exit %d, %d bytes on stdout" % (r.returncode, len(r.stdout)))
+        check(b"PSS9005" in r.stderr,
+              "comparator: the refusal names PSS9005")
+
+
 def check_file_inventory():
     """Hold SPEC 14.1's two-file rule, which was normative and ungated.
 
@@ -1235,22 +1358,53 @@ def check_capability_descriptor():
 
     # --- the marks, checked against the build rather than against themselves
 
+    # Both verbs share one comparator, so one mark covers both - and now that
+    # the mark reads `implemented`, it is only true while BOTH actually run and
+    # emit the shape the descriptor declares. The mark was checked against
+    # refusal before the comparator existed; it is checked against production
+    # now, which is the same rule applied to the opposite state.
     with tempfile.TemporaryDirectory() as d:
-        a = os.path.join(d, "a.json")
-        with open(a, "w", encoding="utf-8") as fh:
-            fh.write("{}")
-        refused = {}
+        model = os.path.join(d, "m.json")
+        out = _run_pss(["survey", "@SCRIPT@", "--format", "json"],
+                       text="function F { $script:v = 1 }\nF\n")
+        with open(model, "wb") as fh:
+            fh.write(out.stdout)
+        produced = {}
         for verb in ("compare", "trace"):
-            refused[verb] = subprocess.run(
-                [sys.executable, os.path.join(HERE, "pss.py"), verb, a, a,
-                 "--format", "json"], capture_output=True, cwd=d).returncode
-    # Both verbs share one comparator, so one mark covers both - and the mark
-    # is only true while BOTH refuse.
-    check(outputs.get("delta_records", {}).get("status") == "not-implemented"
-          and all(rc != 0 for rc in refused.values()),
+            run = subprocess.run(
+                [sys.executable, os.path.join(HERE, "pss.py"), verb,
+                 model, model, "--format", "json"],
+                capture_output=True, cwd=d)
+            try:
+                doc_v = json.loads(run.stdout.decode("utf-8"))
+            except Exception:
+                doc_v = None
+            produced[verb] = (run.returncode, doc_v)
+
+    declared = outputs.get("delta_records", {})
+    top = tuple(declared.get("shape", {}).get("top_level", ()))
+    check(declared.get("status") == "implemented"
+          and all(rc == 0 and doc_v is not None
+                  for rc, doc_v in produced.values())
+          and all(sorted(doc_v) == sorted(top)
+                  for _, doc_v in produced.values()),
           "descriptor: the delta mark matches what compare and trace do",
-          "declared %r, exits %r"
-          % (outputs.get("delta_records", {}).get("status"), refused))
+          "declared %r, results %r"
+          % (declared.get("status"),
+             dict((k, (rc, sorted(dv) if dv else None))
+                  for k, (rc, dv) in produced.items())))
+
+    # SPEC 6.4: `surveyed` is the per-code half of 4.6, so a code this build
+    # evaluates must appear in every run's tally and a code it does not must
+    # be absent. Absence is the signal, and a tally that quietly listed
+    # everything would destroy it.
+    tallied = produced["compare"][1].get("surveyed", {}) \
+        if produced["compare"][1] else {}
+    eq(sorted(tallied), sorted(pss.COMPARATOR_CODES),
+       "delta: surveyed tallies exactly the codes this build evaluates")
+    eq(sorted(k for k, v in tallied.items()
+              if sorted(v) != ["emitted", "equal", "examined"]), [],
+       "delta: every tally states examined, equal and emitted")
 
     err_out = _run_pss(["survey", "@SCRIPT@", "--format", "json",
                         "--axes", "no-such-axis"], text="function F { }")
@@ -2785,6 +2939,7 @@ def main():
     # Needs neither git nor pwsh: the descriptor is a property of the build,
     # so it stays checked at every degradation level (SPEC 14.3).
     check_cache_generator()
+    check_comparator()
     check_file_inventory()
     check_documents()
     check_neutral_naming()
