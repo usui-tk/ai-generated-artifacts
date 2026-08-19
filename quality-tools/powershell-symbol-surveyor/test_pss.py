@@ -1132,6 +1132,48 @@ def check_comparator():
                   - set(r["code"] for r in full["delta_records"])), [],
            "comparator: --all states everything the default did")
 
+        # SPEC 4.7 / 3.2: PSS8008 exists because consumer review found the
+        # most review-worthy fact in a real change - a function had stopped
+        # being called - carried by no candidate shape. The caller-set
+        # difference cannot state it: PSS7004 says which callers moved, not
+        # whether any remain.
+        uncalled = ("$script:Shared = 1\n"
+                    "function Target { $script:Shared }\n"
+                    "function Caller { Target }\n"
+                    "$table = @{ k = 'Target' }\n"
+                    "Caller\n")
+        dropped = ("$script:Shared = 1\n"
+                   "function Target { $script:Shared }\n"
+                   "function Caller { 'inlined' }\n"
+                   "$table = @{ k = 'Target' }\n"
+                   "Caller\n")
+        for name, text in (("u", uncalled), ("v", dropped)):
+            out = _run_pss(["survey", "@SCRIPT@", "--format", "json"],
+                           text=text)
+            paths[name] = os.path.join(d, name + ".json")
+            with open(paths[name], "wb") as fh:
+                fh.write(out.stdout)
+
+        rc, reach = run("compare", "u", "v")
+        eight = [r for r in reach["delta_records"] if r["code"] == "PSS8008"]
+        eq([r["subject"] for r in eight], ["function/Target"],
+           "comparator: PSS8008 names the function whose PSS4003 presence moved")
+        eq([r["detail"]["direction"] for r in eight], ["gained"],
+           "comparator: PSS8008 states which way the presence moved")
+        # The literal is what separates "no longer called" from "no longer
+        # called and no longer named anywhere", and those license different
+        # decisions - so both models' values travel with the fact (SPEC 4.4).
+        check(eight and eight[0]["detail"].get("named_by_literal_b") is True,
+              "comparator: PSS8008 carries the literal-surface evidence",
+              "detail was %r" % (eight[0]["detail"] if eight else None))
+        check("commit" not in json.dumps(eight),
+              "comparator: PSS8008 carries no commit identity",
+              "pss.py knows two models and not where they came from (SPEC 2.1)")
+        rc, back = run("compare", "v", "u")
+        eq([r["detail"]["direction"] for r in back["delta_records"]
+            if r["code"] == "PSS8008"], ["lost"],
+           "comparator: PSS8008's direction follows the argument order")
+
         # SPEC 5.5: a precondition failure refuses; it does not compare
         # partially, because a partial delta reads as a complete one.
         with open(paths["a"], encoding="utf-8") as fh:

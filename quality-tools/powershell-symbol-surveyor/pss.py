@@ -1171,7 +1171,7 @@ MACHINE_FORMATS = ("json",)
 COMPARATOR_CODES = (
     "PSS6001", "PSS6002", "PSS6003",
     "PSS7001", "PSS7002", "PSS7003", "PSS7004", "PSS7007",
-    "PSS8001", "PSS8002",
+    "PSS8001", "PSS8002", "PSS8008",
 )
 
 
@@ -2838,7 +2838,51 @@ def compare_models(model_a, model_b):
         for caller, callee in pairs:
             delta.emit(code, caller, "function", detail={"callee": callee})
 
+    # PSS8008 - the PSS4003 presence difference. Consumer review named this the
+    # most review-worthy fact in the specimen change and found it carried by
+    # neither candidate shape (SPEC 3.2): a function had stopped being called,
+    # and the caller-set difference alone could not say so, because PSS7004
+    # reports which callers moved and not whether any remain.
+    #
+    # No commit identity travels with it. `pss.py` knows two models and nothing
+    # about where they came from (SPEC 2.1); a caller wanting per-commit
+    # resolution runs `trace` over adjacent generations, where a sequence of
+    # these facts - a loss and a later gain among them - is the correct
+    # representation rather than an anomaly.
+    uncalled_a = _uncalled(model_a)
+    uncalled_b = _uncalled(model_b)
+    for sid in sorted(set(fa) | set(fb)):
+        in_a, in_b = sid in uncalled_a, sid in uncalled_b
+        if in_a == in_b:
+            delta.equal("PSS8008")
+            continue
+        detail = {"direction": "gained" if in_b else "lost"}
+        # SPEC 4.7: both models' named_by_literal, where the function is in
+        # both. The key is absent rather than false when a model does not
+        # carry it, following the model's own omit-rather-than-emit-false
+        # convention - so a reader is told what was observed, not what was
+        # assumed.
+        if sid in fa and sid in fb:
+            for label, table in (("named_by_literal_a", uncalled_a),
+                                 ("named_by_literal_b", uncalled_b)):
+                record = table.get(sid)
+                if record is not None and record.get("named_by_literal"):
+                    detail[label] = True
+        delta.emit("PSS8008", sid, "function", detail=detail)
+
     return delta, examined
+
+
+def _uncalled(model):
+    """The PSS4003 records, by function identifier.
+
+    PSS4003 says a function has no static caller and no top-level invocation.
+    It does not say the function is unreachable, and this comparator does not
+    upgrade it: what PSS8008 reports is that the *fact's* presence differs
+    between two models, which is a smaller and checkable claim.
+    """
+    return {c["id"]: c for c in model.get("closures", ())
+            if c.get("code") == "PSS4003"}
 
 
 def _provenance(model_a, model_b, direction):
@@ -2969,7 +3013,8 @@ def _expand_to_all(delta, examined, model_a, model_b):
             ("PSS7002", sorted(set(fa) & set(fb)), "function"),
             ("PSS7003", sorted(set(fa) & set(fb)), "function"),
             ("PSS7004", sorted(set(fa) & set(fb)), "function"),
-            ("PSS7007", sorted(set(ua) & set(ub)), "script-variable")):
+            ("PSS7007", sorted(set(ua) & set(ub)), "script-variable"),
+            ("PSS8008", sorted(set(fa) | set(fb)), "function")):
         for sid in population:
             if (code, sid) in emitted:
                 continue

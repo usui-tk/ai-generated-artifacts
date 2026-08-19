@@ -237,7 +237,7 @@ tally) and `examined_subjects` (the compared population by identifier). All
 three are needed: a code missing from `surveyed` **did not run**, which is not
 the same as running and finding nothing, and a name missing from
 `examined_subjects` was never compared, which is not the same as being
-unchanged. This build evaluates ten of the eighteen codes.
+unchanged. This build evaluates eleven of the eighteen codes.
 
 A `model_version`, axis-set or scope mismatch **refuses** rather than comparing
 partially, because a partial delta reads as a complete one.
