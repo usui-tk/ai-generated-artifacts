@@ -52,6 +52,14 @@ time, and are marked as such.
 
 ### Added
 
+- **The file inventory is gated (§14.1, §13.1).** The two-`.py` rule was
+  normative from the first commit and enforced by nothing, which is how the
+  directory reached five files in three days. The gate enumerates the file set
+  and requires an exact match — enumerated rather than counted, so it names the
+  unaccounted file and also catches one that disappeared — reading the
+  committed inventory and, for `.py`, the working directory, so an unstaged
+  third module fails too. `corpus/` is matched by pattern, because entries
+  accumulate by design.
 - This file, `README.ja.md` and `VERSION`, closing SPEC §13.2's `Docs` row.
 
 ## [0.2.0] - 2026-08-17

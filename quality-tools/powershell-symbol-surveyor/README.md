@@ -227,7 +227,11 @@ python3 test_pss.py        # the whole gate, corpus cases included
 
 The corpus cases live in `test_pss.py` alongside the surveyor's own, because
 SPEC §14.1 keeps this tool at two `.py` files and a third one for the corpus
-was a third one. Their fixtures are real git repositories built in a temporary
+was a third one. **That rule is now gated**: the gate enumerates the tool's
+file set and requires an exact match, so a third module fails whether or not it
+has been staged. It was normative and ungated for three days, which is exactly
+how the count reached five — adding a file now means editing §14.1 and the
+gate's list together. Their fixtures are real git repositories built in a temporary
 directory, because the behaviour under test is git behaviour — renames,
 deletions, appended history, rewritten history. A mock would reproduce the
 assumptions rather than the facts, and every trap this tool is built around was

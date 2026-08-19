@@ -1024,6 +1024,64 @@ def check_cache_generator():
            "cache: the header's shape is the one --emit-baseline-digest gives")
 
 
+SURVEYOR_FILES = ("CHANGELOG.md", "README.ja.md", "README.md", "SPEC.md",
+                  "VERSION", "pss.py", "test_pss.py")
+
+
+def check_file_inventory():
+    """Hold SPEC 14.1's two-file rule, which was normative and ungated.
+
+    This is the check whose absence let the tool reach five `.py` files. §14.1
+    said "two `.py` files, matching its siblings" in the first commit; three
+    files were added over three days and no patch that added one read the
+    sentence, because nothing could fail. The baseline gate grew from 68 checks
+    to 156 over the same period and none of them looked at the directory - they
+    measure the model, and a file count is not in the model.
+
+    So the inventory is enumerated rather than counted. A count says "three
+    where two were expected" and leaves which one open; a list says which file
+    is unaccounted for, and it also fails on a file that quietly *disappeared*,
+    which a count of the wrong thing can hide.
+
+    Two sources, because they catch different mistakes. `git ls-files` is the
+    committed inventory - what the tool *is* to anyone who clones it - and it
+    is what a patch about to be sent for review contains. The working directory
+    is read as well, for `.py` only, because a third module that has not been
+    staged yet is exactly the state a developer is in when the rule matters
+    most; `__pycache__` is ignored as a build artefact, not a file of the tool.
+
+    `corpus/` is matched by pattern rather than enumerated. Entries are meant
+    to accumulate - that is the point of §14.2 - so listing them would turn
+    every registration into a gate edit, and a gate that must be edited to pass
+    stops being read. What is held there is that nothing which is *not* an
+    entry appears.
+    """
+    if not git_available():
+        print("-- git unavailable: file inventory skipped (SPEC 14.3) --")
+        return
+
+    listing = subprocess.run(["git", "ls-files", "."], cwd=HERE,
+                             capture_output=True)
+    tracked = sorted(p for p in listing.stdout.decode("utf-8").split("\n") if p)
+
+    top = sorted(p for p in tracked if "/" not in p)
+    eq(top, sorted(SURVEYOR_FILES), "inventory: the tool's committed files")
+
+    eq(sorted(p for p in top if p.endswith(".py")), ["pss.py", "test_pss.py"],
+       "inventory: SPEC 14.1's two `.py` files, and no third")
+
+    stray = sorted(p for p in tracked
+                   if "/" in p
+                   and not (p.startswith(CORPUS_DIRNAME + "/")
+                            and ENTRY_RE.match(p.split("/", 1)[1])))
+    eq(stray, [], "inventory: nothing under corpus/ that is not an entry")
+
+    on_disk = sorted(n for n in os.listdir(HERE)
+                     if n.endswith(".py") and n != "__pycache__")
+    eq(on_disk, ["pss.py", "test_pss.py"],
+       "inventory: no unstaged third module in the working directory")
+
+
 def check_documents():
     """Hold SPEC 13.2's `Docs` row: the document set exists and stays coupled.
 
@@ -2727,6 +2785,7 @@ def main():
     # Needs neither git nor pwsh: the descriptor is a property of the build,
     # so it stays checked at every degradation level (SPEC 14.3).
     check_cache_generator()
+    check_file_inventory()
     check_documents()
     check_neutral_naming()
     check_capability_descriptor()

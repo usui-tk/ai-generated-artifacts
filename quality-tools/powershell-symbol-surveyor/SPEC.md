@@ -1787,6 +1787,7 @@ build actually runs today, and gates this SPEC requires of a *complete*
 | Determinism | two extractions of the pinned blob per materialisation, compared as bytes (§5.4) |
 | Operating context | `test_pss.py` holds §2.6 two ways. Structurally, `pss.py`'s module-level imports are parsed and compared with a declared allowlist, so the tool has no means of reaching a subprocess, a socket or an HTTP client, and a new import must move the allowlist deliberately. Behaviourally, `survey`, `slice` and `--capabilities` are run in an empty directory that is not a repository, with an environment carrying no executable search path, and their output must be **byte-identical** to the same run made inside this repository. The check exists because the corpus is reference data for the gates and the tool must not acquire a dependency on it |
 | Cache generator | `test_pss.py` holds the SPEC §14.4 producer two ways. Structurally, this file's own syntax tree is parsed: no producer function may name `hashlib` and `baseline_digest` must have exactly one definition — the digest has one implementation, and a second would let a cache and this gate disagree about what was measured. The scope is the producer's named functions, and a function omitted from that list is not examined, so the list is checked against the module first. Behaviourally, a real two-generation cache is produced and its header compared with §14.4's field set **in both directions**, its axis set required to be complete, and its records required to carry `rev` and `blob` and nothing derivable from position. The digest and shape in the header must equal what `--emit-baseline-digest` gives |
+| File inventory | `test_pss.py` enumerates the tool's file set and requires an exact match, holding §14.1's two-file rule. Enumerated rather than counted: a list names the unaccounted file and also catches one that disappeared. Read from the committed inventory and, for `.py` only, from the working directory, so an unstaged third module fails too. `corpus/` is matched by pattern, since entries are meant to accumulate — what is held is that nothing which is not an entry appears. Adding a file means editing §14.1 and this list together, which is the intended cost |
 | Neutral naming | `test_pss.py` applies a denylist of judgement words to the fact-code descriptions and the subcommand help strings (§1.3), and checks the denylist actually covers every code and every subcommand rather than an empty set. **A denylist makes no completeness claim**: it stops listed words from returning and detects nothing worded some other way. SPEC prose is out of scope, because the rule itself has to be able to say the word in order to explain why a code may not |
 | Capability descriptor | `test_pss.py` compares every enumerated block of `--capabilities` with the constant it is supposed to be **reading** — a literal copied into the descriptor diverges the moment the constant moves — and the subcommand set against the §3 synopsis in both directions. The `implemented` / `not-implemented` marks are then checked **against the build**: `compare` must refuse, a usage error under `--format json` must not emit JSON, `survey --format json` must emit a model, and that model must carry the cost block. A mark cannot drift into a lie, and a feature cannot land while leaving its mark behind. Needs neither `git` nor `pwsh`, so it survives every degradation level of §14.3 |
 | Identifier forms and join keys | `--self-check` compares `pss.IDENTIFIER_FORMS` and `pss.COLLECTION_KEYS` with §5.8 on name **and** value — a form that agrees on its name while disagreeing on what it matches is exactly the drift a published descriptor makes dangerous. `test_pss.py` holds the declaration against the pinned blob: every listed field populated, every join value resolving into `symbols` or `<script>`, every other identifier matching exactly one declared form, and every declared unique key unique. The form set is checked for **exercise**, not only for agreement — a form no identifier at the pin belongs to is an enumeration nothing drives (§13.2) |
@@ -2016,6 +2017,22 @@ an allowlist so it *cannot* reach a repository; everything that must reach one
 lives in the gate. A third file was added three times in three days without
 this sentence being read, which is how the count reached five; a new one is a
 decision to record here, not a side effect of adding a feature.
+
+**The rule is gated (§13.1, `inventory:`).** Writing "normative" in a
+specification did not stop the count reaching five, because nothing could fail:
+the rule was stated for three days and read by nobody, and the baseline gate
+grew from 68 checks to 156 over the same period while looking only at the
+model, where a file count does not appear. So the file set is **enumerated**
+rather than counted — a count reports "three where two were expected" and
+leaves which one open, while a list names the unaccounted file and also fails
+on one that quietly disappeared. Two sources are read: the committed inventory,
+which is what a patch under review contains and what a clone receives, and the
+working directory for `.py` only, because an unstaged third module is the state
+a developer is in when the rule matters most. `corpus/` is matched by pattern
+instead, since entries are meant to accumulate (§14.2) and a gate that must be
+edited to pass stops being read; what is held there is that nothing which is
+not an entry appears. Adding a file to this tool therefore means editing this
+section and the gate's list together — which is the intended cost.
 
 ### 14.2 Obtaining a corpus state
 
