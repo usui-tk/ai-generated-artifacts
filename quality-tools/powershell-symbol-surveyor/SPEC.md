@@ -1938,6 +1938,7 @@ build actually runs today, and gates this SPEC requires of a *complete*
 | Version decision | `test_pss.py` re-runs the parent commit's `pss.py` against the same pinned blob and fails when the emitted model moved — shape **or** measured values — while `MODEL_VERSION` did not (§5.5, ADR 0035). No ledger of past versions is kept: the previous state is derived, so there is no second copy to go stale (ADR 0036). Skipped, and reported as skipped, where there is no comparable parent |
 | Materialisation-stated figures | a figure that is not axis-invariant is asserted **per materialisation** and both values are re-derived — today `references_outside_functions` (485 default / 556 with `local-sites`). A single number for such a figure is unfalsifiable, the projection-side form of the basis rule (ADR 0036) |
 | Fixtures | `test_pss.py` runs synthetic cases for the extractor rules that have actually failed — every assignment operator including the three that were unreachable, the member-name exclusions of §12.2 including the dynamic form, and the tokenizer regressions those fixes risked. These need no corpus and run even when `git` is absent (§14.3) |
+| Delta baselines | Appendix B.7 pins comparator outputs and the gate re-derives them three ways: `trace` and `compare` over an adjudicated pair of committed generations (retrieved by blob, never by branch head — the ADR 0034 anchoring, so maintenance work cannot redden it), and `compare` over two independent fixture scripts embedded in the gate — the pair corpus history cannot supply, because every pair drawn from an entry stands in the relation `trace` asserts (§4.9). Fixture identity is held by the emitted document's own `source.sha256` against the recorded basis, so the embedded text cannot drift from what the block claims was measured. The corpus legs need `git` and degrade by name without it; the fixture leg runs at every degradation level (§14.3). The `Publish-ReleaseArtifacts` fixture deliberately carries the §10.6 [F4] instance, so adjudicating [F4] reddens these figures rather than moving them silently |
 
 A non-zero exit on mismatch does not conflict with §9. §9 forbids the exit code
 from carrying a verdict **about the surveyed script**; an inconsistency between
@@ -1962,7 +1963,6 @@ should not assume any of these are currently enforced.
 | Schema nullability | `--capabilities` publishes `model_schema` as key paths and kinds (`always` / `axis` / `optional`), which says whether a path is present and never says what its value may be. `/cost/axis_increment[]/bytes` is `null` in a sliced model (§5.7) and an integer in a surveyed one, so a caller reading the descriptor learns the path is always present and does not learn it can be null. Closing this means either a nullability facet in `MODEL_SCHEMA` — touching §13.3's table, `--self-check` and the descriptor together — or a separate declaration | not started; independent of `compare` and S4 |
 | Reachability | no §10.5 unreachable combination is producible over the regression corpus (`PSS9006` count is zero) | S4 |
 | Derivation owed | **RESOLVED (ADR 0036).** Every B.3 figure is re-derived by `test_pss.py` from the pinned blob, withdrawn as an orphan, or re-stamped with the state that reproduces it; a figure with no executable derivation is no longer permitted to exist | closed |
-| Delta baselines | Appendix B.7's figures are comparator outputs and cannot be re-derived while `compare` and `trace` refuse to run (§3). **Two fixture families are needed, not one:** a `trace` pair, which corpus history supplies by construction, and a `compare` pair of independent scripts, which corpus history **cannot** supply because every pair drawn from it stands in exactly the relation `trace` asserts (§4.9). **The blocker is gone**: both verbs run, and the `compare` family exists — two independent scripts written for consumer review (§3.2) now serve as the fixture corpus history cannot supply. What remains is the pinning itself: Appendix B.7's figures are still unstamped, and the gate exercises the comparator's specified properties over synthetic fixtures rather than re-deriving pinned figures from a corpus blob the way §13.1's baseline leg does | not started; unblocked |
 | Call-site locations | a `PSS2001` edge carries one `line` and a `sites` count, so where `sites` exceeds one the remaining locations are recoverable from no shipped shape — the `command-sites` axis materialises per-site records for **unresolved** commands (`PSS2009`) only. Consumer review (§3.2) hit this on the plainest possible task, "list every place that breaks if this function is deleted", and neither reviewer could complete it from the model. Closing it means either a `lines` array on the edge record or per-site edge records under an axis; both change the emitted model and so advance `model_version` | not started; adjudicate with the other extractor work so cache expiry happens once |
 | Static analysis | clean under the repository's Python gates | not yet wired into a `pss.py`-specific run |
 | Docs | **RESOLVED.** `README.md`, `README.ja.md`, `SPEC.md`, `CHANGELOG.md` and `VERSION` all exist, and `test_pss.py` holds them rather than leaving their presence to inspection: each file must exist, `VERSION` must equal `pss.__version__` (one version, two places, so the file cannot go stale against the code), and the bilingual pair must be in **lock-step on structure** — the same heading text ordering by level, the same number of fenced blocks. Lock-step is checked structurally rather than by translation, and that limit is stated: it catches a section added to one and not the other, and says nothing about whether a paragraph's content still agrees | closed |
@@ -2649,20 +2649,339 @@ B.3 because the rule reached the basis and not the derivation.
 | Distinct `hash_body` over 480 functions | 480 |
 | Distinct name-excluded string-stripped hashes (**rejected variant**) | 471 |
 
-### B.7 Delta behaviour over 12 consecutive historical states
+### B.7 Delta baselines (B-I)
 
-| Quantity | Reference value |
-|---|---:|
-| Same-name function comparisons | 2,607 |
-| `PSS7001 = identical` | 2,395 |
-| `PSS7001 = comment-or-whitespace-only` | 13 |
-| `PSS7001 = string-literal-only` | 9 |
-| `PSS7001 = code-changed` | 190 |
-| Unreachable hash-triple combinations observed | 0 |
-| `PSS7005 = dependencies-unchanged` | 1,156 |
-| `PSS7005 = downstream-changed` | 12 |
-| `PSS7005 = dependencies-changed` | 45 |
-| `PSS7006 = dependency-only` | 12 |
+**The previous content of this appendix is withdrawn, not restamped (ADR
+0036).** It recorded ten aggregate figures under the title "Delta behaviour
+over 12 consecutive historical states" — 2,607 same-name comparisons splitting
+2,395 / 13 / 9 / 190, a `PSS7005` population of 1,213 and twelve
+`dependency-only` functions — with no record of which twelve states. Measured
+with the shipped comparator over every consecutive pair of committed
+generations (229 pairs, both corpus entries), no window of 8 to 16 pairs
+reproduces the population: the closest reaches 2,603, and every near window
+carries **zero** `comment-or-whitespace-only` and **zero**
+`string-literal-only` classifications where the table claimed 13 and 9. The
+figures are outputs of an uncommitted instrument over an unrecorded window —
+the defect ADR 0036 withdrew three B.3 figures for, met on the comparator's
+side.
+
+What replaces them is pinned the way every other acceptance figure is pinned
+(ADR 0034): to named blobs, re-derived by the §13.1 gate, with the basis
+recorded beside the values in the machine block below.
+
+**The adjudicated pair** is generations 93 → 94 of entry `0002`. It is the
+pair consumer review was performed on (§3.2), and it exercises the comparator
+rather than sampling it: all eighteen codes examine a non-empty population,
+sixteen emit, and `PSS8008` emits exactly one record naming
+`function/Restore-BootWimFromSourceIso` — the fact a reviewer identified as
+the most review-worthy in the change and found carried by neither candidate
+shape. The same pair is measured under both verbs, so the fifteen shared
+tallies state as re-derived values what §12.7 states as structure: `trace` is
+`compare` plus the rule layer, and nothing else.
+
+**The independent pair** is the one corpus history cannot supply: every pair
+drawn from an entry stands in exactly the relation `trace` asserts (§4.9), so
+the `compare`-without-succession case needs two scripts with no shared
+history. The two fixture scripts written for consumer review serve, embedded
+in `test_pss.py` (the gate, not the tool — §2.6). The block records the sha256
+of each script exactly as the emitted document's own `source.sha256` states
+it, so the embedded text cannot drift from what the block claims was measured.
+`Publish-ReleaseArtifacts` deliberately carries a §10.6 [F4] instance
+(`foreach ($pkg in Get-StagedArtifact)` — a real call in a position §10.6 does
+not treat as command position), so its figures are **expected to move when
+[F4] is adjudicated**; the movement will be a red in this gate at that moment,
+which is the point of pinning before the extractor arc rather than after.
+
+Materialisation is `default` throughout. The tallies measured equal over
+default and all-axes inputs on the adjudicated pair; the pinned figure states
+the materialisation it was measured at rather than claiming that invariance,
+per the rule §13.2 records for figures that could depend on it.
+
+```json pss-delta-baseline
+{
+  "compare_pair": {
+    "records": 170,
+    "surveyed": {
+      "PSS6001": {
+        "emitted": 1,
+        "equal": 0,
+        "examined": 1
+      },
+      "PSS6002": {
+        "emitted": 21,
+        "equal": 0,
+        "examined": 21
+      },
+      "PSS6003": {
+        "emitted": 0,
+        "equal": 505,
+        "examined": 505
+      },
+      "PSS7001": {
+        "emitted": 6,
+        "equal": 359,
+        "examined": 365
+      },
+      "PSS7002": {
+        "emitted": 2,
+        "equal": 363,
+        "examined": 365
+      },
+      "PSS7003": {
+        "emitted": 6,
+        "equal": 359,
+        "examined": 365
+      },
+      "PSS7004": {
+        "emitted": 10,
+        "equal": 355,
+        "examined": 365
+      },
+      "PSS7005": {
+        "emitted": 8,
+        "equal": 357,
+        "examined": 365
+      },
+      "PSS7006": {
+        "emitted": 8,
+        "equal": 357,
+        "examined": 365
+      },
+      "PSS7007": {
+        "emitted": 14,
+        "equal": 126,
+        "examined": 140
+      },
+      "PSS8001": {
+        "emitted": 83,
+        "equal": 0,
+        "examined": 83
+      },
+      "PSS8002": {
+        "emitted": 1,
+        "equal": 0,
+        "examined": 1
+      },
+      "PSS8003": {
+        "emitted": 8,
+        "equal": 357,
+        "examined": 365
+      },
+      "PSS8004": {
+        "emitted": 1,
+        "equal": 33,
+        "examined": 34
+      },
+      "PSS8008": {
+        "emitted": 1,
+        "equal": 384,
+        "examined": 385
+      }
+    }
+  },
+  "independent_pair": {
+    "basis": {
+      "a_sha256": "533763a4d68284cf9769df6811f706fe89eec6641e70dc7dea2d48583d84af36",
+      "b_sha256": "a71f74e32f46ba3dcdea94c014b7da8ea6afc4fed06b063df6f1b6074170efad",
+      "materialisation": "default"
+    },
+    "records": 25,
+    "source_path_differs": true,
+    "surveyed": {
+      "PSS6001": {
+        "emitted": 7,
+        "equal": 0,
+        "examined": 7
+      },
+      "PSS6002": {
+        "emitted": 7,
+        "equal": 0,
+        "examined": 7
+      },
+      "PSS6003": {
+        "emitted": 0,
+        "equal": 0,
+        "examined": 0
+      },
+      "PSS7001": {
+        "emitted": 0,
+        "equal": 0,
+        "examined": 0
+      },
+      "PSS7002": {
+        "emitted": 0,
+        "equal": 0,
+        "examined": 0
+      },
+      "PSS7003": {
+        "emitted": 0,
+        "equal": 0,
+        "examined": 0
+      },
+      "PSS7004": {
+        "emitted": 0,
+        "equal": 0,
+        "examined": 0
+      },
+      "PSS7005": {
+        "emitted": 0,
+        "equal": 0,
+        "examined": 0
+      },
+      "PSS7006": {
+        "emitted": 0,
+        "equal": 0,
+        "examined": 0
+      },
+      "PSS7007": {
+        "emitted": 0,
+        "equal": 0,
+        "examined": 0
+      },
+      "PSS8001": {
+        "emitted": 4,
+        "equal": 0,
+        "examined": 4
+      },
+      "PSS8002": {
+        "emitted": 5,
+        "equal": 0,
+        "examined": 5
+      },
+      "PSS8003": {
+        "emitted": 0,
+        "equal": 0,
+        "examined": 0
+      },
+      "PSS8004": {
+        "emitted": 1,
+        "equal": 0,
+        "examined": 1
+      },
+      "PSS8008": {
+        "emitted": 1,
+        "equal": 8,
+        "examined": 9
+      }
+    }
+  },
+  "trace_pair": {
+    "basis": {
+      "a": {
+        "blob": "12c86874159ba0641c90d67bcc0a4c19037bf27c",
+        "gen_index": 93,
+        "rev": "f32a761015dbd200ffca785390bfbb107f6594e8"
+      },
+      "b": {
+        "blob": "63782697691f607bb0d0d1e58451afe08464e6e5",
+        "gen_index": 94,
+        "rev": "e1113e5e36b7b08cfab75061022cb7a55d288bc5"
+      },
+      "corpus_entry": "0002-projects-powershell-update-windows-server-iso.json",
+      "materialisation": "default"
+    },
+    "pss7001_classifications": {
+      "code-changed": 6
+    },
+    "pss8008_subjects": [
+      "function/Restore-BootWimFromSourceIso"
+    ],
+    "records": 189,
+    "surveyed": {
+      "PSS6001": {
+        "emitted": 1,
+        "equal": 0,
+        "examined": 1
+      },
+      "PSS6002": {
+        "emitted": 21,
+        "equal": 0,
+        "examined": 21
+      },
+      "PSS6003": {
+        "emitted": 0,
+        "equal": 505,
+        "examined": 505
+      },
+      "PSS7001": {
+        "emitted": 6,
+        "equal": 359,
+        "examined": 365
+      },
+      "PSS7002": {
+        "emitted": 2,
+        "equal": 363,
+        "examined": 365
+      },
+      "PSS7003": {
+        "emitted": 6,
+        "equal": 359,
+        "examined": 365
+      },
+      "PSS7004": {
+        "emitted": 10,
+        "equal": 355,
+        "examined": 365
+      },
+      "PSS7005": {
+        "emitted": 8,
+        "equal": 357,
+        "examined": 365
+      },
+      "PSS7006": {
+        "emitted": 8,
+        "equal": 357,
+        "examined": 365
+      },
+      "PSS7007": {
+        "emitted": 14,
+        "equal": 126,
+        "examined": 140
+      },
+      "PSS8001": {
+        "emitted": 83,
+        "equal": 0,
+        "examined": 83
+      },
+      "PSS8002": {
+        "emitted": 1,
+        "equal": 0,
+        "examined": 1
+      },
+      "PSS8003": {
+        "emitted": 8,
+        "equal": 357,
+        "examined": 365
+      },
+      "PSS8004": {
+        "emitted": 1,
+        "equal": 33,
+        "examined": 34
+      },
+      "PSS8005": {
+        "emitted": 0,
+        "equal": 1,
+        "examined": 1
+      },
+      "PSS8006": {
+        "emitted": 2,
+        "equal": 138,
+        "examined": 140
+      },
+      "PSS8007": {
+        "emitted": 17,
+        "equal": 124,
+        "examined": 141
+      },
+      "PSS8008": {
+        "emitted": 1,
+        "equal": 384,
+        "examined": 385
+      }
+    }
+  }
+}
+```
 
 ### B.8 Machine baseline (B-I)
 

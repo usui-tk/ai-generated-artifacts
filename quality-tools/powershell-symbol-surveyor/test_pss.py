@@ -1334,6 +1334,208 @@ def check_comparator():
               "comparator: the refusal names PSS9005")
 
 
+
+# The independent compare pair (SPEC B.7). Two scripts with no shared history,
+# written for consumer review (SPEC 3.2) - the fixture corpus history cannot
+# supply, because every pair drawn from an entry stands in exactly the relation
+# `trace` asserts (SPEC 4.9). Embedded in the gate, not shipped as files: the
+# tool reads only what it is given (SPEC 2.6) and the inventory rule (SPEC
+# 14.1) stays two `.py` files. Identity is pinned: the B.7 block records each
+# script's sha256 exactly as the emitted delta's `source.sha256` states it, so
+# this text cannot drift from what the block claims was measured.
+#
+# PUBLISH deliberately carries the SPEC 10.6 [F4] instance -
+# `foreach ($pkg in Get-StagedArtifact)`, a real call in a position 10.6 does
+# not treat as command position - so adjudicating [F4] reddens the pinned
+# figures here rather than moving them silently.
+FIXTURE_ROTATION_NAME = "Invoke-BackupRotation.ps1"
+FIXTURE_ROTATION = r"""#Requires -Version 5.1
+Set-StrictMode -Version Latest
+
+$script:RetentionDays = 30
+$script:BackupRoot = 'C:\Backups'
+$script:DryRun = $false
+
+function Write-Log {
+    param([Parameter(Mandatory)][string]$Message,
+          [ValidateSet('Info','Warn')][string]$Level = 'Info')
+    Write-Host ('[{0}] {1}' -f $Level, $Message)
+}
+
+function Get-ExpiredBackups {
+    param([Parameter(Mandatory)][string]$Path,
+          [int]$Days = $script:RetentionDays)
+    $cutoff = (Get-Date).AddDays(-$Days)
+    Get-ChildItem -Path $Path -Filter '*.bak' -File |
+        Where-Object { $_.LastWriteTime -lt $cutoff }
+}
+
+function Remove-Backup {
+    param([Parameter(Mandatory)][System.IO.FileInfo]$File)
+    if ($script:DryRun) {
+        Write-Log -Message ('would remove {0}' -f $File.Name)
+        return
+    }
+    Remove-Item -LiteralPath $File.FullName -Force
+    Write-Log -Message ('removed {0}' -f $File.Name)
+}
+
+function Invoke-Rotation {
+    param([string]$Root = $script:BackupRoot)
+    $expired = Get-ExpiredBackups -Path $Root
+    foreach ($file in $expired) { Remove-Backup -File $file }
+    Write-Log -Message ('rotation complete: {0} file(s)' -f $expired.Count)
+}
+
+Invoke-Rotation
+"""
+
+FIXTURE_PUBLISH_NAME = "Publish-ReleaseArtifacts.ps1"
+FIXTURE_PUBLISH = r"""#Requires -Version 5.1
+Set-StrictMode -Version Latest
+
+$script:StagingDir = 'C:\Staging'
+$script:FeedUrl = 'https://feed.example.invalid/v3'
+
+function Write-Status {
+    param([Parameter(Mandatory)][string]$Text)
+    Write-Host $Text
+}
+
+function Test-ArtifactSignature {
+    param([Parameter(Mandatory)][string]$LiteralPath)
+    $sig = Get-AuthenticodeSignature -LiteralPath $LiteralPath
+    return ($sig.Status -eq 'Valid')
+}
+
+function Get-StagedArtifact {
+    param([string]$Directory = $script:StagingDir)
+    Get-ChildItem -Path $Directory -Filter '*.nupkg' -File
+}
+
+function Push-Artifact {
+    param([Parameter(Mandatory)][System.IO.FileInfo]$Package,
+          [string]$Feed = $script:FeedUrl)
+    if (-not (Test-ArtifactSignature -LiteralPath $Package.FullName)) {
+        Write-Status -Text ('unsigned, skipping: {0}' -f $Package.Name)
+        return
+    }
+    Write-Status -Text ('publishing {0} to {1}' -f $Package.Name, $Feed)
+}
+
+function Invoke-Publish {
+    foreach ($pkg in Get-StagedArtifact) { Push-Artifact -Package $pkg }
+}
+
+Invoke-Publish
+"""
+
+
+def load_delta_baseline():
+    """Read the delta master out of SPEC Appendix B.7.
+
+    Same rule as ``load_baseline``: a missing block is a hard error. The two
+    blocks are separate on purpose - B.8 is the identity of the emitted model
+    and feeds the cache digest (SPEC 14.4); B.7 describes a reader of models,
+    so pinning it must not move the digest or expire a single derived cache.
+    """
+    text = open(SPEC, encoding="utf-8").read()
+    m = re.search(r"```json pss-delta-baseline\n(.*?)\n```", text, re.S)
+    if not m:
+        raise SystemExit("SPEC.md carries no ```json pss-delta-baseline``` "
+                         "block (Appendix B.7) - nothing to assert against")
+    return json.loads(m.group(1))
+
+
+def _delta_via_cli(verb, name_a, model_a, name_b, model_b):
+    """Run the shipped surface, not the functions behind it.
+
+    The pinned figures describe what a caller receives from `pss.py <verb>`,
+    so the gate obtains them the way a caller would: two files, a subprocess,
+    a JSON document. An in-process call would skip the assembly the document
+    fields come from (`surveyed`, provenance, `source_path_differs`).
+    """
+    with tempfile.TemporaryDirectory() as d:
+        pa, pb = os.path.join(d, name_a + ".json"), os.path.join(d, name_b + ".json")
+        for path, model in ((pa, model_a), (pb, model_b)):
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(model, fh)
+        r = subprocess.run(
+            [sys.executable, os.path.join(HERE, "pss.py"), verb, pa, pb,
+             "--format", "json"], capture_output=True, cwd=d)
+        if r.returncode != 0:
+            return None
+        try:
+            return json.loads(r.stdout.decode("utf-8"))
+        except Exception:
+            return None
+
+
+def _check_delta_leg(label, doc, pinned):
+    """The comparisons every pinned delta shares."""
+    if doc is None:
+        check(False, "delta baseline: %s produced a document" % label)
+        return
+    eq(len(doc["delta_records"]), pinned["records"],
+       "delta baseline: %s record count" % label)
+    eq(doc["surveyed"], pinned["surveyed"],
+       "delta baseline: %s per-code tally" % label)
+
+
+def check_delta_fixture_baseline(delta):
+    """SPEC B.7, the independent pair. Needs neither git nor pwsh."""
+    basis = delta["independent_pair"]["basis"]
+    models = {}
+    for key, name, text in (("a", FIXTURE_ROTATION_NAME, FIXTURE_ROTATION),
+                            ("b", FIXTURE_PUBLISH_NAME, FIXTURE_PUBLISH)):
+        eq(hashlib.sha256(text.encode("utf-8")).hexdigest(),
+           basis[key + "_sha256"],
+           "delta baseline: fixture %s matches the recorded basis" % name)
+        models[key] = pss.Survey(name, text).run().model()
+        eq(models[key]["source"]["sha256"], basis[key + "_sha256"],
+           "delta baseline: the %s model states the basis sha256 itself" % name)
+
+    doc = _delta_via_cli("compare", "fa", models["a"], "fb", models["b"])
+    _check_delta_leg("independent compare", doc, delta["independent_pair"])
+    if doc is not None:
+        eq(doc.get("source_path_differs"),
+           delta["independent_pair"]["source_path_differs"],
+           "delta baseline: the independent pair states its path difference")
+
+
+def check_delta_corpus_baseline(delta, root):
+    """SPEC B.7, the adjudicated generation pair. Needs the blobs, hence git."""
+    basis = delta["trace_pair"]["basis"]
+    models = {}
+    for key in ("a", "b"):
+        text = read_blob(root, basis[key]["blob"])
+        models[key] = pss.Survey("reference.ps1", text).run().model()
+
+    traced = _delta_via_cli("trace", "a", models["a"], "b", models["b"])
+    _check_delta_leg("trace pair", traced, delta["trace_pair"])
+    if traced is not None:
+        cls = {}
+        for r in traced["delta_records"]:
+            if r["code"] == "PSS7001":
+                c = r["detail"]["classification"]
+                cls[c] = cls.get(c, 0) + 1
+        eq(cls, delta["trace_pair"]["pss7001_classifications"],
+           "delta baseline: trace pair PSS7001 classifications")
+        eq(sorted(r["subject"] for r in traced["delta_records"]
+                  if r["code"] == "PSS8008"),
+           delta["trace_pair"]["pss8008_subjects"],
+           "delta baseline: trace pair PSS8008 subjects")
+
+    compared = _delta_via_cli("compare", "a", models["a"], "b", models["b"])
+    _check_delta_leg("compare pair", compared, delta["compare_pair"])
+    if compared is not None and traced is not None:
+        eq(sorted(compared["surveyed"]),
+           sorted(set(traced["surveyed"]) - {"PSS8005", "PSS8006", "PSS8007"}),
+           "delta baseline: compare surveys exactly the shared fifteen")
+        eq({c: compared["surveyed"][c] for c in compared["surveyed"]},
+           {c: traced["surveyed"][c] for c in compared["surveyed"]},
+           "delta baseline: the shared tallies agree across the verbs")
+
 def check_file_inventory():
     """Hold SPEC 14.1's two-file rule, which was normative and ungated.
 
@@ -3128,6 +3330,10 @@ def main():
     # so it stays checked at every degradation level (SPEC 14.3).
     check_cache_generator()
     check_comparator()
+    # SPEC B.7's independent pair: embedded fixtures, so it stays checked at
+    # every degradation level; the corpus half runs below, where git is known.
+    delta_baseline = load_delta_baseline()
+    check_delta_fixture_baseline(delta_baseline)
     check_file_inventory()
     check_documents()
     check_neutral_naming()
@@ -3184,6 +3390,11 @@ def main():
            "baseline digest: --emit-baseline-digest agrees with the gate")
 
         check_version_decision(root, text, model_def, model_all)
+
+        # SPEC B.7's adjudicated generation pair: the blobs come from this
+        # repository's object store, so the leg sits with the other blob-fed
+        # legs and degrades with them when git is absent (SPEC 14.3).
+        check_delta_corpus_baseline(delta_baseline, root)
 
         for label, model in (("default", model_def), ("all-axes", model_all)):
             check_cost_report(label, model)

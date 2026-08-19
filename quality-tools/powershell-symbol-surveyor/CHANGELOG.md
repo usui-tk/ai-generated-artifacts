@@ -65,6 +65,25 @@ time, and are marked as such.
 
 ### Added
 
+- **Appendix B.7 is pinned and gated (delta baselines).** The former table
+  ("Delta behaviour over 12 consecutive historical states") is withdrawn, not
+  restamped: measured with the shipped comparator over all 229 consecutive
+  committed-generation pairs, no window of 8–16 pairs reproduces it — the
+  output of an uncommitted instrument over an unrecorded window (ADR 0036,
+  the B.3 defect met on the comparator's side). Replacing it, a
+  `pss-delta-baseline` machine block pins `trace` and `compare` over the
+  adjudicated pair (entry `0002`, generations 93 → 94, retrieved by blob) and
+  `compare` over two independent fixture scripts embedded in the gate — the
+  pair corpus history cannot supply (§4.9). Record counts, per-code tallies,
+  the `PSS7001` classification split and the `PSS8008` subject are re-derived
+  through the shipped CLI surface; fixture identity is held by the emitted
+  document's own `source.sha256` against the recorded basis. The
+  `Publish-ReleaseArtifacts` fixture deliberately carries the §10.6 [F4]
+  instance, so adjudicating [F4] reddens these figures instead of moving them
+  silently. B.7 is a separate block from B.8 on purpose: pinning a reader of
+  models moves no cache-identity digest, so `model_version` stays `"2"` and
+  every derived cache remains valid. The gate grows 259 → 274 checks
+  (268 without `pwsh`, 103 without `git`).
 - **`compare` and `trace` work.** Both verbs ran as refusals for the whole life
   of the tool; they now emit the §6.4 delta document. One comparator serves
   both, differing only in the assertion the caller makes, and `--capabilities`
@@ -73,10 +92,9 @@ time, and are marked as such.
   **All eighteen comparison codes are evaluated.** `compare` runs the fifteen
   that hold without a claim of succession; `trace` runs those and the three
   rules of §12.7 (`PSS8005`–`PSS8007`), which presuppose that the caller has
-  asserted one model is a later state of the other;
-  the other eight are absent from `surveyed`, which is how a caller tells "did
-  not run" from "ran clean". `trace`'s three succession-only codes
-  (`PSS8005`–`PSS8007`) are not among them yet.
+  asserted one model is a later state of the other. Under `compare` those
+  three are absent from `surveyed`, which is how a caller tells "did not run"
+  from "ran clean".
 - **The delta document has a specified shape (§6.4).** `compare` and `trace`
   emit `delta_records` (differences only, flat, one subject each), `surveyed`
   (a per-code tally, mandatory in every build) and `examined_subjects` (the
