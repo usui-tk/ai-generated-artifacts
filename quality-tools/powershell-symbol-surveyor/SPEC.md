@@ -1181,6 +1181,29 @@ membership-filtered; `limitations`, `counters` and `source` are kept in full
 these rules from slice/parent pairs, and a rule recoverable only by
 comparing two outputs is stated by neither.
 
+**Boundary stubs (D12) — the one stated exception to whole-records-only.**
+Round 3 measured the cost of a pure filter: a function slice kept 33 edge
+endpoints that resolved to nothing inside the slice, and re-measured at the
+current build the same scope references **172** symbol identifiers with no
+symbols record — 47 from `edges` and `closures` alone. After scoping,
+every symbol identifier the kept records reference and the slice does not
+contain is re-introduced as a **stub**: `record: "stub"` plus the four
+common keys (`id`, `kind`, `start_line`, `end_line`), copied verbatim from
+the input model — including from an input's own stubs, so slicing a slice
+cannot dangle what the first slice resolved. Additive only: no kept record
+is rewritten, a stub carries no analysis payload, and an identifier with no
+symbols record in the input (`<script>`; every `variable:` form) is not
+stubbed. The reference set is **declaration-driven**: the same
+`COLLECTION_KEYS[...].symbol_refs` fields §5.8 declares as the joins into
+`symbols[].id` — a hand-rolled field list here collected variable-record
+`id`s on its first measurement, identifiers of a different form (§5.2) that
+never resolve into `symbols`, and the declaration already separates the
+two. `limitations` stays outside the rule for the same reason it is kept in
+full: it is whole-file context, not the slice's references.
+`slice` refuses a model carrying another `model_version` (`PSS9005`, §5.5):
+the stubs are a version-4 shape, and a document whose stated version and
+actual shape disagree is the false-delta problem in one file.
+
 The distinction is not theoretical. On the reference target the axes control
 0.40 MB and 3.86 MB of material that is **already absent by default**, while
 `script_variables` — 42 per cent of the default model — is a master collection
@@ -2262,7 +2285,7 @@ should not assume any of these are currently enforced.
 | Per-record presence contract | **RESOLVED at the D11 arc.** The declaration shape was consumer-adjudicated across two candidate specimens (round 3, §3.2): variant enumeration with machine-evaluable predicates and non-circular discriminators, first-class conditional keys, and a per-path index derived from the variants at serialisation time. Six collections declared — measurement corrected the round's five-collection estimate — and the survey's own candidate-A specimen demonstrated the quiet failure of the exceptions-only alternative by violating its own complement rule. `pss.RECORD_VARIANTS`, serialised by `--capabilities`, held by `--self-check` both ways and by the gate over both pin materialisations, a slice and the fixtures (§13.3 Per-record presence) | closed |
 | Dynamic command sites | **RESOLVED at the D12 arc, with its premise corrected by measurement.** The row as written claimed no collection itemises dynamic invocations and `limitations` is silent — measured false before implementation: the 26 sites had carried per-site `PSS9002` records with `owner` and `line` since the tool's first commit, on the default model. What was missing was the **name expression**: a record locating a dynamic invocation still sends a rename pre-flight back to the source, because nothing states *which* expression is invoked. `PSS9002` records now carry `target` — the expression verbatim, extended over byte-adjacent tails only (§4.8; the §10.6 adjacency discipline) — so the pre-flight becomes a model join against the variable collections. The adjudicated axis-shaped itemisation was withdrawn together with the premise: duplicating records already on the default model into an axis is the two-copies shape this SPEC spends its rows fighting. `limitations` entered the §13.3 variant declaration in the same commit (four code-discriminated variants), because one code carrying a key three others do not is not uniform | closed |
 | Command-site arguments | **RESOLVED at the D12 arc.** A site record carries `arguments` — the invocation's argument tokens in order, each `{kind, text}` verbatim, itemisation-not-binding (§4.2, §1.2) — and `span`, the [start, end) byte extent that disambiguates what a line number cannot: a backtick-continued invocation is one element and its span says so, and two same-line invocations of one name carry two spans. Variable and bareword items extend over byte-adjacent tails (§10.6 discipline), a parenthesised or scriptblock argument is captured balanced **over tokens** so a paren inside a string cannot derail it, and separators/redirections are covered by the span rather than itemised. Held by the variant key-set gate over every checked model and by behavioural fixtures for each kind | closed |
-| Slice boundary stubs | Every edge endpoint in a scope slice other than the scoped symbol has no `symbols` record in the slice (33 of 33 at the round-3 kit's slice), so the first source fetch of a session re-opens the parent model, defeating the slice's job as a standalone working set. The ask: retain boundary-stub symbol records (`id`, `kind`, `start_line`, `end_line` only) for every symbol an in-slice record references. Model-moving, and it introduces a new `symbols` variant — to be adjudicated together with the §13.3 variant declaration it extends (the reviewer's own argument for variant-style declaration) | next `model_version` arc (D12 inventory), design coupled to §13.3 |
+| Slice boundary stubs | **RESOLVED at the D12 arc.** Round 3 measured a function slice keeping 33 edge endpoints that resolved to nothing inside the slice; re-measured before implementation the same scope references 172 absent identifiers (47 from `edges`/`closures` alone). A `--scope` slice now re-introduces every referenced-but-absent symbol as a stub — `record: "stub"` plus the four common keys, copied verbatim from the input, additive only, declaration-driven off `COLLECTION_KEYS.symbol_refs` (§5.7) — and the `symbols` variant declaration was re-cut so the common set IS the stub set (§13.3). `slice` refuses a foreign `model_version` (`PSS9005`), for the same reason `compare` does. Held by a resolution gate (every referenced identifier resolves inside the slice), a verbatim-copy gate, and behavioural fixtures including slice-of-slice | closed |
 | Static analysis | clean under the repository's Python gates | not yet wired into a `pss.py`-specific run |
 | Docs | **RESOLVED.** `README.md`, `README.ja.md`, `SPEC.md`, `CHANGELOG.md` and `VERSION` all exist, and `test_pss.py` holds them rather than leaving their presence to inspection: each file must exist, `VERSION` must equal `pss.__version__` (one version, two places, so the file cannot go stale against the code), and the bilingual pair must be in **lock-step on structure** — the same heading text ordering by level, the same number of fenced blocks. Lock-step is checked structurally rather than by translation, and that limit is stated: it catches a section added to one and not the other, and says nothing about whether a paragraph's content still agrees | closed |
 | Emission coverage | every code in §4 blocks 1-4 (survey-emittable) appears as a `code` or `facts` value on at least one record somewhere in the regression corpus's models, or is documented as data-dependent-absent (e.g. `PSS1005` legitimately does not fire on a corpus with zero duplicate names) | `PSS2005`, `PSS4001`, `PSS4002` closed by manual audit. `PSS2002` closed for all five §12.2 sources at the D10 arc — each source is held red-first by a §13.1 fixture, which is stronger than corpus presence. No automated corpus-wide gate yet for the rest; S4 |
@@ -2317,6 +2340,10 @@ definition name is duplicated (§5.2, `PSS9007`), absent at the pin and on
 had ever seen it. It surfaced when the variant-demonstration fixture put the
 first duplicate-name model in front of the presence gate; an emitted key no
 declaration covered was the finding, and declaring it is the close.
+`/symbols[]/record` (D12) is the fourth: it marks a §5.7 boundary stub and
+can therefore appear only on a `--scope` slice — a surveyed model never
+emits it, so it is absent at the pin and on every corpus generation by
+construction, and the presence gate reads it on the pin slice instead.
 
 Counts at the pinned blob: **129** paths at `all-axes`, **115** at the default
 materialisation, the difference being the ten `axis` paths.
@@ -2441,6 +2468,7 @@ materialisation, the difference being the ten `axis` paths.
 | `/symbols[]/parameters[]/qualifier` | always |
 | `/symbols[]/parameters[]/type` | always |
 | `/symbols[]/parent` | always |
+| `/symbols[]/record` | optional |
 | `/symbols[]/start_line` | always |
 | `/unresolved_named_commands` | always |
 | `/unresolved_named_commands[]/arguments` | axis |
@@ -2492,8 +2520,9 @@ absent from the declaration is uniform, and the gate holds that claim too.
 
 | Collection | Variant | When | Carries (beyond common) | Conditional | Observed at the pin |
 |---|---|---|---|---|---:|
-| `symbols` | `top-level` | `depth == 0` | (common only) | `ordinal` | 479 |
-| `symbols` | `nested` | `depth >= 1` | `parent` | `ordinal` | 1 |
+| `symbols` | `top-level` | `depth == 0` | `depth` `facts` `hash_body` `hash_full` `hash_raw` `name` `parameters` | `ordinal` | 479 |
+| `symbols` | `nested` | `depth >= 1` | `depth` `facts` `hash_body` `hash_full` `hash_raw` `name` `parameters` `parent` | `ordinal` | 1 |
+| `symbols` | `stub` | `record == stub` | `record` | — | slice-only (§5.7); exercised on the pin slice |
 | `closures` | `closure-row` | `record == closure` | `facts` `id` `record` `transitive_callee_count` `transitive_caller_count` | — | 480 |
 | `closures` | `uncalled-fact` | `code == PSS4003` | `code` `id` | `named_by_literal` | 26 |
 | `closures` | `cycle-fact` | `code == PSS4004` | `code` `members` | — | 3 |
@@ -2510,8 +2539,9 @@ absent from the declaration is uniform, and the gate holds that claim too.
 | `limitations` | `ordinal-identifier` | `code == PSS9007` | (common only) | — | absent at the pin; exercised on the variants fixture |
 
 The `symbols` and `limitations` rows use `common_keys` (the keys every
-record of that collection carries); every other collection declares its full
-key set per variant. The
+record of that collection carries — for `symbols`, since D12, the four
+identify-and-locate keys a boundary stub shares with a full record); every
+other collection declares its full key set per variant. The
 `closures` `closure-row` variant additionally carries `transitive_callees`
 and `transitive_callers` **under the `closure-sets` axis** — the axis kind
 composes with the variant rather than replacing it. Seven collections are

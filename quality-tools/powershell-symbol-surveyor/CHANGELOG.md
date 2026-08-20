@@ -27,6 +27,24 @@ B.7/B.8 are restamped once at the arc's end.
 
 ### Added
 
+- **A `--scope` slice re-introduces boundary references as stubs** (SPEC
+  §5.7) — the one stated exception to whole-records-only, closing round 3's
+  finding of 33 edge endpoints resolving to nothing inside a function slice
+  (re-measured before implementation: 172 absent identifiers at the same
+  scope, 47 from `edges`/`closures` alone). A stub is `record: "stub"` plus
+  the four identify-and-locate keys, copied verbatim from the input —
+  including from an input's own stubs, so slice-of-slice cannot dangle what
+  the first slice resolved. The reference set is **declaration-driven** off
+  `COLLECTION_KEYS.symbol_refs` (§5.8): the first hand-rolled field list
+  collected variable-record `id`s — identifiers that never resolve into
+  `symbols` — on its very first measurement, and the declaration already
+  separated the two. The `symbols` variant declaration is re-cut so the
+  common set **is** the stub set (four keys; the analysis payload moves to
+  the full variants' carries), `/symbols[]/record` is the fourth `optional`
+  path (slice-only by construction), and `slice` now refuses a model from
+  another `model_version` (`PSS9005`) for the same reason `compare` does.
+  Held by a resolution gate, a verbatim-copy gate, and fixtures including
+  slice-of-slice and the version refusal.
 - **Site records carry `arguments` and `span`** (SPEC §4.2, under the
   `command-sites` axis) — the facts a round-3 destructive-invocation audit
   (`Remove-Item -LiteralPath … -Force`) had to return to the source for.

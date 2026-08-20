@@ -2274,6 +2274,45 @@ def run_fixtures():
           "fixture: two same-line invocations carry two disjoint spans - "
           "the disambiguation a line number cannot give", "got %r" % gd)
 
+    # SPEC 5.7 boundary stubs (D12), on a source small enough to eyeball:
+    # a function slice whose kept edge references a callee outside the
+    # scope re-introduces the callee as a stub, and a whole-model
+    # projection (no scope) adds nothing.
+    body = ("function Get-Leaf { 1 }\n"
+            "function Invoke-Root { Get-Leaf }\n"
+            "Invoke-Root\n")
+    model = pss.Survey("fixture.ps1", body).run().model()
+    sl = pss.slice_model(model, scope="function/Invoke-Root")
+    stubs = [s for s in sl["symbols"] if s.get("record") == "stub"]
+    check(stubs == [{"record": "stub", "id": "function/Get-Leaf",
+                     "kind": "function",
+                     "start_line": 1, "end_line": 1}],
+          "fixture: an out-of-scope callee becomes a boundary stub",
+          "stubs: %r" % stubs)
+    sl_axes = pss.slice_model(model, axes=set())
+    check(not any(s.get("record") == "stub" for s in sl_axes["symbols"]),
+          "fixture: an axis-only slice adds no stubs",
+          "symbols: %r" % sl_axes["symbols"])
+
+    # SPEC 5.5 (D12): slice refuses a model from another model_version -
+    # the stubs are a version-4 shape, and a document whose stated version
+    # and actual shape disagree is the false-delta problem in one file.
+    with tempfile.TemporaryDirectory() as d:
+        stale = dict(model)
+        stale["model_version"] = "3"
+        p = os.path.join(d, "stale.json")
+        with open(p, "w", encoding="utf-8") as fh:
+            json.dump(stale, fh)
+        r = subprocess.run(
+            [sys.executable, os.path.join(HERE, "pss.py"), "slice", p,
+             "--scope", "function/Invoke-Root"],
+            capture_output=True)
+        check(r.returncode != 0 and b"PSS9005" in r.stderr
+              and b"model_version 3" in r.stderr,
+              "fixture: slice refuses a model from another model_version, "
+              "by name (PSS9005)",
+              "rc=%d stderr=%r" % (r.returncode, r.stderr[:160]))
+
     # SPEC 4.8 PSS9003 (D12): -Scope is reported regardless of parameter
     # order. Red-first: the parent build RETURNED at -Name, so the common
     # `-Name X -Value 1 -Scope 1` order was silently missed - while the
@@ -2740,6 +2779,35 @@ def check_slice_projection(model_all, sliced):
           "slice projection: kept aggregates are membership-filtered, "
           "never rewritten",
           "kept %d, scope %r" % (len(kept), scope))
+
+    # D12 boundary stubs (SPEC 5.7 / SLICE_PROJECTION.boundary_stubs).
+    # Written red-first as a measurement: against the pre-stub build this
+    # scope's slice referenced 172 symbol identifiers with no symbols
+    # record - 47 of them from edges and closures alone, the round-3
+    # 33-endpoint finding reproduced and exceeded. The rule is
+    # declaration-driven (COLLECTION_KEYS.symbol_refs), and the first
+    # hand-rolled field list collected variable-record ids - identifiers
+    # that never resolve into symbols - which is why the check asserts
+    # resolution through the same declaration the implementation reads.
+    have = {s["id"] for s in sliced.get("symbols", ())}
+    dangling = sorted(pss._referenced_symbol_ids(sliced) - have)
+    eq(dangling, [],
+       "slice stubs: every referenced symbol identifier resolves inside "
+       "the slice")
+    stubs = {s["id"]: s for s in sliced.get("symbols", ())
+             if s.get("record") == "stub"}
+    parent_syms = {s["id"]: s for s in model_all.get("symbols", ())}
+    check(bool(stubs) and all(
+              set(s.keys()) == {"record", "id", "kind", "start_line",
+                                "end_line"}
+              and all(s[k] == parent_syms[i][k]
+                      for k in ("kind", "start_line", "end_line"))
+              for i, s in stubs.items()),
+          "slice stubs: a stub is the four common keys plus its "
+          "discriminator, copied verbatim from the input",
+          "stubs %d" % len(stubs))
+    check(all(i in parent_syms for i in stubs),
+          "slice stubs: nothing is stubbed that the input does not carry")
 
 
 # -------------------------------------------------------- differential (pwsh)

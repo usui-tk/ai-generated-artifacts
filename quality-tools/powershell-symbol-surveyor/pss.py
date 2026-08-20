@@ -1215,6 +1215,7 @@ MODEL_SCHEMA = {
     "/symbols[]/parameters[]/qualifier": "always",
     "/symbols[]/parameters[]/type": "always",
     "/symbols[]/parent": "always",
+    "/symbols[]/record": "optional",
     "/symbols[]/start_line": "always",
     "/unresolved_named_commands": "always",
     "/unresolved_named_commands[]/arguments": "axis",
@@ -1279,23 +1280,39 @@ NULLABLE_PATHS = {
 # gate against the pinned blob, a slice and the fixtures.
 RECORD_VARIANTS = {
     "symbols": {
-        "common_keys": ("depth", "end_line", "facts", "hash_body",
-                        "hash_full", "hash_raw", "id", "kind", "name",
-                        "parameters", "start_line"),
+        # D12: the common set SHRANK to what a boundary stub carries - the
+        # four keys that identify and locate a symbol. Everything analytic
+        # moved into the full variants' carries, so the stub variant is
+        # "common plus its discriminator" and a full record is "common plus
+        # the analysis payload".
+        "common_keys": ("end_line", "id", "kind", "start_line"),
         "variants": (
             {"name": "top-level", "when": {"path": "depth", "equals": 0},
-             "carries": (), "conditional_keys": {"ordinal": {
+             "carries": ("depth", "facts", "hash_body", "hash_full",
+                         "hash_raw", "name", "parameters"),
+             "conditional_keys": {"ordinal": {
                  "presence_means": "the identifier carries a "
                                    "position-dependent ordinal "
                                    "disambiguator (SPEC 5.2, PSS9007)",
                  "absence_means": "the name is unique in the file"}},
              "axis_keys": {}},
             {"name": "nested", "when": {"path": "depth", "gte": 1},
-             "carries": ("parent",), "conditional_keys": {"ordinal": {
+             "carries": ("depth", "facts", "hash_body", "hash_full",
+                         "hash_raw", "name", "parameters", "parent"),
+             "conditional_keys": {"ordinal": {
                  "presence_means": "the identifier carries a "
                                    "position-dependent ordinal "
                                    "disambiguator (SPEC 5.2, PSS9007)",
                  "absence_means": "the name is unique in the file"}},
+             "axis_keys": {}},
+            # D12: a boundary stub appears ONLY on a --scope slice
+            # (SLICE_PROJECTION.boundary_stubs); a surveyed model never
+            # emits one, which is why the exercised check reads the sliced
+            # model in the checked set. Discriminated on `record`: a full
+            # record carries no `record` key, so the depth predicates and
+            # this one are mutually exclusive by construction.
+            {"name": "stub", "when": {"path": "record", "equals": "stub"},
+             "carries": ("record",), "conditional_keys": {},
              "axis_keys": {}},
         ),
     },
@@ -3213,6 +3230,32 @@ def _record_in_scope(r, scope):
     return False
 
 
+def _referenced_symbol_ids(model):
+    """Every symbol identifier the model's scoped collections reference -
+    read from ``COLLECTION_KEYS[...].symbol_refs``, the D11 declaration of
+    exactly the fields whose every value joins into ``symbols[].id`` (or is
+    the reserved script owner). Declaration-driven on purpose: a hand-rolled
+    field list here collected variable-record ``id`` values on first
+    measurement - identifiers of a different form (SPEC 5.2) that never
+    resolve into ``symbols`` - and the declaration already separates the two
+    as ``symbol_refs`` vs ``identifier_refs``. ``limitations`` is excluded
+    the same way the scope filter excludes it: kept in full as whole-file
+    context (SPEC 5.7), its owners are not the slice's references.
+    """
+    ids = set()
+    for key in _SCOPED_COLLECTIONS:
+        refs = COLLECTION_KEYS.get(key, {}).get("symbol_refs", ())
+        for r in model.get(key, ()) or ():
+            for f in refs:
+                v = r.get(f)
+                if isinstance(v, str):
+                    ids.add(v)
+                elif isinstance(v, (list, tuple)):
+                    ids.update(x for x in v if isinstance(x, str))
+    ids.discard(SCRIPT_OWNER)
+    return ids
+
+
 # Collections a --scope projection filters. `limitations` is deliberately
 # absent: SPEC 5.7 keeps it in full, unconditionally, because it describes
 # what could NOT be determined and filtering it would misrepresent the
@@ -3253,6 +3296,21 @@ SLICE_PROJECTION = {
         "cost": "describes the slice itself; an axis the slice no longer "
                 "carries prices as null (SPEC 5.6), a kept axis as 0",
         "materialization": "declares the scope and the axis set",
+    },
+    # D12: the ONE stated exception to "keeps or drops whole records".
+    "boundary_stubs": {
+        "rule": "additive-stub",
+        "semantics": "after scoping, every symbol identifier the kept "
+                     "records reference through a membership field and the "
+                     "slice does not contain is re-introduced as a stub "
+                     "symbols record - record='stub' plus the four common "
+                     "keys (id, kind, start_line, end_line), copied "
+                     "verbatim from the input model. Additive only: no "
+                     "kept record is rewritten, no stub carries analysis "
+                     "payload, and an identifier without a symbols record "
+                     "in the input (<script>) is not stubbed. Closes the "
+                     "round-3 finding of 33 edge endpoints resolving to "
+                     "nothing inside a function slice (SPEC 5.7)",
     },
 }
 
@@ -3297,6 +3355,20 @@ def slice_model(model, scope=None, axes=None):
             if key in out:
                 out[key] = [r for r in out[key] if _record_in_scope(r, scope)]
         materialization["scope"] = scope
+        # D12 boundary stubs (SPEC 5.7, SLICE_PROJECTION.boundary_stubs):
+        # re-introduce every referenced-but-absent symbol as a stub, sourced
+        # from the INPUT model - including an input's own stubs, so slicing
+        # a slice cannot dangle what the first slice resolved.
+        by_id = {s["id"]: s for s in model.get("symbols", ())}
+        have = {s["id"] for s in out.get("symbols", ())}
+        boundary = _referenced_symbol_ids(out) - have
+        stubs = [{"record": "stub", "id": i, "kind": by_id[i]["kind"],
+                  "start_line": by_id[i]["start_line"],
+                  "end_line": by_id[i]["end_line"]}
+                 for i in sorted(boundary) if i in by_id]
+        if stubs:
+            out["symbols"] = sorted(list(out.get("symbols", ())) + stubs,
+                                    key=lambda r: r["id"])
 
     out["materialization"] = materialization
     # A sliced model is a model, so it carries a cost block describing itself
@@ -3324,6 +3396,19 @@ def cmd_slice(args):
         except json.JSONDecodeError as exc:
             sys.stderr.write("pss.py: slice: %s is not valid JSON (%s)\n" % (args.model, exc))
             return EXIT_ERROR
+
+    mv = model.get("model_version")
+    if mv != MODEL_VERSION:
+        sys.stderr.write(
+            "pss.py: slice: PSS9005 - the model carries model_version %s and "
+            "this build slices under model_version %s. A slice re-emits the "
+            "document under this build's contract (the boundary stubs are a "
+            "model_version-4 shape), so slicing across the boundary would "
+            "produce a document whose stated version and actual shape "
+            "disagree. Re-survey the source with this build, or slice with "
+            "the build that produced the model. No partial slice is "
+            "produced.\n" % (mv, MODEL_VERSION))
+        return EXIT_ERROR
 
     current_axes = frozenset(model.get("materialization", {}).get("axes", []))
     requested_axes = None
