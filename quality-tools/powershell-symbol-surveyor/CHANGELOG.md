@@ -22,6 +22,31 @@ time, and are marked as such.
 
 ### Added
 
+- **The slice projection contract is declared** (SPEC §5.7; round-3 B2).
+  `pss.SLICE_PROJECTION` states what `slice_model` has always done and
+  nothing stated: membership-filtering by one rule over seven identifying
+  fields, whole records kept or dropped and **never rewritten** (a kept
+  unresolved-command aggregate still states source-wide figures),
+  `limitations`/`counters`/`source` kept in full, `cost`/`materialization`
+  recomputed. Serialised by `--capabilities` (`slice_projection`); the gate
+  holds the declaration against behaviour (kept-in-full byte-equality, the
+  no-rewrite rule on kept aggregates, the scoped set == the implemented
+  tuple). A round-3 reviewer had to reverse-engineer these rules from
+  slice/parent output pairs.
+- **The delta document's shape declares its conditional key and its own
+  standing** (SPEC §6.4; round-3 B3). `source_path_differs` — found by a
+  round-3 reviewer in a real document and absent from the declared shape —
+  now lives under `top_level_conditional`, and the gate holds both
+  directions (a same-path pair must not carry it; an unequal-path pair
+  must). §6.4 additionally states three norms that were practised and
+  unwritten: the default `examined_subjects` counts are the per-kind
+  compression of exactly the `--all` enumeration; the pseudo-subject
+  `<script>` can be a delta subject and is never an examined subject; and
+  the delta document is a reader of models outside the §14.4 cache, so a
+  delta **shape** change restamps B.7 and neither expires a cache nor
+  advances `model_version` — the norm whose absence made a clean round-3
+  reviewer misclassify a delta-field ask as a version-arc item.
+
 - **The per-record presence contract is declared, serialised and gated**
   (SPEC §13.3 "Per-record presence"; round-3 adjudication B1). Kind
   `always` was a per-model claim being read as a per-record one —

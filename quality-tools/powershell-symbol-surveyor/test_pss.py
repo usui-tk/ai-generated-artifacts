@@ -1209,6 +1209,30 @@ def check_comparator():
               "comparator: PSS8004 copies the site the resolution was read from",
               "records: %r" % fours)
 
+        # D11 B3: the conditional top-level key, exercised in the direction
+        # the same-path fixtures above cannot show - an unequal-path pair
+        # MUST carry source_path_differs, and the document's keys must stay
+        # inside top_level + top_level_conditional.
+        shape = (pss.MACHINE_OUTPUTS.get("delta_records", {})
+                 .get("shape", {}))
+        allowed = set(shape.get("top_level", ())) \
+            | set(shape.get("top_level_conditional", ()))
+        out = _run_pss(["survey", "@SCRIPT@", "--format", "json"],
+                       text="Old-Name\n")
+        paths["y"] = os.path.join(d, "renamed", "w.json")
+        os.makedirs(os.path.dirname(paths["y"]), exist_ok=True)
+        with open(paths["y"], "wb") as fh:
+            fh.write(out.stdout)
+        rc, unequal = run("compare", "w", "y")
+        check(unequal.get("source_path_differs") is True
+              and set(unequal) <= allowed and allowed
+              and "source_path_differs" in
+              set(shape.get("top_level_conditional", ())),
+              "comparator: an unequal-path pair states source_path_differs "
+              "inside the declared conditional slot",
+              "keys %r, declared conditional %r"
+              % (sorted(unequal), shape.get("top_level_conditional")))
+
         # SPEC 6.4: --all restores the enumeration without changing the tally,
         # because omitting equal subjects is a choice about size and never
         # about what was measured.
@@ -1902,14 +1926,26 @@ def check_capability_descriptor():
 
     declared = outputs.get("delta_records", {})
     top = tuple(declared.get("shape", {}).get("top_level", ()))
+    cond = tuple(declared.get("shape", {}).get("top_level_conditional", ()))
+    # D11 (round-3 finding, verified): `source_path_differs` appeared in real
+    # documents while the declared shape had no slot for it - an undeclared
+    # top-level key is exactly the class of gap the shape declaration exists
+    # to close. The contract is now two-layer: `top_level` keys appear in
+    # EVERY document; `top_level_conditional` keys may appear; nothing else
+    # may. A same-path pair must not carry the conditional key, an
+    # unequal-path pair must - both directions are held below.
+    def _keys_ok(doc_v):
+        keys = set(doc_v)
+        return set(top) <= keys and keys <= set(top) | set(cond)
     check(declared.get("status") == "implemented"
+          and "source_path_differs" in cond
           and all(rc == 0 and doc_v is not None
                   for rc, doc_v in produced.values())
-          and all(sorted(doc_v) == sorted(top)
+          and all(_keys_ok(doc_v) and "source_path_differs" not in doc_v
                   for _, doc_v in produced.values()),
           "descriptor: the delta mark matches what compare and trace do",
-          "declared %r, results %r"
-          % (declared.get("status"),
+          "declared %r/%r, results %r"
+          % (top, cond,
              dict((k, (rc, sorted(dv) if dv else None))
                   for k, (rc, dv) in produced.items())))
 
@@ -2440,6 +2476,43 @@ def check_record_variants(models):
                 measured[k] = measured.get(k, 0) + 1
     eq(stated, measured,
        "variants: the SPEC 13.3 observed column equals the measurement")
+
+
+def check_slice_projection(model_all, sliced):
+    """SPEC 5.7 / round-3 B2: the slice's projection rules are DECLARED, and
+    the declaration is held against what slice_model actually does. Written
+    red-first: the parent build followed these rules and stated none of
+    them, which sent a reviewer reverse-engineering output pairs."""
+    decl = getattr(pss, "SLICE_PROJECTION", None)
+    check(decl is not None,
+          "slice projection: pss.SLICE_PROJECTION is declared")
+    if decl is None:
+        return
+    caps = json.loads(_run_pss(["--capabilities"]).stdout)
+    check(caps.get("slice_projection") == json.loads(json.dumps(decl)),
+          "slice projection: --capabilities serialises the declaration")
+    eq(sorted(decl.get("scoped_collections", ())),
+       sorted(pss._SCOPED_COLLECTIONS),
+       "slice projection: the declared scoped set is the implemented set")
+    # kept_in_full, held by behaviour: the slice's copies are byte-equal.
+    for coll in ("limitations", "counters"):
+        check(coll in decl.get("kept_in_full", {})
+              and sliced.get(coll) == model_all.get(coll),
+              "slice projection: %s is declared kept-in-full and is" % coll)
+    # The no-rewrite rule, held on the record one reviewer verified by hand:
+    # an unresolved-command aggregate kept because its owners include the
+    # scope still states source-wide sites and owners.
+    scope = (sliced.get("materialization") or {}).get("scope")
+    kept = {r["name"]: r for r in sliced.get("unresolved_named_commands", ())
+            if r.get("record") == "aggregate"}
+    parent = {r["name"]: r for r in
+              model_all.get("unresolved_named_commands", ())
+              if r.get("record") == "aggregate"}
+    check(bool(kept) and all(scope in r.get("owners", ()) and r == parent[n]
+                             for n, r in kept.items()),
+          "slice projection: kept aggregates are membership-filtered, "
+          "never rewritten",
+          "kept %d, scope %r" % (len(kept), scope))
 
 
 # -------------------------------------------------------- differential (pwsh)
@@ -3929,6 +4002,8 @@ def main():
                 FIXTURE_PUBLISH_NAME, FIXTURE_PUBLISH).run().model(),
         }
         check_record_variants(variant_models)
+
+        check_slice_projection(model_all, variant_models["pin-slice"])
 
         check_collection_keys(model_all)
 

@@ -1424,6 +1424,7 @@ MACHINE_OUTPUTS = {
             "top_level": ("delta_records", "surveyed", "examined_subjects",
                           "not_evaluated",
                           "direction", "source_a", "source_b", "excluded"),
+            "top_level_conditional": ("source_path_differs",),
             "record": {
                 "always": ("code", "subject", "subject_kind"),
                 "conditional": ("equality", "detail"),
@@ -2985,6 +2986,38 @@ _SCOPED_COLLECTIONS = (
 )
 
 
+# SPEC 5.7 / round-3 B2: the projection contract, DECLARED. The rules below
+# are what slice_model has always done; what was missing was any statement of
+# them, which sent a round-3 reviewer reverse-engineering slice/parent pairs
+# to learn that `limitations` is source-global and an unresolved-command
+# aggregate keeps source-wide figures. One copy: `scoped_collections` is the
+# implementation's own tuple, and --capabilities serialises this constant.
+SLICE_PROJECTION = {
+    "rule": "membership-filter",
+    "semantics": "a --scope slice keeps or drops WHOLE records by one "
+                 "membership rule (the scope identifier appearing in any "
+                 "membership field) and never rewrites a kept record, so "
+                 "counts and lists inside a kept record remain facts about "
+                 "the whole source - an unresolved-command aggregate kept "
+                 "because its owners include the scope still states "
+                 "source-wide sites and owners (SPEC 5.7)",
+    "membership_fields": ("id", "from", "to", "owner", "matches",
+                          "members", "owners"),
+    "scoped_collections": tuple(_SCOPED_COLLECTIONS),
+    "kept_in_full": {
+        "limitations": "describes what could NOT be determined; filtering "
+                       "it would misrepresent the projection's own coverage",
+        "counters": "whole-survey metadata, never per-symbol",
+        "source": "whole-survey metadata, never per-symbol",
+    },
+    "recomputed": {
+        "cost": "describes the slice itself; an axis the slice no longer "
+                "carries prices as null (SPEC 5.6), a kept axis as 0",
+        "materialization": "declares the scope and the axis set",
+    },
+}
+
+
 def slice_model(model, scope=None, axes=None):
     """SPEC 5.7 (symbol-scoped projection) and SPEC 5.5/P21 (axis-set
     normalisation) unified into one deterministic reduction (P20/P21): both
@@ -3873,6 +3906,7 @@ def capabilities_document(parser):
         "facts": dict(FACTS),
         "model_schema": dict(MODEL_SCHEMA),
         "nullable_paths": dict(NULLABLE_PATHS),
+        "slice_projection": json.loads(json.dumps(SLICE_PROJECTION)),
         "record_variants": json.loads(json.dumps(RECORD_VARIANTS)),
         "record_variant_path_index": record_variant_path_index(),
         "identifier_forms": dict(IDENTIFIER_FORMS),

@@ -1116,6 +1116,22 @@ An axis chooses **how much of a collection** is emitted. A projection chooses
 operations and the second is not expressible as an axis, because it cuts across
 collections rather than selecting whole ones.
 
+**The projection contract is declared, not inferred** (D11, round-3 B2). A
+`--scope` slice keeps or drops **whole records** by one membership rule — the
+scope identifier appearing in any of `id`, `from`, `to`, `owner`, `matches`,
+`members`, `owners` — and **never rewrites a kept record**, so counts and
+lists inside a kept record remain facts about the whole source: an
+unresolved-command aggregate kept because its `owners` include the scope
+still states source-wide `sites` and `owners`. Eight collections are
+membership-filtered; `limitations`, `counters` and `source` are kept in full
+(filtering `limitations` would misrepresent the projection's own coverage);
+`cost` and `materialization` are recomputed to describe the slice itself.
+`pss.SLICE_PROJECTION` states all of this, `--capabilities` serialises it
+(`slice_projection`), and the gate holds the declaration against what
+`slice_model` actually does — a round-3 reviewer had to reverse-engineer
+these rules from slice/parent pairs, and a rule recoverable only by
+comparing two outputs is stated by neither.
+
 The distinction is not theoretical. On the reference target the axes control
 0.40 MB and 3.86 MB of material that is **already absent by default**, while
 `script_variables` — 42 per cent of the default model — is a master collection
@@ -1429,7 +1445,39 @@ the document's bytes. The per-subject question keeps its answer — `--all`
 restores the enumeration, identifiers only, once each — and the default
 counts cross-check against the presence tally (`PSS6001` + `PSS6002` +
 `PSS6003` examined sum to them) and, by kind, against the `--all` enumeration
-(a subject's kind is decidable from its §5.8 form alone).
+(a subject's kind is decidable from its §5.8 form alone). **That relationship
+is normative, not incidental**: the default counts are the per-kind
+compression of exactly the `--all` enumeration, and the enumeration is the
+union of both models' symbol identifiers plus both models' script-variable
+identifiers, once each. The pseudo-subject **`<script>` can appear as a
+delta-record subject and is never an examined subject** — it names the top
+level, which is not a symbol either model declares (a round-3 reviewer
+confirmed both rules empirically; a rule recoverable only by counting is
+stated by neither document).
+
+**`source_path_differs` is the one conditional top-level key.** It appears —
+`true` — exactly when the two models' `source.path` values differ, because a
+path difference is a fact about the comparison's inputs a caller may need
+(§5.5), and it is absent otherwise rather than `false`, following the
+model's own omit-rather-than-emit convention. The shape declaration carries
+it under `top_level_conditional` (D11; a round-3 reviewer found it in a real
+document and absent from the declared shape — an undeclared top-level key is
+exactly the class of gap the declaration exists to close, and the gate now
+holds both directions: a same-path pair must not carry it, an unequal-path
+pair must).
+
+**The delta document is a reader of models, not a model** (D11, round-3 B3,
+normatively stating what the D10 arc practised). It is **not** covered by
+the §14.4 cache — the cache stores survey models, and a delta is recomputed
+from them on demand — so a change to the delta document's **shape** expires
+no cache and does not advance `model_version`: it re-derives Appendix B.7
+(whose pins are counts, tallies and named subjects) and restamps it, exactly
+as B.7's separation from B.8 was built to allow. `model_version` gates the
+**inputs** — a version mismatch between the two models refuses (§4.6) — and
+advances only when the emitted **survey model** can differ for a fixed
+input (§13.1). A consumer that needs to know which delta shape it holds
+reads the shape declaration in `--capabilities`, which travels with the
+build that emitted the document.
 
 **Why not simply emit every record.** The alternative — one record per code per
 subject, equality included — satisfies §4.6 per subject and fails it per code,
