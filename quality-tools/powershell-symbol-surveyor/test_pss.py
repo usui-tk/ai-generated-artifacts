@@ -326,7 +326,9 @@ def measure(model):
         },
         "limitations": {
             "PSS9002": codes("limitations")["PSS9002"],
+            "PSS9003": codes("limitations")["PSS9003"],
             "PSS9004": codes("limitations")["PSS9004"],
+            "PSS9007": codes("limitations")["PSS9007"],
             "PSS9004_functions": len({r.get("owner") for r in p9004}),
             "PSS9004_names": len(p9004_names),
         },
@@ -1677,6 +1679,29 @@ Invoke-Publish
 """
 
 
+# The variant-demonstration fixture (D12). NOT a B.7 fixture: its identity is
+# pinned by nothing, because its one job is to exercise the declared record
+# variants the pinned blob cannot produce - the reference target uses
+# Set-Variable without -Scope and defines no duplicate names, so
+# `untrackable-scope-write` (PSS9003) and `ordinal-identifier` (PSS9007)
+# never appear at the pin. An enumerated variant nothing exercises is the
+# failure mode SPEC 13.2 records twice; this fixture is where those two are
+# exercised, and the exercised check reads it through the same models dict
+# as everything else.
+FIXTURE_VARIANTS_NAME = "Invoke-VariantDemo.ps1"
+FIXTURE_VARIANTS = r"""#Requires -Version 5.1
+function Get-Tool { 'tool.exe' }
+function Get-Tool { 'tool2.exe' }
+function Invoke-VariantDemo {
+    $tool = Get-Tool
+    & $tool /flag
+    Set-Variable -Name Seen -Value 1 -Scope 1
+    Write-Output $Missing
+}
+Invoke-VariantDemo
+"""
+
+
 def load_delta_baseline():
     """Read the delta master out of SPEC Appendix B.7.
 
@@ -2211,6 +2236,50 @@ def run_fixtures():
         check(kinds == {want}, "fixture: `%s` still tokenizes as words" % src,
               "kinds: %r" % kinds)
 
+    # SPEC 4.8 PSS9003 (D12): -Scope is reported regardless of parameter
+    # order. Red-first: the parent build RETURNED at -Name, so the common
+    # `-Name X -Value 1 -Scope 1` order was silently missed - while the
+    # pinned blob itself carries exactly that order (Set-Variable -Name
+    # OutputEncoding -Scope Global, line 561), meaning the SPEC 4.8 claim
+    # had never once held on the reference target.
+    for src2, want, label in (
+            ("Set-Variable -Name Seen -Value 1 -Scope 1", 1,
+             "PSS9003 fires with -Scope after -Name (the common order)"),
+            ("Set-Variable -Scope 1 -Name Seen -Value 1", 1,
+             "PSS9003 fires with -Scope first (already held)"),
+            ("Set-Variable -Name Seen -Value 1", 0,
+             "no -Scope, no PSS9003"),
+    ):
+        body = "function Test-Sv {\n    %s\n}\n" % src2
+        model = pss.Survey("fixture.ps1", body).run().model()
+        got = sum(1 for r in model["limitations"]
+                  if r.get("code") == "PSS9003")
+        check(got == want, "fixture: %s" % label,
+              "PSS9003 records: %d" % got)
+
+    # SPEC 4.8 dynamic-invocation targets (D12): the PSS9002 record carries
+    # the name expression verbatim, extended over byte-ADJACENT tails only -
+    # the 10.6 adjacency discipline, applied to the expression side. Written
+    # red-first: the parent build carried no `target` key at all, which is
+    # what sent a round-3 rename pre-flight back to grep with 26 counted
+    # sites and nothing to clear them against.
+    for src, want, label in (
+            ("$tool = 'x.exe'\n    & $tool /flag", "$tool",
+             "a variable target is recorded verbatim"),
+            ("$obj = @{ Path = 'x' }\n    & $obj.Path /flag", "$obj.Path",
+             "an adjacent member chain extends the target"),
+            ("$n = 'x'\n    & ($n + '.exe') /flag", "($n + '.exe')",
+             "a parenthesised expression is captured balanced, over tokens"),
+            ("$tool = 'x.exe'\n    & $tool .Path", "$tool",
+             "a SPACED tail is an argument, not part of the target"),
+    ):
+        body = "function Test-Dyn {\n    %s\n}\n" % src
+        model = pss.Survey("fixture.ps1", body).run().model()
+        recs = [r for r in model["limitations"] if r.get("code") == "PSS9002"]
+        check(len(recs) == 1 and recs[0].get("target") == want,
+              "fixture: %s" % label,
+              "PSS9002 records: %r" % [(r.get("target")) for r in recs])
+
     # SPEC 10.6 dotted command names (D12): a name like `dism.exe` tokenizes
     # as word `.` word, and the command-word iterator joins the ADJACENT run
     # back into one name - the pinned blob really carries `& dism.exe
@@ -2550,24 +2619,28 @@ def check_record_variants(models):
        "variants: exactly-one matching and key sets hold on every checked "
        "model (%d violations)" % len(violations))
 
-    # Every declared variant is exercised at the pin (all axes): a variant
-    # nothing produces is an enumerated capability nothing exercises - the
-    # failure mode SPEC 13.2 records twice.
+    # Every declared variant is exercised somewhere on the CHECKED models: a
+    # variant nothing produces is an enumerated capability nothing exercises -
+    # the failure mode SPEC 13.2 records twice. Widened from pin-only at the
+    # D12 arc: two limitations codes the reference target never produces are
+    # exercised on the variant-demonstration fixture, and the slice boundary
+    # stub can, by construction, appear only on a sliced model.
     unexercised = []
     for coll, cdecl in sorted(decl.items()):
         seen = set()
-        for rec in pin_all.get(coll, ()):
-            hits = _variant_of(rec, cdecl)
-            if len(hits) == 1:
-                seen.add(hits[0]["name"])
+        for label, model in sorted(models.items()):
+            for rec in model.get(coll, ()):
+                hits = _variant_of(rec, cdecl)
+                if len(hits) == 1:
+                    seen.add(hits[0]["name"])
         unexercised += ["%s/%s" % (coll, v["name"])
                         for v in cdecl["variants"] if v["name"] not in seen]
     eq(unexercised, [],
-       "variants: every declared variant is exercised at the pin")
+       "variants: every declared variant is exercised on the checked models")
 
     # An undeclared collection claims uniformity, and the claim is held
     # rather than assumed.
-    for coll in ("edges", "soft_references", "limitations"):
+    for coll in ("edges", "soft_references"):
         if coll in decl:
             continue
         keysets = {frozenset(r) for r in pin_all.get(coll, ())
@@ -4116,6 +4189,8 @@ def main():
                 FIXTURE_ROTATION_NAME, FIXTURE_ROTATION).run().model(),
             "fixture-publish": pss.Survey(
                 FIXTURE_PUBLISH_NAME, FIXTURE_PUBLISH).run().model(),
+            "fixture-variants": pss.Survey(
+                FIXTURE_VARIANTS_NAME, FIXTURE_VARIANTS).run().model(),
         }
         check_record_variants(variant_models)
 

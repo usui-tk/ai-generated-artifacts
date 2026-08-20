@@ -25,6 +25,56 @@ the D10 bundling discipline): every change below alters the model emitted for
 a fixed input, the "3" caches are expired in one bundled event, and Appendix
 B.7/B.8 are restamped once at the arc's end.
 
+### Added
+
+- **`PSS9002` records carry `target`** (SPEC §4.8) — the invoked name
+  expression, verbatim, extended over byte-adjacent member/index/call tails
+  only (the §10.6 adjacency discipline applied to the expression side:
+  `& $x.Path` records `$x.Path`, `& $x .Path` records `$x`; a parenthesised
+  target is captured balanced over tokens, so a paren inside a string cannot
+  derail it). **The §13.2 row's premise was corrected by measurement before
+  implementation**: it claimed the 26 dynamic sites were itemised nowhere
+  and `limitations` was silent — false since the tool's first commit, which
+  carried per-site `PSS9002` records with `owner` and `line` on the default
+  model. What was missing was the expression; with it, the round-3 rename
+  pre-flight becomes a model join instead of a grep, and the adjudicated
+  axis-shaped itemisation is withdrawn with the premise (a second copy of
+  26 records already on the default model). At the pin the 26 sites resolve
+  to nine distinct expressions, including one member chain
+  (`$robocopy.Source`) that proves the adjacency extension on real data.
+- **`limitations` enters the §13.3 variant declaration** — four variants
+  discriminated on `code` (`PSS9002` carrying `target`; `PSS9003`/`PSS9004`/
+  `PSS9007` common-keys only), because one code carrying a key three others
+  do not is not uniform. The exercised-variant gate widens from pin-only to
+  **every checked model**, and a sixth model joins the checked set: the
+  variant-demonstration fixture, which produces the two limitations codes
+  the reference target never does (`Set-Variable -Scope`, a duplicate
+  function name). A prose observed-column cell now marks a variant the pin
+  cannot produce; `--self-check`'s row parser accepts it and the gate's
+  numeric comparison skips it, so the two surfaces stay consistent.
+
+### Fixed
+
+- **`PSS9003` no longer depends on parameter order** (SPEC §4.8). The
+  `Set-Variable` scan returned at `-Name`, so the common order
+  `-Name X -Value 1 -Scope 1` was silently missed — and the pinned blob
+  itself carries exactly that order (`Set-Variable -Name OutputEncoding
+  -Scope Global`, line 561), meaning the §4.8 claim had never once held on
+  the reference target. The scan now continues past `-Name`; the pin gains
+  its first `PSS9003` record, and `measure()` gains all four limitations
+  code counts so the digest sees this class of movement. Demonstrated
+  red-first with both orders. The D10 `-OutVariable` lesson in miniature:
+  the SPEC claimed, the implementation partially delivered, and the gap
+  surfaced only when a fixture exercised the claim.
+- **`/symbols[]/ordinal` was emitted and declared nowhere** — a
+  duplicate-name source emits it (§5.2, `PSS9007`) and it is absent at the
+  pin and on **all 230** corpus generations, which is exactly why no
+  pin-anchored check had ever seen it. The variant-demonstration fixture put
+  the first duplicate-name model in front of the presence gate and the
+  exactly-one/key-set check caught the undeclared key. Declared: the third
+  `optional` path in `MODEL_SCHEMA`/§13.3, and a conditional key on both
+  `symbols` variants.
+
 ### Removed
 
 - **`edges[].line` is retired** (SPEC §5.9). It was normatively `lines[0]` —

@@ -826,7 +826,7 @@ candidate together with the evidence that produced it.
 | Code | Fact |
 |---|---|
 | `PSS9001` | A region could not be parsed. Carries location and extent. |
-| `PSS9002` | A call site could not be statically resolved — invocation through `&` with a non-literal target, or an equivalent dynamic dispatch. |
+| `PSS9002` | A call site could not be statically resolved — invocation through `&` with a non-literal target, or an equivalent dynamic dispatch. Carries `target` (D12): the name expression, **verbatim**, extended over byte-adjacent member/index/call tails only — the §10.6 adjacency discipline applied to the expression side — so a consumer can join it against the variable collections instead of returning to the source. |
 | `PSS9003` | A parent-scope write that cannot be tracked: `Set-Variable` / `New-Variable` with `-Scope`, or `[ref]` passing. |
 | `PSS9004` | A variable read with no resolvable declaration in the enclosing function and no scope qualifier — a dynamic-scope inheritance candidate. Carries the enclosing function's static callers and, for each, whether it declares that name. Where there are none, "zero static callers" is itself the reported fact. |
 | `PSS9005` | The comparison could not be performed for a named unit — for example a model produced under a different `model_version`. |
@@ -2260,13 +2260,13 @@ should not assume any of these are currently enforced.
 | Derivation owed | **RESOLVED (ADR 0036).** Every B.3 figure is re-derived by `test_pss.py` from the pinned blob, withdrawn as an orphan, or re-stamped with the state that reproduces it; a figure with no executable derivation is no longer permitted to exist | closed |
 | Call-site locations | **RESOLVED at the D10 arc.** `edges[].lines` carries every site, ascending, on the default model; `line` is normatively `lines[0]` (§5.9). The shape was consumer-adjudicated across two rounds before it was built, and the gate holds it by fixture (ascending order established at emission — a `$( ... )` site is scanned after the top-level stream) and by the B.8 shape fingerprints | closed |
 | Per-record presence contract | **RESOLVED at the D11 arc.** The declaration shape was consumer-adjudicated across two candidate specimens (round 3, §3.2): variant enumeration with machine-evaluable predicates and non-circular discriminators, first-class conditional keys, and a per-path index derived from the variants at serialisation time. Six collections declared — measurement corrected the round's five-collection estimate — and the survey's own candidate-A specimen demonstrated the quiet failure of the exceptions-only alternative by violating its own complement rule. `pss.RECORD_VARIANTS`, serialised by `--capabilities`, held by `--self-check` both ways and by the gate over both pin materialisations, a slice and the fixtures (§13.3 Per-record presence) | closed |
-| Dynamic command sites | `counters.commands_dynamic` counts dynamic invocations (`& $name`, `. $name`) and no collection itemises them, and `limitations` is silent about the blind spot — a round-3 reviewer's rename pre-flight held a count of 26 potential breakers and zero records to clear them with, forfeiting the point of holding a model. The itemisation (a record per site with `owner` and `line`; name-expression text if recoverable) adds records ⇒ model-moving, version-arc batched, shaped as an axis so the default stays flat. A `limitations` record declaring the blind spot is likewise a model change and travels in the same arc — the SPEC states the gap here in the interim | next `model_version` arc (D12 inventory) |
+| Dynamic command sites | **RESOLVED at the D12 arc, with its premise corrected by measurement.** The row as written claimed no collection itemises dynamic invocations and `limitations` is silent — measured false before implementation: the 26 sites had carried per-site `PSS9002` records with `owner` and `line` since the tool's first commit, on the default model. What was missing was the **name expression**: a record locating a dynamic invocation still sends a rename pre-flight back to the source, because nothing states *which* expression is invoked. `PSS9002` records now carry `target` — the expression verbatim, extended over byte-adjacent tails only (§4.8; the §10.6 adjacency discipline) — so the pre-flight becomes a model join against the variable collections. The adjudicated axis-shaped itemisation was withdrawn together with the premise: duplicating records already on the default model into an axis is the two-copies shape this SPEC spends its rows fighting. `limitations` entered the §13.3 variant declaration in the same commit (four code-discriminated variants), because one code carrying a key three others do not is not uniform | closed |
 | Command-site arguments | An `unresolved_named_commands` site record carries `record`/`code`/`name`/`owner`/`line` and no argument facts; a round-3 reviewer auditing destructive and trust-sensitive invocations (`Remove-Item -LiteralPath … -Force`, signature checks) had to return to the source for the bound parameters. The ask is parameter names, argument-expression kind/text, and a source extent (a line cannot disambiguate multiline or repeated invocations). Facts only — the model reports the invocation; whether it is risky in context is the consumer's judgement (§1.2) | next `model_version` arc (D12 inventory) |
 | Slice boundary stubs | Every edge endpoint in a scope slice other than the scoped symbol has no `symbols` record in the slice (33 of 33 at the round-3 kit's slice), so the first source fetch of a session re-opens the parent model, defeating the slice's job as a standalone working set. The ask: retain boundary-stub symbol records (`id`, `kind`, `start_line`, `end_line` only) for every symbol an in-slice record references. Model-moving, and it introduces a new `symbols` variant — to be adjudicated together with the §13.3 variant declaration it extends (the reviewer's own argument for variant-style declaration) | next `model_version` arc (D12 inventory), design coupled to §13.3 |
 | Static analysis | clean under the repository's Python gates | not yet wired into a `pss.py`-specific run |
 | Docs | **RESOLVED.** `README.md`, `README.ja.md`, `SPEC.md`, `CHANGELOG.md` and `VERSION` all exist, and `test_pss.py` holds them rather than leaving their presence to inspection: each file must exist, `VERSION` must equal `pss.__version__` (one version, two places, so the file cannot go stale against the code), and the bilingual pair must be in **lock-step on structure** — the same heading text ordering by level, the same number of fenced blocks. Lock-step is checked structurally rather than by translation, and that limit is stated: it catches a section added to one and not the other, and says nothing about whether a paragraph's content still agrees | closed |
 | Emission coverage | every code in §4 blocks 1-4 (survey-emittable) appears as a `code` or `facts` value on at least one record somewhere in the regression corpus's models, or is documented as data-dependent-absent (e.g. `PSS1005` legitimately does not fire on a corpus with zero duplicate names) | `PSS2005`, `PSS4001`, `PSS4002` closed by manual audit. `PSS2002` closed for all five §12.2 sources at the D10 arc — each source is held red-first by a §13.1 fixture, which is stronger than corpus presence. No automated corpus-wide gate yet for the rest; S4 |
-| Declared model schema | **RESOLVED (ADR 0036).** §13.3 declares the path set (124 at `all-axes` as of `model_version` 4) and `pss.MODEL_SCHEMA` carries it; `--self-check` holds the two together on path *and* kind, and `test_pss.py` holds the declaration against the pin in both directions. The pairing with the §3.1 descriptor is satisfied by the declaration living in the code, so `--capabilities` can serialise it rather than restate it | closed |
+| Declared model schema | **RESOLVED (ADR 0036).** §13.3 declares the path set (counts stated there, per materialisation) and `pss.MODEL_SCHEMA` carries it; `--self-check` holds the two together on path *and* kind, and `test_pss.py` holds the declaration against the pin in both directions. The pairing with the §3.1 descriptor is satisfied by the declaration living in the code, so `--capabilities` can serialise it rather than restate it | closed |
 | Version-decision enforcement | **RESOLVED (ADR 0036).** The parent commit's build is re-derived and compared; a model that moved without the version advancing is a failure. Measured against real history the check reddens at `44b97d1` (shape moved) and at `bc69c27` (shape identical, values moved) | closed |
 | Enumerated-constant reachability | **the generalisation of the row above.** Every constant this tool enumerates — fact codes, the assignment-operator set, the automatic-variable set, the axis vocabulary — is demonstrably reachable: some input drives it, or it is documented as data-dependent-absent. Enumerating a capability the machinery cannot exercise has now failed twice in the same shape — four fact codes defined and never emitted, and three assignment operators the tokenizer could not produce (§12.2) — and both times every gate stayed green because the check compared *names* rather than *behaviour*. `test_pss.py`'s fixtures cover the operator set; the fact catalogue and the automatic-variable set are not yet covered | S4 |
 
@@ -2308,8 +2308,17 @@ generations of both corpus entries at the `all-axes` materialisation:
 generations. They are absent from the smaller early scripts, which is exactly
 the data dependence the fingerprint cannot police, and marking them is
 therefore a recorded measurement rather than a licence to be absent.
+`/limitations[]/target` (D12) is `always` on the same per-model reading as
+`/symbols[]/parent`: measured over all 230 generations, `commands_dynamic`
+is never zero on this corpus, so every generation emits the path.
+`/symbols[]/ordinal` (D12) is the third `optional` path: emitted only when a
+definition name is duplicated (§5.2, `PSS9007`), absent at the pin and on
+**all 230** corpus generations — which is exactly why no pin-anchored check
+had ever seen it. It surfaced when the variant-demonstration fixture put the
+first duplicate-name model in front of the presence gate; an emitted key no
+declaration covered was the finding, and declaring it is the close.
 
-Counts at the pinned blob: **124** paths at `all-axes`, **114** at the default
+Counts at the pinned blob: **125** paths at `all-axes`, **115** at the default
 materialisation, the difference being the ten `axis` paths.
 
 | Key path | Kind |
@@ -2360,6 +2369,7 @@ materialisation, the difference being the ten `axis` paths.
 | `/limitations[]/detail` | always |
 | `/limitations[]/line` | always |
 | `/limitations[]/owner` | always |
+| `/limitations[]/target` | always |
 | `/local_variables` | always |
 | `/local_variables[]/automatic_refs` | always |
 | `/local_variables[]/code` | axis |
@@ -2423,6 +2433,7 @@ materialisation, the difference being the ten `axis` paths.
 | `/symbols[]/id` | always |
 | `/symbols[]/kind` | always |
 | `/symbols[]/name` | always |
+| `/symbols[]/ordinal` | optional |
 | `/symbols[]/parameters` | always |
 | `/symbols[]/parameters[]/mandatory` | always |
 | `/symbols[]/parameters[]/name` | always |
@@ -2477,8 +2488,8 @@ absent from the declaration is uniform, and the gate holds that claim too.
 
 | Collection | Variant | When | Carries (beyond common) | Conditional | Observed at the pin |
 |---|---|---|---|---|---:|
-| `symbols` | `top-level` | `depth == 0` | (common only) | — | 479 |
-| `symbols` | `nested` | `depth >= 1` | `parent` | — | 1 |
+| `symbols` | `top-level` | `depth == 0` | (common only) | `ordinal` | 479 |
+| `symbols` | `nested` | `depth >= 1` | `parent` | `ordinal` | 1 |
 | `closures` | `closure-row` | `record == closure` | `facts` `id` `record` `transitive_callee_count` `transitive_caller_count` | — | 480 |
 | `closures` | `uncalled-fact` | `code == PSS4003` | `code` `id` | `named_by_literal` | 26 |
 | `closures` | `cycle-fact` | `code == PSS4004` | `code` `members` | — | 3 |
@@ -2489,17 +2500,30 @@ absent from the declaration is uniform, and the gate holds that claim too.
 | `string_interpolation_references` | `reference` | `record == reference` | `code` `id` `in_expandable_string` `line` `name` `owner` `record` `role` | `qualifier` | 118 |
 | `unresolved_named_commands` | `site` | `record == site` | `code` `line` `name` `owner` `record` | — | 2798 |
 | `unresolved_named_commands` | `aggregate` | `record == aggregate` | `code` `name` `owners` `record` `sites` | — | 93 |
+| `limitations` | `unresolved-call-site` | `code == PSS9002` | `target` | — | 26 |
+| `limitations` | `untrackable-scope-write` | `code == PSS9003` | (common only) | — | 1 |
+| `limitations` | `unresolvable-read` | `code == PSS9004` | (common only) | — | 11 |
+| `limitations` | `ordinal-identifier` | `code == PSS9007` | (common only) | — | absent at the pin; exercised on the variants fixture |
 
-The `symbols` rows use `common_keys` (the eleven keys every symbol record
-carries); every other collection declares its full key set per variant. The
+The `symbols` and `limitations` rows use `common_keys` (the keys every
+record of that collection carries); every other collection declares its full
+key set per variant. The
 `closures` `closure-row` variant additionally carries `transitive_callees`
 and `transitive_callers` **under the `closure-sets` axis** — the axis kind
-composes with the variant rather than replacing it. Six collections are
-declared, not the five the adjudication estimated: measurement added
-`string_interpolation_references`, whose `qualifier` is conditional
-(5 of 118 at the pin). `edges`, `soft_references` and `limitations` are
-uniform and therefore undeclared — and the gate holds the uniformity claim
-rather than assuming it.
+composes with the variant rather than replacing it. Seven collections are
+declared: the six of the D11 adjudication (measurement corrected the round's
+five-collection estimate by adding `string_interpolation_references`, whose
+`qualifier` is conditional — 5 of 118 at the pin), plus `limitations`, which
+joined at the D12 arc the moment `PSS9002` records gained `target` — one code
+carrying a key three others do not is a variant, and its discriminator is
+`code`, which every limitations record carries exactly once. An observed
+column that is prose rather than a number marks a variant the pinned blob
+cannot produce (two limitations codes; the slice-only boundary stub): the
+gate's observed-column comparison reads numeric cells only, and the
+exercised check — widened from pin-only to every checked model at the same
+arc — is what holds those variants instead. `edges` and `soft_references`
+are uniform and therefore undeclared — and the gate holds the uniformity
+claim rather than assuming it.
 
 `--capabilities` serialises the declaration verbatim (`record_variants`)
 **and a derived per-path index** (`record_variant_path_index`: for each

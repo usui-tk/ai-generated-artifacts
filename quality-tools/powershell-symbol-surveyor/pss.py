@@ -519,6 +519,56 @@ def iter_command_words(toks, sig):
             cmd_pos = False
 
 
+def _dynamic_target(toks, r):
+    """The name expression following a dynamic-invocation operator (SPEC 4.8,
+    D12): the var or parenthesised expression at raw index ``r``, extended
+    over byte-ADJACENT member/static-member/index/call tails - the same
+    adjacency discipline as the 10.6 dotted-name join, so ``& $x.Path``
+    records ``$x.Path`` while ``& $x .Path`` (the command held in ``$x`` with
+    an argument) records ``$x``. Balance is walked over TOKENS, so a paren
+    inside a string literal cannot derail it. Returns ``(start, end)`` byte
+    offsets into the source.
+    """
+    def balanced(i, open_c, close_c):
+        depth = 0
+        while i < len(toks):
+            t = toks[i]
+            if t.kind == 'op' and t.text == open_c:
+                depth += 1
+            elif t.kind == 'op' and t.text == close_c:
+                depth -= 1
+                if depth == 0:
+                    return i
+            i += 1
+        return None
+
+    t0 = toks[r]
+    if t0.kind == 'op' and t0.text == '(':
+        close = balanced(r, '(', ')')
+        end = close if close is not None else r
+    else:
+        end = r
+        while end + 1 < len(toks):
+            nt = toks[end + 1]
+            if nt.start != toks[end].end:
+                break
+            if nt.kind == 'op' and nt.text in ('.', '::') \
+                    and end + 2 < len(toks) \
+                    and toks[end + 2].kind in ('word', 'num') \
+                    and toks[end + 2].start == nt.end:
+                end += 2
+                continue
+            if nt.kind == 'op' and nt.text in ('(', '['):
+                close = balanced(end + 1, nt.text,
+                                 ')' if nt.text == '(' else ']')
+                if close is None:
+                    break
+                end = close
+                continue
+            break
+    return t0.start, toks[end].end
+
+
 def subexpression_spans(tok):
     """Absolute (start, end) spans of `$( ... )` regions inside an expandable
     string, innermost content only. A command invoked inside one is a real
@@ -996,6 +1046,7 @@ MODEL_SCHEMA = {
     "/limitations[]/detail": "always",
     "/limitations[]/line": "always",
     "/limitations[]/owner": "always",
+    "/limitations[]/target": "always",
     "/local_variables": "always",
     "/local_variables[]/automatic_refs": "always",
     "/local_variables[]/code": "axis",
@@ -1059,6 +1110,7 @@ MODEL_SCHEMA = {
     "/symbols[]/id": "always",
     "/symbols[]/kind": "always",
     "/symbols[]/name": "always",
+    "/symbols[]/ordinal": "optional",
     "/symbols[]/parameters": "always",
     "/symbols[]/parameters[]/mandatory": "always",
     "/symbols[]/parameters[]/name": "always",
@@ -1131,9 +1183,19 @@ RECORD_VARIANTS = {
                         "parameters", "start_line"),
         "variants": (
             {"name": "top-level", "when": {"path": "depth", "equals": 0},
-             "carries": (), "conditional_keys": {}, "axis_keys": {}},
+             "carries": (), "conditional_keys": {"ordinal": {
+                 "presence_means": "the identifier carries a "
+                                   "position-dependent ordinal "
+                                   "disambiguator (SPEC 5.2, PSS9007)",
+                 "absence_means": "the name is unique in the file"}},
+             "axis_keys": {}},
             {"name": "nested", "when": {"path": "depth", "gte": 1},
-             "carries": ("parent",), "conditional_keys": {}, "axis_keys": {}},
+             "carries": ("parent",), "conditional_keys": {"ordinal": {
+                 "presence_means": "the identifier carries a "
+                                   "position-dependent ordinal "
+                                   "disambiguator (SPEC 5.2, PSS9007)",
+                 "absence_means": "the name is unique in the file"}},
+             "axis_keys": {}},
         ),
     },
     "closures": {
@@ -1224,6 +1286,30 @@ RECORD_VARIANTS = {
              "when": {"path": "record", "equals": "aggregate"},
              "carries": ("code", "name", "owners", "record", "sites"),
              "conditional_keys": {}, "axis_keys": {}},
+        ),
+    },
+    # D12: limitations joined the declared set the moment PSS9002 records
+    # gained `target` - one code carrying a key three others do not is
+    # exactly a variant, and the alternative (a uniform collection with the
+    # key silently sometimes-present) is the shape round 3's candidate-A
+    # specimen demonstrated failing. Discriminated on `code`: every
+    # limitations record carries exactly one, and the codes are disjoint by
+    # construction (SPEC 4.8).
+    "limitations": {
+        "common_keys": ("code", "detail", "line", "owner"),
+        "variants": (
+            {"name": "unresolved-call-site",
+             "when": {"path": "code", "equals": "PSS9002"},
+             "carries": ("target",), "conditional_keys": {}, "axis_keys": {}},
+            {"name": "untrackable-scope-write",
+             "when": {"path": "code", "equals": "PSS9003"},
+             "carries": (), "conditional_keys": {}, "axis_keys": {}},
+            {"name": "unresolvable-read",
+             "when": {"path": "code", "equals": "PSS9004"},
+             "carries": (), "conditional_keys": {}, "axis_keys": {}},
+            {"name": "ordinal-identifier",
+             "when": {"path": "code", "equals": "PSS9007"},
+             "carries": (), "conditional_keys": {}, "axis_keys": {}},
         ),
     },
 }
@@ -1772,11 +1858,17 @@ class Survey:
             if t.kind == 'op' and t.text in ('&', '.') and nxt is not None and cmd_pos:
                 if nxt.kind == 'var' or (nxt.kind == 'op' and nxt.text == '('):
                     self.counters["commands_dynamic"] += 1
+                    ts, te = _dynamic_target(toks, sig[k + 1])
                     self.limitations.append({
                         "code": "PSS9002",
                         "owner": self._owner_id_fast(t.start),
                         "line": self.line_of(t.start),
                         "detail": "invocation through '%s' with a non-literal target" % t.text,
+                        # SPEC 4.8 (D12): the name expression, verbatim, so a
+                        # consumer can JOIN it against the variable collections
+                        # instead of returning to the source - the round-3
+                        # rename pre-flight that fell back to grep.
+                        "target": self.text[ts:te],
                     })
 
             if t.kind == 'nl':
@@ -1869,7 +1961,14 @@ class Survey:
                     if value:
                         self._decl_add(self._owner_id_fast(nm.start), value)
                         self._synthesize_decl_site(nm.start, value)
-                return
+                # D12: scanning CONTINUES past -Name. Returning here made
+                # PSS9003 depend on parameter order - SPEC 4.8 claims a
+                # -Scope write is reported, and `-Name X -Value 1 -Scope 1`,
+                # the common order, was silently missed. The D10 -OutVariable
+                # lesson in miniature: the SPEC claimed, the implementation
+                # partially delivered, and the gap surfaced only when a
+                # fixture exercised the claim.
+                continue
             if t.kind == 'word' and t.text.lower() == '-scope':
                 self.limitations.append({
                     "code": "PSS9003",
@@ -2825,9 +2924,16 @@ def self_check():
             def _norm(cell):
                 return " ".join(cell.replace("`", "").split())
             spec_rows = {}
+            # The observed cell is data-dependent and may be prose for a
+            # variant the pin does not produce (D12: two limitations codes,
+            # and the slice-only stub); the signature comparison never reads
+            # it, so the row match accepts any final cell. The GATE's
+            # stated-vs-measured comparison still requires pure digits, so a
+            # prose cell is exactly the mark of a variant the pin cannot
+            # measure - which the exercised check then demands elsewhere.
             for m2 in re.finditer(
                     r"^\| `([a-z_]+)` \| `([a-z-]+)` \| (.+?) \| (.+?) \| "
-                    r"(.+?) \| \d+ \|", vsection, re.M):
+                    r"(.+?) \| .+? \|$", vsection, re.M):
                 spec_rows[(m2.group(1), m2.group(2))] = (
                     _norm(m2.group(3)), _norm(m2.group(4)), _norm(m2.group(5)))
             code_rows = {}
