@@ -22,6 +22,33 @@ time, and are marked as such.
 
 ### Changed
 
+- **All five SPEC §12.2 declaration sources retain a site** (`pss_version`
+  `0.3.0`, **`model_version` `"2"` -> `"3"`** — the emitted model differs for
+  a fixed input, so every derived cache taken under `"2"` is expired by this
+  entry and regenerated inside the same arc, §14.4). A `param()` entry, an
+  inline signature parameter and a `foreach` loop variable are var tokens and
+  classify as the declarations they are (`PSS2002`/`PSS2006`, role `write`);
+  a `Set-Variable`/`New-Variable` literal `-Name` and the `-OutVariable`
+  family synthesise their site at the name literal. The `-OutVariable`
+  family was previously not recognised at all — its reads reported `PSS9004`
+  while §12.2 claimed they resolved; both the gap and the misstatement are
+  closed, red-first. `counters.assignments` and `counters.variable_refs` are
+  unmoved by definition and by measurement at the pinned blob.
+- **The usage map is order-independent** (SPEC §12.3): script-owner
+  contributions are applied against the complete classified population, so a
+  script whose `param()` block and top-level writes precede its functions no
+  longer loses exactly its writers. Membership rules are unchanged. Measured
+  effect on the adjudicated pair (entry `0002`, gens 93 -> 94): `trace` falls
+  189 -> 173 records and `PSS8007` falls **17 -> 1**, the surviving record
+  naming `variable:script/ErrorsJsonlPath` — seventeen perfectly-declared
+  parameters stop reading as missing writes, and the one genuine empty
+  writer set remains. Corpus regression over all 230 generations: only
+  `local_variables` and `script_variables` move; every other collection is
+  byte-identical.
+- Appendix **B.7/B.8 figures redden at this entry by design** and are
+  restamped at the end of the arc, together with the remaining D10 items, so
+  cache expiry happens exactly once (ADR 0035, D10).
+
 - **The tool is two `.py` files again**, which SPEC §14.1 has specified since
   the first commit and which had not been true since the second. `corpus.py`,
   `build_cache.py` and `test_corpus.py` are folded into `test_pss.py`; the

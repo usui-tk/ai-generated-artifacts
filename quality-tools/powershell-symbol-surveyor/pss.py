@@ -38,8 +38,8 @@ import os
 import re
 import sys
 
-__version__ = "0.2.0"
-MODEL_VERSION = "2"
+__version__ = "0.3.0"
+MODEL_VERSION = "3"
 
 MIN_PYTHON = (3, 12)
 
@@ -289,6 +289,14 @@ _COMMENT_OK_BEFORE = frozenset(" \t\r\n(){}[];|,&=+")
 # tokenizer and the role test cannot enumerate different operators. `??=` is
 # three characters and is handled beside this set at both sites.
 _ASSIGN_OPS = frozenset(('+=', '-=', '*=', '/=', '%='))
+
+# The common parameters that declare a variable in the calling scope
+# (SPEC 12.2). The parameter word is matched lower-cased; the value token
+# names the variable, with a leading `+` (the append form) stripped.
+_OUTVAR_PARAMS = frozenset((
+    "-outvariable", "-errorvariable", "-warningvariable",
+    "-informationvariable", "-pipelinevariable",
+))
 
 # Tokens after which the next word sits in command position (SPEC 10.6).
 # `&&` and `||` are PowerShell 7 pipeline chain operators: the token after one
@@ -815,6 +823,10 @@ def _parse_param_entry(toks, sig, idxs, position):
         "mandatory": mandatory,
         "position": position,
         "qualifier": qualifier,
+        # The parameter's own var token IS its declaration site (SPEC 12.2).
+        # Consumed by `_precompute_parameters` and stripped before the entry
+        # reaches the model: `symbols[].parameters` records carry no offset.
+        "offset": toks[sig[var_pos]].start,
     }
 
 
@@ -1341,6 +1353,18 @@ class Survey:
         self.local_decls = {}
         self.script_decl_names = {}
         self.script_qualified_names = {}
+        # Var-token start offsets that ARE declaration sites (SPEC 12.2):
+        # param() entries, inline signature parameters, foreach loop variables.
+        # The scan flips their role to "write" without touching the assignment
+        # counter, whose definition stays "assignment operators + parameter
+        # defaults" (Appendix B differential).
+        self.decl_write_offsets = set()
+        # Script-owner unqualified usage contributions, applied AFTER
+        # classification so the usage map does not depend on document order
+        # (SPEC 12.3). Before this arc a script-side write classified while the
+        # map was still empty was dropped, and only the later reads survived -
+        # the mechanism behind PSS8007's seventeen-record noise.
+        self.script_usage_events = []
 
         self.script_records = []
         self.interp_records = []
@@ -1427,10 +1451,11 @@ class Survey:
         toks, sig = self.toks, self.sig
         for f in self.funcs:
             entries = extract_parameters(toks, sig, f)
-            self.params_by_func[id(f)] = entries
             fid = self.func_ids[id(f)]
             for e in entries:
+                self.decl_write_offsets.add(e.pop("offset"))
                 self._decl_add(fid, e["name"])
+            self.params_by_func[id(f)] = entries
         # EVERY param() block declares names in its owner, not just the one that
         # forms a function's signature. A script-level param() declares
         # script-scope variables, and a script block's param() - `$add = {
@@ -1451,6 +1476,7 @@ class Survey:
             for pos, part in enumerate(_split_top_level(toks, sig, k + 2, close)):
                 e = _parse_param_entry(toks, sig, part, pos)
                 if e:
+                    self.decl_write_offsets.add(e["offset"])
                     self._decl_add(owner, e["name"])
 
     def _scan(self):
@@ -1484,15 +1510,25 @@ class Survey:
                 # sides to avoid, arriving through the dynamic form instead.
                 member_name = (prv is not None and prv.kind == 'op'
                                and prv.text in ('.', '::'))
+                assignment = False
                 if nxt is not None and nxt.kind == 'op' and not member_name:
                     if nxt.text == '=' or nxt.text == '??=' or nxt.text in _ASSIGN_OPS:
                         role = "write"
+                        assignment = True
                     elif nxt.text in ('.', '[', '::'):
                         # A member or index left-hand side REFERENCES the
                         # variable; it never declares anything (SPEC 12.2).
                         role = "read"
+                # A param() entry, inline signature parameter or foreach loop
+                # variable is a declaration site (SPEC 12.2): its role is
+                # "write" whether or not an assignment operator follows. The
+                # counter below stays tied to the operator, because
+                # `counters.assignments` is defined as assignment statements
+                # plus parameter defaults, and the differential holds it there.
+                if t.start in self.decl_write_offsets:
+                    role = "write"
                 self._note_variable(t.start, t.text, in_string=False, role=role)
-                if role == "write":
+                if assignment:
                     self.counters["assignments"] += 1
 
             if t.kind == 'word':
@@ -1501,6 +1537,20 @@ class Survey:
                     self._record_foreach(k)
                 if low in ('set-variable', 'new-variable'):
                     self._record_set_variable(k)
+                if low in _OUTVAR_PARAMS and nxt is not None:
+                    # `-OutVariable ov` declares $ov in the calling scope
+                    # (SPEC 12.2). `+ov` is the append form of the same name;
+                    # the sign tokenizes as its own operator, so the name is
+                    # the token after it.
+                    nm = nxt
+                    if nm.kind == 'op' and nm.text == '+' and k + 2 < len(sig):
+                        nm = toks[sig[k + 2]]
+                    value = self._literal_name(nm)
+                    if value:
+                        value = value.lstrip('+')
+                    if value:
+                        self._decl_add(self._owner_id_fast(nm.start), value)
+                        self._synthesize_decl_site(nm.start, value)
 
             if t.kind == 'op' and t.text in ('&', '.') and nxt is not None and cmd_pos:
                 if nxt.kind == 'var' or (nxt.kind == 'op' and nxt.text == '('):
@@ -1558,16 +1608,49 @@ class Survey:
             v = toks[sig[k + 2]]
             _, name, _ = parse_var_token(v.text)
             self._decl_add(self._owner_id_fast(v.start), name)
+            self.decl_write_offsets.add(v.start)
+
+    def _literal_name(self, tok):
+        """The variable name a `-Name`/`-OutVariable` value token declares, or
+        None when the token is not a literal (SPEC 12.2 requires a literal: an
+        expandable string carrying a variable or subexpression names nothing
+        this tool can resolve statically)."""
+        if tok.kind == 'word':
+            return tok.text
+        if tok.kind in ('str', 'estr'):
+            if tok.kind == 'estr' and (expandable_var_sites(tok)
+                                       or subexpression_spans(tok)):
+                return None
+            return string_value(tok)
+        return None
+
+    def _synthesize_decl_site(self, offset, name):
+        """A declaration whose name is a string literal, not a var token
+        (`Set-Variable -Name x`, `-OutVariable x`), still has a site: the name
+        literal's own position. The synthesised site flows through the same
+        classification as every var token, so it lands as PSS2002/PSS2006 with
+        role "write" - but it does NOT touch `counters.variable_refs`, which
+        counts variable tokens and this is not one (SPEC 12.2)."""
+        low = name.lower()
+        if low in AUTOMATIC_VARIABLES:
+            return
+        self.var_sites.append({
+            "offset": offset, "name": name, "qualifier": None,
+            "owner": self._owner_id_fast(offset), "role": "write",
+            "in_string": False, "splatted": False,
+        })
 
     def _record_set_variable(self, k):
         toks, sig = self.toks, self.sig
         for j in range(k + 1, min(k + 12, len(sig))):
             t = toks[sig[j]]
             if t.kind == 'word' and t.text.lower() == '-name':
-                if j + 1 < len(sig) and toks[sig[j + 1]].kind in ('str', 'estr', 'word'):
+                if j + 1 < len(sig):
                     nm = toks[sig[j + 1]]
-                    value = string_value(nm) if nm.kind in ('str', 'estr') else nm.text
-                    self._decl_add(self._owner_id_fast(nm.start), value)
+                    value = self._literal_name(nm)
+                    if value:
+                        self._decl_add(self._owner_id_fast(nm.start), value)
+                        self._synthesize_decl_site(nm.start, value)
                 return
             if t.kind == 'word' and t.text.lower() == '-scope':
                 self.limitations.append({
@@ -1600,6 +1683,15 @@ class Survey:
 
         Check order is normative: qualifier, then automatic, then declaration.
         """
+        # Script-scope name membership is collected in full BEFORE any site is
+        # classified, so whether a function-side read is admitted to the usage
+        # map cannot depend on where in the file the script-side site sits
+        # (SPEC 12.3). This is the same membership the classification loop used
+        # to build one site at a time.
+        for s in self.var_sites:
+            if s["qualifier"] is None and s["owner"] == "<script>" \
+                    and s["name"].lower() not in AUTOMATIC_VARIABLES:
+                self.script_decl_names.setdefault(s["name"].lower(), s["name"])
         for s in self.var_sites:
             name, low = s["name"], s["name"].lower()
             owner, role, offset = s["owner"], s["role"], s["offset"]
@@ -1645,9 +1737,12 @@ class Survey:
                 rec["qualifier"] = "script"
                 rec["id"] = "variable:script/" + name
                 self.script_records.append(rec)
-                self.script_decl_names.setdefault(low, name)
-                if low in self.usage or low in self.script_qualified_names:
-                    self._usage_add(low, name, owner, role)
+                # Deferred to `_build_usage_map`: admitting this site now would
+                # make the writer set depend on document order - a script-side
+                # write classified while the map is still empty was dropped,
+                # which is what put seventeen perfectly-declared parameters
+                # into PSS8007 (SPEC 12.3, 12.7 rule (c)).
+                self.script_usage_events.append((low, name, owner, role))
                 continue
 
             if low in self.local_decls.get(owner, ()):
@@ -1708,6 +1803,16 @@ class Survey:
         u["readers"].add(owner)
 
     def _build_usage_map(self):
+        # Script-owner unqualified contributions, deferred from classification
+        # so admission is evaluated against the COMPLETE population rather than
+        # the part of it that happened to classify first (SPEC 12.3). The
+        # admission rule itself is unchanged: a script-owner site joins only a
+        # name admitted by a `$script:` qualifier somewhere or by a
+        # cross-boundary read; it never creates an entry for a name no
+        # function touches.
+        for low, name, owner, role in self.script_usage_events:
+            if low in self.usage or low in self.script_qualified_names:
+                self._usage_add(low, name, owner, role)
         # A script-qualified name always belongs, even if every site is a read.
         for low, name in self.script_qualified_names.items():
             if low not in self.usage:

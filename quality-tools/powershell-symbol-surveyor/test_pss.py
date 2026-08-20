@@ -1998,6 +1998,136 @@ def run_fixtures():
               "kinds: %r" % kinds)
 
 
+def run_declaration_fixtures():
+    """SPEC 12.2: every recognised declaration source retains a site.
+
+    Written red-first against the build that retained only the two assignment
+    forms: each check below failed there. A declaration that registers a name
+    without a site cannot appear as a PSS2002/PSS2006 record and cannot reach
+    the usage map as a writer - which is exactly how a script parameter read
+    by seventeen functions reported an empty writer set (PSS8007) while being
+    perfectly declared.
+    """
+    def local_hits(body, name):
+        model = pss.Survey("fixture.ps1", body, axes=["local-sites"]).run().model()
+        return model, [r for r in model["local_variables"]
+                       if r.get("record") == "reference"
+                       and r.get("name", "").lower() == name]
+
+    # param() block entry, no default: the entry itself is the declaration.
+    body = "function Test-P {\n    param([string]$P)\n    Write-Output $P\n}\n"
+    model, hits = local_hits(body, "p")
+    check(any(r.get("code") == "PSS2002" and r.get("role") == "write"
+              and r.get("line") == 2 for r in hits),
+          "decl fixture: param() entry is a PSS2002 write at its own line",
+          "records for $P: %r" % [(r.get("code"), r.get("role"), r.get("line"))
+                                  for r in hits])
+
+    # Inline signature parameter: `function f($a)` declares $a the same way.
+    body = "function Test-I($A) {\n    Write-Output $A\n}\n"
+    model, hits = local_hits(body, "a")
+    check(any(r.get("code") == "PSS2002" and r.get("role") == "write"
+              for r in hits),
+          "decl fixture: inline signature parameter is a PSS2002 write",
+          "records for $A: %r" % [(r.get("code"), r.get("role")) for r in hits])
+
+    # param() entry WITH a default already produced a write via the assignment
+    # look-ahead; retaining the site must not add a second record for it.
+    body = "function Test-D {\n    param($D = 1)\n    Write-Output $D\n}\n"
+    model, hits = local_hits(body, "d")
+    writes = [r for r in hits if r.get("role") == "write"]
+    check(len(writes) == 1,
+          "decl fixture: a defaulted parameter declares exactly once",
+          "write records for $D: %r" % [(r.get("code"), r.get("line"))
+                                        for r in writes])
+
+    # foreach loop variable.
+    body = ("function Test-F {\n"
+            "    foreach ($item in 1..3) { Write-Output $item }\n"
+            "}\n")
+    model, hits = local_hits(body, "item")
+    check(any(r.get("code") == "PSS2002" and r.get("role") == "write"
+              for r in hits),
+          "decl fixture: foreach loop variable is a PSS2002 write",
+          "records for $item: %r" % [(r.get("code"), r.get("role"))
+                                     for r in hits])
+
+    # Set-Variable / New-Variable with a literal -Name: the name token is not a
+    # var token, so the site is synthesised at the name literal's position.
+    for cmdlet in ("Set-Variable", "New-Variable"):
+        body = ("function Test-S {\n"
+                "    %s -Name sv -Value 1\n"
+                "    Write-Output $sv\n"
+                "}\n" % cmdlet)
+        model, hits = local_hits(body, "sv")
+        check(any(r.get("code") == "PSS2002" and r.get("role") == "write"
+                  and r.get("line") == 2 for r in hits),
+              "decl fixture: %s -Name is a PSS2002 write at the name literal"
+              % cmdlet,
+              "records for $sv: %r" % [(r.get("code"), r.get("role"),
+                                        r.get("line")) for r in hits])
+
+    # -OutVariable family: declares the named variable in the calling scope.
+    # Before this arc the family was not recognised at all, so the read below
+    # reported PSS9004 despite SPEC 12.2 listing the source as resolved.
+    for pname in ("-OutVariable", "-ErrorVariable"):
+        body = ("function Test-O {\n"
+                "    Get-Item . %s ov | Out-Null\n"
+                "    Write-Output $ov\n"
+                "}\n" % pname)
+        model, hits = local_hits(body, "ov")
+        check(any(r.get("code") == "PSS2002" and r.get("role") == "write"
+                  for r in hits),
+              "decl fixture: %s declares its variable (PSS2002 write)" % pname,
+              "records for $ov: %r" % [(r.get("code"), r.get("role"))
+                                       for r in hits])
+        unresolved = [l for l in model["limitations"]
+                      if l.get("code") == "PSS9004" and "'$ov'" in l.get("detail", "")]
+        check(not unresolved,
+              "decl fixture: a read of the %s variable resolves" % pname,
+              "PSS9004 records: %r" % unresolved)
+
+    # The append form names the same variable.
+    body = ("function Test-A {\n"
+            "    Get-Item . -OutVariable +ov | Out-Null\n"
+            "}\n")
+    model, hits = local_hits(body, "ov")
+    check(any(r.get("code") == "PSS2002" for r in hits),
+          "decl fixture: -OutVariable +name strips the append sign",
+          "records: %r" % [(r.get("code"), r.get("role")) for r in hits])
+
+    # Usage-map order independence. The script parameter and the top-level
+    # assignment both precede the function that reads them, which is the
+    # ordering that lost the writer before this arc: the script-side write was
+    # classified while the usage map was still empty, so only the later read
+    # was admitted. PSS8007's premise is the writer set, so an order-dependent
+    # writer set makes rule (c) fire on declaration order, not on the code.
+    script = ("param([string]$Cfg)\n"
+              "$Early = 1\n"
+              "function Read-Things {\n"
+              "    Write-Output $Cfg\n"
+              "    Write-Output $Early\n"
+              "}\n"
+              "Read-Things\n")
+    model = pss.Survey("fixture.ps1", script, axes=set()).run().model()
+    usage = {r["name"].lower(): r for r in model["script_variables"]
+             if r.get("record") == "usage_map"}
+    for name in ("cfg", "early"):
+        rec = usage.get(name)
+        check(rec is not None and "<script>" in rec.get("writers", ()),
+              "decl fixture: script-side writer of $%s reaches the usage map"
+              % name,
+              "usage record: %r" % (rec,))
+    # The script parameter's own site is a declaration, not a read.
+    prm = [r for r in model["script_variables"]
+           if r.get("record") == "reference" and r.get("name", "").lower() == "cfg"
+           and r.get("owner") == "<script>"]
+    check(any(r.get("code") == "PSS2006" and r.get("role") == "write"
+              for r in prm),
+          "decl fixture: a script-level param() entry is a PSS2006 write",
+          "records: %r" % [(r.get("code"), r.get("role")) for r in prm])
+
+
 # -------------------------------------------------------- differential (pwsh)
 
 PWSH_PROBE = r"""
@@ -3366,6 +3496,7 @@ def main():
              baseline["basis"]["blob"][:12]))
 
     run_fixtures()
+    run_declaration_fixtures()
 
     # Builds its own repositories, so it needs the `git` binary and not this
     # checkout (SPEC 14.3: a missing runtime degrades the gate, never the tool).

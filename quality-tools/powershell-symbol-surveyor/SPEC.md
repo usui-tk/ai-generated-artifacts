@@ -112,8 +112,10 @@ Two consequences already realised: the verb for relation-asserted comparison is
 `trace`, not `audit` (§4.9); and `PSS8007` names an empty writer set rather
 than declaring the variable broken. That second was not merely a wording
 preference — "broken" is a claim about run time, and it depends on
-`Set-StrictMode` and on the declaration forms this build does not yet retain
-(§12.2, §13.2), neither of which the tool observes. A judgement whose premises
+`Set-StrictMode`, which the tool does not observe, and on writes the model
+cannot carry: §12.2's five declaration sources are all retained as of
+`model_version` 3, but a non-literal `Set-Variable -Name`, a `[ref]` write or
+a `-Scope` write (§12.1) still leaves no site. A judgement whose premises
 the tool cannot see is not a stronger statement than the fact; it is a weaker
 one wearing a stronger word.
 
@@ -511,21 +513,23 @@ still `1,336`). None of the three has been established as correct here; this
 needs a dedicated investigation into where `pss.py`'s token scan and the AST
 diverge, not a guess. Do not cite any of the three numbers as settled.
 
-**`PSS2002` is now emitted, but only for one of its five recognised sources
-(§12.2).** An assignment whose left-hand side is a bare local variable
-(`role == "write"` in the underlying token scan) now gets a `code:
-"PSS2002"` record under `local-sites`, split out from the `PSS2003`
-("reference to" the same declaration) records it previously shared a code
-with. Measured on the reference target: 4,393 `PSS2002` records, matching
-`local_declared` exactly. **The other four §12.2 sources — a `param()` /
-inline-function parameter, a `foreach` loop variable, a `Set-Variable` /
-`New-Variable` `-Name`, and the `-OutVariable` family — are declarations
-`pss.py` already resolves reads against (`_decl_add`), but their call sites
-never retain a line/offset, so no `PSS2002` record exists for them yet.**
-This is a real, open gap, not an oversight papered over: closing it needs
-`_precompute_parameters`, `_record_foreach` and `_record_set_variable` to
-each start keeping a site the way the assignment path already does, which is
-untried and not scoped here. §13.2's "Emission coverage" row tracks it.
+**`PSS2002` is emitted for all five of its recognised sources (§12.2) as of
+`model_version` 3.** An assignment whose left-hand side is a bare local
+variable was the first source to get a `code: "PSS2002"` record under
+`local-sites`, split out from the `PSS2003` ("reference to" the same
+declaration) records it previously shared a code with. The D10 arc closed the
+other four: a `param()` / inline-function parameter and a `foreach` loop
+variable are var tokens whose site was always in the stream and is now
+classified as the declaration it is; a `Set-Variable` / `New-Variable`
+`-Name` and the `-OutVariable` family name their variable in a string
+literal, so their site is **synthesised at the name literal's own position**
+(§12.2). Measured at the pinned blob: 5,534 `PSS2002` records against the
+4,402 the assignment forms alone produced, with `PSS2003` smaller by exactly
+the flipped difference — the four sources added sites, not references, and
+`counters.variable_refs` is unchanged because a synthesised site is not a
+variable token. At script scope the same flip moves a `param()` entry from
+`PSS2004` (read) to `PSS2006` (write), which is what lets a script
+parameter's declaration reach the usage map as a writer (§12.3, §12.7).
 
 The `PSS4001`/`PSS4002` gap noted at §4.4 is resolved in full — see there.
 
@@ -712,7 +716,7 @@ name reuse; `pss.py` does not.
 | `PSS8004` | A soft reference's resolution state differs between the models — most importantly, a string literal that matches a declared name in one and matches none in the other. |
 | `PSS8005` | **Incomplete-rename candidate.** A script-scope name is present in the after model and absent from the before model, while a name present in **both** models lost usage in the same transition. Carries both names, both usage maps, and the count deltas. Derivation and rationale: §12.7 rule (b). |
 | `PSS8006` | **Producer/consumer desynchronisation candidate.** For a script-scope variable, at least one **writer** function's `PSS7001` is not `identical` while at least one **reader** function's `PSS7001` is `identical`. Carries the variable, the changed writers, and the unchanged readers. Derivation and rationale: §12.7 rule (a). |
-| `PSS8007` | **No write site retained.** A script-scope variable has at least one reader in model B and an empty writer set there. What that means at run time depends on `Set-StrictMode` and on the declaration forms this build does not yet retain (§12.2, §13.2), neither of which the tool observes; the fact is the empty writer set, and the reading of it belongs to the caller (§1.1). `trace` only; the single-state equivalent belongs to `psa.py` (§7). Derivation: §12.7 rule (c). |
+| `PSS8007` | **No write site retained.** A script-scope variable has at least one reader in model B and an empty writer set there. What that means at run time depends on `Set-StrictMode`, which the tool does not observe, and on write forms no static site can carry — §12.2's five declaration sources are all retained, and a non-literal `Set-Variable -Name`, a `[ref]` write or a `-Scope` write (§12.1) still leaves none; the fact is the empty writer set, and the reading of it belongs to the caller (§1.1). `trace` only; the single-state equivalent belongs to `psa.py` (§7). Derivation: §12.7 rule (c). |
 | `PSS8008` | **`PSS4003` presence differs.** A function's `PSS4003` presence differs between the models: present in B and not in A, or present in A and not in B. Carries the function identifier, the direction, and both models' `named_by_literal` values (§4.4) for that identifier where the function is present in both. Carries **no commit identity** — `pss.py` is git-agnostic by design (§2.1) and knows only the two models it was given; a caller that wants per-commit resolution runs `trace` over adjacent generations, in which case a sequence of `PSS8008` facts — including a gain followed by a later loss — is the correct and unremarkable representation of a function whose reachability changed more than once (§15.4 F3). |
 
 `PSS8004`, `PSS8005`, `PSS8006`, `PSS8007` and `PSS8008` are the direct detectors for the
@@ -1735,15 +1739,32 @@ Confirmed by execution against the reference PowerShell runtime:
 - an `-OutVariable` / `-ErrorVariable` / `-WarningVariable` /
   `-InformationVariable` / `-PipelineVariable` common parameter.
 
-**Current implementation status:** only the two assignment forms (the
-first two bullets after "an assignment whose left-hand side...") actually
-produce a `PSS2002` record today. The other four sources are resolved for
-reads (a read against a `param()`/`foreach`/`Set-Variable`/`-OutVariable`
-declaration does not misreport as `PSS9004`) but do not yet produce a
-`PSS2002` record of their own, because the code paths that register them
-(`_precompute_parameters`, `_record_foreach`, `_record_set_variable`) keep
-only the name, not a site. This is a known, tracked gap (§4.2, §13.2), not
-a silent omission.
+**Implementation status: all five sources retain a site** (as of
+`model_version` 3). Every recognised declaration is a record, and every
+record has a line:
+
+- a `param()` entry, an inline signature parameter and a `foreach` loop
+  variable are **var tokens** — their site was always in the stream, and it
+  is now classified as the declaration it is (role `write`) whether or not a
+  default value's assignment operator follows. `counters.assignments` is
+  unmoved by this: its definition stays *assignment operators plus parameter
+  defaults*, held by the Appendix B differential.
+- a `Set-Variable` / `New-Variable` `-Name` and an `-OutVariable`-family
+  value name their variable in a **string literal**, not a var token, so the
+  declaration site is **synthesised at the name literal's own position** and
+  flows through the same classification as every var token. A synthesised
+  site does not touch `counters.variable_refs`, which counts variable tokens
+  and this is not one. The name must be a **literal**: a bareword, a
+  single-quoted string, or an expandable string that carries no variable and
+  no subexpression — a computed name names nothing this tool can resolve
+  statically, and no site is synthesised for it. The `-OutVariable` append
+  form (`+name`) declares the same name; the sign is stripped.
+
+Before this arc only the two assignment forms produced a record; a read
+against the other four resolved for `param()`/`foreach`/`Set-Variable` but
+the `-OutVariable` family was not recognised at all, so its reads reported
+`PSS9004` while this section claimed otherwise. Both the gap and the
+misstatement closed together, red-first (§13.1).
 
 `PSS2002` is **not** emitted for:
 
@@ -1789,9 +1810,23 @@ A function appears in `writers` if it contains a declaration site (§12.2) for
 that name at script scope, and in `readers` if it contains any reference to it.
 The script level itself is represented by the reserved owner `<script>`.
 
+**Membership and contribution are order-independent (normative).** Which
+names carry a usage map, and which owners sit in each set, must not depend on
+where in the file a site happens to sit. Script-owner unqualified
+contributions are therefore applied against the **complete** classified
+population: a top-level write is a writer whether the file's functions are
+defined above it or below it. The admission rule itself is unchanged — an
+unqualified name joins the population only through a `$script:` qualifier
+somewhere or a cross-boundary read; a name no function touches gets no map.
+Before this arc the contribution was applied site-by-site in document order,
+which dropped every script-side write classified while the map was still
+empty — a script whose `param()` block and top-level assignments precede its
+functions lost exactly its writers, and §12.7's rule (c) then fired on
+declaration order rather than on the code.
+
 The usage map is the variable-side analogue of a function's callee set: it is
 the structural signature that survives a rename. Measured on the reference
-target at the pinned blob, the 156 names carrying a usage map produce 123
+target at the pinned blob, the 156 names carrying a usage map produce 120
 distinct usage signatures; the collisions fall among narrowly-used variables,
 whose blast radius is correspondingly small. The previously recorded pair,
 155 names and 115 signatures, is reproduced by no generation jointly: 115 is
@@ -1885,8 +1920,10 @@ its writer set is empty there. Unlike (a) and (b), this rule is **decidable
 within the model**: it reports a set that is empty, not a resemblance.
 
 It is **not decidable outside the model**, and the distinction matters. The
-model's writer set is not a complete account of writing — §13.2 records four
-declaration forms this build does not yet retain — and what an unwritten read
+model's writer set is not a complete account of writing — §12.2's five
+declaration sources are all retained now, and a write can still take a form
+no static site can carry: a non-literal `Set-Variable -Name`, a `[ref]`
+write, a `-Scope` write (§12.1) — and what an unwritten read
 does at run time depends on `Set-StrictMode`, which the tool does not observe.
 So the fact is the empty writer set in a model that carries readers. Calling
 the variable broken would assert both premises the tool cannot see (§1.3).
@@ -1916,7 +1953,7 @@ build actually runs today, and gates this SPEC requires of a *complete*
 | Gate | Requirement |
 |---|---|
 | Syntax | `py_compile` clean |
-| Self-check | `--self-check` confirms this SPEC's §4 catalogue and the codes compiled into `pss.py`'s `FACTS` dict agree as **sets of code strings**, exiting non-zero on drift. **This does not confirm any code is ever attached to an emitted record** — see the "Emission coverage" row in §13.2. `PSS2005`, `PSS4001` and `PSS4002` are now confirmed emitted by manual audit (§4.2, §4.4); `PSS2002` is confirmed emitted for one of its five §12.2 sources and not yet for the other four |
+| Self-check | `--self-check` confirms this SPEC's §4 catalogue and the codes compiled into `pss.py`'s `FACTS` dict agree as **sets of code strings**, exiting non-zero on drift. **This does not confirm any code is ever attached to an emitted record** — see the "Emission coverage" row in §13.2. `PSS2005`, `PSS4001` and `PSS4002` are confirmed emitted by manual audit (§4.2, §4.4); `PSS2002` is emitted for all five §12.2 sources, each held red-first by a §13.1 fixture |
 | Provisional index | `--self-check` confirms every `[PROVISIONAL Pnn]` marker in this SPEC has a row in Appendix F and vice versa. A **pending** revision is normal work in progress: reported, exit code unchanged. A **mismatch** between markers and index is a defect in the tool or the document: exit code 2, as for SPEC/catalogue drift. Appendix F must be empty before manifest registration |
 | Axis vocabulary | `--self-check` confirms the axis names compiled into `pss.py` and the §5.6 table agree in both directions, exiting non-zero on drift |
 | Golden vectors — shared | `hash_full` reproduces the repository's shared normalized-hash golden vectors exactly (checked by `--self-check`) |
@@ -1966,7 +2003,7 @@ should not assume any of these are currently enforced.
 | Call-site locations | a `PSS2001` edge carries one `line` and a `sites` count, so where `sites` exceeds one the remaining locations are recoverable from no shipped shape — the `command-sites` axis materialises per-site records for **unresolved** commands (`PSS2009`) only. Consumer review (§3.2) hit this on the plainest possible task, "list every place that breaks if this function is deleted", and neither reviewer could complete it from the model. Closing it means either a `lines` array on the edge record or per-site edge records under an axis; both change the emitted model and so advance `model_version` | not started; adjudicate with the other extractor work so cache expiry happens once |
 | Static analysis | clean under the repository's Python gates | not yet wired into a `pss.py`-specific run |
 | Docs | **RESOLVED.** `README.md`, `README.ja.md`, `SPEC.md`, `CHANGELOG.md` and `VERSION` all exist, and `test_pss.py` holds them rather than leaving their presence to inspection: each file must exist, `VERSION` must equal `pss.__version__` (one version, two places, so the file cannot go stale against the code), and the bilingual pair must be in **lock-step on structure** — the same heading text ordering by level, the same number of fenced blocks. Lock-step is checked structurally rather than by translation, and that limit is stated: it catches a section added to one and not the other, and says nothing about whether a paragraph's content still agrees | closed |
-| Emission coverage | every code in §4 blocks 1-4 (survey-emittable) appears as a `code` or `facts` value on at least one record somewhere in the regression corpus's models, or is documented as data-dependent-absent (e.g. `PSS1005` legitimately does not fire on a corpus with zero duplicate names) | `PSS2005`, `PSS4001`, `PSS4002` closed by manual audit. `PSS2002` open for 4 of 5 §12.2 sources (`param()`/inline-function parameters, `foreach` loop variables, `Set-Variable`/`New-Variable`, `-OutVariable` family) — `_decl_add`'s callers do not retain a site to tag (§4.2, §12.2). No automated gate yet either way; S4 |
+| Emission coverage | every code in §4 blocks 1-4 (survey-emittable) appears as a `code` or `facts` value on at least one record somewhere in the regression corpus's models, or is documented as data-dependent-absent (e.g. `PSS1005` legitimately does not fire on a corpus with zero duplicate names) | `PSS2005`, `PSS4001`, `PSS4002` closed by manual audit. `PSS2002` closed for all five §12.2 sources at the D10 arc — each source is held red-first by a §13.1 fixture, which is stronger than corpus presence. No automated corpus-wide gate yet for the rest; S4 |
 | Declared model schema | **RESOLVED (ADR 0036).** §13.3 declares the 125-path set and `pss.MODEL_SCHEMA` carries it; `--self-check` holds the two together on path *and* kind, and `test_pss.py` holds the declaration against the pin in both directions. The pairing with the §3.1 descriptor is satisfied by the declaration living in the code, so `--capabilities` can serialise it rather than restate it | closed |
 | Version-decision enforcement | **RESOLVED (ADR 0036).** The parent commit's build is re-derived and compared; a model that moved without the version advancing is a failure. Measured against real history the check reddens at `44b97d1` (shape moved) and at `bc69c27` (shape identical, values moved) | closed |
 | Enumerated-constant reachability | **the generalisation of the row above.** Every constant this tool enumerates — fact codes, the assignment-operator set, the automatic-variable set, the axis vocabulary — is demonstrably reachable: some input drives it, or it is documented as data-dependent-absent. Enumerating a capability the machinery cannot exercise has now failed twice in the same shape — four fact codes defined and never emitted, and three assignment operators the tokenizer could not produce (§12.2) — and both times every gate stayed green because the check compared *names* rather than *behaviour*. `test_pss.py`'s fixtures cover the operator set; the fact catalogue and the automatic-variable set are not yet covered | S4 |
