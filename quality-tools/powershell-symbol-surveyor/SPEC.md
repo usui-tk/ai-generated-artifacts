@@ -1203,6 +1203,40 @@ match a declared form, and every declared unique key must actually be unique.
 A field listed and never populated is an enumerated capability nothing
 exercises — the failure mode §13.2 records twice.
 
+### 5.9 Call-site locations on the edge record (normative)
+
+A `PSS2001` edge carries **every** call site:
+
+- `lines` — the line of each site, **ascending**, one entry per site, so
+  `len(lines) == sites` always. Two sites on one line are two entries: the
+  array counts sites, not distinct lines.
+- `line` — normatively **`lines[0]`**, re-derived from the array at emission
+  so the two cannot disagree. It is kept as a field because every consumer of
+  the `"2"` models read it; treating it as anything other than the first
+  entry of `lines` is reading a duplicate. Whether it should be dropped is a
+  question for the next model-moving arc, recorded rather than decided here.
+
+This is the [F2] resolution (§13.2 `Call-site locations`, closed at the D10
+arc). The shape was **consumer-adjudicated before it was built**: both round-2
+reviews, given a live candidate pair, chose the array over per-site records —
+the per-site shape forces a join to answer the plainest question ("list every
+place that breaks if this function is deleted") and represents the same fact
+twice. The array is carried on the **default** model rather than behind an
+axis because the models this project archives are the blob-derived caches
+(§14.4), and a location a cache did not materialise is a location the archive
+does not have; measured at the pinned blob, the array adds 29,347 bytes —
+**+2.6%** of the default model and **+0.4%** of the all-axes one (the arc
+plan's ~1.4% was taken on a different base and is superseded by these two
+basis-stated figures). An
+opt-in axis carrying the same field remains possible without a version
+advance if a narrow-model demand appears (the `closure-sets` precedent);
+recorded, not built.
+
+Sites inside a `$( ... )` subexpression are collected after the top-level
+scan, so the ascending order is **established at emission, not assumed from
+scan order** — an edge whose only early site is inside an expandable string
+would otherwise carry a misordered array.
+
 ---
 
 ## 6. Output formats and consumer layers
@@ -2104,6 +2138,7 @@ materialisation, the difference being the ten `axis` paths.
 | `/edges[]/code` | always |
 | `/edges[]/from` | always |
 | `/edges[]/line` | always |
+| `/edges[]/lines` | always |
 | `/edges[]/sites` | always |
 | `/edges[]/to` | always |
 | `/limitations` | always |

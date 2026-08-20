@@ -964,6 +964,7 @@ MODEL_SCHEMA = {
     "/edges[]/code": "always",
     "/edges[]/from": "always",
     "/edges[]/line": "always",
+    "/edges[]/lines": "always",
     "/edges[]/sites": "always",
     "/edges[]/to": "always",
     "/limitations": "always",
@@ -1611,9 +1612,11 @@ class Survey:
             rec = self.edges.get((src, dst))
             if rec is None:
                 self.edges[(src, dst)] = {"from": src, "to": dst,
-                                          "line": self.line_of(t.start), "sites": 1}
+                                          "line": self.line_of(t.start), "sites": 1,
+                                          "lines": [self.line_of(t.start)]}
             else:
                 rec["sites"] += 1
+                rec["lines"].append(self.line_of(t.start))
 
     def _record_foreach(self, k):
         toks, sig = self.toks, self.sig
@@ -2060,6 +2063,14 @@ class Survey:
         edges = sorted(self.edges.values(), key=lambda r: (r["from"], r["to"]))
         for e in edges:
             e["code"] = "PSS2001"
+            # SPEC 5.9 [F2]: `lines` is every call site, ascending. Sites are
+            # collected in scan order, and a site inside a `$( ... )`
+            # subexpression is scanned after the top-level stream, so the
+            # ascending order is established here, not assumed. `line` is
+            # normatively `lines[0]` - kept as a field for compatibility and
+            # re-derived from the array so the two cannot disagree.
+            e["lines"].sort()
+            e["line"] = e["lines"][0]
 
         closures = sorted(self.closures, key=lambda r: r["id"])
         # PSS4003.named_by_literal (SPEC 4.4, F1/P22): sourced from the

@@ -20,6 +20,20 @@ time, and are marked as such.
 
 ## [Unreleased]
 
+### Added
+
+- **[F2] closed: the edge record carries every call site** (SPEC §5.9 new,
+  §13.2 `Call-site locations` closed; consumer-adjudicated A2; part of the
+  `model_version` `"3"` arc). `edges[].lines` is every site's line,
+  ascending, `len(lines) == sites`; `line` is normatively `lines[0]`,
+  re-derived from the array so the two cannot disagree — which also fixed an
+  unnoticed defect: a site inside `$( ... )` is scanned after the top-level
+  stream, so `line` was the first-*scanned* site, not the first in the file.
+  Shape moves (+1 path, declared in `MODEL_SCHEMA` and §13.3 together).
+  Measured at the pinned blob: +29,347 bytes, +2.6% of the default model,
+  +0.4% of all-axes — the arc plan's ~1.4% was taken on a different base and
+  is superseded by these basis-stated figures.
+
 ### Changed
 
 - **[F4] closed: a command in a `foreach` condition is in command position**

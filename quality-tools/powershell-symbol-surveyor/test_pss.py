@@ -2194,6 +2194,49 @@ def run_command_position_fixtures():
           "edges: %r" % edges)
 
 
+def run_call_site_fixtures():
+    """SPEC 5.9: the edge record carries every call site ([F2], D10 arc,
+    consumer-adjudicated shape A).
+
+    Written red-first: the parent build carried one `line` and a `sites`
+    count, so both round-1 and round-2 reviewers could not list the places a
+    deleted function breaks - the plainest task the model exists for.
+    """
+    body = ("function Invoke-Runner { 1 }\n"
+            "Invoke-Runner\n"
+            "Invoke-Runner\n"
+            "$x = 1\n"
+            "Invoke-Runner\n")
+    model = pss.Survey("fixture.ps1", body, axes=set()).run().model()
+    edge = [e for e in model["edges"] if e["to"] == "function/Invoke-Runner"]
+    check(len(edge) == 1 and edge[0].get("lines") == [2, 3, 5]
+          and edge[0].get("line") == 2 and edge[0].get("sites") == 3,
+          "call-site fixture: lines is every site, ascending, line == lines[0]",
+          "edge: %r" % edge)
+
+    # A site inside a `$( ... )` subexpression is scanned after the top-level
+    # stream; the ascending order must be established, not assumed.
+    body = ("function Get-Tag { 'v1' }\n"
+            "Write-Output \"tag: $(Get-Tag)\"\n"
+            "Get-Tag\n")
+    model = pss.Survey("fixture.ps1", body, axes=set()).run().model()
+    edge = [e for e in model["edges"] if e["to"] == "function/Get-Tag"]
+    check(len(edge) == 1 and edge[0].get("lines") == [2, 3]
+          and edge[0].get("line") == 2,
+          "call-site fixture: a subexpression site sorts into place",
+          "edge: %r" % edge)
+
+    # Two sites on one line are two entries: the array counts sites.
+    body = ("function Get-N { 1 }\n"
+            "$a = (Get-N) + (Get-N)\n")
+    model = pss.Survey("fixture.ps1", body, axes=set()).run().model()
+    edge = [e for e in model["edges"] if e["to"] == "function/Get-N"]
+    check(len(edge) == 1 and edge[0].get("lines") == [2, 2]
+          and edge[0].get("sites") == 2,
+          "call-site fixture: two sites on one line are two entries",
+          "edge: %r" % edge)
+
+
 # -------------------------------------------------------- differential (pwsh)
 
 PWSH_PROBE = r"""
@@ -3577,6 +3620,8 @@ def main():
 
     run_fixtures()
     run_declaration_fixtures()
+    run_command_position_fixtures()
+    run_call_site_fixtures()
 
     # Builds its own repositories, so it needs the `git` binary and not this
     # checkout (SPEC 14.3: a missing runtime degrades the gate, never the tool).
