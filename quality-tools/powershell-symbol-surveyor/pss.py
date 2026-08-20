@@ -52,7 +52,8 @@ MIN_PYTHON = (3, 12)
 AXES = {
     "closure-sets": "transitive_callees and transitive_callers on each closure record",
     "local-sites": "one record per function-local variable reference",
-    "command-sites": "one record per unresolved command-invocation site, "
+    "command-sites": "one record per unresolved command-invocation site - "
+                     "carrying the argument itemisation and source span - "
                      "alongside the retained per-name aggregates",
 }
 
@@ -567,6 +568,102 @@ def _dynamic_target(toks, r):
                 continue
             break
     return t0.start, toks[end].end
+
+
+def _command_arguments(text, toks, sig, k, head):
+    """The argument tokens and source span of an unresolved invocation
+    (SPEC 4.2 PSS2009, D12). ``k`` is the sig index of the command word;
+    ``head`` is the (possibly dot-joined) command token.
+
+    Itemisation, not binding: PowerShell binds positionally and by name
+    against cmdlet metadata this tool does not hold, and guessing a binding
+    would be a judgement (SPEC 1.2). Each item is ``{kind, text}`` verbatim;
+    separator and redirection operators are not itemised, and the ``span``
+    - [start, end) byte offsets over the whole invocation - is the ground
+    truth the itemisation is a convenience over. A backtick continuation
+    lives inside a ``bt`` token, so a multi-line invocation is one element
+    and its span says so; two invocations on one line get two spans, which
+    is the disambiguation a line number cannot give.
+    """
+    def balanced_sig(j, open_c, close_c):
+        depth = 0
+        while j < len(sig):
+            tt = toks[sig[j]]
+            if tt.kind == 'op' and tt.text == open_c:
+                depth += 1
+            elif tt.kind == 'op' and tt.text == close_c:
+                depth -= 1
+                if depth == 0:
+                    return j
+            j += 1
+        return None
+
+    def advance_past(j, end_off):
+        while j < len(sig) and toks[sig[j]].start < end_off:
+            j += 1
+        return j
+
+    args = []
+    stop_ops = frozenset(('|', ';', ')', '}', '&', '&&', '||'))
+    j = advance_past(k + 1, head.end)
+    end_off = head.end
+    while j < len(sig):
+        t = toks[sig[j]]
+        if t.kind == 'nl' or (t.kind == 'op' and t.text in stop_ops):
+            break
+        if t.kind == 'op' and t.text in ('(', '{'):
+            close = balanced_sig(j, t.text, ')' if t.text == '(' else '}')
+            if close is None:
+                break
+            ce = toks[sig[close]].end
+            args.append({"kind": "expression" if t.text == '(' else
+                         "scriptblock", "text": text[t.start:ce]})
+            end_off = ce
+            j = close + 1
+            continue
+        if t.kind == 'op' and t.text in ('$', '@') and j + 1 < len(sig) \
+                and toks[sig[j + 1]].kind == 'op' \
+                and toks[sig[j + 1]].text == '(' \
+                and toks[sig[j + 1]].start == t.end:
+            close = balanced_sig(j + 1, '(', ')')
+            if close is None:
+                break
+            ce = toks[sig[close]].end
+            args.append({"kind": "expression", "text": text[t.start:ce]})
+            end_off = ce
+            j = close + 1
+            continue
+        if t.kind == 'var':
+            ts, te = _dynamic_target(toks, sig[j])
+            args.append({"kind": "splat" if t.text.startswith('@')
+                         else "variable", "text": text[ts:te]})
+            end_off = te
+            j = advance_past(j + 1, te)
+            continue
+        if t.kind == 'word':
+            if t.text.startswith('-'):
+                args.append({"kind": "parameter", "text": t.text})
+                end_off = t.end
+                j += 1
+                continue
+            ts, te = _dynamic_target(toks, sig[j])
+            args.append({"kind": "bareword", "text": text[ts:te]})
+            end_off = te
+            j = advance_past(j + 1, te)
+            continue
+        if t.kind in ('str', 'estr', 'num'):
+            kind = {"str": "string", "estr": "expandable_string",
+                    "num": "number"}[t.kind]
+            args.append({"kind": kind, "text": t.text})
+            end_off = t.end
+            j += 1
+            continue
+        # Any other operator (a comma, a redirection, a member dot that no
+        # chain consumed) separates or decorates; it is covered by the span
+        # and not itemised.
+        end_off = t.end
+        j += 1
+    return args, [head.start, end_off]
 
 
 def subexpression_spans(tok):
@@ -1120,6 +1217,9 @@ MODEL_SCHEMA = {
     "/symbols[]/parent": "always",
     "/symbols[]/start_line": "always",
     "/unresolved_named_commands": "always",
+    "/unresolved_named_commands[]/arguments": "axis",
+    "/unresolved_named_commands[]/arguments[]/kind": "axis",
+    "/unresolved_named_commands[]/arguments[]/text": "axis",
     "/unresolved_named_commands[]/code": "always",
     "/unresolved_named_commands[]/line": "axis",
     "/unresolved_named_commands[]/name": "always",
@@ -1127,6 +1227,7 @@ MODEL_SCHEMA = {
     "/unresolved_named_commands[]/owners": "always",
     "/unresolved_named_commands[]/record": "always",
     "/unresolved_named_commands[]/sites": "always",
+    "/unresolved_named_commands[]/span": "axis",
 }
 
 MODEL_SCHEMA_KINDS = ("always", "axis", "optional")
@@ -1280,7 +1381,8 @@ RECORD_VARIANTS = {
         "variants": (
             {"name": "site",
              "when": {"path": "record", "equals": "site"},
-             "carries": ("code", "line", "name", "owner", "record"),
+             "carries": ("arguments", "code", "line", "name", "owner",
+                         "record", "span"),
              "conditional_keys": {}, "axis_keys": {}},
             {"name": "aggregate",
              "when": {"path": "record", "equals": "aggregate"},
@@ -1892,10 +1994,13 @@ class Survey:
                 # deleted local function from a cmdlet name (SPEC 1.3
                 # forbids guessing that from naming convention).
                 self.counters["unresolved_named_command_sites"] += 1
+                arguments, span = _command_arguments(
+                    self.text, toks, sig, k, t)
                 self.unresolved_named_commands.append({
                     "code": "PSS2009", "name": t.text,
                     "owner": self._owner_id_fast(t.start),
                     "line": self.line_of(t.start), "offset": t.start,
+                    "arguments": arguments, "span": span,
                 })
                 continue
             # The edge source may be <script>: a function called only from top
@@ -2310,7 +2415,11 @@ class Survey:
         if "command-sites" in self.axes:
             records += [
                 {"record": "site", "code": "PSS2009", "name": r["name"],
-                 "owner": r["owner"], "line": r["line"], "offset": r["offset"]}
+                 "owner": r["owner"], "line": r["line"], "offset": r["offset"],
+                 # D12: the argument itemisation and the [start, end) byte
+                 # span - the facts a round-3 destructive-invocation audit
+                 # had to return to the source for (SPEC 4.2).
+                 "arguments": r["arguments"], "span": r["span"]}
                 for r in sorted(self.unresolved_named_commands,
                                 key=lambda r: (r["name"], r["offset"]))
             ]

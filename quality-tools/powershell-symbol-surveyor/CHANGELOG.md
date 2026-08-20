@@ -27,6 +27,22 @@ B.7/B.8 are restamped once at the arc's end.
 
 ### Added
 
+- **Site records carry `arguments` and `span`** (SPEC §4.2, under the
+  `command-sites` axis) — the facts a round-3 destructive-invocation audit
+  (`Remove-Item -LiteralPath … -Force`) had to return to the source for.
+  `arguments` is **itemisation, not binding** (each token `{kind, text}`
+  verbatim, in order; kinds `parameter`/`variable`/`splat`/`string`/
+  `expandable_string`/`number`/`bareword`/`expression`/`scriptblock`;
+  which value binds to which parameter is the consumer's judgement, §1.2);
+  variable and bareword items extend over byte-adjacent tails (`$p.FullName`
+  is one item), and balanced captures walk **tokens**, so a paren inside a
+  string cannot derail them. `span` is the [start, end) byte extent — a
+  backtick continuation lives inside a `bt` token, so a multi-line
+  invocation is one element and its span says so, and two same-line
+  invocations of one name carry two disjoint spans, the disambiguation a
+  line number cannot give. Measured at the pin: **+379,027 bytes, +6.2% of
+  the all-axes model**, all of it on the opt-in axis; the default model is
+  byte-unmoved by this entry.
 - **`PSS9002` records carry `target`** (SPEC §4.8) — the invoked name
   expression, verbatim, extended over byte-adjacent member/index/call tails
   only (the §10.6 adjacency discipline applied to the expression side:

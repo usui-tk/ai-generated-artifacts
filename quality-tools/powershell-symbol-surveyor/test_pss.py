@@ -2236,6 +2236,44 @@ def run_fixtures():
         check(kinds == {want}, "fixture: `%s` still tokenizes as words" % src,
               "kinds: %r" % kinds)
 
+    # SPEC 4.2 command-site arguments and span (D12): itemisation, not
+    # binding. Red-first: the parent build's site records carried neither
+    # key, which is what sent a round-3 destructive-invocation audit back to
+    # the source for the bound parameters.
+    body = ("function Test-Args {\n"
+            "    Remove-Item -LiteralPath $p.FullName -Force\n"
+            "    Invoke-Tool ($a + 1) { $_ } @Rest\n"
+            "    Copy-Item 'a.txt' `\n        b.txt\n"
+            "    Get-Date; Get-Date\n"
+            "}\n")
+    model = pss.Survey("fixture.ps1", body, axes={"command-sites"}).run().model()
+    sites = {(r["name"], tuple(r["span"])): r["arguments"]
+             for r in model["unresolved_named_commands"]
+             if r.get("record") == "site"}
+    ri = [v for (n, _s), v in sites.items() if n == "Remove-Item"]
+    check(ri == [[{"kind": "parameter", "text": "-LiteralPath"},
+                  {"kind": "variable", "text": "$p.FullName"},
+                  {"kind": "parameter", "text": "-Force"}]],
+          "fixture: arguments itemise parameter/variable pairs; a member "
+          "chain is one item", "got %r" % ri)
+    it = [v for (n, _s), v in sites.items() if n == "Invoke-Tool"]
+    check(it == [[{"kind": "expression", "text": "($a + 1)"},
+                  {"kind": "scriptblock", "text": "{ $_ }"},
+                  {"kind": "splat", "text": "@Rest"}]],
+          "fixture: expression, scriptblock and splat arguments are "
+          "captured balanced over tokens", "got %r" % it)
+    ci = [(s, v) for (n, s), v in sites.items() if n == "Copy-Item"]
+    check(len(ci) == 1 and ci[0][1] == [
+              {"kind": "string", "text": "'a.txt'"},
+              {"kind": "bareword", "text": "b.txt"}]
+          and ci[0][0][1] > ci[0][0][0],
+          "fixture: a backtick-continued invocation is one element and its "
+          "span covers both lines", "got %r" % ci)
+    gd = sorted(s for (n, s), _v in sites.items() if n == "Get-Date")
+    check(len(gd) == 2 and gd[0][1] <= gd[1][0],
+          "fixture: two same-line invocations carry two disjoint spans - "
+          "the disambiguation a line number cannot give", "got %r" % gd)
+
     # SPEC 4.8 PSS9003 (D12): -Scope is reported regardless of parameter
     # order. Red-first: the parent build RETURNED at -Name, so the common
     # `-Name X -Value 1 -Scope 1` order was silently missed - while the

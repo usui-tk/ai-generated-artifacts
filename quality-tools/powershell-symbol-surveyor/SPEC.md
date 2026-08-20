@@ -662,7 +662,7 @@ declaration test first misclassifies 254 references on the reference target.
 | `PSS2006` | A script-scope declaration made at script level. At script level an unqualified assignment declares a script-scoped variable, so `$Foo = 1` at top level and `$script:Foo` inside a function name the same entity. |
 | `PSS2007` | A variable reference occurring inside an expandable (double-quoted) string or here-string. Carries the containing string's location. These are real references and are the principal mechanism by which a text-substitution rename silently fails (§12.4). |
 | `PSS2008` | A script-scope variable's usage map: the set of functions that **write** it and the set that **read** it, with per-set counts (§12.3). One record per name in the usage-map population (§12.3). |
-| `PSS2009` | A command invocation site whose command name is a literal in command position (§10.6) but does not resolve to any function defined in this file (SPEC 15.4 F2 / P23). Every such name is counted, not filtered — this tool has no structural basis for telling a deleted local function from a cmdlet or an external executable, and guessing from naming convention is exactly the threshold §1.3 forbids. The default record is a **per-name aggregate** (`name`, `sites`, `owners`); one **per-site** record (`name`, `owner`, `line`) is additionally emitted per invocation under the `command-sites` axis (§5.6). |
+| `PSS2009` | A command invocation site whose command name is a literal in command position (§10.6) but does not resolve to any function defined in this file (SPEC 15.4 F2 / P23). Every such name is counted, not filtered — this tool has no structural basis for telling a deleted local function from a cmdlet or an external executable, and guessing from naming convention is exactly the threshold §1.3 forbids. The default record is a **per-name aggregate** (`name`, `sites`, `owners`); one **per-site** record is additionally emitted per invocation under the `command-sites` axis (§5.6): `name`, `owner`, `line`, and — D12 — `span` ([start, end) byte offsets over the whole invocation; a line cannot disambiguate a multi-line or a repeated same-line invocation, a span can) and `arguments` (the argument tokens in order, each `{kind, text}` verbatim; kinds: `parameter`, `variable`, `splat`, `string`, `expandable_string`, `number`, `bareword`, `expression`, `scriptblock`). **Itemisation, not binding**: PowerShell binds positionally and by name against cmdlet metadata this tool does not hold, so which value binds to which parameter — and whether the invocation is risky — is the consumer's judgement (§1.2). Separator and redirection operators are covered by the span and not itemised; variable and bareword items extend over byte-adjacent tails (the §10.6 adjacency discipline), so `$p.FullName` is one item. |
 
 The usage-map population is **not** the same as the `PSS2006` declaration
 population. It is the union of:
@@ -1037,7 +1037,7 @@ by which a caller asks for one such omission to be restored.
 |---|---|---|
 | `closure-sets` | `transitive_callees` and `transitive_callers` on each closure record, alongside the counts | Derivable from the `edges` master (§11.1) |
 | `local-sites` | One record per function-local variable reference, alongside the retained per-function aggregates | Folded into an aggregate (§5.3) |
-| `command-sites` | One record per unresolved command-invocation site, alongside the retained per-name aggregates | Folded into a per-name aggregate (§4.2 PSS2009 / §15.4 F2) |
+| `command-sites` | One record per unresolved command-invocation site — carrying the argument itemisation and source span — alongside the retained per-name aggregates | Folded into a per-name aggregate (§4.2 PSS2009 / §15.4 F2) |
 
 Neither axis adds or removes a collection: `closures`, `local_variables` and
 `unresolved_named_commands` are present in every model, and an axis only
@@ -2261,7 +2261,7 @@ should not assume any of these are currently enforced.
 | Call-site locations | **RESOLVED at the D10 arc.** `edges[].lines` carries every site, ascending, on the default model; `line` is normatively `lines[0]` (§5.9). The shape was consumer-adjudicated across two rounds before it was built, and the gate holds it by fixture (ascending order established at emission — a `$( ... )` site is scanned after the top-level stream) and by the B.8 shape fingerprints | closed |
 | Per-record presence contract | **RESOLVED at the D11 arc.** The declaration shape was consumer-adjudicated across two candidate specimens (round 3, §3.2): variant enumeration with machine-evaluable predicates and non-circular discriminators, first-class conditional keys, and a per-path index derived from the variants at serialisation time. Six collections declared — measurement corrected the round's five-collection estimate — and the survey's own candidate-A specimen demonstrated the quiet failure of the exceptions-only alternative by violating its own complement rule. `pss.RECORD_VARIANTS`, serialised by `--capabilities`, held by `--self-check` both ways and by the gate over both pin materialisations, a slice and the fixtures (§13.3 Per-record presence) | closed |
 | Dynamic command sites | **RESOLVED at the D12 arc, with its premise corrected by measurement.** The row as written claimed no collection itemises dynamic invocations and `limitations` is silent — measured false before implementation: the 26 sites had carried per-site `PSS9002` records with `owner` and `line` since the tool's first commit, on the default model. What was missing was the **name expression**: a record locating a dynamic invocation still sends a rename pre-flight back to the source, because nothing states *which* expression is invoked. `PSS9002` records now carry `target` — the expression verbatim, extended over byte-adjacent tails only (§4.8; the §10.6 adjacency discipline) — so the pre-flight becomes a model join against the variable collections. The adjudicated axis-shaped itemisation was withdrawn together with the premise: duplicating records already on the default model into an axis is the two-copies shape this SPEC spends its rows fighting. `limitations` entered the §13.3 variant declaration in the same commit (four code-discriminated variants), because one code carrying a key three others do not is not uniform | closed |
-| Command-site arguments | An `unresolved_named_commands` site record carries `record`/`code`/`name`/`owner`/`line` and no argument facts; a round-3 reviewer auditing destructive and trust-sensitive invocations (`Remove-Item -LiteralPath … -Force`, signature checks) had to return to the source for the bound parameters. The ask is parameter names, argument-expression kind/text, and a source extent (a line cannot disambiguate multiline or repeated invocations). Facts only — the model reports the invocation; whether it is risky in context is the consumer's judgement (§1.2) | next `model_version` arc (D12 inventory) |
+| Command-site arguments | **RESOLVED at the D12 arc.** A site record carries `arguments` — the invocation's argument tokens in order, each `{kind, text}` verbatim, itemisation-not-binding (§4.2, §1.2) — and `span`, the [start, end) byte extent that disambiguates what a line number cannot: a backtick-continued invocation is one element and its span says so, and two same-line invocations of one name carry two spans. Variable and bareword items extend over byte-adjacent tails (§10.6 discipline), a parenthesised or scriptblock argument is captured balanced **over tokens** so a paren inside a string cannot derail it, and separators/redirections are covered by the span rather than itemised. Held by the variant key-set gate over every checked model and by behavioural fixtures for each kind | closed |
 | Slice boundary stubs | Every edge endpoint in a scope slice other than the scoped symbol has no `symbols` record in the slice (33 of 33 at the round-3 kit's slice), so the first source fetch of a session re-opens the parent model, defeating the slice's job as a standalone working set. The ask: retain boundary-stub symbol records (`id`, `kind`, `start_line`, `end_line` only) for every symbol an in-slice record references. Model-moving, and it introduces a new `symbols` variant — to be adjudicated together with the §13.3 variant declaration it extends (the reviewer's own argument for variant-style declaration) | next `model_version` arc (D12 inventory), design coupled to §13.3 |
 | Static analysis | clean under the repository's Python gates | not yet wired into a `pss.py`-specific run |
 | Docs | **RESOLVED.** `README.md`, `README.ja.md`, `SPEC.md`, `CHANGELOG.md` and `VERSION` all exist, and `test_pss.py` holds them rather than leaving their presence to inspection: each file must exist, `VERSION` must equal `pss.__version__` (one version, two places, so the file cannot go stale against the code), and the bilingual pair must be in **lock-step on structure** — the same heading text ordering by level, the same number of fenced blocks. Lock-step is checked structurally rather than by translation, and that limit is stated: it catches a section added to one and not the other, and says nothing about whether a paragraph's content still agrees | closed |
@@ -2318,7 +2318,7 @@ had ever seen it. It surfaced when the variant-demonstration fixture put the
 first duplicate-name model in front of the presence gate; an emitted key no
 declaration covered was the finding, and declaring it is the close.
 
-Counts at the pinned blob: **125** paths at `all-axes`, **115** at the default
+Counts at the pinned blob: **129** paths at `all-axes`, **115** at the default
 materialisation, the difference being the ten `axis` paths.
 
 | Key path | Kind |
@@ -2443,6 +2443,9 @@ materialisation, the difference being the ten `axis` paths.
 | `/symbols[]/parent` | always |
 | `/symbols[]/start_line` | always |
 | `/unresolved_named_commands` | always |
+| `/unresolved_named_commands[]/arguments` | axis |
+| `/unresolved_named_commands[]/arguments[]/kind` | axis |
+| `/unresolved_named_commands[]/arguments[]/text` | axis |
 | `/unresolved_named_commands[]/code` | always |
 | `/unresolved_named_commands[]/line` | axis |
 | `/unresolved_named_commands[]/name` | always |
@@ -2450,6 +2453,7 @@ materialisation, the difference being the ten `axis` paths.
 | `/unresolved_named_commands[]/owners` | always |
 | `/unresolved_named_commands[]/record` | always |
 | `/unresolved_named_commands[]/sites` | always |
+| `/unresolved_named_commands[]/span` | axis |
 
 #### Value nullability
 
@@ -2498,7 +2502,7 @@ absent from the declaration is uniform, and the gate holds that claim too.
 | `script_variables` | `reference` | `record == reference` | `code` `id` `line` `name` `owner` `qualifier` `record` `role` | `in_expandable_string` | 1879 |
 | `script_variables` | `usage-map` | `record == usage_map` | `code` `id` `name` `reader_count` `readers` `record` `writer_count` `writers` | — | 156 |
 | `string_interpolation_references` | `reference` | `record == reference` | `code` `id` `in_expandable_string` `line` `name` `owner` `record` `role` | `qualifier` | 118 |
-| `unresolved_named_commands` | `site` | `record == site` | `code` `line` `name` `owner` `record` | — | 2798 |
+| `unresolved_named_commands` | `site` | `record == site` | `arguments` `code` `line` `name` `owner` `record` `span` | — | 2798 |
 | `unresolved_named_commands` | `aggregate` | `record == aggregate` | `code` `name` `owners` `record` `sites` | — | 93 |
 | `limitations` | `unresolved-call-site` | `code == PSS9002` | `target` | — | 26 |
 | `limitations` | `untrackable-scope-write` | `code == PSS9003` | (common only) | — | 1 |
