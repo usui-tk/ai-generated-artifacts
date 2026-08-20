@@ -1738,6 +1738,23 @@ hashtable key or assignment target); when it starts with `-` (an operator or a
 parameter name); or when it is inside brackets (an attribute or type-literal
 context).
 
+**Dotted command names (closed at the D12 arc, `model_version` 4).** A name
+like `dism.exe` lexes as word `.` word, and the pre-D12 command-word iterator
+yielded the first word alone — the `PSS2009` record named `dism`, a name that
+exists in no source line, so a consumer joining the record back to the source
+(or pre-flighting a rename against it) matched nothing. In command position an
+**adjacent** run of word (`.` word-or-number)\* is one command name. Adjacency
+is decided on byte offsets, never on significant-token order: `dism . exe` —
+the command `dism` with two arguments — does not join, and the exclusion rules
+above apply to the token after the joined run (the assignment look-ahead sees
+past the tail). The join repeats over every tail (`robocopy.exe.bak`) and a
+numeric tail joins (`python3.12`). **Stated limit:** a name whose *first*
+segment leads with a digit (`7z.exe`) lexes as a number token and is not a
+command word at all; that is a limit of the lexer's word rule, is unchanged by
+this join, and a codebase invoking such names loses those `PSS2009` records —
+recorded here so the absence reads as a stated limit rather than an unstated
+one.
+
 **Closed gap: `foreach ($x in <command>)` (recorded §3.2 2026-08; closed at
 the D10 arc, `model_version` 3).** The inclusion list used to cover the
 position after the opening `(` — which is `$x` — and nothing after `in`, so a

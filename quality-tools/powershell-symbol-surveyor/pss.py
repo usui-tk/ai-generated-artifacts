@@ -38,8 +38,8 @@ import os
 import re
 import sys
 
-__version__ = "0.3.0"
-MODEL_VERSION = "3"
+__version__ = "0.4.0"
+MODEL_VERSION = "4"
 
 MIN_PYTHON = (3, 12)
 
@@ -467,15 +467,40 @@ def iter_command_words(toks, sig):
                    if t.kind == 'word' and t.text.lower() in KEYWORDS else None)
         if t.kind == 'word':
             low = t.text.lower()
+            # SPEC 10.6 dotted command names (D12): `dism.exe` tokenizes as
+            # word `.` word, and pre-D12 the yielded command name was the
+            # first word alone - the PSS2009 record named `dism`, a name that
+            # exists in no source line. In command position an ADJACENT run
+            # of word ('.' word|num)* is one name; adjacency is checked on
+            # byte offsets, never on significant-token order, so `dism . exe`
+            # (the command `dism` with two arguments) does not join. A name
+            # whose FIRST segment leads with a digit (`7z.exe`) tokenizes as
+            # `num` and is not a command word at all - a stated limit of the
+            # lexer, not of this join (SPEC 10.6).
+            joined, j = t, k
+            if cmd_pos and low not in KEYWORDS and not low.startswith('-') \
+                    and bracket_depth == 0:
+                while j + 2 < len(sig):
+                    dot = toks[sig[j + 1]]
+                    tail = toks[sig[j + 2]]
+                    if not (dot.kind == 'op' and dot.text == '.'
+                            and dot.start == joined.end
+                            and tail.kind in ('word', 'num')
+                            and tail.start == dot.end):
+                        break
+                    joined = Tok('word', joined.text + '.' + tail.text,
+                                 joined.start, tail.end)
+                    j += 2
+            nxt_eff = toks[sig[j + 1]] if j + 1 < len(sig) else nxt
             excluded = (
                 low in KEYWORDS
                 or low.startswith('-')
                 or bracket_depth > 0
-                or (nxt is not None and nxt.kind == 'op'
-                    and nxt.text in ('=', '+=', '-=', '*=', '/=', '%='))
+                or (nxt_eff is not None and nxt_eff.kind == 'op'
+                    and nxt_eff.text in ('=', '+=', '-=', '*=', '/=', '%='))
             )
             if cmd_pos and not excluded:
-                yield k, t
+                yield k, joined
             if low in STATEMENT_KEYWORDS:
                 cmd_pos = True
                 continue

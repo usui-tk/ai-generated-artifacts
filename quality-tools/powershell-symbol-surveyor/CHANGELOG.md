@@ -18,7 +18,48 @@ This file starts at `0.2.0`. Entries before it are reconstructed from the
 commit history and the SPEC's own decision records rather than written at the
 time, and are marked as such.
 
-## [Unreleased]
+## [0.4.0] - 2026-08-20 (`model_version` "3" -> "4"; the D12 arc)
+
+`MODEL_VERSION` advances at this arc's first model-moving commit (ADR 0035 /
+the D10 bundling discipline): every change below alters the model emitted for
+a fixed input, the "3" caches are expired in one bundled event, and Appendix
+B.7/B.8 are restamped once at the arc's end.
+
+### Changed
+
+- **Dotted command names join** (SPEC §10.6). `dism.exe` lexes as word `.`
+  word and the command-word iterator yielded the first word alone, so the
+  `PSS2009` record named `dism` — a name that exists in no source line. In
+  command position an adjacent word (`.` word-or-number)\* run is now one
+  name; adjacency is byte-offset-decided (`dism . exe` stays the command
+  `dism` with two arguments), the exclusion look-ahead sees past the joined
+  tail, and the lexer's leading-digit limit (`7z.exe` is a number token) is
+  stated rather than silently inherited. At the pinned blob exactly one
+  record moves (`dism` -> `dism.exe`, line 7690, the real `& dism.exe
+  @Arguments` invocation); `counters.commands_named` is unchanged at the
+  reference parser's 5,048. Full-corpus regression over all 230 generations:
+  five joins and nothing else (`dism`/`expand`/`reg`/`reagentc`/`robocopy`
+  gaining `.exe`), site and name counts unmoved everywhere.
+
+### Fixed
+
+- **The §14.4 digest was blind to a name change, and the blindness was
+  measured before it was closed**: the join above moves a record *value* on
+  all 230 generations and moved **no** figure in the acceptance block — the
+  digest still read `4619cc9c…`, identifying two builds that emit different
+  models as one. A count cannot see a rename (93 aggregates == 93
+  aggregates), so `measure()` now asserts the *identity* of the `PSS2009`
+  name set (a 16-hex digest over the sorted lower-cased aggregate names)
+  alongside its count. ADR 0035's founding measurement was content-only
+  blindness on the fact-code side; this is the same lesson arriving on the
+  value side, closed in the commit that demonstrated it.
+
+## [0.3.0] - 2026-08-20 (the D10 and D11 arcs)
+
+*(Header corrected at the D12 arc: these entries shipped as `pss_version`
+`0.3.0` — the bump is recorded inside the declaration-sources entry below —
+but the section kept the `[Unreleased]` heading, which no gate reads. The
+heading now states what happened.)*
 
 ### Added
 

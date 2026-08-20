@@ -301,6 +301,25 @@ def measure(model):
             "PSS3001": codes("soft_references")["PSS3001"],
             "PSS3002": codes("soft_references")["PSS3002"],
         },
+        # The D12 dotted-name join proved this block blind to a NAME change:
+        # `dism` -> `dism.exe` moved a record value on all 230 generations and
+        # moved no figure above, so the §14.4 digest - whose whole job is to
+        # identify the producing build by measured values - did not move
+        # either. A count cannot see a rename (93 == 93); the identity of the
+        # name set is therefore asserted as a digest over the sorted
+        # lower-cased aggregate names, the ADR 0015 width. Content-only
+        # blindness was ADR 0035's founding measurement on the fact-code side;
+        # this is the same lesson arriving on the value side.
+        "unresolved_named_commands": {
+            "aggregate_records": sum(
+                1 for r in model["unresolved_named_commands"]
+                if r.get("record") == "aggregate"),
+            "names_sha256_16": hashlib.sha256("\n".join(sorted(
+                r["name"].lower()
+                for r in model["unresolved_named_commands"]
+                if r.get("record") == "aggregate")).encode("utf-8"))
+                .hexdigest()[:16],
+        },
         "string_interpolation_references": {
             "records": len(interp),
             "distinct_source_lines": len({r["line"] for r in interp}),
@@ -2191,6 +2210,30 @@ def run_fixtures():
                  if t.text in ("-Path", "-eq", "C:/x", "Get-Item")}
         check(kinds == {want}, "fixture: `%s` still tokenizes as words" % src,
               "kinds: %r" % kinds)
+
+    # SPEC 10.6 dotted command names (D12): a name like `dism.exe` tokenizes
+    # as word `.` word, and the command-word iterator joins the ADJACENT run
+    # back into one name - the pinned blob really carries `& dism.exe
+    # @Arguments`, and pre-D12 the PSS2009 record named `dism`, a name that
+    # exists in no source line. Written red-first against that build.
+    for src, want_names, label in (
+            ("dism.exe /online /cleanup-image",
+             ["dism.exe"], "`dism.exe` is one command name, not `dism`"),
+            ("python3.12 --version",
+             ["python3.12"], "a numeric tail joins (`python3.12`)"),
+            ("robocopy.exe.bak x y",
+             ["robocopy.exe.bak"], "the join is repeated over every tail"),
+            ("dism . exe",
+             ["dism"], "a SPACED `.` does not join - `dism . exe` is the "
+             "command `dism` with two arguments"),
+    ):
+        body = "function Test-Fixture {\n    %s\n}\n" % src
+        model = pss.Survey("fixture.ps1", body).run().model()
+        names = sorted(r["name"] for r in model["unresolved_named_commands"]
+                       if r.get("record") == "aggregate")
+        check(names == sorted(want_names),
+              "fixture: %s" % label,
+              "aggregate names: %r" % names)
 
 
 def run_declaration_fixtures():
