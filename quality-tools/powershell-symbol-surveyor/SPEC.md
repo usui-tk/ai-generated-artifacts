@@ -519,6 +519,55 @@ What the round decided or found:
   and only an out-of-band document ties a model to a repository tree, which
   is the design rather than a gap.
 
+**2026-08-20 (third round).** Two reviewers, one per model family, given a
+kit built from the shipped `"3"` CLI: models at three materialisations
+(default, all-axes, a scope slice), a real generation-pair `trace`/`compare`
+with the `--all` twin and an unrelated-pair `compare`, two hand-built
+per-record presence-contract candidates with an observed-presence file, and
+`--capabilities` — no repository, no SPEC. Every quantitative claim in both
+responses — forty-two — was verified against the kit and held. What the
+round decided or found:
+
+- **The presence contract converged on a hybrid** (§13.3 Per-record
+  presence): variant enumeration with machine-evaluable predicates and
+  non-circular discriminators (one reviewer pointed at `depth`, already on
+  every symbol record), first-class conditional keys, and a per-path index
+  derived from the variants. The decisive evidence against the
+  exceptions-only candidate was supplied by the survey's own specimen,
+  which violated its own complement rule (`/closures[]/code`, 29 of 509,
+  undeclared) — the quiet-failure mode, demonstrated rather than argued.
+  The same reviewer extended the scope beyond the round-2 finding to five
+  collections; measurement made it six.
+- **The two-state transcription on the usage-map family** (§12.7): both
+  asked; one proved on the kit's own generation pair that a trace's
+  `PSS8007` misreads as introduced-by-B until the raw models are joined —
+  the empty-writer state predated the change. `baseline_state` /
+  `successor_state` exist because of that.
+- **The slice's projection rules were recoverable only by comparing
+  outputs**: one reviewer reverse-engineered kept-in-full `limitations` and
+  source-global aggregate figures from slice/parent pairs; the other hit
+  the cut symbol records of every edge endpoint (33 of 33 at the kit's
+  slice). The contract is declared (§5.7, `slice_projection`); the boundary
+  stubs are a model change, inventoried (§13.2) to be adjudicated together
+  with the variant declaration they would extend.
+- **Two declaration holes no gate here had found**: `source_path_differs`
+  present in a real document and absent from the declared shape (now
+  `top_level_conditional`, both directions gated), and the never-stated
+  rules that `<script>` is a delta subject but no examined subject and that
+  the default counts compress exactly the `--all` enumeration (§6.4). A
+  reviewer misclassifying a delta-field ask as a version-arc item exposed
+  that the delta document's own standing was unwritten (§6.4).
+- **Method**: one kit was contaminated in delivery — the orchestrator-side
+  answer key travelled in the same package as the reviewer archive. The
+  root cause was the packaging, not the reviewer, who disclosed before
+  answering, re-derived every figure, and correctly partitioned what the
+  exposure voided (the decidability measurements) from what it could not
+  touch (the walked workflows, which had no key). Two rules are adopted
+  from the round: the delivery to a reviewer contains exactly the startup
+  message and the kit archive, verified by listing; and hand-built
+  specimens declare their own coverage status, so a deliberately partial
+  candidate cannot be mistaken for a defective complete one.
+
 ---
 
 ## 4. Fact specifications
@@ -2189,6 +2238,9 @@ should not assume any of these are currently enforced.
 | Derivation owed | **RESOLVED (ADR 0036).** Every B.3 figure is re-derived by `test_pss.py` from the pinned blob, withdrawn as an orphan, or re-stamped with the state that reproduces it; a figure with no executable derivation is no longer permitted to exist | closed |
 | Call-site locations | **RESOLVED at the D10 arc.** `edges[].lines` carries every site, ascending, on the default model; `line` is normatively `lines[0]` (§5.9). The shape was consumer-adjudicated across two rounds before it was built, and the gate holds it by fixture (ascending order established at emission — a `$( ... )` site is scanned after the top-level stream) and by the B.8 shape fingerprints | closed |
 | Per-record presence contract | **RESOLVED at the D11 arc.** The declaration shape was consumer-adjudicated across two candidate specimens (round 3, §3.2): variant enumeration with machine-evaluable predicates and non-circular discriminators, first-class conditional keys, and a per-path index derived from the variants at serialisation time. Six collections declared — measurement corrected the round's five-collection estimate — and the survey's own candidate-A specimen demonstrated the quiet failure of the exceptions-only alternative by violating its own complement rule. `pss.RECORD_VARIANTS`, serialised by `--capabilities`, held by `--self-check` both ways and by the gate over both pin materialisations, a slice and the fixtures (§13.3 Per-record presence) | closed |
+| Dynamic command sites | `counters.commands_dynamic` counts dynamic invocations (`& $name`, `. $name`) and no collection itemises them, and `limitations` is silent about the blind spot — a round-3 reviewer's rename pre-flight held a count of 26 potential breakers and zero records to clear them with, forfeiting the point of holding a model. The itemisation (a record per site with `owner` and `line`; name-expression text if recoverable) adds records ⇒ model-moving, version-arc batched, shaped as an axis so the default stays flat. A `limitations` record declaring the blind spot is likewise a model change and travels in the same arc — the SPEC states the gap here in the interim | next `model_version` arc (D12 inventory) |
+| Command-site arguments | An `unresolved_named_commands` site record carries `record`/`code`/`name`/`owner`/`line` and no argument facts; a round-3 reviewer auditing destructive and trust-sensitive invocations (`Remove-Item -LiteralPath … -Force`, signature checks) had to return to the source for the bound parameters. The ask is parameter names, argument-expression kind/text, and a source extent (a line cannot disambiguate multiline or repeated invocations). Facts only — the model reports the invocation; whether it is risky in context is the consumer's judgement (§1.2) | next `model_version` arc (D12 inventory) |
+| Slice boundary stubs | Every edge endpoint in a scope slice other than the scoped symbol has no `symbols` record in the slice (33 of 33 at the round-3 kit's slice), so the first source fetch of a session re-opens the parent model, defeating the slice's job as a standalone working set. The ask: retain boundary-stub symbol records (`id`, `kind`, `start_line`, `end_line` only) for every symbol an in-slice record references. Model-moving, and it introduces a new `symbols` variant — to be adjudicated together with the §13.3 variant declaration it extends (the reviewer's own argument for variant-style declaration) | next `model_version` arc (D12 inventory), design coupled to §13.3 |
 | Static analysis | clean under the repository's Python gates | not yet wired into a `pss.py`-specific run |
 | Docs | **RESOLVED.** `README.md`, `README.ja.md`, `SPEC.md`, `CHANGELOG.md` and `VERSION` all exist, and `test_pss.py` holds them rather than leaving their presence to inspection: each file must exist, `VERSION` must equal `pss.__version__` (one version, two places, so the file cannot go stale against the code), and the bilingual pair must be in **lock-step on structure** — the same heading text ordering by level, the same number of fenced blocks. Lock-step is checked structurally rather than by translation, and that limit is stated: it catches a section added to one and not the other, and says nothing about whether a paragraph's content still agrees | closed |
 | Emission coverage | every code in §4 blocks 1-4 (survey-emittable) appears as a `code` or `facts` value on at least one record somewhere in the regression corpus's models, or is documented as data-dependent-absent (e.g. `PSS1005` legitimately does not fire on a corpus with zero duplicate names) | `PSS2005`, `PSS4001`, `PSS4002` closed by manual audit. `PSS2002` closed for all five §12.2 sources at the D10 arc — each source is held red-first by a §13.1 fixture, which is stronger than corpus presence. No automated corpus-wide gate yet for the rest; S4 |

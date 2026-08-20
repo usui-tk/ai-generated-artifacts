@@ -22,6 +22,15 @@ time, and are marked as such.
 
 ### Added
 
+- **SPEC §3.2 records survey round 3** (42/42 quantitative claims verified;
+  the presence-contract adjudication with the candidate-A self-violation as
+  decisive evidence; the two-state and slice findings; the delivery
+  contamination with its root cause on the packaging side and the two
+  method rules adopted from it). **SPEC §13.2** closes the per-record
+  presence row and opens the D12 inventory: dynamic command sites,
+  command-site arguments + extents, and slice boundary stubs
+  (design-coupled to the §13.3 variant declaration).
+
 - **`PSS8007`, `PSS8006` and `PSS7007` transcribe both usage states**
   (SPEC §12.7; round-3 B4). `detail.baseline_state` / `detail.successor_state`
   carry each model's writer and reader identities **with the site lines that
