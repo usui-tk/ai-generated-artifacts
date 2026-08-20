@@ -1231,6 +1231,24 @@ COMPARATOR_CODES = (
 # "An incomplete rename" is not a fact about two unrelated files.
 SUCCESSION_CODES = ("PSS8005", "PSS8006", "PSS8007")
 
+# SPEC 11.3 / 11.4: the classification vocabularies, each in ITS OWN table's
+# row order - the two tables order their rows differently ((same, differs)
+# is 11.3's second row and 11.4's third), so the row-key sequences are stated
+# per table rather than shared, and the cell lookups are derived from the
+# pairs so the descriptor and the comparator cannot disagree. One copy:
+# `--capabilities` serialises these, because the intended caller holds no
+# SPEC (SPEC 2.6) and a round-2 reviewer had to guess the enum from the
+# value names (A4).
+PSS7005_CLASSIFICATIONS = ("dependencies-unchanged", "downstream-changed",
+                           "direct-only-change", "dependencies-changed")
+_PSS7005_ROWS = ((True, True), (True, False), (False, True), (False, False))
+PSS7006_CLASSIFICATIONS = ("unchanged", "local-change",
+                           "dependency-only", "change-and-propagation")
+_PSS7006_ROWS = ((True, True), (False, True), (True, False), (False, False))
+
+_PSS7005_CELL = dict(zip(_PSS7005_ROWS, PSS7005_CLASSIFICATIONS))
+_PSS7006_CELL = dict(zip(_PSS7006_ROWS, PSS7006_CLASSIFICATIONS))
+
 
 MACHINE_OUTPUTS = {
     "model": {
@@ -1257,6 +1275,10 @@ MACHINE_OUTPUTS = {
                 "conditional": ("equality", "detail"),
             },
             "equality_values": ("equal", "differs"),
+            "classification_values": {
+                "PSS7005": PSS7005_CLASSIFICATIONS,
+                "PSS7006": PSS7006_CLASSIFICATIONS,
+            },
             "directions": ("unrelated", "caller-asserted-succession"),
             "codes_evaluated": COMPARATOR_CODES,
             "codes_evaluated_by_trace_only": SUCCESSION_CODES,
@@ -3041,12 +3063,7 @@ def compare_models(model_a, model_b):
         closure_b = _transitive(callees_b, sid)
         direct_same = direct_a == direct_b
         closure_same = closure_a == closure_b
-        dependency = {
-            (True, True): "dependencies-unchanged",
-            (True, False): "downstream-changed",
-            (False, True): "direct-only-change",
-            (False, False): "dependencies-changed",
-        }[(direct_same, closure_same)]
+        dependency = _PSS7005_CELL[(direct_same, closure_same)]
         if dependency == "dependencies-unchanged":
             delta.equal("PSS7005")
         else:
@@ -3059,12 +3076,7 @@ def compare_models(model_a, model_b):
         # value names are neutral by specification - no priority is attached,
         # because priority is a judgement and belongs to the caller (1.2).
         text_same = classification == "identical"
-        combined = {
-            (True, True): "unchanged",
-            (False, True): "local-change",
-            (True, False): "dependency-only",
-            (False, False): "change-and-propagation",
-        }[(text_same, direct_same and closure_same)]
+        combined = _PSS7006_CELL[(text_same, direct_same and closure_same)]
         if combined == "unchanged":
             delta.equal("PSS7006")
         else:

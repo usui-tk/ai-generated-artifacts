@@ -401,6 +401,19 @@ being made. The report states what it measured (`"format"`) and binds itself to
 its input (`source.sha256`), because a size figure that names neither its
 serialisation nor its subject is not a fact under §1.3.
 
+**The baseline of an `axis_increment` is this model's own materialisation.**
+An entry's `bytes` is the additional compact-serialised size the model would
+gain if that axis were added to the axes it already carries, measured by
+re-surveying — an axis's contribution is decided during extraction and is not
+recoverable from a model that lacks it. An axis the model already materialises
+therefore reports **`0`**: nothing further to add, not nothing measured. On a
+slice (§5.7) the entry is **`null`** — the increment cannot be priced from a
+model whose collections were cut after extraction, and a carried-over figure
+would describe a different artefact (§13.3 nullability). This paragraph
+exists because a round-2 reviewer recovered the baseline correctly and only
+by comparing a default model against its all-axes twin; an inference that
+must be reverse-engineered from two documents is not stated by either.
+
 **The parts must sum to the whole, and the rule that makes them sum must be
 written down.** A per-collection figure is the byte length of that
 collection's compact-serialised array alone, excluding its key name, colon
@@ -470,6 +483,41 @@ The asking is deliberately narrow. Reviewers are given tasks with answers the
 kit can support, told that being encouraging is not useful, and asked for where
 they got stuck, what they guessed, and what they got wrong. An opinion on the
 design is not solicited and has not been useful when volunteered.
+
+**2026-08-20 (second round).** Two reviewers, one per model family, each given
+a kit built from the shipped CLI (models, deltas, `--capabilities`, the two
+[F2] candidate shapes as live specimens, and a real `trace`/`compare` pair)
+with no repository and no SPEC — the §2.6 operating context, exactly. The
+round-1 material defects did not recur, and every quantitative claim in both
+responses was verified against the kit before any of it was adjudicated on.
+What the round decided or found:
+
+- **[F2] converged on the `lines` array** (§5.9): both reviewers rejected the
+  per-site-record candidate for the same two reasons (a forced join on the
+  plainest task; the same fact represented twice). The only disagreement —
+  default versus axis — was adjudicated to default on the archive argument.
+- **[F4] converged on emitting the edge** (§10.6): both ranked it first; one
+  demonstrated that the honest-degradation alternative had turned `PSS3001`'s
+  own classification claim false for the token in question.
+- **Nullability converged on present-but-null** (§13.3): the recorded
+  key-omission alternative was put to both and rejected by both; the
+  alternative is withdrawn, not deferred.
+- **`not_evaluated` was proposed independently by both** and adopted (§6.4),
+  as was the position transcription onto `PSS8001`/`PSS8002`/`PSS8004`; the
+  `examined_subjects` enumeration both reviewers never used was cut to
+  counts by default (§6.4).
+- **A declaration-contract gap was found that no gate here had found**: a
+  kind-`always` path can be omitted per record (`/symbols[]/parent`, absent
+  on 384 of 385 records at the pin) — §13.3's `always` is a per-model claim
+  read as a per-record one. Recorded as owed (§13.2), not fixed here.
+- **Three documentation defects were reported as guesses forced by the
+  shipped surface** and each is closed in this arc: the `axis_increment`
+  baseline (§3.1), the meaning of `edges[].line` (§5.9), and the
+  `PSS7005`/`PSS7006` value vocabularies (§11.3, now serialised).
+- The **in-band provenance** added after round 1 (§6.4) was used by both
+  without prompting; one correctly limited it — the delta names its models,
+  and only an out-of-band document ties a model to a repository tree, which
+  is the design rather than a gap.
 
 ---
 
@@ -714,7 +762,7 @@ name reuse; `pss.py` does not.
 | `PSS8001` | A call edge present in model B and absent from model A. `detail` carries the callee and the edge's call-site `lines`, copied from model B (§5.9, D10 A3). |
 | `PSS8002` | A call edge present in model A and absent from model B. `detail` carries the callee and the edge's call-site `lines`, copied from model A (§5.9, D10 A3). |
 | `PSS8003` | A function's transitive closure differs between models, with the set difference. |
-| `PSS8004` | A soft reference's resolution state differs between the models — most importantly, a string literal that matches a declared name in one and matches none in the other. `detail` carries the first site's `owner` and `line`, copied from the model whose record the resolution was read from (model B where it has one); further sites are derivable from that model's own `soft_references` (D10 A3). Equality is over the resolution only — a moved site is not a resolution difference. |
+| `PSS8004` | A soft reference's resolution state differs between the models — most importantly, a string literal that matches a declared name in one and matches none in the other. `detail` carries the first site's `owner` and `line`, copied from the model whose record the resolution was read from (model B where it has one); further sites are derivable from that model's own `soft_references` (D10 A3). `resolves_a`/`resolves_b` are each present **only** where the literal resolved on that side — an absent key means it matched nothing there, following the model's own omit-rather-than-emit convention. Equality is over the resolution only — a moved site is not a resolution difference. |
 | `PSS8005` | **Incomplete-rename candidate.** A script-scope name is present in the after model and absent from the before model, while a name present in **both** models lost usage in the same transition. Carries both names, both usage maps, and the count deltas. Derivation and rationale: §12.7 rule (b). |
 | `PSS8006` | **Producer/consumer desynchronisation candidate.** For a script-scope variable, at least one **writer** function's `PSS7001` is not `identical` while at least one **reader** function's `PSS7001` is `identical`. Carries the variable, the changed writers, and the unchanged readers. Derivation and rationale: §12.7 rule (a). |
 | `PSS8007` | **No write site retained.** A script-scope variable has at least one reader in model B and an empty writer set there. What that means at run time depends on `Set-StrictMode`, which the tool does not observe, and on write forms no static site can carry — §12.2's five declaration sources are all retained, and a non-literal `Set-Variable -Name`, a `[ref]` write or a `-Scope` write (§12.1) still leaves none; the fact is the empty writer set, and the reading of it belongs to the caller (§1.1). `trace` only; the single-state equivalent belongs to `psa.py` (§7). Derivation: §12.7 rule (c). |
@@ -1741,6 +1789,17 @@ state pairs: 1,156 / 12 / 0 / 45. The `direct-only-change` cell was not
 observed in that sample but is reachable (adding a direct call to a function
 already reachable indirectly) and is therefore retained in the enum.
 
+**The vocabulary is serialised, not only documented** (D10, A4). This table
+and §11.4's live in `pss.py` (`PSS7005_CLASSIFICATIONS` /
+`PSS7006_CLASSIFICATIONS`, each in its own table's row order — the two
+tables order their rows differently, so the row-key sequences are stated per
+table) and `--capabilities` publishes them under
+`delta_records.shape.classification_values`, because the intended caller
+holds no SPEC (§2.6) and a round-2 reviewer had to infer the enum from the
+value names alone. The comparator's cell lookups are derived from the same
+constants, so the descriptor and the behaviour cannot disagree; the gate
+holds every emitted classification against the declared vocabulary.
+
 ### 11.4 The combined classification
 
 `PSS7006` crosses `PSS7001` (did the text change) with `PSS7005` (did the
@@ -2061,7 +2120,8 @@ should not assume any of these are currently enforced.
 | Determinism | **RESOLVED.** `test_pss.py` extracts the pinned blob twice at each materialisation and compares the **serialised bytes**, not the parsed objects: key order is part of what §5.4 promises, and two dicts can compare equal while serialising differently. Re-checked now rather than left as written, because `--cost` re-runs the survey internally to price an absent axis (§3.1), so a default-materialisation model is produced by four extractions rather than one | closed |
 | Reachability | no §10.5 unreachable combination is producible over the regression corpus (`PSS9006` count is zero) | S4 |
 | Derivation owed | **RESOLVED (ADR 0036).** Every B.3 figure is re-derived by `test_pss.py` from the pinned blob, withdrawn as an orphan, or re-stamped with the state that reproduces it; a figure with no executable derivation is no longer permitted to exist | closed |
-| Call-site locations | a `PSS2001` edge carries one `line` and a `sites` count, so where `sites` exceeds one the remaining locations are recoverable from no shipped shape — the `command-sites` axis materialises per-site records for **unresolved** commands (`PSS2009`) only. Consumer review (§3.2) hit this on the plainest possible task, "list every place that breaks if this function is deleted", and neither reviewer could complete it from the model. Closing it means either a `lines` array on the edge record or per-site edge records under an axis; both change the emitted model and so advance `model_version` | not started; adjudicate with the other extractor work so cache expiry happens once |
+| Call-site locations | **RESOLVED at the D10 arc.** `edges[].lines` carries every site, ascending, on the default model; `line` is normatively `lines[0]` (§5.9). The shape was consumer-adjudicated across two rounds before it was built, and the gate holds it by fixture (ascending order established at emission — a `$( ... )` site is scanned after the top-level stream) and by the B.8 shape fingerprints | closed |
+| Per-record presence contract | §13.3's `always` is a **per-model** claim — the path occurs in every model — and a round-2 reviewer read it as per-record and found the counterexample: `/symbols[]/parent` is kind `always` and absent on 384 of 385 symbol records at the pinned blob (verified), `/closures[]/record` on 27 of 412. The remedy is a declared per-record presence contract beside the nullability one — which variants of a record carry which keys, `omitted_when` stated rather than inferred — serialised by `--capabilities`, held by `--self-check` in both directions, and held against the pinned blob by the gate (the §13.3-nullability pattern re-applied) | not started; independent of `model_version` (declaration only), adjudicate the declaration shape first |
 | Static analysis | clean under the repository's Python gates | not yet wired into a `pss.py`-specific run |
 | Docs | **RESOLVED.** `README.md`, `README.ja.md`, `SPEC.md`, `CHANGELOG.md` and `VERSION` all exist, and `test_pss.py` holds them rather than leaving their presence to inspection: each file must exist, `VERSION` must equal `pss.__version__` (one version, two places, so the file cannot go stale against the code), and the bilingual pair must be in **lock-step on structure** — the same heading text ordering by level, the same number of fenced blocks. Lock-step is checked structurally rather than by translation, and that limit is stated: it catches a section added to one and not the other, and says nothing about whether a paragraph's content still agrees | closed |
 | Emission coverage | every code in §4 blocks 1-4 (survey-emittable) appears as a `code` or `facts` value on at least one record somewhere in the regression corpus's models, or is documented as data-dependent-absent (e.g. `PSS1005` legitimately does not fire on a corpus with zero duplicate names) | `PSS2005`, `PSS4001`, `PSS4002` closed by manual audit. `PSS2002` closed for all five §12.2 sources at the D10 arc — each source is held red-first by a §13.1 fixture, which is stronger than corpus presence. No automated corpus-wide gate yet for the rest; S4 |

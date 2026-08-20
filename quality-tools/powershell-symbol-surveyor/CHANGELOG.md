@@ -22,6 +22,27 @@ time, and are marked as such.
 
 ### Added
 
+- **The classification vocabularies are serialised** (SPEC §11.3;
+  adjudication A4, premise corrected by measurement: the §11.3/§11.4 truth
+  tables already existed and matched the implementation — what the round-2
+  reviewer lacked was any copy reachable from the shipped surface, since the
+  intended caller holds no SPEC (§2.6). `PSS7005_CLASSIFICATIONS` /
+  `PSS7006_CLASSIFICATIONS` are one-copy constants, each in its own table's
+  row order — the two tables order their rows differently, found in the act
+  of unifying them — the comparator's cell lookups derive from them, and
+  `--capabilities` publishes them as `classification_values`. Model
+  unchanged. Two new gate checks, red-run against the parent build.)
+- **§3.2 records the second consumer-review round**: convergences, the
+  verified new finding (a kind-`always` path omitted per record), and the
+  three documentation defects reported as forced guesses — each closed in
+  this arc: the `axis_increment` baseline is stated (§3.1: this model's own
+  materialisation; `0` = already carried, `null` = sliced), `edges[].line`'s
+  meaning is §5.9's, and `PSS8004`'s `resolves_a`/`resolves_b` presence rule
+  is explicit.
+- **§13.2 gains the per-record presence contract as owed** (the round-2
+  finding, verified: `/symbols[]/parent` kind `always`, absent on 384/385
+  records at the pin) and closes the `Call-site locations` row ([F2]).
+
 - **The delta document states what it did not evaluate and shrinks what it
   never used** (SPEC §6.4; consumer-adjudicated A3; part of the
   `model_version` `"3"` arc — the document shape moves, the record

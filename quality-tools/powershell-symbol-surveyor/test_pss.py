@@ -1308,6 +1308,29 @@ def check_comparator():
         by_code = {}
         for r in chain["delta_records"]:
             by_code.setdefault(r["code"], {})[r["subject"]] = r
+        # SPEC 11.3/11.4 (D10 A4): the classification vocabularies are
+        # serialised by --capabilities, because the intended caller holds no
+        # SPEC and a round-2 reviewer had to guess the enum from the value
+        # names. Held here against behaviour: every emitted classification is
+        # a member of the declared vocabulary.
+        declared_cls = (pss.MACHINE_OUTPUTS.get("delta_records", {})
+                        .get("shape", {}).get("classification_values"))
+        check(declared_cls is not None
+              and tuple(declared_cls.get("PSS7005", ())) ==
+              getattr(pss, "PSS7005_CLASSIFICATIONS", None)
+              and tuple(declared_cls.get("PSS7006", ())) ==
+              getattr(pss, "PSS7006_CLASSIFICATIONS", None),
+              "comparator: the classification vocabularies are declared",
+              "descriptor shape carries %r" % (declared_cls,))
+        emitted_cls = [r.get("detail", {}).get("classification")
+                       for recs in (by_code.get("PSS7005", {}),
+                                    by_code.get("PSS7006", {}))
+                       for r in recs.values()]
+        vocab = set(getattr(pss, "PSS7005_CLASSIFICATIONS", ())) \
+            | set(getattr(pss, "PSS7006_CLASSIFICATIONS", ()))
+        check(emitted_cls and all(c in vocab for c in emitted_cls),
+              "comparator: every emitted classification is in the vocabulary",
+              "emitted %r, vocabulary %r" % (emitted_cls, sorted(vocab)))
         eq(by_code.get("PSS7005", {}).get("function/Outer", {})
            .get("detail", {}).get("classification"), "downstream-changed",
            "comparator: PSS7005 names a moved closure behind an unchanged "
