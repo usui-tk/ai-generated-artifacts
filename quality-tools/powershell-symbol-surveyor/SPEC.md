@@ -1323,11 +1323,16 @@ A `PSS2001` edge carries **every** call site:
 - `lines` — the line of each site, **ascending**, one entry per site, so
   `len(lines) == sites` always. Two sites on one line are two entries: the
   array counts sites, not distinct lines.
-- `line` — normatively **`lines[0]`**, re-derived from the array at emission
-  so the two cannot disagree. It is kept as a field because every consumer of
-  the `"2"` models read it; treating it as anything other than the first
-  entry of `lines` is reading a duplicate. Whether it should be dropped is a
-  question for the next model-moving arc, recorded rather than decided here.
+
+**`line` is retired (D12 arc, `model_version` 4).** It was normatively
+`lines[0]` — a duplicate by construction, kept one version for the `"2"`
+consumers that read it, with the retirement question recorded here rather
+than decided. Decided now, in the arc that advances the version anyway: a
+consumer reading `line` was reading a copy of `lines[0]`, and a copy of a
+fact is the shape §13.2 spends its rows fighting. The `"3"` models carry
+both fields; a `"4"` model carries `lines` only, and the version gate on
+`compare`/`trace` (§5.5) is what keeps the two shapes from being read as
+one.
 
 This is the [F2] resolution (§13.2 `Call-site locations`, closed at the D10
 arc). The shape was **consumer-adjudicated before it was built**: both round-2
@@ -2261,7 +2266,7 @@ should not assume any of these are currently enforced.
 | Static analysis | clean under the repository's Python gates | not yet wired into a `pss.py`-specific run |
 | Docs | **RESOLVED.** `README.md`, `README.ja.md`, `SPEC.md`, `CHANGELOG.md` and `VERSION` all exist, and `test_pss.py` holds them rather than leaving their presence to inspection: each file must exist, `VERSION` must equal `pss.__version__` (one version, two places, so the file cannot go stale against the code), and the bilingual pair must be in **lock-step on structure** — the same heading text ordering by level, the same number of fenced blocks. Lock-step is checked structurally rather than by translation, and that limit is stated: it catches a section added to one and not the other, and says nothing about whether a paragraph's content still agrees | closed |
 | Emission coverage | every code in §4 blocks 1-4 (survey-emittable) appears as a `code` or `facts` value on at least one record somewhere in the regression corpus's models, or is documented as data-dependent-absent (e.g. `PSS1005` legitimately does not fire on a corpus with zero duplicate names) | `PSS2005`, `PSS4001`, `PSS4002` closed by manual audit. `PSS2002` closed for all five §12.2 sources at the D10 arc — each source is held red-first by a §13.1 fixture, which is stronger than corpus presence. No automated corpus-wide gate yet for the rest; S4 |
-| Declared model schema | **RESOLVED (ADR 0036).** §13.3 declares the 125-path set and `pss.MODEL_SCHEMA` carries it; `--self-check` holds the two together on path *and* kind, and `test_pss.py` holds the declaration against the pin in both directions. The pairing with the §3.1 descriptor is satisfied by the declaration living in the code, so `--capabilities` can serialise it rather than restate it | closed |
+| Declared model schema | **RESOLVED (ADR 0036).** §13.3 declares the path set (124 at `all-axes` as of `model_version` 4) and `pss.MODEL_SCHEMA` carries it; `--self-check` holds the two together on path *and* kind, and `test_pss.py` holds the declaration against the pin in both directions. The pairing with the §3.1 descriptor is satisfied by the declaration living in the code, so `--capabilities` can serialise it rather than restate it | closed |
 | Version-decision enforcement | **RESOLVED (ADR 0036).** The parent commit's build is re-derived and compared; a model that moved without the version advancing is a failure. Measured against real history the check reddens at `44b97d1` (shape moved) and at `bc69c27` (shape identical, values moved) | closed |
 | Enumerated-constant reachability | **the generalisation of the row above.** Every constant this tool enumerates — fact codes, the assignment-operator set, the automatic-variable set, the axis vocabulary — is demonstrably reachable: some input drives it, or it is documented as data-dependent-absent. Enumerating a capability the machinery cannot exercise has now failed twice in the same shape — four fact codes defined and never emitted, and three assignment operators the tokenizer could not produce (§12.2) — and both times every gate stayed green because the check compared *names* rather than *behaviour*. `test_pss.py`'s fixtures cover the operator set; the fact catalogue and the automatic-variable set are not yet covered | S4 |
 
@@ -2304,7 +2309,7 @@ generations. They are absent from the smaller early scripts, which is exactly
 the data dependence the fingerprint cannot police, and marking them is
 therefore a recorded measurement rather than a licence to be absent.
 
-Counts at the pinned blob: **125** paths at `all-axes`, **115** at the default
+Counts at the pinned blob: **124** paths at `all-axes`, **114** at the default
 materialisation, the difference being the ten `axis` paths.
 
 | Key path | Kind |
@@ -2347,7 +2352,6 @@ materialisation, the difference being the ten `axis` paths.
 | `/edges` | always |
 | `/edges[]/code` | always |
 | `/edges[]/from` | always |
-| `/edges[]/line` | always |
 | `/edges[]/lines` | always |
 | `/edges[]/sites` | always |
 | `/edges[]/to` | always |

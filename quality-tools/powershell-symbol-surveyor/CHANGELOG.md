@@ -25,6 +25,18 @@ the D10 bundling discipline): every change below alters the model emitted for
 a fixed input, the "3" caches are expired in one bundled event, and Appendix
 B.7/B.8 are restamped once at the arc's end.
 
+### Removed
+
+- **`edges[].line` is retired** (SPEC §5.9). It was normatively `lines[0]` —
+  a duplicate by construction, kept one version for the `"2"` consumers that
+  read it, with the retirement recorded as a question for the next
+  model-moving arc. Decided in that arc: a consumer reading `line` was
+  reading a copy, and a copy of a fact is the shape §13.2 spends its rows
+  fighting. The declared path set falls 125 -> 124 (`all-axes`) / 115 -> 114
+  (default); the comparator and the delta document read `lines` only and are
+  unmoved; the §5.5 version gate on `compare`/`trace` keeps the `"3"` and
+  `"4"` edge shapes from being read as one.
+
 ### Changed
 
 - **Dotted command names join** (SPEC §10.6). `dism.exe` lexes as word `.`

@@ -2448,8 +2448,8 @@ def run_call_site_fixtures():
     model = pss.Survey("fixture.ps1", body, axes=set()).run().model()
     edge = [e for e in model["edges"] if e["to"] == "function/Invoke-Runner"]
     check(len(edge) == 1 and edge[0].get("lines") == [2, 3, 5]
-          and edge[0].get("line") == 2 and edge[0].get("sites") == 3,
-          "call-site fixture: lines is every site, ascending, line == lines[0]",
+          and "line" not in edge[0] and edge[0].get("sites") == 3,
+          "call-site fixture: lines is every site, ascending; line is retired",
           "edge: %r" % edge)
 
     # A site inside a `$( ... )` subexpression is scanned after the top-level
@@ -2460,7 +2460,7 @@ def run_call_site_fixtures():
     model = pss.Survey("fixture.ps1", body, axes=set()).run().model()
     edge = [e for e in model["edges"] if e["to"] == "function/Get-Tag"]
     check(len(edge) == 1 and edge[0].get("lines") == [2, 3]
-          and edge[0].get("line") == 2,
+          and "line" not in edge[0],
           "call-site fixture: a subexpression site sorts into place",
           "edge: %r" % edge)
 

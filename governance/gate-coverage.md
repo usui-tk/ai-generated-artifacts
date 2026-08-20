@@ -96,7 +96,7 @@
   over the paths a given model happens to carry, so a data-dependent field can appear or
   vanish without moving it. Measured over all 230 committed generations, exactly two such
   fields exist and each is present in 204 of them — which is why one corpus entry carries
-  two fingerprints. SPEC 13.3 now declares the 125-path set with those two marked
+  two fingerprints. SPEC 13.3 now declares the full path set with those two marked
   `optional` and the evidence recorded; the fingerprint remains, and answers a different
   question.
 - **A remainder cannot audit the breakdown it completes.** The cost report's stated

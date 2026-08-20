@@ -988,7 +988,6 @@ MODEL_SCHEMA = {
     "/edges": "always",
     "/edges[]/code": "always",
     "/edges[]/from": "always",
-    "/edges[]/line": "always",
     "/edges[]/lines": "always",
     "/edges[]/sites": "always",
     "/edges[]/to": "always",
@@ -1814,8 +1813,7 @@ class Survey:
             dst = self.func_ids[id(targets[0])]
             rec = self.edges.get((src, dst))
             if rec is None:
-                self.edges[(src, dst)] = {"from": src, "to": dst,
-                                          "line": self.line_of(t.start), "sites": 1,
+                self.edges[(src, dst)] = {"from": src, "to": dst, "sites": 1,
                                           "lines": [self.line_of(t.start)]}
             else:
                 rec["sites"] += 1
@@ -2269,11 +2267,12 @@ class Survey:
             # SPEC 5.9 [F2]: `lines` is every call site, ascending. Sites are
             # collected in scan order, and a site inside a `$( ... )`
             # subexpression is scanned after the top-level stream, so the
-            # ascending order is established here, not assumed. `line` is
-            # normatively `lines[0]` - kept as a field for compatibility and
-            # re-derived from the array so the two cannot disagree.
+            # ascending order is established here, not assumed. `line` -
+            # normatively lines[0], a duplicate by construction - is RETIRED
+            # at the D12 arc (SPEC 5.9): the "3" consumers that read it were
+            # reading a copy, and a copy of a fact is the shape this SPEC
+            # spends 13.2 rows fighting.
             e["lines"].sort()
-            e["line"] = e["lines"][0]
 
         closures = sorted(self.closures, key=lambda r: r["id"])
         # PSS4003.named_by_literal (SPEC 4.4, F1/P22): sourced from the
