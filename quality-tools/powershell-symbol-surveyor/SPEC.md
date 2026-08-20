@@ -3454,87 +3454,93 @@ is, so a bare count is unfalsifiable in the same way.
 
 ```json pss-baseline
 {
-  "basis": {
-    "blob": "f2b5e6a59b4d7fde688958a19bbfcdb6ce247c01",
-    "corpus_entry": "0002-projects-powershell-update-windows-server-iso.json",
-    "gen_index": 156,
-    "rev": "aade522845fa351cf4bb0f7f81fe72d79eb9bee4"
-  },
-  "closures": {
-    "callee_side_total": 5071,
-    "caller_side_total": 5252,
-    "widest_callee": 175,
-    "widest_caller": 140
-  },
-  "counters": {
-    "assignments": 4757,
-    "commands_dynamic": 26,
-    "commands_named": 5048,
-    "expandable_strings": 172,
-    "interpolation_refs": 118,
-    "string_literals_bareword": 10027,
-    "string_literals_quoted": 8010,
-    "unresolved_named_command_sites": 2798,
-    "variable_refs": 24317
-  },
-  "edges": {
-    "from_script": 34,
-    "function_to_function": 1247,
-    "records": 1281
-  },
-  "facts": {
-    "closures.PSS4001": 480,
-    "closures.PSS4002": 480,
-    "symbols.PSS1001": 480,
-    "symbols.PSS1002": 480,
-    "symbols.PSS1003": 480,
-    "symbols.PSS1004": 1
-  },
-  "limitations": {
-    "PSS9002": 26,
-    "PSS9004": 11,
-    "PSS9004_functions": 5,
-    "PSS9004_names": 4
-  },
-  "local_variables": {
-    "PSS2002": 5534,
-    "PSS2003": 14818,
-    "PSS2005": 2075,
-    "aggregate_records": 465
-  },
-  "model_shape": {
-    "all-axes": "82af5244ad5f6935",
-    "default": "df79920d299a07ab"
-  },
-  "references_outside_functions": {
-    "all-axes": 556,
-    "default": 485
-  },
-  "script_variables": {
-    "PSS2004": 1792,
-    "PSS2004_env": 14,
-    "PSS2004_script": 1778,
-    "PSS2006": 87,
-    "PSS2008": 156,
-    "script_qualified_names": 198,
-    "script_qualified_refs": 1865,
-    "script_qualified_refs_at_script_level": 484,
-    "script_qualified_refs_in_function": 1381,
-    "usage_signatures": 120
-  },
-  "soft_references": {
-    "PSS3001": 49,
-    "PSS3002": 104
-  },
-  "string_interpolation_references": {
-    "distinct_source_lines": 84,
-    "records": 118
-  },
-  "symbols": {
-    "duplicate_names": 0,
-    "nested": 1,
-    "total": 480
-  }
+ "basis": {
+  "blob": "f2b5e6a59b4d7fde688958a19bbfcdb6ce247c01",
+  "corpus_entry": "0002-projects-powershell-update-windows-server-iso.json",
+  "gen_index": 156,
+  "rev": "aade522845fa351cf4bb0f7f81fe72d79eb9bee4"
+ },
+ "closures": {
+  "callee_side_total": 5071,
+  "caller_side_total": 5252,
+  "widest_callee": 175,
+  "widest_caller": 140
+ },
+ "counters": {
+  "assignments": 4757,
+  "commands_dynamic": 26,
+  "commands_named": 5048,
+  "expandable_strings": 172,
+  "interpolation_refs": 118,
+  "string_literals_bareword": 10027,
+  "string_literals_quoted": 8010,
+  "unresolved_named_command_sites": 2798,
+  "variable_refs": 24317
+ },
+ "edges": {
+  "from_script": 34,
+  "function_to_function": 1247,
+  "records": 1281
+ },
+ "facts": {
+  "closures.PSS4001": 480,
+  "closures.PSS4002": 480,
+  "symbols.PSS1001": 480,
+  "symbols.PSS1002": 480,
+  "symbols.PSS1003": 480,
+  "symbols.PSS1004": 1
+ },
+ "limitations": {
+  "PSS9002": 26,
+  "PSS9003": 1,
+  "PSS9004": 11,
+  "PSS9004_functions": 5,
+  "PSS9004_names": 4,
+  "PSS9007": 0
+ },
+ "local_variables": {
+  "PSS2002": 5534,
+  "PSS2003": 14818,
+  "PSS2005": 2075,
+  "aggregate_records": 465
+ },
+ "model_shape": {
+  "all-axes": "4c8c4ccaeb6824a4",
+  "default": "3a513c698491cbe3"
+ },
+ "references_outside_functions": {
+  "all-axes": 556,
+  "default": 485
+ },
+ "script_variables": {
+  "PSS2004": 1792,
+  "PSS2004_env": 14,
+  "PSS2004_script": 1778,
+  "PSS2006": 87,
+  "PSS2008": 156,
+  "script_qualified_names": 198,
+  "script_qualified_refs": 1865,
+  "script_qualified_refs_at_script_level": 484,
+  "script_qualified_refs_in_function": 1381,
+  "usage_signatures": 120
+ },
+ "soft_references": {
+  "PSS3001": 49,
+  "PSS3002": 104
+ },
+ "string_interpolation_references": {
+  "distinct_source_lines": 84,
+  "records": 118
+ },
+ "symbols": {
+  "duplicate_names": 0,
+  "nested": 1,
+  "total": 480
+ },
+ "unresolved_named_commands": {
+  "aggregate_records": 93,
+  "names_sha256_16": "f9837b486282c11e"
+ }
 }
 ```
 

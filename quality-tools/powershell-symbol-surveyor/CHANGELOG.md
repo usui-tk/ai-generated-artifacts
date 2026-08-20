@@ -23,7 +23,13 @@ time, and are marked as such.
 `MODEL_VERSION` advances at this arc's first model-moving commit (ADR 0035 /
 the D10 bundling discipline): every change below alters the model emitted for
 a fixed input, the "3" caches are expired in one bundled event, and Appendix
-B.7/B.8 are restamped once at the arc's end.
+B.8 is restamped once at the arc's end — B.7's pins verified **unmoved**, the
+outcome §6.4's standing predicts for changes the comparator does not read.
+The restamp's B.8 movements are exactly the arc's declared set: both shape
+fingerprints, the new `unresolved_named_commands` name-set block, and the
+`PSS9003`/`PSS9007` limitations counts. Battery after the restamp: **358**
+with `pwsh` / **351** without / **163** without `git`, green at all three
+degradation levels; the derived caches are regenerated under the new digest.
 
 ### Added
 
