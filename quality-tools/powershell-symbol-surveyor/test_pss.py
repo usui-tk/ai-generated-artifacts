@@ -1469,6 +1469,79 @@ def check_comparator():
            sorted(pss.SUCCESSION_CODES),
            "succession: trace tallies exactly the three that compare cannot")
 
+        # D11 B4 (round-3 adjudication): PSS8007, PSS8006 and PSS7007 carry
+        # baseline_state and successor_state - writer/reader identities WITH
+        # their retained site lines, from each model's own reference records.
+        # One reviewer proved the need on real data: a trace's PSS8007 reads
+        # as "introduced by B" until the raw models are joined, and the
+        # empty-writer state turned out to predate the change. The state a
+        # consumer had to reconstruct by joining is transcribed by the
+        # writer, which holds both models at emission time. This pair fires
+        # all three codes at once: P gains a reader and its writer's body
+        # changes (PSS7007 + PSS8006); Q is read and never written in both
+        # models (PSS8007 - and its baseline_state proves the condition
+        # PRE-EXISTS, the decidable-from-the-delta fact that was the ask).
+        st_a = ("function Set-P { $script:P = 1 }\n"
+                "function Read-P { $null = $script:P }\n"
+                "function Read-Q { $null = $script:Q }\n"
+                "Set-P; Read-P; Read-Q\n")
+        st_b = ("function Set-P { $script:P = 2 }\n"
+                "function Read-P { $null = $script:P }\n"
+                "function Read-P2 { $null = $script:P }\n"
+                "function Read-Q { $null = $script:Q }\n"
+                "Set-P; Read-P; Read-P2; Read-Q\n")
+        st_models = {}
+        for name, text in (("sa", st_a), ("sb", st_b)):
+            out = _run_pss(["survey", "@SCRIPT@", "--format", "json"],
+                           text=text)
+            paths[name] = os.path.join(d, name + ".json")
+            with open(paths[name], "wb") as fh:
+                fh.write(out.stdout)
+            st_models[name] = json.loads(out.stdout.decode("utf-8"))
+
+        def ref_sites(model, vid, role):
+            sites = {}
+            for r in model.get("script_variables", ()):
+                if r.get("record") == "reference" and r.get("id") == vid \
+                        and r.get("role") == role:
+                    sites.setdefault(r["owner"], []).append(r["line"])
+            return [{"id": o, "lines": sorted(ls)}
+                    for o, ls in sorted(sites.items())]
+
+        rc, st = run("trace", "sa", "sb")
+        eq(rc, 0, "states: the state fixture traces")
+        by_code = {}
+        for r in st["delta_records"]:
+            by_code.setdefault(r["code"], []).append(r)
+        for code, vid in (("PSS7007", "variable:script/P"),
+                          ("PSS8006", "variable:script/P"),
+                          ("PSS8007", "variable:script/Q")):
+            recs = [r for r in by_code.get(code, ())
+                    if r["subject"] == vid]
+            det = recs[0]["detail"] if recs else {}
+            b_state, s_state = det.get("baseline_state"), \
+                det.get("successor_state")
+            expect = lambda m, role: ref_sites(m, vid, role)
+            ok = (len(recs) == 1 and isinstance(b_state, dict)
+                  and isinstance(s_state, dict)
+                  and b_state.get("readers") == expect(st_models["sa"], "read")
+                  and s_state.get("readers") == expect(st_models["sb"], "read")
+                  and b_state.get("writers") == expect(st_models["sa"], "write")
+                  and s_state.get("writers") == expect(st_models["sb"], "write")
+                  and b_state.get("writer_count")
+                  == len(expect(st_models["sa"], "write"))
+                  and s_state.get("writer_count")
+                  == len(expect(st_models["sb"], "write")))
+            check(ok, "states: %s carries baseline and successor states "
+                      "with the models' own site lines" % code,
+                  "records %r" % recs)
+        q87 = [r for r in by_code.get("PSS8007", ())
+               if r["subject"] == "variable:script/Q"]
+        check(q87 and q87[0]["detail"].get("baseline_state", {})
+              .get("writer_count") == 0,
+              "states: PSS8007's baseline_state makes pre-existing "
+              "decidable from the delta alone")
+
         # SPEC 5.5: a precondition failure refuses; it does not compare
         # partially, because a partial delta reads as a complete one.
         with open(paths["a"], encoding="utf-8") as fh:

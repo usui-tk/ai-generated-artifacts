@@ -22,6 +22,22 @@ time, and are marked as such.
 
 ### Added
 
+- **`PSS8007`, `PSS8006` and `PSS7007` transcribe both usage states**
+  (SPEC §12.7; round-3 B4). `detail.baseline_state` / `detail.successor_state`
+  carry each model's writer and reader identities **with the site lines that
+  model's own reference records retain** — the join both round-3 reviewers
+  performed by hand before they could act on a record, and the evidence one
+  of them needed to prove that a trace's empty-writer `PSS8007` state
+  predated the change rather than being introduced by it. Pre-existing vs
+  introduced is now decidable from the delta alone; which of the two it
+  amounts to remains the consumer's reading. On `PSS8007`, `baseline_state`
+  is `null` when the variable is absent from the before model. Delta-shape
+  change under §6.4's newly stated standing: B.7 pins (counts, tallies,
+  subjects) verified unmoved, no restamp needed, `model_version` untouched.
+  New gate fixture fires all three codes in one pair and cross-derives every
+  transcribed line from the raw models; demonstrated red against the D10
+  build.
+
 - **The slice projection contract is declared** (SPEC §5.7; round-3 B2).
   `pss.SLICE_PROJECTION` states what `slice_model` has always done and
   nothing stated: membership-filtering by one rule over seven identifying

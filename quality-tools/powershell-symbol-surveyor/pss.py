@@ -3147,6 +3147,32 @@ def _usage_maps(model):
             if v.get("record") == "usage_map"}
 
 
+def _usage_state(model, vid):
+    """SPEC 6.4 / round-3 B4: one model's usage state for a script variable -
+    writer and reader identities WITH the site lines that model's own
+    reference records retain. This is exactly the join both round-3
+    reviewers performed by hand against the raw models before acting on a
+    PSS7007/PSS8006/PSS8007 record; the delta writer holds both models at
+    emission time, so the state is transcribed rather than reconstructed.
+    Facts only: `writer_count` counts identities with retained reference
+    sites in THIS model, and an empty `lines` list would mean an identity
+    the usage map names without a retained site - retention, not verdict."""
+    sites = {"read": {}, "write": {}}
+    for r in model.get("script_variables", ()):
+        if r.get("record") == "reference" and r.get("id") == vid:
+            role = r.get("role")
+            if role in sites:
+                sites[role].setdefault(r["owner"], []).append(r["line"])
+
+    def rows(role):
+        return [{"id": owner, "lines": sorted(lines)}
+                for owner, lines in sorted(sites[role].items())]
+
+    writers = rows("write")
+    return {"writer_count": len(writers), "writers": writers,
+            "readers": rows("read")}
+
+
 def _edge_pairs(model):
     return {(e["from"], e["to"]) for e in model.get("edges", ())}
 
@@ -3343,6 +3369,8 @@ def compare_models(model_a, model_b):
             continue
         delta.emit("PSS7007", vid, "script-variable", equality="differs",
                    detail={
+                       "baseline_state": _usage_state(model_a, vid),
+                       "successor_state": _usage_state(model_b, vid),
                        "writers": {"added": sorted(wb - wa),
                                    "removed": sorted(wa - wb),
                                    "count_a": len(wa), "count_b": len(wb)},
@@ -3530,7 +3558,9 @@ def trace_models(model_before, model_after):
             "code": "PSS8006", "subject": vid,
             "subject_kind": "script-variable",
             "detail": {"changed_writers": changed_writers,
-                       "unchanged_readers": unchanged_readers}})
+                       "unchanged_readers": unchanged_readers,
+                       "baseline_state": _usage_state(model_before, vid),
+                       "successor_state": _usage_state(model_after, vid)}})
 
     # Rule (b), PSS8005: a name appears while an old name persists with reduced
     # usage. A completed rename removes one name and adds one; an incomplete
@@ -3589,7 +3619,10 @@ def trace_models(model_before, model_after):
         delta.records.append({
             "code": "PSS8007", "subject": vid,
             "subject_kind": "script-variable",
-            "detail": {"readers": readers, "writer_count": 0}})
+            "detail": {"readers": readers, "writer_count": 0,
+                       "baseline_state": (_usage_state(model_before, vid)
+                                          if vid in before else None),
+                       "successor_state": _usage_state(model_after, vid)}})
 
     return delta, examined
 

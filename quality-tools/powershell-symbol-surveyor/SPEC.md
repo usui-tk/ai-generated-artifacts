@@ -2098,6 +2098,25 @@ the variable broken would assert both premises the tool cannot see (§1.3).
 Emitted only as a difference between two models; the single-state equivalent
 belongs to `psa.py` (§7).
 
+**The two-state transcription (D11, round-3 B4, normative).** `PSS8006`,
+`PSS8007` and — in both verbs — `PSS7007` carry `baseline_state` and
+`successor_state` in `detail`: for the subject variable, each model's writer
+and reader **identities with the site lines that model's own reference
+records retain** (`{"writer_count": n, "writers": [{"id", "lines"}],
+"readers": [{"id", "lines"}]}`, identities sorted, lines ascending). This is
+the join both round-3 reviewers performed by hand against the raw models
+before they could act on a record — one of them proved on real data that a
+trace's `PSS8007` reads as "introduced by B" until the baseline shows the
+empty-writer state predates the change — and the delta writer holds both
+models at emission time, so the state is transcribed, not reconstructed.
+`writer_count` counts identities with retained reference sites in that
+model; on `PSS8007`, `baseline_state` is `null` when the variable does not
+exist in the before model (a state for a subject a model does not carry).
+Facts only: which of pre-existing debt or introduced condition the pair
+amounts to remains the consumer's reading, now decidable from the delta
+alone. Delta-shape change under §6.4's standing: B.7 restamped, no
+`model_version` interaction.
+
 **Verification.** The three rules were validated by injecting a realistic
 defect: in a historical state, `$script:OsProfile` — referenced by 12 functions
 — was renamed throughout except in one function, reproducing a single-site
