@@ -2121,7 +2121,7 @@ should not assume any of these are currently enforced.
 | Reachability | no §10.5 unreachable combination is producible over the regression corpus (`PSS9006` count is zero) | S4 |
 | Derivation owed | **RESOLVED (ADR 0036).** Every B.3 figure is re-derived by `test_pss.py` from the pinned blob, withdrawn as an orphan, or re-stamped with the state that reproduces it; a figure with no executable derivation is no longer permitted to exist | closed |
 | Call-site locations | **RESOLVED at the D10 arc.** `edges[].lines` carries every site, ascending, on the default model; `line` is normatively `lines[0]` (§5.9). The shape was consumer-adjudicated across two rounds before it was built, and the gate holds it by fixture (ascending order established at emission — a `$( ... )` site is scanned after the top-level stream) and by the B.8 shape fingerprints | closed |
-| Per-record presence contract | §13.3's `always` is a **per-model** claim — the path occurs in every model — and a round-2 reviewer read it as per-record and found the counterexample: `/symbols[]/parent` is kind `always` and absent on 384 of 385 symbol records at the pinned blob (verified), `/closures[]/record` on 27 of 412. The remedy is a declared per-record presence contract beside the nullability one — which variants of a record carry which keys, `omitted_when` stated rather than inferred — serialised by `--capabilities`, held by `--self-check` in both directions, and held against the pinned blob by the gate (the §13.3-nullability pattern re-applied) | not started; independent of `model_version` (declaration only), adjudicate the declaration shape first |
+| Per-record presence contract | **RESOLVED at the D11 arc.** The declaration shape was consumer-adjudicated across two candidate specimens (round 3, §3.2): variant enumeration with machine-evaluable predicates and non-circular discriminators, first-class conditional keys, and a per-path index derived from the variants at serialisation time. Six collections declared — measurement corrected the round's five-collection estimate — and the survey's own candidate-A specimen demonstrated the quiet failure of the exceptions-only alternative by violating its own complement rule. `pss.RECORD_VARIANTS`, serialised by `--capabilities`, held by `--self-check` both ways and by the gate over both pin materialisations, a slice and the fixtures (§13.3 Per-record presence) | closed |
 | Static analysis | clean under the repository's Python gates | not yet wired into a `pss.py`-specific run |
 | Docs | **RESOLVED.** `README.md`, `README.ja.md`, `SPEC.md`, `CHANGELOG.md` and `VERSION` all exist, and `test_pss.py` holds them rather than leaving their presence to inspection: each file must exist, `VERSION` must equal `pss.__version__` (one version, two places, so the file cannot go stale against the code), and the bilingual pair must be in **lock-step on structure** — the same heading text ordering by level, the same number of fenced blocks. Lock-step is checked structurally rather than by translation, and that limit is stated: it catches a section added to one and not the other, and says nothing about whether a paragraph's content still agrees | closed |
 | Emission coverage | every code in §4 blocks 1-4 (survey-emittable) appears as a `code` or `facts` value on at least one record somewhere in the regression corpus's models, or is documented as data-dependent-absent (e.g. `PSS1005` legitimately does not fire on a corpus with zero duplicate names) | `PSS2005`, `PSS4001`, `PSS4002` closed by manual audit. `PSS2002` closed for all five §12.2 sources at the D10 arc — each source is held red-first by a §13.1 fixture, which is stronger than corpus presence. No automated corpus-wide gate yet for the rest; S4 |
@@ -2316,6 +2316,64 @@ holds the declaration against reality on the pinned blob and a slice of it:
 every observed null is declared, and **every declared path is exercised** — a
 nullable mark nothing drives is an enumeration nothing checks (the §13.2
 rule, applied to values).
+
+#### Per-record presence
+
+Kind `always` above is a **per-model** claim: the path occurs in every model
+this build emits. It has never been a per-record claim — `/symbols[]/parent`
+is `always` and sits on 1 of 480 symbol records at the pinned basis — but
+until the third consumer review (§3.2) nothing said so, and a reader holding
+one record could not tell a missing key from a different record variant. Both
+round-3 reviewers converged on the remedy adopted here: for every collection
+whose records are not uniform, `pss.RECORD_VARIANTS` declares the **record
+variants** — a machine-evaluable predicate (`equals`/`gte` on one key, never
+on the absence of the key being explained: both reviewers flagged that as
+circular, and `depth` exists on every symbol record precisely to carry this
+weight), the exact key set each variant carries, **conditional keys** whose
+presence is the value (§4.4's omit-rather-than-emit for negative booleans,
+promoted to a first-class slot), and **axis keys** present only when the
+axis is materialised. A record matches **exactly one** variant; a collection
+absent from the declaration is uniform, and the gate holds that claim too.
+
+| Collection | Variant | When | Carries (beyond common) | Conditional | Observed at the pin |
+|---|---|---|---|---|---:|
+| `symbols` | `top-level` | `depth == 0` | (common only) | — | 479 |
+| `symbols` | `nested` | `depth >= 1` | `parent` | — | 1 |
+| `closures` | `closure-row` | `record == closure` | `facts` `id` `record` `transitive_callee_count` `transitive_caller_count` | — | 480 |
+| `closures` | `uncalled-fact` | `code == PSS4003` | `code` `id` | `named_by_literal` | 26 |
+| `closures` | `cycle-fact` | `code == PSS4004` | `code` `members` | — | 3 |
+| `local_variables` | `reference` | `record == reference` | `code` `id` `line` `name` `owner` `record` `role` | `in_expandable_string` | 22427 |
+| `local_variables` | `aggregate` | `record == aggregate` | `automatic_refs` `local_declared` `local_refs` `owner` `record` `unresolved_refs` | — | 465 |
+| `script_variables` | `reference` | `record == reference` | `code` `id` `line` `name` `owner` `qualifier` `record` `role` | `in_expandable_string` | 1879 |
+| `script_variables` | `usage-map` | `record == usage_map` | `code` `id` `name` `reader_count` `readers` `record` `writer_count` `writers` | — | 156 |
+| `string_interpolation_references` | `reference` | `record == reference` | `code` `id` `in_expandable_string` `line` `name` `owner` `record` `role` | `qualifier` | 118 |
+| `unresolved_named_commands` | `site` | `record == site` | `code` `line` `name` `owner` `record` | — | 2798 |
+| `unresolved_named_commands` | `aggregate` | `record == aggregate` | `code` `name` `owners` `record` `sites` | — | 93 |
+
+The `symbols` rows use `common_keys` (the eleven keys every symbol record
+carries); every other collection declares its full key set per variant. The
+`closures` `closure-row` variant additionally carries `transitive_callees`
+and `transitive_callers` **under the `closure-sets` axis** — the axis kind
+composes with the variant rather than replacing it. Six collections are
+declared, not the five the adjudication estimated: measurement added
+`string_interpolation_references`, whose `qualifier` is conditional
+(5 of 118 at the pin). `edges`, `soft_references` and `limitations` are
+uniform and therefore undeclared — and the gate holds the uniformity claim
+rather than assuming it.
+
+`--capabilities` serialises the declaration verbatim (`record_variants`)
+**and a derived per-path index** (`record_variant_path_index`: for each
+path, the variants it is present on, conditional in, and any governing
+axis). The two consumer moments the reviewers split their preference across
+— one record in hand, and planning a query over a collection — are each
+served by a machine surface, and because the index is derived from the
+variants at serialisation time, the two cannot disagree. `--self-check`
+holds this table against `pss.RECORD_VARIANTS` in both directions on the
+signature columns; the observed column is data-dependent, so the gate — not
+`--self-check`, which runs without input — re-derives it against the pinned
+blob, holds exactly-one matching and the declared key sets over both pin
+materialisations, a scope slice and the embedded fixtures, and requires
+every declared variant to be exercised at the pin.
 
 | Path | Null states |
 |---|---|

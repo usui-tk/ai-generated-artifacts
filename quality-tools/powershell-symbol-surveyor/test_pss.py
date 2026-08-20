@@ -2323,6 +2323,125 @@ def run_call_site_fixtures():
           "edge: %r" % edge)
 
 
+def _variant_of(rec, decl):
+    """The declared variants a record matches (SPEC 13.3 per-record presence).
+    Structured predicates only - equals / gte - so matching is machine-
+    evaluable, which round 3 required of any shipped presence contract."""
+    hits = []
+    for v in decl["variants"]:
+        w = v["when"]
+        val = rec.get(w["path"])
+        if "equals" in w:
+            ok = val == w["equals"]
+        else:
+            ok = isinstance(val, int) and not isinstance(val, bool) \
+                and val >= w["gte"]
+        if ok:
+            hits.append(v)
+    return hits
+
+
+def check_record_variants(models):
+    """SPEC 13.3 per-record presence contract (round-3 adjudication B1).
+
+    Written red-first: every check below fails against the build that
+    declared only per-model kinds, because RECORD_VARIANTS did not exist.
+    kind `always` was a per-model claim being read as a per-record one -
+    /symbols[]/parent is `always` and sits on 1 of 480 records - and both
+    round-3 reviewers independently asked for variant enumeration with
+    machine-evaluable predicates, exactly-one matching, key-set validation,
+    and an exercised-variant gate; one of them demonstrated the quiet
+    failure of the exceptions-only alternative on the survey's own specimen.
+    """
+    decl = getattr(pss, "RECORD_VARIANTS", None)
+    check(decl is not None, "variants: pss.RECORD_VARIANTS is declared")
+    if decl is None:
+        return
+    caps = json.loads(_run_pss(["--capabilities"]).stdout)
+    check(caps.get("record_variants") == json.loads(json.dumps(decl)),
+          "variants: --capabilities serialises the declaration verbatim")
+    index = caps.get("record_variant_path_index") or {}
+    closures_id = index.get("/closures[]/id") or {}
+    check(sorted(closures_id.get("present_on", ())) ==
+          ["closure-row", "uncalled-fact"],
+          "variants: the derived path index answers the collection-query side",
+          "index entry: %r" % closures_id)
+
+    pin_all = models["pin-all"]
+    violations = []
+    for label, model in sorted(models.items()):
+        axes = set((model.get("materialization") or {}).get("axes") or ())
+        for coll, cdecl in sorted(decl.items()):
+            common = set(cdecl.get("common_keys", ()))
+            for rec in model.get(coll, ()):
+                hits = _variant_of(rec, cdecl)
+                if len(hits) != 1:
+                    violations.append("%s/%s: %d variants matched %r"
+                                      % (label, coll, len(hits), rec))
+                    continue
+                v = hits[0]
+                required = common | set(v["carries"])
+                axis_keys = set()
+                for axis, keys in (v.get("axis_keys") or {}).items():
+                    axis_keys |= set(keys)
+                    if axis in axes:
+                        required |= set(keys)
+                allowed = required | axis_keys \
+                    | set((v.get("conditional_keys") or {}))
+                keys = set(rec)
+                if not required <= keys or not keys <= allowed:
+                    violations.append(
+                        "%s/%s/%s: missing %r undeclared %r"
+                        % (label, coll, v["name"],
+                           sorted(required - keys), sorted(keys - allowed)))
+    eq(violations[:3], [],
+       "variants: exactly-one matching and key sets hold on every checked "
+       "model (%d violations)" % len(violations))
+
+    # Every declared variant is exercised at the pin (all axes): a variant
+    # nothing produces is an enumerated capability nothing exercises - the
+    # failure mode SPEC 13.2 records twice.
+    unexercised = []
+    for coll, cdecl in sorted(decl.items()):
+        seen = set()
+        for rec in pin_all.get(coll, ()):
+            hits = _variant_of(rec, cdecl)
+            if len(hits) == 1:
+                seen.add(hits[0]["name"])
+        unexercised += ["%s/%s" % (coll, v["name"])
+                        for v in cdecl["variants"] if v["name"] not in seen]
+    eq(unexercised, [],
+       "variants: every declared variant is exercised at the pin")
+
+    # An undeclared collection claims uniformity, and the claim is held
+    # rather than assumed.
+    for coll in ("edges", "soft_references", "limitations"):
+        if coll in decl:
+            continue
+        keysets = {frozenset(r) for r in pin_all.get(coll, ())
+                   if isinstance(r, dict)}
+        check(len(keysets) <= 1,
+              "variants: undeclared collection %s is uniform" % coll,
+              "distinct key sets: %d" % len(keysets))
+
+    # The SPEC 13.3 table's observed-at-the-pin column, re-derived (ADR
+    # 0036: the prose figure and the measurement must be one thing).
+    text = open(SPEC, encoding="utf-8").read()
+    rows = re.findall(
+        r"^\| `([a-z_]+)` \| `([a-z-]+)` \|[^|]*\|[^|]*\|[^|]*\| (\d+) \|",
+        text, re.M)
+    stated = {(c, v): int(n) for c, v, n in rows}
+    measured = {}
+    for coll, cdecl in sorted(decl.items()):
+        for rec in pin_all.get(coll, ()):
+            hits = _variant_of(rec, cdecl)
+            if len(hits) == 1:
+                k = (coll, hits[0]["name"])
+                measured[k] = measured.get(k, 0) + 1
+    eq(stated, measured,
+       "variants: the SPEC 13.3 observed column equals the measurement")
+
+
 # -------------------------------------------------------- differential (pwsh)
 
 PWSH_PROBE = r"""
@@ -3792,6 +3911,24 @@ def main():
         check_declared_schema(model_def, model_all)
 
         check_value_nullability(model_def, model_all)
+
+        # SPEC 13.3 per-record presence (round-3 B1): held over both pin
+        # materialisations, a scope slice, and the two embedded fixtures -
+        # the same population the nullability declaration is held over,
+        # plus the slice, because a variant contract that breaks under
+        # projection would be a contract about one materialisation only.
+        variant_models = {
+            "pin-default": model_def,
+            "pin-all": model_all,
+            "pin-slice": pss.slice_model(
+                model_all, scope="function/Set-DebugStep",
+                axes=set(pss.AXES)),
+            "fixture-rotation": pss.Survey(
+                FIXTURE_ROTATION_NAME, FIXTURE_ROTATION).run().model(),
+            "fixture-publish": pss.Survey(
+                FIXTURE_PUBLISH_NAME, FIXTURE_PUBLISH).run().model(),
+        }
+        check_record_variants(variant_models)
 
         check_collection_keys(model_all)
 

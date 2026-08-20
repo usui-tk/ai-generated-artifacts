@@ -1080,6 +1080,160 @@ NULLABLE_PATHS = {
 
 
 # ---------------------------------------------------------------------------
+# SPEC 13.3: the per-record presence contract (round-3 adjudication B1).
+#
+# MODEL_SCHEMA's kind `always` is a PER-MODEL claim - the path occurs in every
+# model this build emits - and round 3 verified the cost of leaving the
+# per-RECORD question undeclared: /symbols[]/parent is `always` and sits on 1
+# of 480 records at the pin. This constant declares, for every collection
+# whose records are not uniform, the record variants: a machine-evaluable
+# predicate (`equals` / `gte` on one key - never on the absence of the key
+# being explained, which both reviewers flagged as circular), the exact key
+# set each variant carries, conditional keys whose PRESENCE is the value
+# (SPEC 4.4's omit-rather-than-emit for negative booleans, promoted to a
+# first-class slot at reviewer request), and axis keys present only when the
+# axis is materialised. A record must match exactly one variant; a collection
+# with no entry here is uniform, and the gate holds both claims. Serialised
+# verbatim by --capabilities together with a derived per-path index
+# (record_variant_path_index), so the record-in-hand reading and the
+# collection-query planning - the two moments the reviewers split their
+# preference across - are each served by a machine surface. Held by
+# --self-check against the SPEC 13.3 table in both directions and by the
+# gate against the pinned blob, a slice and the fixtures.
+RECORD_VARIANTS = {
+    "symbols": {
+        "common_keys": ("depth", "end_line", "facts", "hash_body",
+                        "hash_full", "hash_raw", "id", "kind", "name",
+                        "parameters", "start_line"),
+        "variants": (
+            {"name": "top-level", "when": {"path": "depth", "equals": 0},
+             "carries": (), "conditional_keys": {}, "axis_keys": {}},
+            {"name": "nested", "when": {"path": "depth", "gte": 1},
+             "carries": ("parent",), "conditional_keys": {}, "axis_keys": {}},
+        ),
+    },
+    "closures": {
+        "common_keys": (),
+        "variants": (
+            {"name": "closure-row",
+             "when": {"path": "record", "equals": "closure"},
+             "carries": ("facts", "id", "record", "transitive_callee_count",
+                         "transitive_caller_count"),
+             "conditional_keys": {},
+             "axis_keys": {"closure-sets": ("transitive_callees",
+                                            "transitive_callers")}},
+            {"name": "uncalled-fact",
+             "when": {"path": "code", "equals": "PSS4003"},
+             "carries": ("code", "id"),
+             "conditional_keys": {"named_by_literal": {
+                 "presence_means": "true - the function is named by a string "
+                                   "literal somewhere in the file (SPEC 4.4)",
+                 "absence_means": "false - the omit-rather-than-emit "
+                                  "convention for negative booleans"}},
+             "axis_keys": {}},
+            {"name": "cycle-fact",
+             "when": {"path": "code", "equals": "PSS4004"},
+             "carries": ("code", "members"),
+             "conditional_keys": {}, "axis_keys": {}},
+        ),
+    },
+    "local_variables": {
+        "common_keys": (),
+        "variants": (
+            {"name": "reference",
+             "when": {"path": "record", "equals": "reference"},
+             "carries": ("code", "id", "line", "name", "owner", "record",
+                         "role"),
+             "conditional_keys": {"in_expandable_string": {
+                 "presence_means": "true - the site sits inside an "
+                                   "expandable string",
+                 "absence_means": "false"}},
+             "axis_keys": {}},
+            {"name": "aggregate",
+             "when": {"path": "record", "equals": "aggregate"},
+             "carries": ("automatic_refs", "local_declared", "local_refs",
+                         "owner", "record", "unresolved_refs"),
+             "conditional_keys": {}, "axis_keys": {}},
+        ),
+    },
+    "script_variables": {
+        "common_keys": (),
+        "variants": (
+            {"name": "reference",
+             "when": {"path": "record", "equals": "reference"},
+             "carries": ("code", "id", "line", "name", "owner", "qualifier",
+                         "record", "role"),
+             "conditional_keys": {"in_expandable_string": {
+                 "presence_means": "true - the site sits inside an "
+                                   "expandable string",
+                 "absence_means": "false"}},
+             "axis_keys": {}},
+            {"name": "usage-map",
+             "when": {"path": "record", "equals": "usage_map"},
+             "carries": ("code", "id", "name", "reader_count", "readers",
+                         "record", "writer_count", "writers"),
+             "conditional_keys": {}, "axis_keys": {}},
+        ),
+    },
+    "string_interpolation_references": {
+        "common_keys": (),
+        "variants": (
+            {"name": "reference",
+             "when": {"path": "record", "equals": "reference"},
+             "carries": ("code", "id", "in_expandable_string", "line", "name",
+                         "owner", "record", "role"),
+             "conditional_keys": {"qualifier": {
+                 "presence_means": "the interpolated reference carries a "
+                                   "scope qualifier",
+                 "absence_means": "the reference is unqualified"}},
+             "axis_keys": {}},
+        ),
+    },
+    "unresolved_named_commands": {
+        "common_keys": (),
+        "variants": (
+            {"name": "site",
+             "when": {"path": "record", "equals": "site"},
+             "carries": ("code", "line", "name", "owner", "record"),
+             "conditional_keys": {}, "axis_keys": {}},
+            {"name": "aggregate",
+             "when": {"path": "record", "equals": "aggregate"},
+             "carries": ("code", "name", "owners", "record", "sites"),
+             "conditional_keys": {}, "axis_keys": {}},
+        ),
+    },
+}
+
+
+def record_variant_path_index():
+    """The per-path view DERIVED from RECORD_VARIANTS - candidate A's
+    collection-query convenience generated from candidate B's record-local
+    truth, so the two cannot disagree (the round-3 hybrid adjudication)."""
+    index = {}
+    for coll, cdecl in sorted(RECORD_VARIANTS.items()):
+        keys = {}
+        for v in cdecl["variants"]:
+            for k in cdecl.get("common_keys", ()):
+                keys.setdefault(k, {"present_on": [], "conditional_in": [],
+                                    "axis": None})["present_on"].append(v["name"])
+            for k in v["carries"]:
+                keys.setdefault(k, {"present_on": [], "conditional_in": [],
+                                    "axis": None})["present_on"].append(v["name"])
+            for k in (v.get("conditional_keys") or {}):
+                keys.setdefault(k, {"present_on": [], "conditional_in": [],
+                                    "axis": None})["conditional_in"].append(v["name"])
+            for axis, aks in (v.get("axis_keys") or {}).items():
+                for k in aks:
+                    e = keys.setdefault(k, {"present_on": [],
+                                            "conditional_in": [], "axis": None})
+                    e["present_on"].append(v["name"])
+                    e["axis"] = axis
+        for k, e in keys.items():
+            index["/%s[]/%s" % (coll, k)] = e
+    return index
+
+
+# ---------------------------------------------------------------------------
 # SPEC 5.8: how a caller joins the collections to each other.
 #
 # MODEL_SCHEMA says which key paths exist; it does not say which of them carry
@@ -2631,6 +2785,65 @@ def self_check():
                 print("  nullable : %d paths, SPEC.md 13.3 and pss.py agree; "
                       "all are declared key paths" % len(NULLABLE_PATHS))
 
+        # Per-record presence (the SPEC 13.3 subsection, round-3 B1). The
+        # machine fact compared here is the variant signature - collection,
+        # variant name, predicate, carried keys, conditional keys. The
+        # observed column is data-dependent and is held by the gate against
+        # the pinned blob, not here: --self-check runs without any input.
+        vstart = ssection.find("#### Per-record presence")
+        if vstart < 0:
+            print("  FAIL: could not locate the SPEC 13.3 Per-record "
+                  "presence subsection")
+            rc = EXIT_ERROR
+        else:
+            vsection = ssection[vstart:]
+            def _norm(cell):
+                return " ".join(cell.replace("`", "").split())
+            spec_rows = {}
+            for m2 in re.finditer(
+                    r"^\| `([a-z_]+)` \| `([a-z-]+)` \| (.+?) \| (.+?) \| "
+                    r"(.+?) \| \d+ \|", vsection, re.M):
+                spec_rows[(m2.group(1), m2.group(2))] = (
+                    _norm(m2.group(3)), _norm(m2.group(4)), _norm(m2.group(5)))
+            code_rows = {}
+            for coll, cdecl in sorted(RECORD_VARIANTS.items()):
+                for v in cdecl["variants"]:
+                    w = v["when"]
+                    when = "%s == %s" % (w["path"], w["equals"]) \
+                        if "equals" in w else "%s >= %s" % (w["path"], w["gte"])
+                    carries = " ".join(v["carries"]) if v["carries"] \
+                        else "(common only)"
+                    cond = " ".join(sorted(v.get("conditional_keys") or {})) \
+                        or "\u2014"
+                    code_rows[(coll, v["name"])] = (_norm(when),
+                                                    _norm(carries),
+                                                    _norm(cond))
+            v_missing_in_spec = sorted(set(code_rows) - set(spec_rows))
+            v_missing_in_code = sorted(set(spec_rows) - set(code_rows))
+            v_disagrees = sorted(k for k in set(code_rows) & set(spec_rows)
+                                 if code_rows[k] != spec_rows[k])
+            if v_missing_in_spec:
+                print("  FAIL: record variant declared in pss.py but absent "
+                      "from SPEC.md 13.3: %s"
+                      % ", ".join("%s/%s" % k for k in v_missing_in_spec))
+                rc = EXIT_ERROR
+            if v_missing_in_code:
+                print("  FAIL: record variant in SPEC.md 13.3 but not "
+                      "declared in pss.py: %s"
+                      % ", ".join("%s/%s" % k for k in v_missing_in_code))
+                rc = EXIT_ERROR
+            if v_disagrees:
+                print("  FAIL: record variant signature differs between "
+                      "pss.py and SPEC.md 13.3: %s"
+                      % ", ".join("%s/%s (%r vs %r)"
+                                  % (k + (code_rows[k], spec_rows[k]))
+                                  for k in v_disagrees))
+                rc = EXIT_ERROR
+            if not (v_missing_in_spec or v_missing_in_code or v_disagrees):
+                print("  variants : %d record variants over %d collections, "
+                      "SPEC.md 13.3 and pss.py agree"
+                      % (len(code_rows), len(RECORD_VARIANTS)))
+
     if rc == EXIT_OK:
         print("")
         print("  SPEC.md and FACTS are in sync (no drift detected)")
@@ -3660,6 +3873,8 @@ def capabilities_document(parser):
         "facts": dict(FACTS),
         "model_schema": dict(MODEL_SCHEMA),
         "nullable_paths": dict(NULLABLE_PATHS),
+        "record_variants": json.loads(json.dumps(RECORD_VARIANTS)),
+        "record_variant_path_index": record_variant_path_index(),
         "identifier_forms": dict(IDENTIFIER_FORMS),
         "script_owner": SCRIPT_OWNER,
         "collection_keys": {

@@ -20,6 +20,31 @@ time, and are marked as such.
 
 ## [Unreleased]
 
+### Added
+
+- **The per-record presence contract is declared, serialised and gated**
+  (SPEC §13.3 "Per-record presence"; round-3 adjudication B1). Kind
+  `always` was a per-model claim being read as a per-record one —
+  `/symbols[]/parent` is `always` and sits on 1 of 480 records at the pin.
+  `pss.RECORD_VARIANTS` now declares, for every non-uniform collection, the
+  record variants: machine-evaluable predicates (`equals`/`gte`, never on
+  the absence being explained — `depth` discriminates `symbols`
+  non-circularly), exact key sets, first-class conditional keys whose
+  presence is the value (§4.4 omit-for-false, promoted at reviewer
+  request), and axis keys composing with the variant. Exactly-one matching;
+  undeclared collections claim uniformity and the gate holds that too.
+  `--capabilities` serialises the declaration verbatim plus a derived
+  per-path index, serving both consumer moments the reviewers split across.
+  Six collections declared, not the adjudicated five: measurement added
+  `string_interpolation_references` (conditional `qualifier`, 5 of 118).
+  Declaration-only — `model_version` stays `"3"`, no cache expires. New
+  gate checks (exactly-one + key sets over five models, exercised variants,
+  uniformity of undeclared collections, SPEC observed column re-derived,
+  descriptor verbatim + index derivation), demonstrated red as an actual
+  run against the shipped parent build; `--self-check` gains the
+  bidirectional table comparison, demonstrated red against the
+  section-less SPEC.
+
 ### Changed
 
 - **Appendix B.7/B.8 restamped once, closing the D10 arc's intermediate red**
