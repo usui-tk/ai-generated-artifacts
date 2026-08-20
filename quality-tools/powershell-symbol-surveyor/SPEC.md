@@ -459,9 +459,10 @@ than to give an opinion. Four results are load-bearing here.
   change and was carried by neither candidate**, a function having become
   uncalled. It is implemented ahead of codes that were already prototyped.
 - A **specification gap** was found that this repository's own gates could not
-  have found: a command in a `foreach` condition is not in command position
-  under §10.6's inclusion list, so a real call produces no edge and its target
-  is reported `PSS4003`. The reviewer reached the truth through
+  have found: a command in a `foreach` condition was not in command position
+  under §10.6's inclusion list as it then stood, so a real call produced no
+  edge and its target was reported `PSS4003` (closed at the D10 arc — §10.6).
+  The reviewer reached the truth through
   `named_by_literal` and `PSS3001` — the honest-degradation design of §4.4
   working as intended — but the boundary itself was undocumented.
 
@@ -1518,7 +1519,8 @@ command position.
 **Inclusion.** Command position is: statement start; after `|`, `;`, `&`, `&&`,
 `||`, an opening `(` or `{`, or an assignment operator; after one of the
 statement keywords `begin default do else end exit finally process return throw
-try`; and after the closing `)` of a keyword-introduced parenthesis group.
+try`; after the closing `)` of a keyword-introduced parenthesis group; and
+after the keyword `in` inside a `foreach` condition group.
 
 `&&` and `||` are the PowerShell 7 pipeline chain operators. They do not occur
 in the reference target, so no Appendix B value depends on them; they are
@@ -1528,30 +1530,41 @@ and §1.4 requires this tool to work on any single `.ps1`.
 `catch` and `elseif` are deliberately absent from the statement-keyword list:
 each takes a parenthesis or a block rather than a command.
 
+The `in` rule is scoped to the **innermost** parenthesis group having been
+opened after `foreach`, so a bareword `in` used as an ordinary argument opens
+nothing. It is the only statement-condition rule needed: a command at the head
+of an `if`/`while`/`until`/`switch` condition, or anywhere after `|` or inside
+a nested `(`, was already covered by the list above — measured against the
+reference parser at the pinned blob, the token scan's only misses were the two
+`foreach`-condition calls, and with the rule the populations are equal
+(5,048 = 5,048), held by the Appendix B differential from here on.
+
 **Exclusion.** A word in an otherwise-command position is *not* a command name
 when it is a PowerShell keyword; when an assignment operator follows it (a
 hashtable key or assignment target); when it starts with `-` (an operator or a
 parameter name); or when it is inside brackets (an attribute or type-literal
 context).
 
-**Known gap: `foreach ($x in <command>)` (§3.2, 2026-08).** The inclusion list
-covers the position after an opening `(`, which is `$x` here, and the keyword
-list does not contain `in`. So a command in a `foreach` condition — a genuine
-pipeline at run time — yields **no edge**, and a function invoked only that way
-is reported `PSS4003`, with `transitive_callee_count` understated for its
-caller. This is a gap in the list above and not an implementation defect: the
-code matches what this section says.
+**Closed gap: `foreach ($x in <command>)` (recorded §3.2 2026-08; closed at
+the D10 arc, `model_version` 3).** The inclusion list used to cover the
+position after the opening `(` — which is `$x` — and nothing after `in`, so a
+command in a `foreach` condition — a genuine pipeline at run time — yielded
+**no edge**, and a function invoked only that way was reported `PSS4003` with
+`transitive_callee_count` understated for its caller. It was recorded rather
+than fixed on discovery because closing it changes the emitted model for a
+fixed input (§5.5, ADR 0035), and it waited for the version arc so cache
+expiry happened once. Both round-2 consumer reviews independently ranked
+"emit the edge" first among the remedies — one demonstrated the alternative's
+cost by showing `PSS3001`'s classification claim ("not in command position")
+had become **false** for the token in question — and the implementability
+probe against the reference parser confirmed the token scan could carry the
+rule before it was adjudicated in.
 
-It is recorded rather than fixed here because closing it changes the emitted
-model for a fixed input and therefore advances `model_version` (§5.5, ADR
-0035), expiring every derived cache (§14.4). It is adjudicated together with
-the other pending extractor work so that expiry happens once.
-
-The degradation is honest, and that is what made the gap findable: the target
-still carries `PSS3001` with `matches` resolving to it, and its `PSS4003`
-carries `named_by_literal: true` (§4.4). A consumer reading those two reached
-the truth. A consumer reading only the edges would not, which is why this
-paragraph exists rather than only a backlog entry.
+The degradation was honest while it lasted, and that is what made the gap
+findable: the target still carried `PSS3001` with `matches` resolving to the
+callee, and its `PSS4003` carried `named_by_literal: true` (§4.4). A consumer
+reading those two reached the truth; a consumer reading only the edges did
+not, which is why this paragraph exists rather than only a changelog entry.
 
 
 

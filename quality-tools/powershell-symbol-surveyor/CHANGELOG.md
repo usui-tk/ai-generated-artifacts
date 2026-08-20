@@ -22,6 +22,21 @@ time, and are marked as such.
 
 ### Changed
 
+- **[F4] closed: a command in a `foreach` condition is in command position**
+  (SPEC §10.6, consumer-adjudicated A1; part of the `model_version` `"3"`
+  arc). `foreach ($x in Get-Thing)` now yields the `PSS2001` edge, an
+  unresolved name there is `PSS2009`, and the callee stops reporting
+  `PSS4003` / matching `PSS3001` — the honest-degradation path §4.4 carried
+  reverses into the primary fact. The rule is scoped to the keyword `in`
+  inside a `foreach` condition group; an implementability probe against the
+  reference parser preceded the adjudication (the token scan's only misses
+  at the pinned blob were the two `foreach`-condition calls) and the
+  populations are now equal, held by a **new differential check**
+  (`counters.commands_named` == bare-word-named `CommandAst`, demonstrated
+  red at 5,046 vs 5,048 against the parent build). The `Publish-ReleaseArtifacts`
+  independent-pair pin reddened at this entry — the movement B.7 was pinned
+  ahead of the arc to make visible.
+
 - **All five SPEC §12.2 declaration sources retain a site** (`pss_version`
   `0.3.0`, **`model_version` `"2"` -> `"3"`** — the emitted model differs for
   a fixed input, so every derived cache taken under `"2"` is expired by this

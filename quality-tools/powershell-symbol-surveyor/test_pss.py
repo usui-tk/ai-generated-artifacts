@@ -2128,6 +2128,72 @@ def run_declaration_fixtures():
           "records: %r" % [(r.get("code"), r.get("role")) for r in prm])
 
 
+def run_command_position_fixtures():
+    """SPEC 10.6: a command in a statement-condition pipeline is in command
+    position (the [F4] fix, D10 arc, consumer-adjudicated).
+
+    Written red-first: before the fix, `foreach ($x in Get-Thing)` yielded no
+    edge, its target reported PSS4003, and the honest degradation was carried
+    by PSS3001 - the exact instance the Publish-ReleaseArtifacts B.7 fixture
+    pins. The guards below also hold what must NOT change: `in` outside a
+    `foreach` condition group opens no command position.
+    """
+    body = ("function Get-StagedArtifact { 1..3 }\n"
+            "foreach ($pkg in Get-StagedArtifact) {\n"
+            "    Write-Output $pkg\n"
+            "}\n")
+    model = pss.Survey("fixture.ps1", body, axes=set()).run().model()
+    edges = [(e["from"], e["to"]) for e in model["edges"]]
+    check(("<script>", "function/Get-StagedArtifact") in edges,
+          "cmd-pos fixture: a foreach-condition call is a PSS2001 edge",
+          "edges: %r" % edges)
+    orphans = [r for r in model["symbols"]
+               if r.get("name") == "Get-StagedArtifact"
+               and "PSS4003" in (r.get("facts") or ())]
+    check(not orphans,
+          "cmd-pos fixture: the foreach-condition callee is not PSS4003",
+          "symbol facts: %r" % [r.get("facts") for r in model["symbols"]])
+    soft = [r for r in model["soft_references"]
+            if r.get("code") == "PSS3001"
+            and r.get("literal", "").lower() == "get-stagedartifact"]
+    check(not soft,
+          "cmd-pos fixture: the call is no longer a PSS3001 soft reference",
+          "PSS3001 records: %r" % soft)
+
+    # The first command of a pipeline in the condition; the ones after `|`
+    # were always covered.
+    body = ("function Get-Thing { 1..3 }\n"
+            "foreach ($y in Get-Thing | Sort-Object) { $y }\n")
+    model = pss.Survey("fixture.ps1", body, axes=set()).run().model()
+    edges = [(e["from"], e["to"]) for e in model["edges"]]
+    check(("<script>", "function/Get-Thing") in edges,
+          "cmd-pos fixture: the head of a foreach-condition pipeline is an edge",
+          "edges: %r" % edges)
+
+    # An unresolved name in the same position is a PSS2009, not silence.
+    body = "foreach ($f in Get-ChildItem C:/tmp) { $f }\n"
+    model = pss.Survey("fixture.ps1", body, axes=set()).run().model()
+    unresolved = [r["name"].lower() for r in model["unresolved_named_commands"]]
+    check("get-childitem" in unresolved,
+          "cmd-pos fixture: an unresolved foreach-condition command is PSS2009",
+          "unresolved: %r" % unresolved)
+
+    # Guards: `in` as an ordinary bareword argument opens nothing, and a
+    # parenthesised condition element was already covered by `(`.
+    toks = pss.tokenize("Write-Host in Get-Foo\n")
+    words = [t.text for _k, t in pss.iter_command_words(toks, pss.significant(toks))]
+    check(words == ["Write-Host"],
+          "cmd-pos fixture: `in` outside a foreach group opens no position",
+          "command words: %r" % words)
+    body = ("function Get-A { 1 }\n"
+            "foreach ($x in (Get-A)) { $x }\n")
+    model = pss.Survey("fixture.ps1", body, axes=set()).run().model()
+    edges = [(e["from"], e["to"]) for e in model["edges"]]
+    check(("<script>", "function/Get-A") in edges,
+          "cmd-pos fixture: a parenthesised condition element stays covered",
+          "edges: %r" % edges)
+
+
 # -------------------------------------------------------- differential (pwsh)
 
 PWSH_PROBE = r"""
@@ -2143,6 +2209,11 @@ $cvt_lhs = @($asg | Where-Object { $_.Left -is [System.Management.Automation.Lan
 $params = $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.ParameterAst]}, $true)
 $defaults = @($params | Where-Object { $null -ne $_.DefaultValue })
 $funcs = $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst]}, $true)
+$cmds = $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.CommandAst]}, $true)
+$named = @($cmds | Where-Object {
+  $e = $_.CommandElements[0]
+  $e -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
+  $e.StringConstantType -eq 'BareWord' })
 [pscustomobject]@{
   parse_errors  = $errs.Count
   variable_refs = $vars.Count
@@ -2152,6 +2223,7 @@ $funcs = $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.F
   assign_var    = $var_lhs.Count
   assign_cvt    = $cvt_lhs.Count
   param_default = $defaults.Count
+  commands_named = $named.Count
 } | ConvertTo-Json -Compress
 """
 
@@ -2187,6 +2259,14 @@ def run_differential(pwsh, text, measured):
        "differential: PSS2005 == automatic-named VariableExpressionAst")
     eq(measured["symbols"]["total"], ast["functions"],
        "differential: functions == FunctionDefinitionAst")
+    # SPEC 10.6's command position, held against the reference parser: every
+    # bare-word-named CommandAst - including one sitting in a statement
+    # condition (`foreach ($x in Get-Thing)`) - must be a command word the
+    # token scan reaches. Added red-first at the D10 [F4] fix: the parent
+    # build measured 5,046 against the parser's 5,048, the two missing being
+    # exactly the foreach-condition calls.
+    eq(measured["counters"]["commands_named"], ast["commands_named"],
+       "differential: counters.commands_named == bare-word-named CommandAst")
     # counters.assignments is NOT AssignmentStatementAst (that is B.4, B-II);
     # it is the population the token scanner can see - variable and
     # type-conversion left-hand sides plus parameter defaults. Stating the

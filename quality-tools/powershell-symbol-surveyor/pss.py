@@ -422,8 +422,11 @@ def iter_command_words(toks, sig):
     """Yield word tokens sitting in command position (SPEC 10.6).
 
     Command position is: statement start, after `|`, `;`, `&`, `(`, `{`, or an
-    assignment operator. Three exclusions keep the population equal to what the
-    reference parser calls a command name:
+    assignment operator; and after the keyword `in` inside a `foreach`
+    condition group - `foreach ($x in Get-Thing)` is a genuine pipeline at run
+    time, and the reference parser counts its head as a command ([F4], D10).
+    Three exclusions keep the population equal to what the reference parser
+    calls a command name:
 
       * PowerShell keywords (`if`, `foreach`, `return`, ...) are not commands;
       * a word followed by an assignment operator is a hashtable key or an
@@ -436,8 +439,11 @@ def iter_command_words(toks, sig):
     """
     cmd_pos = True
     bracket_depth = 0
+    # Each entry is the lower-cased keyword the group was opened after, or
+    # None. Truthiness carries the old "opened after a keyword" meaning; the
+    # text itself is read by exactly one rule, the `in`-in-`foreach` one.
     paren_stack = []
-    prev_kw = False
+    prev_kw = None
     for k in range(len(sig)):
         t = toks[sig[k]]
         nxt = toks[sig[k + 1]] if k + 1 < len(sig) else None
@@ -452,12 +458,13 @@ def iter_command_words(toks, sig):
                 # `param($Msg) _LogLine ...` - the token after a
                 # keyword-introduced group starts a statement, so a command may
                 # follow it directly.
-                opened_after_keyword = paren_stack.pop() if paren_stack else False
-                prev_kw = False
+                opened_after_keyword = paren_stack.pop() if paren_stack else None
+                prev_kw = None
                 if opened_after_keyword:
                     cmd_pos = True
                     continue
-        prev_kw = t.kind == 'word' and t.text.lower() in KEYWORDS
+        prev_kw = (t.text.lower()
+                   if t.kind == 'word' and t.text.lower() in KEYWORDS else None)
         if t.kind == 'word':
             low = t.text.lower()
             excluded = (
@@ -470,6 +477,13 @@ def iter_command_words(toks, sig):
             if cmd_pos and not excluded:
                 yield k, t
             if low in STATEMENT_KEYWORDS:
+                cmd_pos = True
+                continue
+            if low == 'in' and paren_stack and paren_stack[-1] == 'foreach':
+                # SPEC 10.6 [F4]: the collection expression of a `foreach`
+                # condition starts here. Scoped to the innermost group being
+                # the `foreach` one, so a bareword `in` used as an ordinary
+                # argument opens nothing.
                 cmd_pos = True
                 continue
         if t.kind == 'nl':
