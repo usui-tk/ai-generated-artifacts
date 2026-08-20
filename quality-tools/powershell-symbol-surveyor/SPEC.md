@@ -2095,7 +2095,7 @@ build actually runs today, and gates this SPEC requires of a *complete*
 | Version decision | `test_pss.py` re-runs the parent commit's `pss.py` against the same pinned blob and fails when the emitted model moved — shape **or** measured values — while `MODEL_VERSION` did not (§5.5, ADR 0035). No ledger of past versions is kept: the previous state is derived, so there is no second copy to go stale (ADR 0036). Skipped, and reported as skipped, where there is no comparable parent |
 | Materialisation-stated figures | a figure that is not axis-invariant is asserted **per materialisation** and both values are re-derived — today `references_outside_functions` (485 default / 556 with `local-sites`). A single number for such a figure is unfalsifiable, the projection-side form of the basis rule (ADR 0036) |
 | Fixtures | `test_pss.py` runs synthetic cases for the extractor rules that have actually failed — every assignment operator including the three that were unreachable, the member-name exclusions of §12.2 including the dynamic form, and the tokenizer regressions those fixes risked. These need no corpus and run even when `git` is absent (§14.3) |
-| Delta baselines | Appendix B.7 pins comparator outputs and the gate re-derives them three ways: `trace` and `compare` over an adjudicated pair of committed generations (retrieved by blob, never by branch head — the ADR 0034 anchoring, so maintenance work cannot redden it), and `compare` over two independent fixture scripts embedded in the gate — the pair corpus history cannot supply, because every pair drawn from an entry stands in the relation `trace` asserts (§4.9). Fixture identity is held by the emitted document's own `source.sha256` against the recorded basis, so the embedded text cannot drift from what the block claims was measured. The corpus legs need `git` and degrade by name without it; the fixture leg runs at every degradation level (§14.3). The `Publish-ReleaseArtifacts` fixture deliberately carries the §10.6 [F4] instance, so adjudicating [F4] reddens these figures rather than moving them silently |
+| Delta baselines | Appendix B.7 pins comparator outputs and the gate re-derives them three ways: `trace` and `compare` over an adjudicated pair of committed generations (retrieved by blob, never by branch head — the ADR 0034 anchoring, so maintenance work cannot redden it), and `compare` over two independent fixture scripts embedded in the gate — the pair corpus history cannot supply, because every pair drawn from an entry stands in the relation `trace` asserts (§4.9). Fixture identity is held by the emitted document's own `source.sha256` against the recorded basis, so the embedded text cannot drift from what the block claims was measured. The corpus legs need `git` and degrade by name without it; the fixture leg runs at every degradation level (§14.3). The `Publish-ReleaseArtifacts` fixture deliberately carries the §10.6 [F4] instance, and adjudicating [F4] at the D10 arc reddened these figures rather than moving them silently — the red-then-restamp path the pin was built for, observed |
 | Value nullability | `--self-check` compares `pss.NULLABLE_PATHS` with the §13.3 nullability table in both directions and requires each entry to be a declared key path; `test_pss.py` holds the declaration against reality on the pinned blob and a slice of it — every observed null path is declared, and every declared path actually carries a null somewhere the gate exercises, so the mark can neither lag reality nor outrun it. `--capabilities` serialises the declaration (`nullable_paths`), checked as serialised, not restated |
 
 A non-zero exit on mismatch does not conflict with §9. §9 forbids the exit code
@@ -2788,7 +2788,7 @@ was the question being asked and the file it was asked about.
 | `$script:`-qualified (`PSS2004`) 1,381 | **re-derived exactly** | script-qualified reference records whose owner is a function — `script_qualified_refs_in_function`. The label admitted three readings (1,865 records, 1,812 `PSS2004`, 1,381 inside functions) and the recorded figure was the third |
 | usage-map population 156 | **re-derived exactly** | `PSS2008` record count, already asserted in B.8 |
 | `PSS9004` sub-counts, 5 functions / 4 names | **re-derived exactly** | distinct owners of the `PSS9004` records, and distinct variable names named in their `detail` |
-| distinct usage signatures 115 | **re-stamped to 123** | distinct (writer set, reader set) pairs over the usage map. 115 is reproduced at generations 104-110 of entry `0002` — a different state, not a different derivation |
+| distinct usage signatures 115 | **re-stamped to 123** (a disposition record of the ADR 0036 event; the figure moves with the model — 120 as of `model_version` 3, held by B.8, after the D10 usage-map order-independence fix) | distinct (writer set, reader set) pairs over the usage map. 115 is reproduced at generations 104-110 of entry `0002` — a different state, not a different derivation |
 | `PSS2007` 83 strings | **re-stamped to 84** | distinct source lines carrying an interpolated reference (§12.4). 83 is reproduced at generations 88-111 of entry `0002` |
 | distinct script names 155, and its correction to 197 | **withdrawn** | reproduced by no generation and no revision. Both are orphans of instruments that no longer exist, in the manner of `PSS2005`'s 2,004 (ADR 0034). The measured figure is 198, asserted as `script_qualified_names` |
 | references outside any function 555 | **withdrawn; replaced by two figures** | the label covers two questions with different answers. `script_qualified_refs_at_script_level` (484, axis-invariant) is the script-scope share; `references_outside_functions` (485 default / 556 with `local-sites`) is the all-scopes total, and is the one asserted figure that is **not** axis-invariant, so it states its materialisation. 555 is reproduced by neither, at any generation |
@@ -2869,10 +2869,12 @@ in `test_pss.py` (the gate, not the tool — §2.6). The block records the sha25
 of each script exactly as the emitted document's own `source.sha256` states
 it, so the embedded text cannot drift from what the block claims was measured.
 `Publish-ReleaseArtifacts` deliberately carries a §10.6 [F4] instance
-(`foreach ($pkg in Get-StagedArtifact)` — a real call in a position §10.6 does
-not treat as command position), so its figures are **expected to move when
-[F4] is adjudicated**; the movement will be a red in this gate at that moment,
-which is the point of pinning before the extractor arc rather than after.
+(`foreach ($pkg in Get-StagedArtifact)` — a real call in a position the
+pre-D10 §10.6 did not treat as command position), and its figures **did move
+when [F4] was adjudicated**: the pin reddened at the [F4] commit (25 -> 24
+records, the deliberate instance becoming its edge) and was restamped at the
+arc's end — the red-then-restamp path that pinning before the extractor arc
+existed to produce, observed rather than predicted.
 
 Materialisation is `default` throughout. The tallies measured equal over
 default and all-axes inputs on the adjudicated pair; the pinned figure states
@@ -2967,7 +2969,7 @@ per the rule §13.2 records for figures that could depend on it.
       "b_sha256": "a71f74e32f46ba3dcdea94c014b7da8ea6afc4fed06b063df6f1b6074170efad",
       "materialisation": "default"
     },
-    "records": 25,
+    "records": 24,
     "source_path_differs": true,
     "surveyed": {
       "PSS6001": {
@@ -3021,9 +3023,9 @@ per the rule §13.2 records for figures that could depend on it.
         "examined": 0
       },
       "PSS8001": {
-        "emitted": 4,
+        "emitted": 5,
         "equal": 0,
-        "examined": 4
+        "examined": 5
       },
       "PSS8002": {
         "emitted": 5,
@@ -3036,13 +3038,13 @@ per the rule §13.2 records for figures that could depend on it.
         "examined": 0
       },
       "PSS8004": {
-        "emitted": 1,
+        "emitted": 0,
         "equal": 0,
-        "examined": 1
+        "examined": 0
       },
       "PSS8008": {
-        "emitted": 1,
-        "equal": 8,
+        "emitted": 0,
+        "equal": 9,
         "examined": 9
       }
     }
@@ -3068,7 +3070,7 @@ per the rule §13.2 records for figures that could depend on it.
     "pss8008_subjects": [
       "function/Restore-BootWimFromSourceIso"
     ],
-    "records": 189,
+    "records": 173,
     "surveyed": {
       "PSS6001": {
         "emitted": 1,
@@ -3151,8 +3153,8 @@ per the rule §13.2 records for figures that could depend on it.
         "examined": 140
       },
       "PSS8007": {
-        "emitted": 17,
-        "equal": 124,
+        "emitted": 1,
+        "equal": 140,
         "examined": 141
       },
       "PSS8008": {
@@ -3197,39 +3199,10 @@ is, so a bare count is unfalsifiable in the same way.
 ```json pss-baseline
 {
   "basis": {
+    "blob": "f2b5e6a59b4d7fde688958a19bbfcdb6ce247c01",
     "corpus_entry": "0002-projects-powershell-update-windows-server-iso.json",
     "gen_index": 156,
-    "rev": "aade522845fa351cf4bb0f7f81fe72d79eb9bee4",
-    "blob": "f2b5e6a59b4d7fde688958a19bbfcdb6ce247c01"
-  },
-  "counters": {
-    "assignments": 4757,
-    "commands_dynamic": 26,
-    "commands_named": 5046,
-    "expandable_strings": 172,
-    "interpolation_refs": 118,
-    "string_literals_bareword": 10027,
-    "string_literals_quoted": 8010,
-    "unresolved_named_command_sites": 2796,
-    "variable_refs": 24317
-  },
-  "symbols": {
-    "total": 480,
-    "nested": 1,
-    "duplicate_names": 0
-  },
-  "facts": {
-    "symbols.PSS1001": 480,
-    "symbols.PSS1002": 480,
-    "symbols.PSS1003": 480,
-    "symbols.PSS1004": 1,
-    "closures.PSS4001": 480,
-    "closures.PSS4002": 480
-  },
-  "edges": {
-    "records": 1281,
-    "from_script": 34,
-    "function_to_function": 1247
+    "rev": "aade522845fa351cf4bb0f7f81fe72d79eb9bee4"
   },
   "closures": {
     "callee_side_total": 5071,
@@ -3237,31 +3210,29 @@ is, so a bare count is unfalsifiable in the same way.
     "widest_callee": 175,
     "widest_caller": 140
   },
-  "local_variables": {
-    "PSS2002": 4402,
-    "PSS2003": 15950,
-    "PSS2005": 2075,
-    "aggregate_records": 465
+  "counters": {
+    "assignments": 4757,
+    "commands_dynamic": 26,
+    "commands_named": 5048,
+    "expandable_strings": 172,
+    "interpolation_refs": 118,
+    "string_literals_bareword": 10027,
+    "string_literals_quoted": 8010,
+    "unresolved_named_command_sites": 2798,
+    "variable_refs": 24317
   },
-  "script_variables": {
-    "PSS2004": 1826,
-    "PSS2004_script": 1812,
-    "PSS2004_env": 14,
-    "PSS2006": 53,
-    "PSS2008": 156,
-    "script_qualified_refs": 1865,
-    "script_qualified_refs_in_function": 1381,
-    "script_qualified_refs_at_script_level": 484,
-    "script_qualified_names": 198,
-    "usage_signatures": 123
+  "edges": {
+    "from_script": 34,
+    "function_to_function": 1247,
+    "records": 1281
   },
-  "soft_references": {
-    "PSS3001": 49,
-    "PSS3002": 104
-  },
-  "string_interpolation_references": {
-    "records": 118,
-    "distinct_source_lines": 84
+  "facts": {
+    "closures.PSS4001": 480,
+    "closures.PSS4002": 480,
+    "symbols.PSS1001": 480,
+    "symbols.PSS1002": 480,
+    "symbols.PSS1003": 480,
+    "symbols.PSS1004": 1
   },
   "limitations": {
     "PSS9002": 26,
@@ -3269,13 +3240,44 @@ is, so a bare count is unfalsifiable in the same way.
     "PSS9004_functions": 5,
     "PSS9004_names": 4
   },
+  "local_variables": {
+    "PSS2002": 5534,
+    "PSS2003": 14818,
+    "PSS2005": 2075,
+    "aggregate_records": 465
+  },
   "model_shape": {
-    "default": "d40eb8a39e403dbe",
-    "all-axes": "cf0ca399f8a00dc9"
+    "all-axes": "82af5244ad5f6935",
+    "default": "df79920d299a07ab"
   },
   "references_outside_functions": {
-    "default": 485,
-    "all-axes": 556
+    "all-axes": 556,
+    "default": 485
+  },
+  "script_variables": {
+    "PSS2004": 1792,
+    "PSS2004_env": 14,
+    "PSS2004_script": 1778,
+    "PSS2006": 87,
+    "PSS2008": 156,
+    "script_qualified_names": 198,
+    "script_qualified_refs": 1865,
+    "script_qualified_refs_at_script_level": 484,
+    "script_qualified_refs_in_function": 1381,
+    "usage_signatures": 120
+  },
+  "soft_references": {
+    "PSS3001": 49,
+    "PSS3002": 104
+  },
+  "string_interpolation_references": {
+    "distinct_source_lines": 84,
+    "records": 118
+  },
+  "symbols": {
+    "duplicate_names": 0,
+    "nested": 1,
+    "total": 480
   }
 }
 ```

@@ -20,6 +20,21 @@ time, and are marked as such.
 
 ## [Unreleased]
 
+### Changed
+
+- **Appendix B.7/B.8 restamped once, closing the D10 arc's intermediate red**
+  — every pinned figure re-derived by the shipped build and stamped with its
+  basis unchanged: `trace` pair 189 -> 173 records (`PSS8007` 17 -> 1,
+  naming `ErrorsJsonlPath`), independent pair 25 -> 24 (the deliberate [F4]
+  instance became its edge), `commands_named` 5,048, `PSS2002` 5,534, usage
+  signatures 120, both shape fingerprints (+`/edges[]/lines`). **The derived
+  caches taken under `model_version` `"2"` (digest `e32e86ec…`) are expired
+  by this arc and regenerated under `"3"`** via `test_pss.py cache
+  0001`/`0002`, header digest verified against `--emit-baseline-digest`.
+  Gate 13 grows 280 -> 315 with `pwsh` (274 -> 308 without; 105 -> 139
+  without `git`). B.7's "expected to move when [F4] is adjudicated" is
+  rewritten as the observation it became.
+
 ### Added
 
 - **The classification vocabularies are serialised** (SPEC §11.3;
