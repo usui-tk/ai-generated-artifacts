@@ -22,6 +22,25 @@ time, and are marked as such.
 
 ### Added
 
+- **The delta document states what it did not evaluate and shrinks what it
+  never used** (SPEC §6.4; consumer-adjudicated A3; part of the
+  `model_version` `"3"` arc — the document shape moves, the record
+  populations do not). Three changes, all proposed or requested by both
+  round-2 reviewers independently: `not_evaluated` maps every catalogued
+  comparison code absent from `surveyed` to its reason (`{}` under `trace`,
+  emitted rather than omitted); `examined_subjects` is per-kind counts by
+  default with the full enumeration restored under `--all` (both reviewers
+  completed every task without reading the enumeration while it dominated
+  the document's bytes; the counts cross-check against the presence tally
+  and, by kind, against the `--all` enumeration); and the position a
+  reviewer had to rebuild by joining raw models is copied onto the records —
+  `PSS8001`/`PSS8002` carry the edge's `lines` (§5.9) from the model that
+  has the edge, `PSS8004` carries the first site's `owner`/`line` from the
+  model whose record the resolution was read from. `PSS8004` equality stays
+  over the resolution only: a moved site is not a resolution difference.
+  Seven new comparator gate checks, each demonstrated red as an actual run
+  against the parent build.
+
 - **[F2] closed: the edge record carries every call site** (SPEC §5.9 new,
   §13.2 `Call-site locations` closed; consumer-adjudicated A2; part of the
   `model_version` `"3"` arc). `edges[].lines` is every site's line,

@@ -1250,6 +1250,7 @@ MACHINE_OUTPUTS = {
         "emitted_by": "compare --format json, trace --format json",
         "shape": {
             "top_level": ("delta_records", "surveyed", "examined_subjects",
+                          "not_evaluated",
                           "direction", "source_a", "source_b", "excluded"),
             "record": {
                 "always": ("code", "subject", "subject_kind"),
@@ -3094,11 +3095,23 @@ def compare_models(model_a, model_b):
     # PSS8001/8002 - edges. The subject is the calling side and the callee goes
     # in `detail`: a delta record has one subject (SPEC 6.4), and the edge store
     # is keyed by (from, to) rather than observed as a symbol.
+    #
+    # D10, A3-2: the record copies the edge's call-site `lines` (SPEC 5.9)
+    # from the model that carries the edge - the reviewers' first question
+    # about an added or removed edge was "where", and both rebuilt it by
+    # joining the raw models. Copied with .get: a pre-5.9 model carries no
+    # `lines`, and the delta transcribes what its input holds, never invents.
     ea, eb = _edge_pairs(model_a), _edge_pairs(model_b)
-    for code, pairs in (("PSS8001", sorted(eb - ea)),
-                        ("PSS8002", sorted(ea - eb))):
+    edge_index_a = {(e["from"], e["to"]): e for e in model_a.get("edges", ())}
+    edge_index_b = {(e["from"], e["to"]): e for e in model_b.get("edges", ())}
+    for code, pairs, index in (("PSS8001", sorted(eb - ea), edge_index_b),
+                               ("PSS8002", sorted(ea - eb), edge_index_a)):
         for caller, callee in pairs:
-            delta.emit(code, caller, "function", detail={"callee": callee})
+            detail = {"callee": callee}
+            lines = index.get((caller, callee), {}).get("lines")
+            if lines is not None:
+                detail["lines"] = lines
+            delta.emit(code, caller, "function", detail=detail)
 
     # PSS8004: a soft reference's resolution state differs - most importantly a
     # string literal that matches a declared name in one model and matches none
@@ -3106,10 +3119,17 @@ def compare_models(model_a, model_b):
     # it is a fact about the literal surface, which is all the tool observes
     # (SPEC 4.4). The subject is the literal rather than a symbol identifier:
     # in the interesting case there is no symbol on one side to name.
+    #
+    # Equality is over the RESOLUTION only. The record also carries the first
+    # site's owner and line (D10, A3-2: both round-2 reviewers rebuilt the
+    # position by joining the raw models); a moved site with an unmoved
+    # resolution is not a resolution difference and emits nothing.
     soft_a = _soft_resolution(model_a)
     soft_b = _soft_resolution(model_b)
     for literal in sorted(set(soft_a) | set(soft_b)):
-        in_a, in_b = soft_a.get(literal), soft_b.get(literal)
+        rec_a, rec_b = soft_a.get(literal), soft_b.get(literal)
+        in_a = rec_a["matches"] if rec_a else None
+        in_b = rec_b["matches"] if rec_b else None
         if in_a == in_b:
             delta.equal("PSS8004")
             continue
@@ -3118,6 +3138,12 @@ def compare_models(model_a, model_b):
             detail["resolves_a"] = in_a
         if in_b is not None:
             detail["resolves_b"] = in_b
+        # The site of the record the resolution was read from; model B's
+        # where it has one (the state the caller usually holds), else A's.
+        site = rec_b if rec_b is not None else rec_a
+        if site is not None:
+            detail["owner"] = site["owner"]
+            detail["line"] = site["line"]
         delta.emit("PSS8004", literal, "literal", equality="differs",
                    detail=detail)
 
@@ -3157,21 +3183,26 @@ def compare_models(model_a, model_b):
 
 
 def _soft_resolution(model):
-    """Each soft-reference literal and what it resolves to, or None.
+    """Each soft-reference literal: what it resolves to (or None), plus the
+    first site's owner and line.
 
     A literal appearing at several sites resolves the same way at all of them -
     resolution is name matching, not position - so the map is keyed by literal
     and `matches` is read once. `None` means the literal matched no declared
     name in this model, which is the state that matters: a literal that
     resolved in one model and not the other is what a half-finished rename
-    leaves behind.
+    leaves behind. The site kept is the FIRST record's (document order);
+    further sites are derivable from that model's own soft_references
+    (SPEC 6.4: the delta copies, it does not restate collections).
     """
     out = {}
     for record in model.get("soft_references", ()):
         literal = record.get("literal")
-        if literal is None:
+        if literal is None or literal in out:
             continue
-        out[literal] = record.get("matches")
+        out[literal] = {"matches": record.get("matches"),
+                        "owner": record.get("owner"),
+                        "line": record.get("line")}
     return out
 
 
@@ -3395,7 +3426,37 @@ def _delta_document(model_a, model_b, direction, want_all):
     document = _provenance(model_a, model_b, direction)
     document["delta_records"] = delta.records
     document["surveyed"] = delta.tally
-    document["examined_subjects"] = examined
+
+    # SPEC 6.4 (D10, A3-1): the codes this run did NOT evaluate, stated with
+    # the reason, keyed by code. Absence from `surveyed` was already the
+    # signal; this makes the signal self-describing - both round-2 reviewers
+    # proposed it independently. Empty under `trace`, which evaluates all
+    # eighteen; `{}` is emitted rather than the key omitted, because an
+    # omitted key is the silence SPEC 4.6 forbids.
+    catalogue = set(COMPARATOR_CODES) | set(SUCCESSION_CODES)
+    not_evaluated = {}
+    for code in sorted(catalogue - set(delta.tally)):
+        if code in SUCCESSION_CODES:
+            not_evaluated[code] = (
+                "succession-only: emitted only under trace, which carries "
+                "the caller's assertion that model B is a later state of "
+                "model A (SPEC 4.9, 12.7)")
+        else:  # pragma: no cover - every catalogued code is implemented
+            not_evaluated[code] = "not implemented in this build"
+    document["not_evaluated"] = not_evaluated
+
+    # SPEC 6.4 (D10, A3-3): the examined population is per-kind counts by
+    # default and the full enumeration under --all. Both round-2 reviewers
+    # reported never using the enumeration while it dominated the document's
+    # bytes; the per-subject question ("was function/X examined?") remains
+    # answerable under --all, and the counts cross-check against the
+    # presence tally (PSS6001 + PSS6002 + PSS6003 examined = their sum).
+    fa, fb = _functions(model_a), _functions(model_b)
+    counts = {"function": 0, "script-variable": 0}
+    for sid in examined:
+        kind = "function" if sid in fa or sid in fb else "script-variable"
+        counts[kind] += 1
+    document["examined_subjects"] = counts
 
     # SPEC 5.5: `cost` describes the model, not the script, and two models can
     # be identical in every record and differ only there. Stated in the output
@@ -3408,6 +3469,7 @@ def _delta_document(model_a, model_b, direction, want_all):
         document["source_path_differs"] = True
 
     if want_all:
+        document["examined_subjects"] = examined
         document["delta_records"] = _expand_to_all(delta, examined,
                                                    model_a, model_b)
     return document
@@ -3488,7 +3550,14 @@ def _render_delta_text(document, verb):
                                    ensure_ascii=False) if detail else
                         record.get("equality", "")))
     lines.append("")
-    lines.append("examined subjects: %d" % len(document["examined_subjects"]))
+    subjects = document["examined_subjects"]
+    # SPEC 6.4: per-kind counts by default, the enumeration under --all. The
+    # text channel states the same total either way (SPEC 6.2).
+    total = (sum(subjects.values()) if isinstance(subjects, dict)
+             else len(subjects))
+    lines.append("examined subjects: %d" % total)
+    for code, reason in sorted(document.get("not_evaluated", {}).items()):
+        lines.append("not evaluated: %s (%s)" % (code, reason))
     return "\n".join(lines) + "\n"
 
 

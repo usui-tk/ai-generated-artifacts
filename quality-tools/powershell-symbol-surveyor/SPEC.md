@@ -711,10 +711,10 @@ name reuse; `pss.py` does not.
 
 | Code | Fact |
 |---|---|
-| `PSS8001` | A call edge present in model B and absent from model A. |
-| `PSS8002` | A call edge present in model A and absent from model B. |
+| `PSS8001` | A call edge present in model B and absent from model A. `detail` carries the callee and the edge's call-site `lines`, copied from model B (§5.9, D10 A3). |
+| `PSS8002` | A call edge present in model A and absent from model B. `detail` carries the callee and the edge's call-site `lines`, copied from model A (§5.9, D10 A3). |
 | `PSS8003` | A function's transitive closure differs between models, with the set difference. |
-| `PSS8004` | A soft reference's resolution state differs between the models — most importantly, a string literal that matches a declared name in one and matches none in the other. |
+| `PSS8004` | A soft reference's resolution state differs between the models — most importantly, a string literal that matches a declared name in one and matches none in the other. `detail` carries the first site's `owner` and `line`, copied from the model whose record the resolution was read from (model B where it has one); further sites are derivable from that model's own `soft_references` (D10 A3). Equality is over the resolution only — a moved site is not a resolution difference. |
 | `PSS8005` | **Incomplete-rename candidate.** A script-scope name is present in the after model and absent from the before model, while a name present in **both** models lost usage in the same transition. Carries both names, both usage maps, and the count deltas. Derivation and rationale: §12.7 rule (b). |
 | `PSS8006` | **Producer/consumer desynchronisation candidate.** For a script-scope variable, at least one **writer** function's `PSS7001` is not `identical` while at least one **reader** function's `PSS7001` is `identical`. Carries the variable, the changed writers, and the unchanged readers. Derivation and rationale: §12.7 rule (a). |
 | `PSS8007` | **No write site retained.** A script-scope variable has at least one reader in model B and an empty writer set there. What that means at run time depends on `Set-StrictMode`, which the tool does not observe, and on write forms no static site can carry — §12.2's five declaration sources are all retained, and a non-literal `Set-Variable -Name`, a `[ref]` write or a `-Scope` write (§12.1) still leaves none; the fact is the empty writer set, and the reading of it belongs to the caller (§1.1). `trace` only; the single-state equivalent belongs to `psa.py` (§7). Derivation: §12.7 rule (c). |
@@ -1330,9 +1330,13 @@ change has to argue against.
 {
   "delta_records":     [ ... ],
   "surveyed":          { "PSS7001": {"examined": 365, "equal": 359, "emitted": 6}, ... },
-  "examined_subjects": [ "function/...", "variable:script/...", ... ]
+  "examined_subjects": { "function": 365, "script-variable": 141 },
+  "not_evaluated":     { "PSS8005": "succession-only: ...", ... }
 }
 ```
+
+(`compare` shown; under `--all` the third key carries the full identifier
+enumeration instead of the counts, and under `trace` the fourth is `{}`.)
 
 **`delta_records` carries differences only, as a flat list.** Not one array per
 kind of change: a collection per code would add eighteen keys to the public
@@ -1360,14 +1364,24 @@ which is the distinction a reviewer got wrong when reading a specimen that
 omitted the tally. `--capabilities` (§3.1) states the same fact statically;
 `surveyed` states it for the run in hand, and the two must agree.
 
-**`examined_subjects` enumerates the compared population by identifier.** It is
-the per-subject axis. A tally cannot answer "was `function/X` examined?", and
-that question is not hypothetical: a caller certifying a named unit as
-unchanged between two states, or catching its own misspelling, needs the name
-and not the count. Identifiers only, once each — the per-code equality results
-for an equal subject are recoverable from `surveyed` plus that subject's
-absence from `delta_records`, so repeating them per code buys nothing and costs
-an order of magnitude.
+**`not_evaluated` makes the absence self-describing** (D10, A3; both round-2
+reviewers proposed it independently). It maps every catalogued comparison code
+absent from `surveyed` to the reason: under `compare` that is exactly the
+three succession-only codes with the §4.9 reason, and under `trace` — which
+evaluates all eighteen — it is `{}`, emitted rather than omitted, because an
+omitted key is the silence §4.6 forbids. The map costs tens of bytes and
+closes the one question the tally's absence-signal left the reader to infer.
+
+**`examined_subjects` states the compared population — per-kind counts by
+default, the full identifier enumeration under `--all`** (D10, A3). The
+enumeration was the default until this arc, on the argument that a tally
+cannot answer "was `function/X` examined?"; measured against practice, both
+round-2 reviewers completed every task without reading it while it dominated
+the document's bytes. The per-subject question keeps its answer — `--all`
+restores the enumeration, identifiers only, once each — and the default
+counts cross-check against the presence tally (`PSS6001` + `PSS6002` +
+`PSS6003` examined sum to them) and, by kind, against the `--all` enumeration
+(a subject's kind is decidable from its §5.8 form alone).
 
 **Why not simply emit every record.** The alternative — one record per code per
 subject, equality included — satisfies §4.6 per subject and fails it per code,

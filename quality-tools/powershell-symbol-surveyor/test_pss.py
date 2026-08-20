@@ -1131,17 +1131,26 @@ def check_comparator():
         eq(rc, 0, "comparator: two models compare")
 
         # SPEC 6.4: `surveyed` is stated for every evaluated code even when
-        # nothing differs, and `examined_subjects` names the population. The
-        # two answer different questions and neither substitutes.
+        # nothing differs, and `examined_subjects` states the population -
+        # per-kind counts by default, the enumeration under --all (D10 A3-3).
         eq(sorted(delta["surveyed"]), sorted(pss.COMPARATOR_CODES),
            "comparator: the tally covers every code this build evaluates")
-        check(len(delta["examined_subjects"]) == len(set(delta["examined_subjects"])),
-              "comparator: the examined population lists each subject once")
-        emitted_subjects = set(r["subject"] for r in delta["delta_records"])
-        eq(sorted(s for s in emitted_subjects
-                  if s not in set(delta["examined_subjects"])
-                  and s != "<script>"), [],
-           "comparator: every record's subject is in the examined population")
+        eq(sorted(delta["examined_subjects"]), ["function", "script-variable"],
+           "comparator: the default population is per-kind counts")
+        pres = [delta["surveyed"][c]["examined"]
+                for c in ("PSS6001", "PSS6002", "PSS6003")]
+        counts_total = (sum(delta["examined_subjects"].values())
+                        if isinstance(delta["examined_subjects"], dict)
+                        else None)
+        eq(counts_total, sum(pres),
+           "comparator: the counts cross-check against the presence tally")
+        # SPEC 6.4 (D10 A3-1): the codes a run did not evaluate are stated
+        # with reasons; under compare that is exactly the succession three.
+        eq(sorted(delta.get("not_evaluated", {})), sorted(pss.SUCCESSION_CODES),
+           "comparator: compare states the three codes it did not evaluate")
+        check(all(delta["not_evaluated"][c] for c in delta.get("not_evaluated", {})),
+              "comparator: every not_evaluated entry carries a reason",
+              "entries: %r" % delta.get("not_evaluated"))
 
         # SPEC 4.9: three codes require the caller's assertion of succession
         # and must never appear under `compare`.
@@ -1163,6 +1172,42 @@ def check_comparator():
         rc, traced = run("trace", "a", "b")
         eq([rc, traced["direction"]], [0, "caller-asserted-succession"],
            "comparator: trace carries the caller's succession assertion")
+        eq(traced.get("not_evaluated"), {},
+           "comparator: trace evaluates every catalogued code and says so")
+
+        # D10 A3-2: an added or removed edge copies its call-site lines from
+        # the model that carries it (SPEC 5.9); the delta transcribes, it
+        # does not send the reader back to a join both reviewers had to
+        # rebuild by hand.
+        eights = {r["code"]: r for r in delta["delta_records"]
+                  if r["code"] in ("PSS8001", "PSS8002")}
+        check(eights.get("PSS8001", {}).get("detail", {}).get("lines") == [3]
+              and eights.get("PSS8002", {}).get("detail", {}).get("lines") == [3],
+              "comparator: PSS8001/PSS8002 copy the edge's call-site lines",
+              "records: %r" % eights)
+
+        # D10 A3-2: PSS8004 copies the first site's owner and line from the
+        # model whose record the resolution was read from - in the
+        # half-finished-rename case only one side has a record at all.
+        renamed_a = ("function Old-Name { 1 }\n"
+                     "$k = 'Old-Name'\n"
+                     "Old-Name\n")
+        renamed_b = ("function New-Name { 1 }\n"
+                     "$k = 'Old-Name'\n"
+                     "New-Name\n")
+        for name, text in (("w", renamed_a), ("x", renamed_b)):
+            out = _run_pss(["survey", "@SCRIPT@", "--format", "json"],
+                           text=text)
+            paths[name] = os.path.join(d, name + ".json")
+            with open(paths[name], "wb") as fh:
+                fh.write(out.stdout)
+        rc, ren = run("compare", "w", "x")
+        fours = [r for r in ren["delta_records"] if r["code"] == "PSS8004"]
+        check(len(fours) == 1 and fours[0]["subject"] == "Old-Name"
+              and fours[0]["detail"].get("owner") == "<script>"
+              and fours[0]["detail"].get("line") == 2,
+              "comparator: PSS8004 copies the site the resolution was read from",
+              "records: %r" % fours)
 
         # SPEC 6.4: --all restores the enumeration without changing the tally,
         # because omitting equal subjects is a choice about size and never
@@ -1175,6 +1220,24 @@ def check_comparator():
         eq(sorted(set(r["code"] for r in delta["delta_records"])
                   - set(r["code"] for r in full["delta_records"])), [],
            "comparator: --all states everything the default did")
+        # The enumeration lives under --all (D10 A3-3): unique, covering every
+        # record's subject, and per-kind consistent with the default counts -
+        # a subject's kind is decidable from its SPEC 5.8 form alone.
+        subjects = full["examined_subjects"]
+        check(isinstance(subjects, list)
+              and len(subjects) == len(set(subjects)),
+              "comparator: --all enumerates each examined subject once",
+              "examined_subjects: %r" % (subjects,))
+        emitted_subjects = set(r["subject"] for r in full["delta_records"])
+        eq(sorted(s for s in emitted_subjects
+                  if s not in set(subjects) and s != "<script>"), [],
+           "comparator: every record's subject is in the examined population")
+        by_kind = {"function": 0, "script-variable": 0}
+        for s in subjects:
+            by_kind["function" if s.startswith("function/")
+                    else "script-variable"] += 1
+        eq(by_kind, delta["examined_subjects"],
+           "comparator: the default counts equal the --all enumeration by kind")
 
         # SPEC 4.7 / 3.2: PSS8008 exists because consumer review found the
         # most review-worthy fact in a real change - a function had stopped
