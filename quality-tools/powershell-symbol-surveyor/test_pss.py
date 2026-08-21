@@ -495,11 +495,19 @@ def check_version_decision(root, text, model_def, model_all):
 
 
 TEXT_CHANNEL_DERIVATIONS = {
-    "functions": lambda m: len(m["symbols"]),
+    # SPEC 6.2 (D12): a boundary stub is a reference marker, not a function
+    # definition, so the symbol rows read FULL records only. The derivations
+    # here are written from the SPEC's definitions, and these three crashed
+    # (or miscounted) on the first stubbed slice exactly as the renderer
+    # did - same defect, both sides of the channel-agreement gate.
+    "functions": lambda m: sum(1 for r in m["symbols"]
+                               if r.get("record") != "stub"),
     "nested definitions": lambda m: sum(1 for r in m["symbols"]
-                                        if "PSS1004" in r["facts"]),
+                                        if r.get("record") != "stub"
+                                        and "PSS1004" in r["facts"]),
     "duplicate names": lambda m: sum(1 for r in m["symbols"]
-                                     if "PSS1005" in r["facts"]),
+                                     if r.get("record") != "stub"
+                                     and "PSS1005" in r["facts"]),
     "named commands": lambda m: m["counters"]["commands_named"],
     "call edges": lambda m: len(m["edges"]),
     "from a function": lambda m: sum(1 for r in m["edges"]
@@ -2293,6 +2301,30 @@ def run_fixtures():
     check(not any(s.get("record") == "stub" for s in sl_axes["symbols"]),
           "fixture: an axis-only slice adds no stubs",
           "symbols: %r" % sl_axes["symbols"])
+
+    # SPEC 6.2 (D12): the text channel renders a STUBBED slice - written
+    # red-first against the build whose README example `slice --scope ...
+    # --out` (default format: text) crashed with a KeyError on the first
+    # stubbed slice: render_text read s["facts"] unconditionally, and the
+    # `functions` row counted stubs as functions. A stub is a reference
+    # marker, not a definition (SPEC 5.7/6.2).
+    txt = pss.render_text(sl)
+    rows = {}
+    for line in txt.splitlines():
+        if ":" in line:
+            k, _, v = line.partition(":")
+            rows[k.strip()] = v.strip()
+    check(rows.get("functions") == "1",
+          "fixture: a stubbed slice's text channel counts full records only",
+          "functions row: %r" % rows.get("functions"))
+    check(rows.get("boundary stubs", "").startswith("1 "),
+          "fixture: the boundary-stubs row states the stub count, only on a "
+          "model that carries stubs",
+          "boundary stubs row: %r" % rows.get("boundary stubs"))
+    txt_full = pss.render_text(model)
+    check("boundary stubs" not in txt_full,
+          "fixture: an unsliced model prints no boundary-stubs row",
+          "unexpected row present")
 
     # SPEC 5.5 (D12): slice refuses a model from another model_version -
     # the stubs are a version-4 shape, and a document whose stated version

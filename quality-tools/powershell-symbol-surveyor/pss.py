@@ -2658,11 +2658,21 @@ def render_text(model):
     out.append("lines      : %d" % src["line_count"])
     out.append("")
     out.append("-- PSS1xxx definition inventory --")
-    out.append("functions             : %d" % len(model["symbols"]))
+    # SPEC 6.2 (D12): a boundary stub is a reference marker, not a function
+    # definition - the symbol rows read FULL records only, and the stub
+    # count gets its own row, printed only when stubs exist. The renderer
+    # crashed on the first stubbed slice (s["facts"] on a record that
+    # carries none) precisely because no rule had been stated.
+    full_syms = [s for s in model["symbols"] if s.get("record") != "stub"]
+    stub_count = len(model["symbols"]) - len(full_syms)
+    out.append("functions             : %d" % len(full_syms))
+    if stub_count:
+        out.append("boundary stubs        : %d  (slice boundary, SPEC 5.7)"
+                   % stub_count)
     out.append("nested definitions    : %d" % sum(
-        1 for s in model["symbols"] if "PSS1004" in s["facts"]))
+        1 for s in full_syms if "PSS1004" in s["facts"]))
     out.append("duplicate names       : %d" % sum(
-        1 for s in model["symbols"] if "PSS1005" in s["facts"]))
+        1 for s in full_syms if "PSS1005" in s["facts"]))
     out.append("")
     out.append("-- PSS2xxx reference and binding --")
     out.append("named commands        : %d" % c["commands_named"])

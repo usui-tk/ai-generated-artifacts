@@ -20,6 +20,23 @@ time, and are marked as such.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The text channel crashed on a stubbed slice** — a D12 regression found
+  by executing the restructured README's own example (`slice --scope …
+  --out`, default format text): `render_text` read `s["facts"]`
+  unconditionally and a §5.7 boundary stub carries no `facts` (KeyError,
+  exit 1), while the `functions` row counted stubs as functions (173 on
+  the pin slice, where the true count is 1 full record + 172 stubs). The
+  slice × text combination sat in the battery's blind spot: channel
+  agreement reads pin models, which carry no stubs. SPEC §6.2 now states
+  the rule (`functions` counts full records only; fact rows read full
+  records only; a `boundary stubs` row prints only when stubs exist, so an
+  unsliced model's text output is byte-unchanged), the renderer and the
+  channel-agreement derivations follow it — both sides had the same defect
+  — and fixtures hold the stubbed-slice text channel red-first. No model
+  change: `MODEL_VERSION` stays "4", no restamp, caches untouched.
+
 ### Changed
 
 - **README / README.ja restructured, consumer surface first.** The pages led
