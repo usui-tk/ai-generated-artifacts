@@ -22,6 +22,19 @@ time, and are marked as such.
 
 ### Added
 
+- **Rename pre-flight stated** (SPEC §4.8, post-round-4). A reviewer
+  constructed, correctly, a clearance argument the SPEC had left unstated —
+  zero `PSS3001` matches for a declared name proves no whole in-file
+  literal carries it, clearing every literal-fed dynamic site — and found
+  the boundary where it fails: an undeclared name has no literal-evidence
+  channel at all (`PSS3001` matches declared names only), so the model is
+  structurally blind to it. Both are now stated procedure, together with
+  the member-chain join limit on `PSS9002.target` (the emitted expression
+  matches no §5.8 identifier form; the consumer strips the tail and joins
+  the base, and the member's value has no records to join — §4.8's
+  previous sentence promised the join without the stripping). No record
+  added: the section states what existing records support, and where they
+  stop.
 - **SPEC §3.2 records survey round 4** — the first post-D12 round, on a
   tool-output-only kit that shipped the reconstructed README for its first
   onboarding read. Exact three-way agreement on every counted population;

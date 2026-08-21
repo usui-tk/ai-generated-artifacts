@@ -888,7 +888,7 @@ candidate together with the evidence that produced it.
 | Code | Fact |
 |---|---|
 | `PSS9001` | A region could not be parsed. Carries location and extent. |
-| `PSS9002` | A call site could not be statically resolved — invocation through `&` with a non-literal target, or an equivalent dynamic dispatch. Carries `target` (D12): the name expression, **verbatim**, extended over byte-adjacent member/index/call tails only — the §10.6 adjacency discipline applied to the expression side — so a consumer can join it against the variable collections instead of returning to the source. |
+| `PSS9002` | A call site could not be statically resolved — invocation through `&` with a non-literal target, or an equivalent dynamic dispatch. Carries `target` (D12): the name expression, **verbatim**, extended over byte-adjacent member/index/call tails only — the §10.6 adjacency discipline applied to the expression side. A plain-variable `target` joins against the variable collections directly; a **member-chain** `target` (`$robocopy.Source`) matches no §5.8 identifier form as emitted — the consumer strips the tail and joins the **base** variable, and the member's value has no records to join at all (§12.2's member-LHS exclusion). Stated here post-round-4: the previous sentence promised the join without the stripping, and a reviewer performing it correctly asked where the operation was specified. |
 | `PSS9003` | A parent-scope write that cannot be tracked: `Set-Variable` / `New-Variable` with `-Scope`, or `[ref]` passing. |
 | `PSS9004` | A variable read with no resolvable declaration in the enclosing function and no scope qualifier — a dynamic-scope inheritance candidate. Carries the enclosing function's static callers and, for each, whether it declares that name. Where there are none, "zero static callers" is itself the reported fact. |
 | `PSS9005` | The comparison could not be performed for a named unit — for example a model produced under a different `model_version`. |
@@ -901,6 +901,26 @@ cross-function state explicitly with `$script:` rather than relying on implicit
 inheritance. A codebase without that discipline would produce far more. The
 count is therefore a usable indicator of whether a given script is statically
 analysable at all — reported as a number, with no threshold and no judgement.
+
+**Rename pre-flight against dynamic sites (stated post-round-4).** A
+round-4 reviewer constructed, correctly, a clearance argument this document
+had left unstated; it is recorded here so the next consumer inherits it as a
+stated procedure rather than a discovery, together with the boundary at
+which it fails. For a rename of a **declared** function, three model
+channels exist: the static edges (§4.4 closure enumerates every static
+caller); the soft-reference channel — `PSS3001`'s population is *every*
+string constant, quoted and bareword (§4.3), so **zero `PSS3001` matches
+for the name proves no whole in-file literal carries it**, which clears
+every dynamic site whose target is fed only by this file's literals; and
+the `PSS9002` targets themselves, whose *values* the model never carries
+(§1.3) — so a site fed by computed strings, external input, or member state
+stays uncleared, individually and permanently, from the model alone. For an
+**undeclared** name the second channel does not exist: `PSS3001` matches
+literals against declared function names only, so there is no
+literal-evidence channel at all and no dynamic site can be cleared —
+the model is structurally blind to the name, and a pre-flight for it is a
+source task. None of this adds a record: it states what the existing
+records already support, and where they stop.
 
 ---
 
