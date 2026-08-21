@@ -329,7 +329,7 @@ SPEC §14.1 がこのツールを 2 つの `.py` ファイルに保つと規定�
 
 ## 登録
 
-本ツールは登録済みです: `tool.powershell-symbol-surveyor` @ 0.4.0、kind は
+本ツールは登録済みです: `tool.powershell-symbol-surveyor` @ 0.5.0、kind は
 `tool`、アナライザの前例に倣ったディレクトリ全体の 1 ユニットです。コーパス管理と
 キャッシュ生成器は `test_pss.py` のサブコマンドとして同じユニットに含まれます。
 SPEC 自身の条件 — Appendix F に provisional 項目が無いこと — は 2026-08-16 から

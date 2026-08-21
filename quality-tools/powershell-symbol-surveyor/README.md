@@ -351,7 +351,7 @@ are skipped — and say so — where it is absent (§14.3).
 
 ## Registration
 
-The tool is registered: `tool.powershell-symbol-surveyor` @ 0.4.0, kind
+The tool is registered: `tool.powershell-symbol-surveyor` @ 0.5.0, kind
 `tool`, a whole-directory unit on the analyzer's precedent. The corpus
 manager and the cache producer are subcommands of `test_pss.py` and are
 covered by the same unit. The SPEC's own condition — Appendix F empty of

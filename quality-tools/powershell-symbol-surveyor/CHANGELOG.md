@@ -18,6 +18,31 @@ This file starts at `0.2.0`. Entries before it are reconstructed from the
 commit history and the SPEC's own decision records rather than written at the
 time, and are marked as such.
 
+## [Unreleased]
+
+### Fixed
+
+- **Round-5 documentation findings, all verified before being closed**
+  (docs-only; no model change). (G1) The README registration figure said
+  `@ 0.4.0` in both languages — the D13 sweep updated the manifest and
+  STATUS but missed the README; both reviewers reported it with the
+  correct caution that the kit alone could not adjudicate which version
+  space it named. (G2) SPEC §3's "Current build status" paragraph
+  described the pre-comparator build in the present tense for five arcs —
+  the **fourth site** of the round-4 stale-prose class, missed by that
+  sweep because it never contains the phrase the sweep grepped for; the
+  CLI option table also lacked `survey --cost` and `compare`/`trace
+  --all`, both live in the descriptor. (G5) Three one-sentence
+  clarifications a reviewer showed were earnable from the records alone
+  but worth stating: `writer_count` counts owner symbols, never write
+  sites; a model already carrying an axis reports that axis's increment
+  as 0 (previously stated for slices only); §12.8's backtick folding
+  concerns end-of-expression detection only — the continuation bytes stay
+  in the span and in `rhs`, verbatim. Plus one bridge sentence: §13.2's
+  target-join description **is** §4.8's third channel taken one step
+  further, not a separate procedure — the two round-5 reviewers read it
+  each way and reached the same facts, and the sentence removes the fork.
+
 ## [0.5.0] - 2026-08-21 (`model_version` "4" -> "5"; the D13 arc)
 
 ### Added

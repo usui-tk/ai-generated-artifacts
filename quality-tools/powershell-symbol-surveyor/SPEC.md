@@ -302,6 +302,8 @@ pss.py --version
 | `--format {text,json}` | `survey`, `slice`, `compare`, `trace` | Output format. Default `text`. |
 | `--axes LIST` | `survey`, `slice` | Comma-separated materialisation axes to restore (`survey`) or narrow to (`slice`), or `all`. Default: none (§5.6). An unrecognised name exits `2`. |
 | `--scope ID` | `slice` | Keep only records concerning this symbol identifier, plus incident edges and all limitations (§5.7). An unmatched identifier exits `2`. |
+| `--cost` | `survey` | Compute the model, print its cost report, discard the model (§2.6). |
+| `--all` | `compare`, `trace` | Emit every delta record, including the categories the default output folds into tallies (§6.4). |
 | `--pretty` | `survey`, `slice` | Indent the JSON model. Default is compact (§2.4). |
 | `--list-facts` | — | Print the fact catalogue and exit. |
 | `--self-check` | — | Verify this SPEC's §4 catalogue, Appendix F provisional index and §5.6 axis vocabulary against the tool's compiled state, and exit (§13). |
@@ -313,17 +315,21 @@ mechanism. Severity does not exist in this tool, and facts are not suppressed �
 they are filtered by the caller when the caller has decided what it cares
 about.
 
-**Current build status.** `compare` and `trace` exist as subcommands and can be
-invoked, but this build deliberately refuses to run either: each prints an
-explanatory message and exits non-zero rather than emitting an empty or partial
-comparison (§2.1; the comparator is Layer 3 and has not been built yet).
-`--cost` **is implemented** in this build, as `survey --cost`: the model is
-computed and discarded, and the report it prints is the block every model now
-carries under a single top-level key. `--capabilities` **is implemented**, and
-declares the two machine outputs this build does not produce — the delta
-records of `compare` / `trace` and the structured error payload — as
-`"status": "not-implemented"` with a reason, rather than omitting them or
-describing shapes that do not exist (§3.1).
+**Current build status.** `compare` and `trace` **run**: each emits the §6.4
+delta document (the comparator shipped at D8), refusing only the
+precondition mismatches §5.5 lists — a `model_version`, axis-set or scope
+disagreement — rather than manufacturing a false delta. `--cost` is
+implemented as `survey --cost`: the model is computed and discarded, and
+the report it prints is the block every model carries under a single
+top-level key. `--capabilities` is implemented; the one machine output this
+build does not produce — the structured error payload — is declared
+`"status": "not-implemented"` with a reason, rather than omitted or given a
+shape that does not exist (§3.1). *(This paragraph described the
+pre-comparator build in the present tense for five arcs — the fourth site
+of the round-4 stale-prose class, found by a round-5 reviewer after the
+first three were fixed: it escaped that sweep because it never contains the
+phrase the sweep grepped for. The descriptor was right throughout; status
+prose defers to it.)*
 
 ### 3.1 The caller is expected to be a language model
 
@@ -930,7 +936,12 @@ literals against declared function names only, so there is no
 literal-evidence channel at all and no dynamic site can be cleared —
 the model is structurally blind to the name, and a pre-flight for it is a
 source task. None of this adds a record: it states what the existing
-records already support, and where they stop.
+records already support, and where they stop. (§13.2's dynamic-sites row
+describes joining a `PSS9002.target` into the variable collections; that
+join **is** this section's third channel taken one step further — D13's
+`rhs` on the writer — not a separate procedure. One round-5 reviewer read
+it as inside the procedure and one as an addition beyond it; both readings
+led to the same facts, and this sentence removes the fork.)
 
 ---
 
@@ -1154,7 +1165,11 @@ position; the percentages moved again at D13 because the base model grew by
 the script writes' `rhs`). The same order of magnitude that motivated
 `local-sites` originally, which is why this collection follows the identical
 pattern rather than being emitted unconditionally in full or gated as an
-all-or-nothing collection. D13's own price, measured at this version: `rhs`
+all-or-nothing collection. A model that already carries an axis reports
+that axis's `cost.axis_increment` as `0` — the reading stated for slices
+("a kept axis as 0") applies to a directly surveyed `--axes` model
+identically, a gap a round-5 reviewer noted: nothing said so for `survey`.
+D13's own price, measured at this version: `rhs`
 + `rhs_span` add 496 KB to the `local-sites` axis (4.31 → 4.80 MB against a
 1.09 MB base — the axis was already the largest by far) and 29 KB to the
 default model (the script writes, scope (ii)). (Both figures are the compact-JSON byte length of
@@ -2322,7 +2337,11 @@ trace's `PSS8007` reads as "introduced by B" until the baseline shows the
 empty-writer state predates the change — and the delta writer holds both
 models at emission time, so the state is transcribed, not reconstructed.
 `writer_count` counts identities with retained reference sites in that
-model; on `PSS8007`, `baseline_state` is `null` when the variable does not
+model — **owner symbols, never write sites** (a single `<script>` owner
+writing twice is one writer; a round-5 reviewer noted that D13's countable
+write records make this the likelier consumer slip, so it is now stated at
+the definition rather than left to §12.3's implication); on `PSS8007`,
+`baseline_state` is `null` when the variable does not
 exist in the before model (a state for a subject a model does not carry).
 Facts only: which of pre-existing debt or introduced condition the pair
 amounts to remains the consumer's reading, now decidable from the delta
@@ -2374,7 +2393,10 @@ operator that cannot end a statement (a pipe, a comma, a binary operator, an
 opening group — never a closer), or when the expression has not started yet.
 Grouped regions are crossed whole, so an inner `;` or newline never ends the
 expression; a backtick continuation never surfaces (the lexer folds the
-escaped newline into a dropped token); a trailing comment is never part of
+escaped newline into a dropped token — this concerns **end-of-expression
+detection only**: the continuation bytes remain inside the span and inside
+`rhs`, verbatim, as a round-5 reviewer confirmed on a live record); a
+trailing comment is never part of
 the expression (the end advances only on significant tokens).
 
 Both collections carry it — a `$script:`-qualified write and a `<script>`
