@@ -22,6 +22,25 @@ time, and are marked as such.
 
 ### Added
 
+- **`model_version` "4" -> "5" — the D13 arc: a write carries its
+  right-hand side.** The round-4 convergence fact, landed as adjudicated
+  (option B x scope (ii)): every `reference` record with `role: "write"`
+  whose declaration has a supplying expression carries `rhs` (the
+  expression, **verbatim** — never normalised, never evaluated, never
+  bound) and `rhs_span` (`[start, end)` byte offsets with
+  `text[start:end] == rhs`, held by the gate over every write in the pin
+  **without sampling** — the span is the verbatim contract made checkable).
+  Sources per SPEC §12.2: assignment/compound right-hand sides, `param()`
+  defaults (the entry's own `,` ends the expression — a statement-level `,`
+  is an array literal, a parameter separator is not), `foreach` `in`
+  expressions; `-OutVariable`-class and `Set-Variable`/`New-Variable`
+  writes carry neither key (SPEC §12.8's exclusions). Script-scope writes
+  included (scope (ii)): the round-4 audits that hit this wall were
+  script-variable audits, so the default model moves at this version.
+  Declared in `MODEL_SCHEMA` (4 paths) and both `RECORD_VARIANTS`
+  reference variants (conditional keys); `--self-check` demonstrated red
+  between the code declaration and the §13.3 sweep, exactly as built.
+
 - **A D13 inventory row: the writer right-hand side** (SPEC §13.2,
   round-4 F8). Both reviewers converged, independently and unprompted, on
   the same next fact — the assignment RHS, verbatim, on the

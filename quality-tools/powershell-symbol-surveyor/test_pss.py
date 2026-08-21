@@ -615,6 +615,113 @@ def check_channel_agreement(model):
        "channel agreement: every numeric row carries a derivation")
 
 
+def check_writer_rhs():
+    """SPEC 12.8 (D13): a write carries its supplying expression, verbatim.
+
+    Written red-first against the "4" build: no record carried `rhs`, and
+    MODEL_VERSION had not moved. Both round-4 reviewers converged on this
+    fact independently; the shapes below are the five declaration sources of
+    SPEC 12.2 plus the multi-line pipeline case that makes `rhs_span` worth
+    carrying (the span is what lets the pin gate hold source[span] == rhs
+    over every write without sampling).
+    """
+    body = (
+        "function T {\n"
+        "  param([string]$P = 'dflt', [int]$Q)\n"
+        "  $a = 1 + 2\n"
+        "  $a += (3 * 4)\n"
+        "  foreach ($it in Get-List -All) { $it }\n"
+        "  Get-Thing -OutVariable ov\n"
+        "  $b = Get-Value |\n"
+        "    Where-Object { $_.Ok }\n"
+        "  $script:S = \"x-$a\"\n"
+        "}\n"
+        "$Top = 42; $t2 = 7\n"
+    )
+    m = pss.Survey("f.ps1", body, axes={"local-sites"}).run().model()
+    eq(m["model_version"], pss.MODEL_VERSION,
+       "rhs fixture: the emitting build is the declared model_version")
+
+    writes = {}
+    for coll in ("local_variables", "script_variables"):
+        for r in m[coll]:
+            if r.get("record") == "reference" and r.get("role") == "write":
+                writes.setdefault(r["name"], []).append(r)
+
+    def rhs_of(name, idx=0):
+        return writes[name][idx].get("rhs")
+
+    eq(rhs_of("P"), "'dflt'", "rhs: a param default is the supplying expression")
+    check("rhs" not in writes["Q"][0] and "rhs_span" not in writes["Q"][0],
+          "rhs: a param with no default carries neither key",
+          "unexpected rhs on $Q")
+    eq(rhs_of("a", 0), "1 + 2", "rhs: a plain assignment, operator excluded")
+    eq(rhs_of("a", 1), "(3 * 4)",
+       "rhs: a compound assignment carries its right-hand side")
+    eq(rhs_of("it"), "Get-List -All",
+       "rhs: a foreach loop variable carries the `in` expression")
+    check("rhs" not in writes["ov"][0],
+          "rhs: an -OutVariable declaration has no supplying expression",
+          "unexpected rhs on $ov")
+    eq(rhs_of("b"), "Get-Value |\n    Where-Object { $_.Ok }",
+       "rhs: a pipeline continuation is one statement - the rhs crosses the "
+       "newline, verbatim")
+    eq(rhs_of("S"), '"x-$a"',
+       "rhs: a script-qualified write carries rhs (scope (ii): script writes "
+       "included)")
+    eq(rhs_of("Top"), "42", "rhs: a `;` ends the statement")
+    eq(rhs_of("t2"), "7", "rhs: the statement after the `;` starts clean")
+
+    for name, recs in writes.items():
+        for r in recs:
+            eq("rhs" in r, "rhs_span" in r,
+               "rhs fixture: rhs and rhs_span travel together on $%s" % name)
+            if "rhs" in r:
+                a, b = r["rhs_span"]
+                eq(body[a:b], r["rhs"],
+                   "rhs fixture: source[rhs_span] == rhs on $%s" % name)
+
+    reads = [r for coll in ("local_variables", "script_variables")
+             for r in m[coll]
+             if r.get("record") == "reference" and r.get("role") == "read"]
+    check(all("rhs" not in r and "rhs_span" not in r for r in reads),
+          "rhs: a read carries neither key",
+          "rhs on a read record")
+
+
+def check_rhs_integrity(text, model_all):
+    """SPEC 12.8 (D13): over the WHOLE pin, every write's rhs is the source's
+    own bytes at rhs_span - no sampling, which is what the span is for.
+    Violations are collected and held by ONE check each, the same shape as
+    every other pin-population gate here: a per-record eq would multiply the
+    battery's check count by the write population (measured: 362 -> 6,316
+    before this was caught at the arc's own commit)."""
+    unpaired = []
+    mismatched = []
+    n_with = 0
+    for coll in ("local_variables", "script_variables"):
+        for r in model_all[coll]:
+            if r.get("record") != "reference" or r.get("role") != "write":
+                continue
+            if ("rhs" in r) != ("rhs_span" in r):
+                unpaired.append((coll, r["name"], r["line"]))
+                continue
+            if "rhs" in r:
+                a, b = r["rhs_span"]
+                if text[a:b] != r["rhs"]:
+                    mismatched.append((coll, r["name"], r["line"],
+                                       text[a:b][:40], r["rhs"][:40]))
+                n_with += 1
+    eq(unpaired, [],
+       "rhs integrity: rhs and rhs_span travel together over every pin write")
+    eq(mismatched, [],
+       "rhs integrity: source[rhs_span] == rhs over every pin write, "
+       "no sampling")
+    check(n_with > 4000,
+          "rhs integrity: the pin's writes overwhelmingly carry rhs",
+          "only %d writes carry rhs" % n_with)
+
+
 def check_projection_invariance(text, model_all):
     """Dropping an axis must remove records and fields, never change them (5.6).
 
@@ -4407,6 +4514,9 @@ def main():
         check_determinism(text)
 
         check_projection_invariance(text, model_all)
+
+        check_writer_rhs()
+        check_rhs_integrity(text, model_all)
 
         check_channel_agreement(model_all)
 

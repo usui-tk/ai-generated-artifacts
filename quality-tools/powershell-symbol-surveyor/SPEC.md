@@ -2336,6 +2336,50 @@ design.
 
 ---
 
+### 12.8 The writer's right-hand side (normative, D13)
+
+A `reference` record with `role: "write"` carries the expression that
+supplies the declared value, when one exists:
+
+- **`rhs`** — the supplying expression, **verbatim**: the source's own bytes,
+  never normalised, never evaluated, never bound. The §1.2/§1.3 stance
+  applied to the writer's `=`: the model states what the source says supplies
+  the value, and stops exactly there — round 4's two reviewers converged on
+  this fact independently, and both stated that binding is *not* the missing
+  piece (§3.2, fourth round).
+- **`rhs_span`** — `[start, end)` byte offsets into the surveyed source, with
+  `text[start:end] == rhs` **held by the gate over every write in the pinned
+  corpus, without sampling** — the span is not a convenience but the
+  verbatim contract made checkable (§13.2).
+
+**Which writes carry it.** The supplying expression per §12.2 declaration
+source: an assignment or compound assignment's right-hand side (the operator
+excluded); a `param()` entry's default expression (the entry's own `,`
+separator ends it — a `,` at statement level is an array literal, a `,`
+between parameters is not); a `foreach` loop variable's `in` expression (the
+group's closer ends it). Writes with **no supplying expression carry neither
+key**: a `param()` entry without a default, an `-OutVariable`-class binding,
+a `Set-Variable`/`New-Variable` name (its `-Value` argument is command
+input, already itemised as such under §5.6's site records, not an
+expression this section re-parents).
+
+**Where the expression ends.** At the end of the pipeline statement: a `;`,
+the enclosing group's closer, or a newline that does not continue the
+statement. A newline continues it when the preceding significant token is an
+operator that cannot end a statement (a pipe, a comma, a binary operator, an
+opening group — never a closer), or when the expression has not started yet.
+Grouped regions are crossed whole, so an inner `;` or newline never ends the
+expression; a backtick continuation never surfaces (the lexer folds the
+escaped newline into a dropped token); a trailing comment is never part of
+the expression (the end advances only on significant tokens).
+
+Both collections carry it — a `$script:`-qualified write and a `<script>`
+scope write no less than a function-local one (scope (ii), adjudicated: the
+round-4 audits that hit this wall were script-variable audits). On
+`local_variables` the keys ride the `local-sites` axis with the records that
+carry them; on `script_variables` they are present in the default model,
+which therefore moved at this version.
+
 ## 13. Self-quality gates
 
 This section lists two different things and does not blur them: gates this
@@ -2520,6 +2564,8 @@ materialisation, the difference being the ten `axis` paths.
 | `/local_variables[]/code` | axis |
 | `/local_variables[]/id` | axis |
 | `/local_variables[]/in_expandable_string` | axis |
+| `/local_variables[]/rhs` | axis |
+| `/local_variables[]/rhs_span` | axis |
 | `/local_variables[]/line` | axis |
 | `/local_variables[]/local_declared` | always |
 | `/local_variables[]/local_refs` | always |
@@ -2536,6 +2582,8 @@ materialisation, the difference being the ten `axis` paths.
 | `/script_variables[]/code` | always |
 | `/script_variables[]/id` | always |
 | `/script_variables[]/in_expandable_string` | optional |
+| `/script_variables[]/rhs` | optional |
+| `/script_variables[]/rhs_span` | optional |
 | `/script_variables[]/line` | always |
 | `/script_variables[]/name` | always |
 | `/script_variables[]/owner` | always |
@@ -2644,9 +2692,9 @@ absent from the declaration is uniform, and the gate holds that claim too.
 | `closures` | `closure-row` | `record == closure` | `facts` `id` `record` `transitive_callee_count` `transitive_caller_count` | — | 480 |
 | `closures` | `uncalled-fact` | `code == PSS4003` | `code` `id` | `named_by_literal` | 26 |
 | `closures` | `cycle-fact` | `code == PSS4004` | `code` `members` | — | 3 |
-| `local_variables` | `reference` | `record == reference` | `code` `id` `line` `name` `owner` `record` `role` | `in_expandable_string` | 22427 |
+| `local_variables` | `reference` | `record == reference` | `code` `id` `line` `name` `owner` `record` `role` | `in_expandable_string` `rhs` `rhs_span` | 22427 |
 | `local_variables` | `aggregate` | `record == aggregate` | `automatic_refs` `local_declared` `local_refs` `owner` `record` `unresolved_refs` | — | 465 |
-| `script_variables` | `reference` | `record == reference` | `code` `id` `line` `name` `owner` `qualifier` `record` `role` | `in_expandable_string` | 1879 |
+| `script_variables` | `reference` | `record == reference` | `code` `id` `line` `name` `owner` `qualifier` `record` `role` | `in_expandable_string` `rhs` `rhs_span` | 1879 |
 | `script_variables` | `usage-map` | `record == usage_map` | `code` `id` `name` `reader_count` `readers` `record` `writer_count` `writers` | — | 156 |
 | `string_interpolation_references` | `reference` | `record == reference` | `code` `id` `in_expandable_string` `line` `name` `owner` `record` `role` | `qualifier` | 118 |
 | `unresolved_named_commands` | `site` | `record == site` | `arguments` `code` `line` `name` `owner` `record` `span` | — | 2798 |

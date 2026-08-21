@@ -39,7 +39,7 @@ import re
 import sys
 
 __version__ = "0.4.0"
-MODEL_VERSION = "4"
+MODEL_VERSION = "5"
 
 MIN_PYTHON = (3, 12)
 
@@ -1176,6 +1176,8 @@ MODEL_SCHEMA = {
     "/local_variables[]/code": "axis",
     "/local_variables[]/id": "axis",
     "/local_variables[]/in_expandable_string": "axis",
+    "/local_variables[]/rhs": "axis",
+    "/local_variables[]/rhs_span": "axis",
     "/local_variables[]/line": "axis",
     "/local_variables[]/local_declared": "always",
     "/local_variables[]/local_refs": "always",
@@ -1192,6 +1194,8 @@ MODEL_SCHEMA = {
     "/script_variables[]/code": "always",
     "/script_variables[]/id": "always",
     "/script_variables[]/in_expandable_string": "optional",
+    "/script_variables[]/rhs": "optional",
+    "/script_variables[]/rhs_span": "optional",
     "/script_variables[]/line": "always",
     "/script_variables[]/name": "always",
     "/script_variables[]/owner": "always",
@@ -1375,7 +1379,20 @@ RECORD_VARIANTS = {
              "when": {"path": "record", "equals": "reference"},
              "carries": ("code", "id", "line", "name", "owner", "record",
                          "role"),
-             "conditional_keys": {"in_expandable_string": {
+             "conditional_keys": {
+                 "rhs": {
+                     "presence_means": "role is write and the declaration has "
+                                       "a supplying expression - carried "
+                                       "verbatim (SPEC 12.8)",
+                     "absence_means": "role is read, or the write has no "
+                                      "supplying expression (SPEC 12.8's "
+                                      "exclusions)"},
+                 "rhs_span": {
+                     "presence_means": "exactly when rhs is present: [start, "
+                                       "end) byte offsets with text[start:end]"
+                                       " == rhs, gate-held (SPEC 12.8)",
+                     "absence_means": "exactly when rhs is absent"},
+                 "in_expandable_string": {
                  "presence_means": "true - the site sits inside an "
                                    "expandable string",
                  "absence_means": "false"}},
@@ -1394,7 +1411,20 @@ RECORD_VARIANTS = {
              "when": {"path": "record", "equals": "reference"},
              "carries": ("code", "id", "line", "name", "owner", "qualifier",
                          "record", "role"),
-             "conditional_keys": {"in_expandable_string": {
+             "conditional_keys": {
+                 "rhs": {
+                     "presence_means": "role is write and the declaration has "
+                                       "a supplying expression - carried "
+                                       "verbatim (SPEC 12.8)",
+                     "absence_means": "role is read, or the write has no "
+                                      "supplying expression (SPEC 12.8's "
+                                      "exclusions)"},
+                 "rhs_span": {
+                     "presence_means": "exactly when rhs is present: [start, "
+                                       "end) byte offsets with text[start:end]"
+                                       " == rhs, gate-held (SPEC 12.8)",
+                     "absence_means": "exactly when rhs is absent"},
+                 "in_expandable_string": {
                  "presence_means": "true - the site sits inside an "
                                    "expandable string",
                  "absence_means": "false"}},
@@ -1808,6 +1838,10 @@ class Survey:
         # counter, whose definition stays "assignment operators + parameter
         # defaults" (Appendix B differential).
         self.decl_write_offsets = set()
+        # SPEC 12.8 (D13): var-token offset -> the foreach `in` expression's
+        # byte span, recorded by _record_foreach and consumed when the loop
+        # variable's write site is noted.
+        self.foreach_rhs = {}
         # Script-owner unqualified usage contributions, applied AFTER
         # classification so the usage map does not depend on document order
         # (SPEC 12.3). Before this arc a script-side write classified while the
@@ -1976,7 +2010,20 @@ class Survey:
                 # plus parameter defaults, and the differential holds it there.
                 if t.start in self.decl_write_offsets:
                     role = "write"
-                self._note_variable(t.start, t.text, in_string=False, role=role)
+                rhs_span = None
+                if assignment:
+                    # SPEC 12.8: the supplying expression begins after the
+                    # assignment operator (sig position k + 1). Inside a
+                    # param() block (a declaration-listed site) the entry's
+                    # own separator ends the default expression - a `,` at
+                    # statement level is an array literal, a `,` between
+                    # parameters is not.
+                    rhs_span = self._rhs_span_from(
+                        k + 1, stop_comma=t.start in self.decl_write_offsets)
+                elif role == "write":
+                    rhs_span = self.foreach_rhs.get(t.start)
+                self._note_variable(t.start, t.text, in_string=False,
+                                    role=role, rhs_span=rhs_span)
                 if assignment:
                     self.counters["assignments"] += 1
 
@@ -2060,6 +2107,69 @@ class Survey:
                 rec["sites"] += 1
                 rec["lines"].append(self.line_of(t.start))
 
+    def _rhs_span_from(self, k_op, stop_comma=False):
+        """SPEC 12.8 (D13): the supplying expression's [start, end) byte span.
+
+        From the first significant token after the assignment operator to the
+        end of the pipeline statement: a `;`, a non-continuation newline, or
+        the enclosing group's closer. A newline continues the statement when
+        the token before it is an operator that cannot end one (a pipe, a
+        comma, a binary operator, an opening group - never a closer), or when
+        the RHS has not started yet. Grouped regions are crossed whole, so an
+        inner `;` or newline never ends the statement. Backtick continuations
+        never surface here: the lexer folds the escaped newline into a `bt`
+        token, which `significant` drops. `end` advances only on significant
+        tokens, so a trailing comment is never part of the expression. The
+        span is the verbatim contract: the record's `rhs` is exactly
+        text[start:end], and the gate holds that equality over every write.
+        """
+        toks, sig = self.toks, self.sig
+        j = k_op + 1
+        start = None
+        end = None
+        while j < len(sig):
+            t = toks[sig[j]]
+            if stop_comma and t.kind == 'op' and t.text == ',':
+                break               # a param() entry ends at its separator
+            if t.kind == 'nl':
+                if end is None:
+                    j += 1          # the RHS starts on the next line
+                    continue
+                prev = toks[sig[j - 1]]
+                if prev.kind == 'op' and prev.text not in (')', '}', ']'):
+                    j += 1          # continuation: `|`, `,`, `+`, `(` ...
+                    continue
+                break
+            if t.kind == 'op':
+                if t.text == ';':
+                    break
+                if t.text in (')', '}', ']'):
+                    break           # the enclosing group's closer
+                if t.text in ('(', '{', '['):
+                    depth = 1
+                    if start is None:
+                        start = t.start
+                    end = t.end
+                    j += 1
+                    while j < len(sig) and depth:
+                        tt = toks[sig[j]]
+                        if tt.kind == 'op':
+                            if tt.text in ('(', '{', '['):
+                                depth += 1
+                            elif tt.text in (')', '}', ']'):
+                                depth -= 1
+                        if tt.kind != 'nl':
+                            end = tt.end
+                        j += 1
+                    continue
+            if start is None:
+                start = t.start
+            end = t.end
+            j += 1
+        if start is None or end is None or end <= start:
+            return None
+        return (start, end)
+
     def _record_foreach(self, k):
         toks, sig = self.toks, self.sig
         if k + 2 < len(sig) and toks[sig[k + 1]].kind == 'op' \
@@ -2068,6 +2178,15 @@ class Survey:
             _, name, _ = parse_var_token(v.text)
             self._decl_add(self._owner_id_fast(v.start), name)
             self.decl_write_offsets.add(v.start)
+            # SPEC 12.8: the `in` expression supplies the loop variable's
+            # value - it is the declaration's rhs. Scanned to the '(' group's
+            # own closer via the same walk as an assignment rhs; the depth
+            # starts inside the group, so the closer ends the span.
+            if k + 4 < len(sig) and toks[sig[k + 3]].kind == 'word' \
+                    and toks[sig[k + 3]].text.lower() == 'in':
+                span = self._rhs_span_from(k + 3)
+                if span:
+                    self.foreach_rhs[v.start] = span
 
     def _literal_name(self, tok):
         """The variable name a `-Name`/`-OutVariable` value token declares, or
@@ -2128,7 +2247,7 @@ class Survey:
             if t.kind == 'nl':
                 return
 
-    def _note_variable(self, offset, vtext, in_string, role):
+    def _note_variable(self, offset, vtext, in_string, role, rhs_span=None):
         qualifier, name, splatted = parse_var_token(vtext)
         self.counters["variable_refs"] += 1
         if in_string:
@@ -2141,7 +2260,7 @@ class Survey:
         self.var_sites.append({
             "offset": offset, "name": name, "qualifier": qualifier,
             "owner": owner, "role": role, "in_string": in_string,
-            "splatted": splatted,
+            "splatted": splatted, "rhs_span": rhs_span,
         })
 
     def _classify_variables(self):
@@ -2167,6 +2286,17 @@ class Survey:
                 "line": line, "offset": offset, "role": role,
                 "in_expandable_string": s["in_string"],
             }
+            # SPEC 12.8 (D13): a write carries its supplying expression,
+            # verbatim, plus the byte span that IS the verbatim contract -
+            # text[a:b] == rhs, held by the gate over every write. Flows
+            # through `base` so every write-classified record downstream
+            # (PSS2002, PSS2004-write, PSS2005-write, PSS2006) carries it;
+            # reads and writes with no supplying expression (SPEC 12.8's
+            # exclusions) carry neither key.
+            if role == "write" and s.get("rhs_span"):
+                a, b = s["rhs_span"]
+                base["rhs"] = self.text[a:b]
+                base["rhs_span"] = [a, b]
             if s["in_string"]:
                 # PSS2007 is an explicit exception to the SPEC 5.3 tiering rule:
                 # these are the principal path by which a text-substitution
