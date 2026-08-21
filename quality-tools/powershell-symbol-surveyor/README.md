@@ -16,6 +16,111 @@ rules are durable in
 
 ---
 
+## Surveying a script
+
+The surveyor reads one script and emits one JSON document — the model. It
+reports facts and draws no conclusions (SPEC §1.2): counts, symbols, call
+edges, references, and the analysis limits it hit (§4.8) — never a verdict
+about any of them. Whether something is a defect, a risk or fine is the
+consumer's judgement, made on facts the model must therefore actually carry.
+
+```
+# the default model - compact JSON on stdout
+python3 pss.py survey Script.ps1 --format json --out model.json
+
+# restore opt-in material: closure-sets, command-sites, local-sites, or 'all'
+python3 pss.py survey Script.ps1 --axes all --out model.json
+
+# price a request without keeping it: the model is computed and discarded
+python3 pss.py survey Script.ps1 --axes all --cost
+```
+
+The default model is deliberately not everything. Three **materialisation
+axes** (SPEC §5.6) hold the bulk material — transitive closure sets, one
+record per unresolved command-invocation site (carrying the invocation's
+argument itemisation and byte span), one record per local-variable
+reference — and every model states which axes it carries in its
+`materialization` block, so a narrower model can never pass as a full one.
+Every model also carries `model_version`, which advances whenever the model
+emitted for a fixed input can differ (§5.5); it is what decides whether two
+models are comparable at all.
+
+---
+
+## Slicing a model
+
+`slice` narrows an existing model deterministically. It never re-surveys and
+never adds material a survey did not capture — an axis on `slice` only
+restores what the input already carries.
+
+```
+# every record concerning one symbol, plus incident edges and all limitations
+python3 pss.py slice model.json --scope function/Set-DebugStep --out slice.json
+
+# narrow to an axis subset; 'all' keeps every axis the input has
+python3 pss.py slice model.json --axes closure-sets
+```
+
+A `--scope` slice keeps or drops **whole records** by one membership rule and
+never rewrites a kept record (SPEC §5.7) — with one stated exception: every
+symbol identifier the kept records still reference is re-introduced as a
+**boundary stub** (`record: "stub"` plus the four identify-and-locate keys,
+copied verbatim from the input), so nothing a slice hands a reader dangles.
+`limitations` is kept in full, because it describes what the survey could
+*not* determine and filtering it would misrepresent the slice's own
+coverage. A model from another `model_version` is **refused** (`PSS9005`)
+rather than sliced into a document whose stated version and actual shape
+disagree.
+
+---
+
+## Comparing two models
+
+`compare A B` states the differences and claims no relation between the inputs.
+`trace before after` carries the caller's assertion that the second is a later
+state of the first — an assertion the tool cannot verify and can only require
+to be made, which is why it is a verb and not a defaulted flag.
+
+```
+python3 pss.py compare a.json b.json --format json
+python3 pss.py trace before.json after.json --format json --out delta.json
+python3 pss.py compare a.json b.json --all      # equality stated per subject
+```
+
+The output carries `delta_records` (differences only), `surveyed` (a per-code
+tally) and `examined_subjects` (the compared population by identifier). All
+three are needed: a code missing from `surveyed` **did not run**, which is not
+the same as running and finding nothing, and a name missing from
+`examined_subjects` was never compared, which is not the same as being
+unchanged. `compare` evaluates the fifteen codes that hold without a claim of
+succession; `trace` evaluates those and the three rules of §12.7, which
+presuppose the assertion `trace` exists to carry. Each produces a candidate
+with its evidence, never a conclusion.
+
+A `model_version`, axis-set or scope mismatch **refuses** rather than comparing
+partially, because a partial delta reads as a complete one.
+
+## The descriptor and the self-checks
+
+```
+python3 pss.py --capabilities   # machine-readable interface descriptor (JSON)
+python3 pss.py --self-check     # SPEC tables and compiled constants, held both ways
+python3 pss.py --list-facts     # the fact catalogue, one line per code
+```
+
+`--capabilities` **serialises the constants the tool actually runs on** — the
+declared model schema, identifier forms and collection join keys, record
+variants, value nullability, the slice projection, the axis vocabulary —
+and marks what is not implemented *with a reason*, gated against behaviour
+so a feature cannot land while leaving its mark behind (SPEC §3.1). A
+consumer can therefore learn the interface from the tool instead of from a
+copy of the documentation. `--self-check` holds the SPEC's tables and the
+compiled catalogue against each other in both directions; what it cannot
+see — values at a real input — the baseline gate holds against the pinned
+corpus blob (§13.1).
+
+---
+
 ## Why a corpus
 
 The surveyor's requirements are derived from measured damage rather than from
@@ -117,7 +222,7 @@ stale — the failure mode ADR 0031 removed elsewhere in this repository.
 
 ---
 
-## Usage
+## Corpus usage
 
 ```
 # register an entry (one .ps1; directories and globs are refused)
@@ -219,32 +324,6 @@ whether the data is still comparable.
 
 ---
 
-## Comparing two models
-
-`compare A B` states the differences and claims no relation between the inputs.
-`trace before after` carries the caller's assertion that the second is a later
-state of the first — an assertion the tool cannot verify and can only require
-to be made, which is why it is a verb and not a defaulted flag.
-
-```
-python3 pss.py compare a.json b.json --format json
-python3 pss.py trace before.json after.json --format json --out delta.json
-python3 pss.py compare a.json b.json --all      # equality stated per subject
-```
-
-The output carries `delta_records` (differences only), `surveyed` (a per-code
-tally) and `examined_subjects` (the compared population by identifier). All
-three are needed: a code missing from `surveyed` **did not run**, which is not
-the same as running and finding nothing, and a name missing from
-`examined_subjects` was never compared, which is not the same as being
-unchanged. `compare` evaluates the fifteen codes that hold without a claim of
-succession; `trace` evaluates those and the three rules of §12.7, which
-presuppose the assertion `trace` exists to carry. Each produces a candidate
-with its evidence, never a conclusion.
-
-A `model_version`, axis-set or scope mismatch **refuses** rather than comparing
-partially, because a partial delta reads as a complete one.
-
 ## Self-test
 
 ```
@@ -268,7 +347,15 @@ are skipped — and say so — where it is absent (§14.3).
 
 ## Registration
 
-Neither `pss.py` nor its helpers are registered in the manifest yet. `pss.py`
-registers when its SPEC has no provisional items left; `corpus.py` and
-its apparatus register with it. Registering a helper before the tool it
-serves would invert the order.
+Neither `pss.py` nor the gate's apparatus is registered in the manifest yet.
+`pss.py` registers when its SPEC has no provisional items left; the corpus
+manager and the cache producer are subcommands of `test_pss.py` and go with
+it. Registering a helper before the tool it serves would invert the order.
+
+> **Note (2026-08-18):** deferring registration has a cost worth recording.
+> The derived battery target lists start from the manifest (ADR 0031), so
+> deferring registration **also defers every structural gate over this
+> directory**. In fact the file count grew from two to five in three days
+> against a SPEC that says "two `.py` files", and no gate could see it —
+> the baseline gate reads the model, not the directory tree. Registering
+> first has been proposed.

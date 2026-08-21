@@ -18,6 +18,23 @@ This file starts at `0.2.0`. Entries before it are reconstructed from the
 commit history and the SPEC's own decision records rather than written at the
 time, and are marked as such.
 
+## [Unreleased]
+
+### Changed
+
+- **README / README.ja restructured, consumer surface first.** The pages led
+  with the corpus/cache machinery while `survey`, `slice` and
+  `--capabilities` appeared nowhere — an inversion of what the tool now is.
+  Three new sections open the page (surveying, slicing with the D12 boundary
+  stubs and the `PSS9005` refusal, the descriptor and self-checks; every
+  usage line executed before being written down), the comparison section
+  moves up with them, and the corpus/cache half is kept intact below —
+  this README remains the corpus manager's authoritative document. The
+  `Registration` section's stale `corpus.py` phrasing is corrected to the
+  subcommand reality, and the deferral-cost note that existed only in the
+  Japanese page is mirrored into the English one. Structural lock-step held
+  by the gate on both pages.
+
 ## [0.4.0] - 2026-08-20 (`model_version` "3" -> "4"; the D12 arc)
 
 `MODEL_VERSION` advances at this arc's first model-moving commit (ADR 0035 /
