@@ -22,8 +22,8 @@ Oracle 公式の [`oracle-linux-image-tools`](https://github.com/oracle/oracle-l
 
 Oracle 公式 AMI(オーナー ID `131827586825`)の AWS Marketplace 提供が終了したため、独自の AMI 構築・運用フローを確立する目的で作成しています。
 
-> **2026 年 2 月以降の AWS 新機能対応**
-> AWS が C8i / M8i / R8i インスタンスでネスト仮想化をサポートしたことに伴い、本ガイドは **M8i 系インスタンスでのビルドを主推奨**としています。これによりベアメタルインスタンス(`.metal`)を使う必要がなく、**コストが従来の約 1/15** になります。
+> **AWS ネスト仮想化機能への対応(2026 年 2 月リリース・2026 年 6 月拡大)**
+> AWS は通常の EC2 インスタンス(非ベアメタル)でネスト仮想化をサポートしています — 2026 年 2 月に C8i / M8i / R8i で開始し、2026 年 6 月に -id/-flex 系、X8i、C7i / M7i / R7i 世代(C7i-flex / M7i-flex 含む)、I7i へ拡大されました。本ガイドは **M8i 系インスタンスでのビルドを主推奨**とし、複数 AMI の並行ビルドには R8i を推奨します。これによりベアメタルインスタンス(`.metal`)を使う必要がなく、**コストが従来の約 1/18**(東京オンデマンド・2026-08 実測)になります。
 
 ---
 
@@ -154,18 +154,19 @@ streamable VMDK 変換、 S3 ステージング、 EC2 `import-snapshot`、
 
 `oracle-linux-image-tools` は KVM/libvirt を使うため、ビルドホストには CPU 仮想化拡張(Intel VT-x / AMD-V)が露出している必要があります。**3 つの選択肢**があります。
 
-### 3.1 推奨: AWS EC2 の M8i / C8i / R8i 系(ネスト仮想化有効)
+### 3.1 推奨: ネスト仮想化対応の AWS EC2 インスタンスファミリー
 
-2026 年 2 月以降、AWS は通常の EC2 インスタンス(非ベアメタル)で**ネスト仮想化**をサポートしました。これにより `m8i.xlarge` クラスの安価なインスタンスでビルダーを動かせます。
+2026 年 2 月以降、AWS は通常の EC2 インスタンス(非ベアメタル)で**ネスト仮想化**をサポートしており、2026 年 6 月の拡大で対応リストは Intel 16 ファミリーに広がりました。これにより `m8i.xlarge` クラスの安価なインスタンスでビルダーを動かせます。
 
 | 項目 | 内容 |
 |------|------|
-| 対応インスタンス | C8i, C8i-flex, C8id / M8i, M8i-flex, M8id / R8i, R8i-flex, R8id |
-| サイズ | `.large` 〜 `.96xlarge`(全サイズ対応) |
-| アーキテクチャ | x86_64(Intel Xeon 6, Sapphire Rapids 世代) |
-| リージョン | すべての商用リージョン(東京 ap-northeast-1 含む) |
-| 追加料金 | **なし**(通常のインスタンス料金のみ) |
-| 推奨スペック | `m8i.xlarge` (4 vCPU / 16 GB) — `oracle-linux-image-tools` のデフォルト要件に適合 |
+| 対応インスタンス | C8i, C8i-flex, C8id / M8i, M8i-flex, M8id / R8i, R8i-flex, R8id / X8i / C7i, C7i-flex / M7i, M7i-flex / R7i / I7i(2026-08 時点の AWS User Guide 記載リスト) |
+| アーキテクチャ | x86_64・Intel のみ(8i 世代 = Intel Xeon 6 / 7i 世代 = 第 4 世代 Intel Xeon, Sapphire Rapids)。Graviton は非対応。 |
+| リージョン | すべての商用リージョン(東京 ap-northeast-1 含む)+ AWS GovCloud (US) |
+| 追加料金 | **なし**(ネスト仮想化自体の追加課金はなく、通常のインスタンス料金のみ) |
+| 推奨スペック(単発ビルド) | `m8i.xlarge` (4 vCPU / 16 GB) — `oracle-linux-image-tools` のデフォルト要件に適合 |
+| 推奨スペック(複数 AMI 並行ビルド) | `r8i.xlarge` / `r8i.2xlarge` (4 / 8 vCPU, 32 / 64 GB) — メモリ最適化ファミリー。複数 major を同時にビルドする際の運用実績のある選択肢(各ビルドがゲスト VM を 1 台ずつ抱えるため、律速はメモリ容量) |
+| 最安の対応オプション | `c7i-flex.xlarge` / `m7i-flex.xlarge` — 第 7 節参照(flex 系はベースライン/バースト型の CPU モデルですが、本ビルドは I/O バウンドのため実用上の問題はありません) |
 
 **起動例:**
 ```bash
@@ -211,7 +212,7 @@ aws ec2 run-instances \
 
 ---
 
-## 4. ネスト仮想化の有効化(M8i 系を使う場合のみ)
+## 4. ネスト仮想化の有効化(対応ファミリーを使う場合のみ)
 
 ### 4.1 新規起動時に有効化
 
@@ -400,7 +401,8 @@ Phase 0 では実行環境を自動検出し、問題があれば対応案内を
 **ケース B: ネスト仮想化非対応のインスタンスファミリーを使っている場合**
 ```
 2026-06-08 07:32:35 [WARN]  [ケース B] m5 はネスト仮想化非対応のインスタンスファミリーです。
-2026-06-08 07:32:35 [INFO]  選択肢 1 (推奨): ネスト仮想化対応の C8i / M8i / R8i 系に乗り換え
+2026-06-08 07:32:35 [INFO]  選択肢 1 (推奨): ネスト仮想化対応インスタンスに乗り換え
+2026-06-08 07:32:35 [INFO]    (C8i/M8i/R8i の -id/-flex 含む, X8i, C7i/M7i/R7i, C7i-flex/M7i-flex, I7i)
 2026-06-08 07:32:35 [INFO]  選択肢 2: ベアメタルインスタンスに乗り換え
 ```
 
@@ -418,16 +420,19 @@ Phase 0 では実行環境を自動検出し、問題があれば対応案内を
 
 ## 7. コスト比較
 
-東京リージョン目安、1 ビルドあたり 1 時間と仮定。
+東京リージョンのオンデマンド料金(Linux / Shared テナンシー)、1 ビルドあたり 1 時間と仮定。価格は **2026-08-21** に AWS Price List API から実測した値です — 料金は変動するため、必ず最新の価格を確認してください。
 
 | 方式 | ビルダー | 時間単価 | 1 ビルドあたり | 月 4 回 | 月 30 回 |
 |------|---------|---------|--------------|--------|---------|
-| **推奨: M8i 系 + ネスト仮想化** | `m8i.xlarge` | $0.30/h | **$0.30** | $1.20 | **$9.00** |
-| 推奨: C8i 系 (CPU 重視) | `c8i.2xlarge` | $0.50/h | $0.50 | $2.00 | $15.00 |
-| 代替: ベアメタル(従来手法) | `c5n.metal` | $4.50/h | $4.50 | $18.00 | $135.00 |
-| 代替: ベアメタル | `m5.metal` | $5.50/h | $5.50 | $22.00 | $165.00 |
+| **推奨: M8i 系 + ネスト仮想化** | `m8i.xlarge` | $0.273/h | **$0.27** | $1.09 | **$8.20** |
+| 最安の対応オプション: 7i-flex 系 | `c7i-flex.xlarge` | $0.214/h | $0.21 | $0.85 | $6.41 |
+| **複数 AMI 並行ビルド: R8i 系** | `r8i.xlarge` (32 GB) | $0.335/h | $0.34 | $1.34 | $10.06 |
+| 複数 AMI 並行ビルド: R8i 系 | `r8i.2xlarge` (64 GB) | $0.670/h | $0.67 | $2.68 | $20.11 |
+| 推奨: C8i 系 (CPU 重視) | `c8i.2xlarge` | $0.472/h | $0.47 | $1.89 | $14.16 |
+| 代替: ベアメタル(従来手法) | `c5n.metal` | $4.896/h | $4.90 | $19.58 | $146.88 |
+| 代替: ベアメタル | `m5.metal` | $5.952/h | $5.95 | $23.81 | $178.56 |
 
-**月 30 回ビルドする場合、約 $126/月のコスト削減**が可能です。CI/CD パイプライン化にも十分耐えられる経済性です。
+**月 30 回ビルドする場合、約 $138/月のコスト削減**が可能です(m8i.xlarge 対 c5n.metal)。CI/CD パイプライン化にも十分耐えられる経済性です。メモリ単価では R8i 系が対応ファミリー中で最も有利で、同じ 32 GB を `m8i.2xlarge` で確保するより `r8i.xlarge` の方が約 39% 安くなります — 複数 major の同時ビルドで R8i 系を優先利用しているのはこのためです。
 
 ---
 
@@ -524,9 +529,9 @@ ssh -i your-keypair.pem ec2-user@<public-ip>
 
 ### 9.5 ネスト仮想化を主推奨にする理由
 
-2026 年 2 月以降、AWS が C8i / M8i / R8i でネスト仮想化を正式サポートしたことで、以下が達成されました。
+AWS が通常の EC2 インスタンスでネスト仮想化を正式サポートしたことで(2026 年 2 月に C8i / M8i / R8i、2026 年 6 月に -id/-flex 系・X8i・7i 世代・I7i へ拡大)、以下が達成されました。
 
-1. **Oracle 公式ツールに準拠**したまま、**圧倒的に安価**にビルド可能(`m8i.xlarge` で約 $0.30/ビルド vs `c5n.metal` で約 $5/ビルド)
+1. **Oracle 公式ツールに準拠**したまま、**圧倒的に安価**にビルド可能(`m8i.xlarge` で約 $0.27/ビルド vs `c5n.metal` で約 $4.90/ビルド。東京オンデマンド・2026-08 実測)
 2. **CI/CD パイプライン化が現実解**になる経済性
 3. ベアメタル特有の起動遅延(数分待ち)が発生せず、ビルド全体時間が短縮
 4. Spot Instance / Auto Scaling との組み合わせも視野に入る
@@ -675,6 +680,7 @@ aws ec2 get-console-output --instance-id i-xxxxx --region <region>
 - [oracle/oracle-linux/oracle-linux-image-tools](https://github.com/oracle/oracle-linux/tree/main/oracle-linux-image-tools) — Oracle 公式ツール
 - [Use nested virtualization to run hypervisors in Amazon EC2 instances](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nested-virtualization.html) — AWS のネスト仮想化機能ドキュメント
 - [Amazon EC2 supports nested virtualization on virtual Amazon EC2 instances (What's New)](https://aws.amazon.com/about-aws/whats-new/2026/02/amazon-ec2-nested-virtualization-on-virtual/) — 2026 年 2 月リリースアナウンス
+- [Nested virtualization is now available on additional Intel platforms and AWS GovCloud (US) regions (What's New)](https://aws.amazon.com/about-aws/whats-new/2026/06/nested-virtualization-intel-us-gov-cloud/) — 2026 年 6 月の対応拡大アナウンス(7i 世代・-id/-flex 系・X8i・I7i)
 - [Oracle Linux ISOs](https://yum.oracle.com/oracle-linux-isos.html) — ISO ダウンロードとチェックサム
 - [AWS VM Import/Export User Guide](https://docs.aws.amazon.com/vm-import/latest/userguide/) — `import-snapshot` / `register-image` の詳細
 - [Boot modes in EC2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ami-boot.html) — `uefi-preferred` 等の挙動

@@ -308,4 +308,51 @@ rc="$(run_p3 _p3_validate_ks "${p3tmp}/unend-el8.cfg" 8)"
 if [ "${rc}" -ge 1 ]; then t_pass "p3-gate: unbalanced sections still caught with %addon counted (${rc} findings)"; else t_fail "p3-gate: unbalanced sections still caught with %addon counted"; fi
 rm -rf "${p3tmp}"
 
+# --- guide_ec2_kvm_issue : 3-case routing (nested-virt family list sync) ------
+# The Case A family pattern mirrors the AWS User Guide list (2026-08: the
+# Feb 2026 launch families plus the June 2026 expansion). Rows pin one
+# representative per class: an original family (regression), newly added
+# families (7i generation, flex, X8i, I7i), a non-capable family (Case B),
+# and bare metal (Case C -- the D.8 ordering regression).
+# row: instance_type | expected_case_regex
+while IFS='|' read -r itype eregex; do
+  [ -z "${itype}" ] && continue
+  out="$(
+    # shellcheck source=/dev/null
+    . "${MAIN}" >/dev/null 2>&1
+    # shellcheck disable=SC2034  # consumed inside the sourced function
+    EC2_INSTANCE_ID="i-0123456789abcdef0"
+    # shellcheck disable=SC2034  # consumed inside the sourced function
+    EC2_REGION="ap-northeast-1"
+    guide_ec2_kvm_issue "${itype}" 2>&1
+  )"; rc=$?
+  assert_rc 1 "${rc}" "guide_ec2_kvm_issue: ${itype} exits 1"
+  assert_match "${out}" "${eregex}" "  -> routes to the expected case :: ${itype}"
+done <<'CASES'
+m8i.xlarge|\[Case A\] m8i supports nested virtualization
+m7i.xlarge|\[Case A\] m7i supports nested virtualization
+c7i-flex.2xlarge|\[Case A\] c7i-flex supports nested virtualization
+x8i.xlarge|\[Case A\] x8i supports nested virtualization
+i7i.2xlarge|\[Case A\] i7i supports nested virtualization
+m5.xlarge|\[Case B\] m5 does NOT support nested virtualization
+c5n.metal|\[Case C\] c5n.metal is bare metal
+CASES
+
+# Case B guidance carries no hardcoded hourly price (pricing drifts and is
+# centralized in README section 7; the in-script message must stay price-free).
+out="$(
+  # shellcheck source=/dev/null
+  . "${MAIN}" >/dev/null 2>&1
+  # shellcheck disable=SC2034  # consumed inside the sourced function
+  EC2_INSTANCE_ID="i-0123456789abcdef0"
+  # shellcheck disable=SC2034  # consumed inside the sourced function
+  EC2_REGION="ap-northeast-1"
+  guide_ec2_kvm_issue "m5.xlarge" 2>&1
+)" || true
+if grep -Eq -- '\$[0-9]+([.][0-9]+)?/h' <<<"${out}"; then
+  t_fail "guide_ec2_kvm_issue: Case B message is price-free (found a \$N/h price)"
+else
+  t_pass "guide_ec2_kvm_issue: Case B message is price-free"
+fi
+
 t_done

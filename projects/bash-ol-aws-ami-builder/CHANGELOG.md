@@ -20,6 +20,46 @@ This CHANGELOG is **English only** per the repository-wide
 
 ## [Unreleased]
 
+### Changed (2026-08-21 — nested-virt capable-family expansion (June 2026 AWS list) + measured cost refresh)
+- **Case A family pattern in `guide_ec2_kvm_issue` expanded to the AWS
+  User Guide list as of 2026-08** (16 families): the June 2026 AWS
+  expansion added `x8i`, the 7i generation (`c7i`/`m7i`/`r7i`,
+  `c7i-flex`/`m7i-flex`), and `i7i` on top of the Feb 2026 launch
+  families — without this, e.g. an `m7i` host was mis-routed to Case B
+  ("does not support") instead of Case A ("enable it"). Sources: the
+  EC2 User Guide nested-virtualization page and the 2026-06 What's New
+  announcement (the re:Post article's larger 20-family list was NOT
+  adopted — primary sources agree on 16).
+- **Hardcoded hourly prices removed from the in-script Case B guidance**
+  (both the capable-instance example and the `c5n.metal` example):
+  prices drift, so pricing is centralized in README section 7, which is
+  refreshed with values measured from the AWS Price List Bulk API on
+  2026-08-21 (Tokyo, on-demand, Linux/Shared) and now carries an
+  as-measured date. Headline corrections: `m8i.xlarge` $0.30 -> $0.273/h,
+  `c5n.metal` $4.50 -> $4.896/h; the bare-metal saving at 30 builds/mo
+  is ~$138 (was understated at ~$126) and the cost ratio is ~1/18
+  (was conservatively stated as ~1/15).
+- **Per-use-case builder recommendations added** (both READMEs,
+  section 3.1 + 7): single build = `m8i.xlarge` (unchanged primary);
+  **parallel multi-major builds = `r8i.xlarge`/`r8i.2xlarge`**
+  (memory-optimized, the operationally proven choice — each concurrent
+  build hosts its own guest VM, so memory binds first, and the same
+  32 GB costs ~39% less on `r8i.xlarge` than on `m8i.2xlarge`);
+  cheapest capable = `c7i-flex`/`m7i-flex` (baseline/burst caveat noted;
+  the build is I/O-bound). The section-3.1 blanket "Sizes .large
+  through .96xlarge" row was dropped (not true across flex families);
+  the architecture row now states Intel-only across the 8i/7i
+  generations instead of a single-generation label.
+- Docs in lock-step: both READMEs (intro callout, 3.1, 4, 6.3 Case-B
+  sample log, 7, 9.5, references incl. the June 2026 What's New link),
+  wrapper header comment, and the `guide_ec2_kvm_issue` comment block.
+  SPEC untouched (it enumerates no family list; D.8 / record #9 are
+  historical records).
+- Tests: B-T3 74 (was 59) — a table-driven `guide_ec2_kvm_issue`
+  routing pin (Case A for an original + the newly added families,
+  Case B, Case C/D.8) and a Case-B price-free pin; suite baseline
+  807 -> **822**. TESTING.md counts + the B-T3 ledger row updated.
+
 ### Fixed (2026-07-27 — record #10: first real OL5 E2E boots; summary-message fixes; the ks selinux hardcode)
 - **Milestone (docs updated accordingly): the OL5 path is E2E-PROVEN.**
   `ami-0f9a04a9b4683fd44` booted on `t2` (Xen) and `c5` (Nitro),

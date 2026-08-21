@@ -22,8 +22,8 @@ The deepest legacy target is **Oracle Linux 5** (x86_64), added on the same synt
 
 Created in response to the discontinuation of Oracle's official AMI offerings (owner ID `131827586825`) on the AWS Marketplace, with the goal of establishing an independent build and operations workflow for Oracle Linux AMIs.
 
-> **Aligned with the AWS feature released in February 2026**
-> Now that AWS supports nested virtualization on C8i / M8i / R8i instances, this guide **recommends building on M8i-class instances as the primary path**. This removes the need for bare-metal instances (`.metal`) and brings the cost down to **approximately 1/15 of the previous approach**.
+> **Aligned with the AWS nested-virtualization feature (February 2026, expanded June 2026)**
+> AWS supports nested virtualization on regular (non-bare-metal) EC2 instances — launched on C8i / M8i / R8i in February 2026 and expanded in June 2026 to the -id/-flex variants, X8i, the C7i / M7i / R7i generation (plus C7i-flex / M7i-flex), and I7i. This guide **recommends building on M8i-class instances as the primary path** (R8i for parallel multi-AMI builds). This removes the need for bare-metal instances (`.metal`) and brings the cost down to **approximately 1/18 of the previous approach** (Tokyo on-demand, measured 2026-08).
 
 ---
 
@@ -152,18 +152,19 @@ one-file change.
 
 `oracle-linux-image-tools` relies on KVM/libvirt, so the build host must expose CPU virtualization extensions (Intel VT-x / AMD-V). You have **three options**.
 
-### 3.1 Recommended: AWS EC2 M8i / C8i / R8i family (nested virtualization enabled)
+### 3.1 Recommended: a nested-virtualization-capable AWS EC2 instance family
 
-Since February 2026, AWS supports **nested virtualization** on regular (non-bare-metal) EC2 instances. This lets you run the builder on inexpensive instances like `m8i.xlarge`.
+Since February 2026, AWS supports **nested virtualization** on regular (non-bare-metal) EC2 instances; the June 2026 expansion broadened the capable list to 16 Intel families. This lets you run the builder on inexpensive instances like `m8i.xlarge`.
 
 | Item | Detail |
 |------|--------|
-| Supported instances | C8i, C8i-flex, C8id / M8i, M8i-flex, M8id / R8i, R8i-flex, R8id |
-| Sizes | `.large` through `.96xlarge` (all sizes supported) |
-| Architecture | x86_64 (Intel Xeon 6, Sapphire Rapids generation) |
-| Regions | All commercial regions (including Tokyo `ap-northeast-1`) |
-| Extra cost | **None** — same price as the regular instance |
-| Recommended size | `m8i.xlarge` (4 vCPU / 16 GB) — meets `oracle-linux-image-tools` defaults |
+| Supported instances | C8i, C8i-flex, C8id / M8i, M8i-flex, M8id / R8i, R8i-flex, R8id / X8i / C7i, C7i-flex / M7i, M7i-flex / R7i / I7i (AWS User Guide list as of 2026-08) |
+| Architecture | x86_64, Intel only (8i generation = Intel Xeon 6; 7i generation = 4th Gen Intel Xeon, Sapphire Rapids). Graviton is not supported. |
+| Regions | All commercial regions (including Tokyo `ap-northeast-1`) and AWS GovCloud (US) |
+| Extra cost | **None** — nested virtualization itself adds no charge on top of the instance price |
+| Recommended size (single build) | `m8i.xlarge` (4 vCPU / 16 GB) — meets `oracle-linux-image-tools` defaults |
+| Recommended size (parallel multi-AMI builds) | `r8i.xlarge` / `r8i.2xlarge` (4 / 8 vCPU, 32 / 64 GB) — memory-optimized; the operationally proven choice when building several majors concurrently (each build hosts its own guest VM, so memory is the binding constraint) |
+| Cheapest capable option | `c7i-flex.xlarge` / `m7i-flex.xlarge` — see section 7 (flex families use a baseline/burst CPU model; the build is I/O-bound, so this is not a practical concern) |
 
 **Launch example:**
 ```bash
@@ -209,7 +210,7 @@ If you already have a KVM-capable Linux host on premises, the build runs there w
 
 ---
 
-## 4. Enabling Nested Virtualization (M8i family only)
+## 4. Enabling Nested Virtualization (capable families only)
 
 ### 4.1 Enable at launch
 
@@ -398,7 +399,8 @@ Phase 0 inspects the runtime environment and emits targeted guidance when someth
 **Case B: Running on an instance family that does not support nested virtualization**
 ```
 2026-06-08 07:32:35 [WARN]  [Case B] m5 does NOT support nested virtualization.
-2026-06-08 07:32:35 [INFO]  Option 1 (recommended): Use a nested-virtualization-capable C8i / M8i / R8i instance
+2026-06-08 07:32:35 [INFO]  Option 1 (recommended): Use a nested-virtualization-capable instance
+2026-06-08 07:32:35 [INFO]    (C8i/M8i/R8i incl. -id/-flex, X8i, C7i/M7i/R7i, C7i-flex/M7i-flex, I7i)
 2026-06-08 07:32:35 [INFO]  Option 2: Switch to a bare-metal instance
 ```
 
@@ -416,16 +418,19 @@ This automation **minimizes the trial-and-error of first-time setup**.
 
 ## 7. Cost Comparison
 
-Tokyo region pricing, assuming roughly one hour per build.
+Tokyo region on-demand pricing (Linux / Shared tenancy), assuming roughly one hour per build. Prices measured from the AWS Price List API on **2026-08-21** — always check current pricing, as these drift.
 
 | Approach | Builder | Hourly | Per build | 4 builds/mo | 30 builds/mo |
 |----------|---------|--------|-----------|-------------|--------------|
-| **Recommended: M8i + nested virt** | `m8i.xlarge` | $0.30/h | **$0.30** | $1.20 | **$9.00** |
-| Recommended: C8i (compute-heavy) | `c8i.2xlarge` | $0.50/h | $0.50 | $2.00 | $15.00 |
-| Legacy: bare metal | `c5n.metal` | $4.50/h | $4.50 | $18.00 | $135.00 |
-| Legacy: bare metal | `m5.metal` | $5.50/h | $5.50 | $22.00 | $165.00 |
+| **Recommended: M8i + nested virt** | `m8i.xlarge` | $0.273/h | **$0.27** | $1.09 | **$8.20** |
+| Cheapest capable: 7i-flex | `c7i-flex.xlarge` | $0.214/h | $0.21 | $0.85 | $6.41 |
+| **Parallel multi-AMI builds: R8i** | `r8i.xlarge` (32 GB) | $0.335/h | $0.34 | $1.34 | $10.06 |
+| Parallel multi-AMI builds: R8i | `r8i.2xlarge` (64 GB) | $0.670/h | $0.67 | $2.68 | $20.11 |
+| Recommended: C8i (compute-heavy) | `c8i.2xlarge` | $0.472/h | $0.47 | $1.89 | $14.16 |
+| Legacy: bare metal | `c5n.metal` | $4.896/h | $4.90 | $19.58 | $146.88 |
+| Legacy: bare metal | `m5.metal` | $5.952/h | $5.95 | $23.81 | $178.56 |
 
-**At 30 builds per month, you save approximately $126/month** compared to the bare-metal approach. The pricing easily supports CI/CD pipeline integration.
+**At 30 builds per month, you save approximately $138/month** compared to the bare-metal approach (m8i.xlarge vs c5n.metal). The pricing easily supports CI/CD pipeline integration. For memory-per-dollar, the R8i family is the strongest capable option — the same 32 GB costs about 39% less on `r8i.xlarge` than on `m8i.2xlarge` — which is why R8i is the operationally preferred family for concurrent multi-major builds.
 
 ---
 
@@ -522,9 +527,9 @@ Every env template ships with `UPDATE_TO_LATEST="yes"`. The setting flows throug
 
 ### 9.5 Why nested virtualization is the primary recommendation
 
-Now that AWS officially supports nested virtualization on C8i / M8i / R8i (since February 2026), this approach delivers:
+Now that AWS officially supports nested virtualization on regular EC2 instances (C8i / M8i / R8i since February 2026; expanded in June 2026 to the -id/-flex variants, X8i, the 7i generation, and I7i), this approach delivers:
 
-1. **Compatibility with the official Oracle tooling** at a **dramatically lower cost** (≈$0.30/build on `m8i.xlarge` vs. ≈$5/build on `c5n.metal`).
+1. **Compatibility with the official Oracle tooling** at a **dramatically lower cost** (≈$0.27/build on `m8i.xlarge` vs. ≈$4.90/build on `c5n.metal`; Tokyo on-demand, measured 2026-08).
 2. **Realistic CI/CD integration** thanks to the pricing.
 3. Faster end-to-end time, avoiding the multi-minute startup latency typical of bare-metal instances.
 4. Compatibility with Spot Instances and Auto Scaling for further cost optimization.
@@ -672,6 +677,7 @@ aws ec2 get-console-output --instance-id i-xxxxx --region <region>
 - [oracle/oracle-linux/oracle-linux-image-tools](https://github.com/oracle/oracle-linux/tree/main/oracle-linux-image-tools) — The Oracle official tool used internally
 - [Use nested virtualization to run hypervisors in Amazon EC2 instances](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nested-virtualization.html) — AWS nested virtualization documentation
 - [Amazon EC2 supports nested virtualization on virtual Amazon EC2 instances (What's New)](https://aws.amazon.com/about-aws/whats-new/2026/02/amazon-ec2-nested-virtualization-on-virtual/) — February 2026 release announcement
+- [Nested virtualization is now available on additional Intel platforms and AWS GovCloud (US) regions (What's New)](https://aws.amazon.com/about-aws/whats-new/2026/06/nested-virtualization-intel-us-gov-cloud/) — June 2026 expansion announcement (7i generation, -id/-flex variants, X8i, I7i)
 - [Oracle Linux ISOs](https://yum.oracle.com/oracle-linux-isos.html) — ISO downloads and checksums
 - [AWS VM Import/Export User Guide](https://docs.aws.amazon.com/vm-import/latest/userguide/) — Detailed documentation for `import-snapshot` / `register-image`
 - [Boot modes in EC2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ami-boot.html) — Behavior of `uefi-preferred` and friends

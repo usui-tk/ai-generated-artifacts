@@ -39,8 +39,10 @@
 # Runtime:
 #   * Bash 4+ (for `${var,,}`, associative arrays, etc.)
 #   * Linux build host with CPU virtualization extensions exposed (vmx/svm).
-#     Either bare metal, or an EC2 C8i / M8i / R8i instance with nested
-#     virtualization enabled (see AWS docs link in the README).
+#     Either bare metal, or a nested-virtualization-capable EC2 instance
+#     (Intel 8i/7i generations -- C8i/M8i/R8i incl. -id/-flex, X8i,
+#     C7i/M7i/R7i, C7i-flex/M7i-flex, I7i) with the feature enabled
+#     (see AWS docs link in the README).
 #   * Architecture: x86_64 host required for x86_64 AMI builds.
 #   * Free disk space: 20 GB minimum, 30 GB recommended at WORKSPACE.
 #
@@ -918,8 +920,10 @@ resolve_aws_region() {
 # Print detailed guidance when KVM is unavailable on an EC2 host, then exit.
 #
 # Three scenarios are handled:
-#   (A) C8i / M8i / R8i family -> nested virtualization just needs to be enabled
-#   (B) Other (legacy) Nitro family -> switch to C8i/M8i/R8i or use .metal
+#   (A) Nested-virt-capable family (Intel 8i/7i generations; the case
+#       pattern below is kept in sync with the AWS User Guide list)
+#       -> nested virtualization just needs to be enabled
+#   (B) Other (legacy) Nitro family -> switch to a capable family or use .metal
 #   (C) .metal family -> likely a configuration issue (kvm module not loaded)
 #------------------------------------------------------------------------------
 guide_ec2_kvm_issue() {
@@ -955,7 +959,10 @@ guide_ec2_kvm_issue() {
     log_info "       ls -l /dev/kvm"
   else
     case "${family}" in
-      c8i|c8i-flex|c8id|m8i|m8i-flex|m8id|r8i|r8i-flex|r8id)
+      # AWS User Guide list as of 2026-08 (Feb 2026 launch: C8i/M8i/R8i;
+      # the June 2026 expansion added the -id/-flex variants, X8i, the 7i
+      # generation, and I7i). Keep in sync with README section 3.1.
+      c8i|c8i-flex|c8id|m8i|m8i-flex|m8id|r8i|r8i-flex|r8id|x8i|c7i|c7i-flex|m7i|m7i-flex|r7i|i7i)
         log_warn "[Case A] ${family} supports nested virtualization, but the feature is currently disabled."
         echo
         log_info "Action: enable nested virtualization on this instance."
@@ -979,13 +986,14 @@ guide_ec2_kvm_issue() {
         echo
         log_info "Action: switch to one of the following options."
         log_info ""
-        log_info "  Option 1 (recommended): Use a nested-virtualization-capable C8i / M8i / R8i instance"
-        log_info "    - Example: m8i.xlarge (4 vCPU / 16 GB / approx \$0.30/h)"
-        log_info "    - Same price as the standard instance; no extra charge"
+        log_info "  Option 1 (recommended): Use a nested-virtualization-capable instance"
+        log_info "    (C8i/M8i/R8i incl. -id/-flex, X8i, C7i/M7i/R7i, C7i-flex/M7i-flex, I7i)"
+        log_info "    - Example: m8i.xlarge (4 vCPU / 16 GB); r8i for parallel multi-AMI builds"
+        log_info "    - Nested virtualization itself adds no extra charge (pricing: README section 7)"
         log_info "    - Sufficient spec to host the build VM"
         log_info ""
         log_info "  Option 2: Switch to a bare-metal instance"
-        log_info "    - Example: c5n.metal (approx \$5/h; acceptable for short builds)"
+        log_info "    - Example: c5n.metal (markedly more expensive; pricing: README section 7)"
         log_info ""
         log_info "  List of nested-virt-capable instance types in this region:"
         log_info "    aws ec2 describe-instance-types \\"
