@@ -22,6 +22,23 @@ time, and are marked as such.
 
 ### Added
 
+- **`model_version` "5" -> "6" — the D14 arc, part 1: every span is the
+  byte offset the SPEC declares.** `rhs_span` (§12.8) and the D12 site
+  `span` (§5.6) — the sibling defect found during the D14 design — now
+  address the **encoded** source; one character→byte conversion at record
+  assembly (identity on all-ASCII sources, a cumulative table otherwise).
+  Measured basis: the reference target opens with a BOM, so byte-reading
+  consumers would have mis-addressed 5,111/5,113 rhs spans and
+  2,797/2,798 site spans. Red demonstrated as the real battery against
+  the "5" build: a BOM+Japanese fixture and two whole-population byte
+  gates (encoded_source[rhs_span] == rhs; encoded_source[span] opens
+  with the invoked name) — exactly those figures fell out as violations.
+  The gates now verify on encoded bytes: **the gate embodies the
+  declaration, not the code** (the round-5 lesson, §12.8's resolved
+  note). No structural change: Appendix B.8 measured unmoved (values
+  moved, shape did not); §5.6's figures re-measured at v6 — default
+  byte-identical, `local-sites` +2 bytes.
+
 - **The span-unit deviation is recorded and inventoried (D14)** — round
   5's whole-population check exposed that `rhs_span` ships character
   offsets against §12.8's declared byte offsets (4 of 5,373 pin writes

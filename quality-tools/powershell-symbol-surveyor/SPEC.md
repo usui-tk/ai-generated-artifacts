@@ -2422,21 +2422,24 @@ supplies the declared value, when one exists:
   corpus, without sampling** — the span is not a convenience but the
   verbatim contract made checkable (§13.2).
 
-  **Known deviation (measured, round 5; inventoried for D14, §13.2).** The
-  shipped implementation emits **character offsets**, not the byte offsets
-  this section declares: on the reference target the two differ on exactly
-  4 of 5,373 writes — the ones whose `rhs` carries non-ASCII (Japanese)
-  characters (lines 10979, 10987, 26804, 26808) — where the span width
-  equals the character count, not the UTF-8 byte length. The gate did not
-  see it because it slices the decoded text (unit-consistent with the
-  implementation, blind to this sentence); both round-5 reviewers'
-  necessary check (span width == UTF-8 length of `rhs`) embodied the
-  declared reading but sampled five ASCII-only writes each; running the
-  same check over the whole population during evaluation exposed it. Until
-  the D14 item lands, a consumer must treat spans as character offsets
-  into the decoded source; the declaration above states the intended
-  contract, byte offsets being the language-neutral address into the
-  artefact `sha256` and `byte_count` already describe.
+  **Resolved deviation (found round 5, measured, fixed at D14 —
+  `model_version` "6").** D13 shipped **character offsets** against this
+  section's declared byte offsets. The width divergence was 4 of 5,373
+  writes (the non-ASCII `rhs` cases), but the absolute-coordinate reality
+  was far heavier, measured during the D14 design: the reference target
+  opens with a BOM at character 0, so a byte-reading consumer would have
+  mis-addressed **5,111 of 5,113** `rhs` spans — and the D12 site `span`
+  had the same sibling defect (**2,797 of 2,798** sites), declared as
+  bytes in two places and implemented in characters. Both are byte
+  offsets as of "6", one conversion applied at record assembly. The
+  detection account is kept because each miss is a lesson: the D13 gate
+  sliced the *decoded* text — unit-consistent with the implementation and
+  therefore structurally blind to the declaration's unit; both round-5
+  reviewers invented the check that embodies the declared reading (span
+  width == UTF-8 length of `rhs`) but sampled five ASCII-only writes
+  each; the whole-population run during evaluation exposed it. The fix's
+  design rule, now built into §13's gates: **the gate verifies on the
+  encoded bytes — it embodies the declaration, not the code.**
 
 **Which writes carry it.** The supplying expression per §12.2 declaration
 source: an assignment or compound assignment's right-hand side (the operator

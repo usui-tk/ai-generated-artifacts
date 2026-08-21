@@ -39,7 +39,7 @@ import re
 import sys
 
 __version__ = "0.5.0"
-MODEL_VERSION = "5"
+MODEL_VERSION = "6"
 
 MIN_PYTHON = (3, 12)
 
@@ -1838,6 +1838,7 @@ class Survey:
         # counter, whose definition stays "assignment operators + parameter
         # defaults" (Appendix B differential).
         self.decl_write_offsets = set()
+        self._byte_pos = None   # lazy char->byte table (SPEC 12.8/5.6, D14)
         # SPEC 12.8 (D13): var-token offset -> the foreach `in` expression's
         # byte span, recorded by _record_foreach and consumed when the loop
         # variable's write site is noted.
@@ -2087,11 +2088,12 @@ class Survey:
                 self.counters["unresolved_named_command_sites"] += 1
                 arguments, span = _command_arguments(
                     self.text, toks, sig, k, t)
+                bspan = self._bspan(span)
                 self.unresolved_named_commands.append({
                     "code": "PSS2009", "name": t.text,
                     "owner": self._owner_id_fast(t.start),
                     "line": self.line_of(t.start), "offset": t.start,
-                    "arguments": arguments, "span": span,
+                    "arguments": arguments, "span": [bspan[0], bspan[1]],
                 })
                 continue
             # The edge source may be <script>: a function called only from top
@@ -2106,6 +2108,38 @@ class Survey:
             else:
                 rec["sites"] += 1
                 rec["lines"].append(self.line_of(t.start))
+
+    def _bspan(self, span):
+        """SPEC 12.8 / 5.6 (D14): convert a token-level character span to the
+        BYTE offsets the SPEC declares. The lexer walks the decoded text, so
+        every token position is a character index; the published contract is
+        byte offsets into the encoded artefact - the language-neutral address
+        into what `sha256` and `byte_count` already describe. On an
+        all-ASCII source the two units coincide and the conversion is the
+        identity (no table is built). Otherwise a cumulative table is built
+        once per survey: D13 shipped without this conversion, and on the
+        BOM-carrying reference target a byte-reading consumer would have
+        mis-addressed 5,111 of 5,113 rhs spans and 2,797 of 2,798 site
+        spans - found in round 5 by running the reviewers' own necessary
+        check over the whole population (SPEC 12.8's resolved deviation
+        note)."""
+        if span is None:
+            return None
+        if self._byte_pos is None:
+            if self.text.isascii():
+                self._byte_pos = ()          # identity marker
+            else:
+                pos = [0] * (len(self.text) + 1)
+                p = 0
+                for i, c in enumerate(self.text):
+                    o = ord(c)
+                    p += 1 if o < 0x80 else 2 if o < 0x800 else \
+                        3 if o < 0x10000 else 4
+                    pos[i + 1] = p
+                self._byte_pos = pos
+        if self._byte_pos == ():
+            return (span[0], span[1])
+        return (self._byte_pos[span[0]], self._byte_pos[span[1]])
 
     def _rhs_span_from(self, k_op, stop_comma=False):
         """SPEC 12.8 (D13): the supplying expression's [start, end) byte span.
@@ -2296,7 +2330,8 @@ class Survey:
             if role == "write" and s.get("rhs_span"):
                 a, b = s["rhs_span"]
                 base["rhs"] = self.text[a:b]
-                base["rhs_span"] = [a, b]
+                ba, bb = self._bspan((a, b))
+                base["rhs_span"] = [ba, bb]
             if s["in_string"]:
                 # PSS2007 is an explicit exception to the SPEC 5.3 tiering rule:
                 # these are the principal path by which a text-substitution

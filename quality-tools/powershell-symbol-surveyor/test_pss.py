@@ -688,14 +688,43 @@ def check_writer_rhs():
           "rhs: a read carries neither key",
           "rhs on a read record")
 
+    # SPEC 12.8/5.6 (D14): spans are BYTE offsets, exercised on the input
+    # class that exposed the D13 defect - a BOM at char 0 plus Japanese
+    # characters ahead of the records. Written red-first against the "5"
+    # build (character offsets): every expectation below measured shifted.
+    body = ("\ufeff# \u65e5\u672c\u8a9e comment\n"
+            "$x = '\u3042'\n"
+            "Remove-Item -Path $x\n")
+    bb = body.encode("utf-8")
+    m6 = pss.Survey("bom.ps1", body, axes={"command-sites"}).run().model()
+    w = [r for r in m6["script_variables"]
+         if r.get("record") == "reference" and r.get("role") == "write"
+         and r["name"] == "x"][0]
+    a, b = w["rhs_span"]
+    eq(bb[a:b].decode("utf-8"), "'\u3042'",
+       "rhs fixture (D14): rhs_span is byte offsets - correct through a BOM "
+       "and multibyte characters")
+    site = [r for r in m6["unresolved_named_commands"]
+            if r.get("record") == "site"][0]
+    a, b = site["span"]
+    eq(bb[a:b].decode("utf-8"), "Remove-Item -Path $x",
+       "site fixture (D14): the D12 span is byte offsets - the sibling "
+       "defect fixed in the same arc")
+
 
 def check_rhs_integrity(text, model_all):
-    """SPEC 12.8 (D13): over the WHOLE pin, every write's rhs is the source's
-    own bytes at rhs_span - no sampling, which is what the span is for.
-    Violations are collected and held by ONE check each, the same shape as
-    every other pin-population gate here: a per-record eq would multiply the
-    battery's check count by the write population (measured: 362 -> 6,316
-    before this was caught at the arc's own commit)."""
+    """SPEC 12.8/5.6 (D14): over the WHOLE pin, every span addresses the
+    source's ENCODED BYTES - both rhs_span and the D12 site span. The gate
+    embodies the DECLARATION, not the code (the D14 design rule, learned
+    the hard way): the D13 gate sliced the decoded text, unit-consistent
+    with the implementation and therefore structurally blind to the
+    declared byte unit - byte-reading consumers would have mis-addressed
+    5,111 of 5,113 rhs spans and 2,797 of 2,798 site spans on this pin (a
+    BOM at char 0 shifts everything). Written red-first against the "5"
+    build: exactly those population figures fell out as violations.
+    Violations are collected and held by ONE check each (population-level,
+    per the 362->6,316 lesson recorded at D13)."""
+    tb = text.encode("utf-8")
     unpaired = []
     mismatched = []
     n_with = 0
@@ -708,18 +737,39 @@ def check_rhs_integrity(text, model_all):
                 continue
             if "rhs" in r:
                 a, b = r["rhs_span"]
-                if text[a:b] != r["rhs"]:
-                    mismatched.append((coll, r["name"], r["line"],
-                                       text[a:b][:40], r["rhs"][:40]))
+                if tb[a:b] != r["rhs"].encode("utf-8"):
+                    mismatched.append((coll, r["name"], r["line"]))
                 n_with += 1
-    eq(unpaired, [],
-       "rhs integrity: rhs and rhs_span travel together over every pin write")
-    eq(mismatched, [],
-       "rhs integrity: source[rhs_span] == rhs over every pin write, "
-       "no sampling")
+    check(not unpaired,
+          "rhs integrity: rhs and rhs_span travel together over every pin "
+          "write",
+          "%d unpaired; first: %r" % (len(unpaired), unpaired[:3]))
+    check(not mismatched,
+          "rhs integrity: encoded_source[rhs_span] == rhs over every pin "
+          "write, no sampling - the byte unit SPEC 12.8 declares",
+          "%d of %d violate; first: %r" % (len(mismatched), n_with,
+                                           mismatched[:3]))
     check(n_with > 4000,
           "rhs integrity: the pin's writes overwhelmingly carry rhs",
           "only %d writes carry rhs" % n_with)
+
+    bad_sites = []
+    n_sites = 0
+    for r in model_all["unresolved_named_commands"]:
+        if r.get("record") != "site":
+            continue
+        n_sites += 1
+        a, b = r["span"]
+        if not tb[a:b].decode("utf-8", errors="replace").startswith(r["name"]):
+            bad_sites.append((r["name"], r["line"]))
+    check(not bad_sites,
+          "site-span integrity: encoded_source[span] opens with the invoked "
+          "name over every pin site - the byte unit SPEC 5.6 declares",
+          "%d of %d violate; first: %r" % (len(bad_sites), n_sites,
+                                           bad_sites[:3]))
+    check(n_sites > 2000,
+          "site-span integrity: the pin's sites are all present",
+          "only %d sites" % n_sites)
 
 
 def check_projection_invariance(text, model_all):
