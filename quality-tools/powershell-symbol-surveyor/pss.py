@@ -49,6 +49,33 @@ MIN_PYTHON = (3, 12)
 # master collection never becomes an axis (SPEC 5.6); an axis only restores
 # content already withheld *within* a collection that is always present.
 # ---------------------------------------------------------------------------
+# SPEC 3.1 (round-4 F4): the tool's GLOBAL flag surface, declared once and
+# read twice - build_parser() constructs each flag from this dict and the
+# descriptor serialises it, so the parser and the published interface cannot
+# name different surfaces. A round-4 reviewer found the descriptor silent on
+# exactly these entry points: the README taught them, which is the "copy of
+# the documentation" the 3.1 property exists to remove. (test_pss.py's own
+# --emit-baseline-digest is the GATE's surface, not this tool's, and is
+# deliberately outside this declaration.)
+GLOBAL_FLAGS = {
+    "--version": "print version and exit",
+    "--list-facts": "print the fact catalogue and exit",
+    "--self-check": "verify SPEC section 4 against the compiled catalogue "
+                    "and exit",
+    "--capabilities": "print the machine-readable interface descriptor "
+                      "(JSON) and exit (SPEC 3.1)",
+}
+
+# SPEC 5.6 / 3.1 (round-4 F4): the one axis alias, declared where the axes
+# are. parse_axes_arg and cmd_slice both read this constant, and the
+# descriptor serialises it - previously 'all' lived as a bare literal in the
+# implementation and the README, invisible to the descriptor.
+AXES_ALIAS = {
+    "all": "the full SPEC 5.6 vocabulary on survey; every axis the input "
+           "already carries on slice (a slice never adds material, SPEC "
+           "5.7); must appear alone, never combined with named axes",
+}
+
 AXES = {
     "closure-sets": "transitive_callees and transitive_callers on each closure record",
     "local-sites": "one record per function-local variable reference",
@@ -3423,9 +3450,10 @@ def cmd_slice(args):
     current_axes = frozenset(model.get("materialization", {}).get("axes", []))
     requested_axes = None
     if args.axes is not None:
-        if args.axes.strip() == "all":
-            # 'all' on slice means "every axis the INPUT has", not the global
-            # vocabulary (survey's 'all') - slice never adds material.
+        if args.axes.strip() in AXES_ALIAS:
+            # The alias on slice means "every axis the INPUT has", not the
+            # global vocabulary (survey's reading) - a slice never adds
+            # material. Both readings are declared in AXES_ALIAS (SPEC 3.1).
             requested_axes = current_axes
         else:
             try:
@@ -4270,6 +4298,8 @@ def capabilities_document(parser):
         "machine_formats": list(MACHINE_FORMATS),
         "exit_codes": dict(EXIT_CODES),
         "axes": dict(AXES),
+        "axes_alias": dict(AXES_ALIAS),
+        "global_flags": dict(GLOBAL_FLAGS),
         "facts": dict(FACTS),
         "model_schema": dict(MODEL_SCHEMA),
         "nullable_paths": dict(NULLABLE_PATHS),
@@ -4337,7 +4367,7 @@ def parse_axes_arg(raw):
     if not raw:
         return frozenset()
     tokens = [t.strip() for t in raw.split(",") if t.strip()]
-    if "all" in tokens:
+    if any(t in AXES_ALIAS for t in tokens):
         if len(tokens) > 1:
             raise ValueError("'all' must be used alone, not combined with named axes")
         return frozenset(AXES)
@@ -4353,13 +4383,10 @@ def build_parser():
     p = argparse.ArgumentParser(
         prog="pss.py",
         description="PowerShell Symbol Surveyor - facts about symbols and their change.")
-    p.add_argument("--version", action="store_true", help="print version and exit")
-    p.add_argument("--list-facts", action="store_true", help="print the fact catalogue and exit")
-    p.add_argument("--self-check", action="store_true",
-                   help="verify SPEC section 4 against the compiled catalogue and exit")
-    p.add_argument("--capabilities", action="store_true",
-                   help="print the machine-readable interface descriptor "
-                        "(JSON) and exit (SPEC 3.1)")
+    # Constructed from GLOBAL_FLAGS (SPEC 3.1): one declaration, read by
+    # the parser here and by the descriptor - the two cannot part.
+    for flag, help_text in GLOBAL_FLAGS.items():
+        p.add_argument(flag, action="store_true", help=help_text)
     sub = p.add_subparsers(dest="command")
 
     sp = sub.add_parser("survey", help="survey a single .ps1 and emit the symbol model")

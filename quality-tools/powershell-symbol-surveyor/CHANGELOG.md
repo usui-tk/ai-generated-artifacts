@@ -22,6 +22,21 @@ time, and are marked as such.
 
 ### Added
 
+- **The descriptor carries the tool's own entry points** (SPEC §3.1,
+  round-4 F4; both reviewers, from different sides). `global_flags` — the
+  four global flags, declared once in `pss.GLOBAL_FLAGS` and read twice by
+  construction (`build_parser()` builds each flag from it; the descriptor
+  serialises it), held by the gate against the parser's real option strings
+  in both directions with every declared flag run for exit 0 — and
+  `axes_alias` — the `all` reading on `survey` and on `slice`, declared in
+  `pss.AXES_ALIAS` and read by both axis parsers, its survey reading
+  verified to resolve to the full §5.6 vocabulary. Previously both lived
+  only in the README: the "copy of the documentation" the §3.1 property
+  exists to remove. Gate 13: 361 → 369 with `pwsh` (362 without; 174
+  without `git`). The gate's own docstring said "compare must refuse" for
+  four arcs after the comparator shipped — the same round-4 stale-prose
+  class — and is fixed with it.
+
 - **Rename pre-flight stated** (SPEC §4.8, post-round-4). A reviewer
   constructed, correctly, a clearance argument the SPEC had left unstated —
   zero `PSS3001` matches for a declared name proves no whole in-file

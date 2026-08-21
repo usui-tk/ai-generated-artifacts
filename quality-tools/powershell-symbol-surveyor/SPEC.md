@@ -337,18 +337,28 @@ originating use that process is another language model (§1.1). Two consequences
 are normative.
 
 **The interface must be discoverable without prose.** `--capabilities` emits a
-structured document — subcommands, the axis vocabulary of §5.6, the fact
-catalogue, exit-code meanings, available output formats and the current
-`model_version` — so that a caller can determine what it may ask for without
-parsing help text. A descriptor that has drifted from the tool is worse than no
+structured document — subcommands, the tool's own global flag surface
+(`global_flags`, added post-round-4: a reviewer found the descriptor silent
+on the very flags one learns it through), the axis vocabulary of §5.6 with
+its one alias (`axes_alias`: the `all` reading on `survey` and on `slice`),
+the fact catalogue, exit-code meanings, available output formats and the
+current `model_version` — so that a caller can determine what it may ask for
+without parsing help text. A descriptor that has drifted from the tool is worse than no
 descriptor, because it produces confident wrong requests; §13 therefore gates
 the descriptor against this document.
 
 **The descriptor serialises; it does not restate.** Every enumeration it
 publishes is read from the constant that already holds it — `FACTS`, `AXES`,
-`MODEL_SCHEMA`, `IDENTIFIER_FORMS`, `COLLECTION_KEYS`, `EXIT_CODES` — and the
-subcommand list is read from the argument parser, so a subcommand that is
-added, removed or renamed cannot go missing from the descriptor. A descriptor
+`AXES_ALIAS`, `GLOBAL_FLAGS`, `MODEL_SCHEMA`, `IDENTIFIER_FORMS`,
+`COLLECTION_KEYS`, `EXIT_CODES` — and the subcommand list is read from the
+argument parser, so a subcommand that is added, removed or renamed cannot go
+missing from the descriptor. `GLOBAL_FLAGS` is read twice by construction:
+`build_parser()` constructs each global flag from it and the descriptor
+serialises it, so the parser and the published surface cannot part — and §13
+additionally holds the declaration against the parser's real option strings
+in both directions and runs every declared flag for exit 0. (`test_pss.py`'s
+`--emit-baseline-digest` is the gate's surface, not this tool's, and is
+deliberately outside the declaration.) A descriptor
 that restated any of these would be the second copy of a fact, and two copies
 of one fact drift (ADR 0036, §13.3). §13 checks each block against the constant
 it is supposed to be reading, so a literal copied in is caught the moment the

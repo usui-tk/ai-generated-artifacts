@@ -1996,13 +1996,23 @@ def check_capability_descriptor():
     copied into the descriptor diverges the moment the constant moves - which
     is the entire reason SPEC 13.3 put the schema in the code.
 
-    The descriptor may be *optimistic*. Two of the four machine outputs SPEC
-    3.1 requires it to describe do not exist in this build, and they are
-    published with ``status: not-implemented``. That mark is a claim about
-    behaviour, so it is checked against behaviour: ``compare`` must actually
-    refuse, and a usage error under ``--format json`` must actually not be
-    JSON. Implementing either without moving its mark reddens this gate, which
-    is what makes the mark unable to drift into a lie.
+    The descriptor may be *optimistic*. A ``status`` mark is a claim about
+    behaviour, so it is checked against behaviour on both sides of the
+    current split: ``compare`` (mark ``implemented``) must emit the 6.4
+    document, and a usage error under ``--format json`` (``error_payload``
+    still ``not-implemented``) must actually not be JSON. Moving reality
+    without moving a mark reddens this gate, which is what makes a mark
+    unable to drift into a lie. (This docstring itself said "compare must
+    refuse" for four arcs after the comparator shipped - the round-4
+    stale-prose finding, fixed here alongside the SPEC's three sites.)
+
+    Round-4 additions (F4): the GLOBAL flag surface and the axes 'all'
+    alias were real interface the descriptor did not carry - a reader could
+    learn them only from the README, which is the "copy of the
+    documentation" the 3.1 property exists to remove. Both are serialised
+    from constants and held here: block == constant, flags == the parser's
+    real global surface in both directions, and each flag exercised for
+    exit 0.
     """
     out = _run_pss(["--capabilities"])
     eq(out.returncode, 0, "descriptor: --capabilities exits 0")
@@ -2127,6 +2137,27 @@ def check_capability_descriptor():
     eq(sorted(k for k, v in tallied.items()
               if sorted(v) != ["emitted", "equal", "examined"]), [],
        "delta: every tally states examined, equal and emitted")
+
+    # F4 (round 4): the global flag surface, serialised and held three ways.
+    eq(doc.get("global_flags"), dict(pss.GLOBAL_FLAGS),
+       "descriptor: global_flags serialises pss.GLOBAL_FLAGS")
+    parser_flags = sorted(
+        o for a in pss.build_parser()._actions for o in a.option_strings
+        if o.startswith("--") and o != "--help")
+    eq(sorted(pss.GLOBAL_FLAGS), parser_flags,
+       "descriptor: GLOBAL_FLAGS equals the parser's real global surface, "
+       "both directions")
+    for flag in sorted(pss.GLOBAL_FLAGS):
+        r = _run_pss([flag])
+        check(r.returncode == 0 and r.stdout.strip(),
+              "descriptor: %s runs and emits (exit 0)" % flag,
+              "rc=%d" % r.returncode)
+
+    # F4 (round 4): the axes 'all' alias, declared and true.
+    eq(doc.get("axes_alias"), dict(pss.AXES_ALIAS),
+       "descriptor: axes_alias serialises pss.AXES_ALIAS")
+    eq(sorted(pss.parse_axes_arg("all")), sorted(pss.AXES),
+       "descriptor: 'all' resolves to the full 5.6 vocabulary, as declared")
 
     err_out = _run_pss(["survey", "@SCRIPT@", "--format", "json",
                         "--axes", "no-such-axis"], text="function F { }")
