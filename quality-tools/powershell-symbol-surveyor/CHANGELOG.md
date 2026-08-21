@@ -22,6 +22,19 @@ time, and are marked as such.
 
 ### Added
 
+- **CI workflow** (`quality-tools__powershell-symbol-surveyor.yml`, the
+  analyzer's precedent): `py_compile` over both files as the fail-fast
+  static-analysis step — the §13.2 "Static analysis" row's close — then
+  `--self-check`, then the full §13.1 battery with the runner's
+  preinstalled `pwsh`, per push/PR touching this directory.
+  `fetch-depth: 0` is a **measured** requirement: on a depth-1 clone the
+  battery fails ("pinned blob 12c86874… does not resolve" plus a red
+  cache-generator leg), because the B.7 corpus pair and the §14.4
+  generator read committed-generation blobs that exist only in history;
+  the pin itself survives shallowness only while the reference script's
+  HEAD content coincidentally equals it. Every step command executed
+  locally in the workflow's own phrasing before being written down.
+
 - **Registered in the manifest** — `tool.powershell-symbol-surveyor` @
   0.4.0, kind `tool`, a whole-directory unit on the analyzer's precedent,
   written through the manifest CRUD (ADR 0011; validator 0 findings). The

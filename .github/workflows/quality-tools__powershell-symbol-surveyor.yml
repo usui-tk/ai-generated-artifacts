@@ -1,0 +1,171 @@
+# ============================================================================
+# CI workflow for quality-tools/powershell-symbol-surveyor/
+# pss.py self-quality gates.
+#
+# Gate definitions are authoritative in pss.py SPEC.md §13:
+#   fail-fast   : python3 -m py_compile pss.py test_pss.py
+#                 (the §13.2 "Static analysis" row: the pss.py-specific run)
+#   self-check  : pss.py --self-check   (SPEC tables vs compiled constants,
+#                 held both ways; §13 / §3.1)
+#   battery     : test_pss.py [--pwsh]  (Appendix B.8 re-derivation from the
+#                 pinned corpus blob, fixtures, variant/schema/slice/channel
+#                 gates; §13.1-§13.3, ADR 0034/0036)
+#
+# fetch-depth: 0 is REQUIRED and the requirement is measured, not assumed:
+# the battery reads committed-generation blobs that exist only in history
+# (the Appendix B.7 corpus pair and the §14.4 cache-generator run), and on a
+# depth-1 clone the battery fails with "pinned blob 12c86874... does not
+# resolve" plus a red cache-generator leg. The pin itself (f2b5e6a5...)
+# happens to survive a shallow clone only while the reference script's HEAD
+# content equals it - a coincidence, not a contract.
+#
+# Governance policies (design principles, naming, timeout tiers, Fork PR
+# handling, etc.) are defined in the repository-level specification:
+#   /SPEC.md
+#
+# Change history for this workflow is recorded in:
+#   quality-tools/powershell-symbol-surveyor/CHANGELOG.md
+#
+# Do NOT add per-workflow CHANGELOG.md, README.md, or governance docs under
+# .github/workflows/. See /SPEC.md §9 [SPEC-CI-070].
+# ============================================================================
+name: 'quality-tools/powershell-symbol-surveyor — pss.py CI'
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'quality-tools/powershell-symbol-surveyor/pss.py'
+      - 'quality-tools/powershell-symbol-surveyor/test_pss.py'
+      - 'quality-tools/powershell-symbol-surveyor/VERSION'
+      - 'quality-tools/powershell-symbol-surveyor/SPEC.md'
+      - 'quality-tools/powershell-symbol-surveyor/README.md'
+      - 'quality-tools/powershell-symbol-surveyor/README.ja.md'
+      - 'quality-tools/powershell-symbol-surveyor/CHANGELOG.md'
+      - 'quality-tools/powershell-symbol-surveyor/corpus/**'
+      - '.github/workflows/quality-tools__powershell-symbol-surveyor.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'quality-tools/powershell-symbol-surveyor/pss.py'
+      - 'quality-tools/powershell-symbol-surveyor/test_pss.py'
+      - 'quality-tools/powershell-symbol-surveyor/VERSION'
+      - 'quality-tools/powershell-symbol-surveyor/SPEC.md'
+      - 'quality-tools/powershell-symbol-surveyor/README.md'
+      - 'quality-tools/powershell-symbol-surveyor/README.ja.md'
+      - 'quality-tools/powershell-symbol-surveyor/CHANGELOG.md'
+      - 'quality-tools/powershell-symbol-surveyor/corpus/**'
+      - '.github/workflows/quality-tools__powershell-symbol-surveyor.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pss-py-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pss-py-self-check:
+    # Fork PR guard: see /SPEC.md §5 [SPEC-CI-030]. Same-repo PRs and
+    # push/dispatch always proceed; fork-origin PRs are skipped.
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30  # T1 — Light (see /SPEC.md §4 [SPEC-CI-020])
+    defaults:
+      run:
+        working-directory: quality-tools/powershell-symbol-surveyor
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history: the battery resolves committed-generation blobs
+          # that a shallow clone does not carry (measured; header comment).
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          # Pin to 3.12 (matches the psa.py workflow's rationale): the gate
+          # suite has not been validated against the CPython series that
+          # '3.x' currently resolves to.
+          python-version: '3.12'
+
+      # --- Pre-flight: runner environment diagnostics ---
+      # Mirrors the psa.py workflow's diagnostic step: runner version,
+      # Python version, pwsh version and CWD up front, so failed runs carry
+      # the data needed to triage runner-side drift.
+      - name: '[Diag] Runner environment snapshot'
+        working-directory: ${{ github.workspace }}
+        run: |
+          set +e
+          echo "===== uname ====="
+          uname -a
+          echo
+          echo "===== Python ====="
+          python3 --version
+          which python3
+          echo
+          echo "===== pwsh (preinstalled on ubuntu-latest) ====="
+          pwsh --version
+          which pwsh
+          echo
+          echo "===== git depth (must be full history) ====="
+          git -C "$GITHUB_WORKSPACE" rev-list --count HEAD
+          echo
+          echo "===== Current working directory (default per `defaults.run`) ====="
+          pwd
+
+      - name: '[sanity] Python syntax check (the SPEC 13.2 static-analysis run)'
+        # Fail-fast before the heavier gates. py_compile catches parse-level
+        # errors that would otherwise surface as confusing tracebacks deep
+        # inside the battery. This is the pss.py-specific static-analysis
+        # run SPEC 13.2 records; the battery behind it is the deeper gate.
+        run: python3 -m py_compile pss.py test_pss.py
+
+      - name: '[self-check] SPEC drift detection (pss.py --self-check)'
+        # SPEC tables and compiled constants held against each other in
+        # both directions (fact catalogue, axes, schema, identifier forms,
+        # record variants, nullability, provisional index). Exits non-zero
+        # on any drift.
+        run: python3 pss.py --self-check | tee selfcheck.log
+
+      - name: '[battery] Full gate with pwsh (test_pss.py --pwsh)'
+        # The whole §13.1 battery: Appendix B.8 re-derived from the pinned
+        # corpus blob, the differential leg against PowerShell's own parser,
+        # fixtures, variant/schema/slice/channel gates, the corpus self-test
+        # over real temporary git repositories, and the §14.4 cache
+        # generator on a bounded run. pwsh is preinstalled on ubuntu-latest
+        # (diagnosed above); without it the battery degrades per SPEC 14.3,
+        # so this step passing proves the FULL set ran.
+        run: python3 test_pss.py --pwsh "$(command -v pwsh)" | tee battery.log
+
+      - name: '[Summary] Write Step Summary'
+        if: always()
+        run: |
+          {
+            echo "## pss.py — Self-quality gates"
+            echo ""
+            echo "Syntax fail-fast, SPEC drift detection and the full §13.1 battery ran on the working tree."
+            echo ""
+            echo "### Self-check (\`pss.py --self-check\`)"
+            if [ -f selfcheck.log ]; then
+              tail -5 selfcheck.log
+            fi
+            echo ""
+            echo "### Battery (\`test_pss.py --pwsh\`)"
+            if [ -f battery.log ]; then
+              tail -10 battery.log
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: '[Artifacts] Upload logs'
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pss-py-${{ github.run_id }}
+          path: |
+            quality-tools/powershell-symbol-surveyor/selfcheck.log
+            quality-tools/powershell-symbol-surveyor/battery.log
+          if-no-files-found: warn
+          retention-days: 14
