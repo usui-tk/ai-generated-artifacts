@@ -20,6 +20,20 @@ time, and are marked as such.
 
 ## [Unreleased]
 
+### Changed
+
+- **Channel agreement covers every figure on every row** (SPEC §13.2,
+  independent-remainder close). The gate's extraction read only a row's
+  head figure, so the printed quoted/bareword splits were structurally
+  invisible — demonstrated red-first: swapping `quoted 48 / bareword 1` in
+  the rendered text passed the old gate untouched, and reddens the new one
+  as `(49, 1, 48) != (49, 48, 1)`. Extraction now takes the head plus every
+  standalone number inside parentheses (an alphanumeric code like `PSS2007`
+  contributes nothing), derivations may return tuples, and the four
+  previously-uncovered rows (`lines`; the three soft-reference rows) carry
+  derivations written from the SPEC's definitions. The `interpolated refs`
+  parenthesised figure is covered by the same widening.
+
 ### Fixed
 
 - **The text channel crashed on a stubbed slice** — a D12 regression found

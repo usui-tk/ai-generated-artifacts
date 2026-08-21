@@ -494,6 +494,15 @@ def check_version_decision(root, text, model_def, model_all):
           % (" and ".join(moved), pss.MODEL_VERSION))
 
 
+def _soft_split(m, code):
+    """SPEC 6.2: total, quoted, bareword for one soft-reference code - the
+    full row, not its head."""
+    hits = [r for r in m["soft_references"] if r["code"] == code]
+    return (len(hits),
+            sum(1 for r in hits if r["literal_kind"] == "quoted"),
+            sum(1 for r in hits if r["literal_kind"] == "bareword"))
+
+
 TEXT_CHANNEL_DERIVATIONS = {
     # SPEC 6.2 (D12): a boundary stub is a reference marker, not a function
     # definition, so the symbol rows read FULL records only. The derivations
@@ -515,7 +524,22 @@ TEXT_CHANNEL_DERIVATIONS = {
     "variable references": lambda m: m["counters"]["variable_refs"],
     "scope-qualified refs": lambda m: sum(1 for r in m["script_variables"]
                                           if r["record"] == "reference"),
-    "interpolated refs": lambda m: len(m["string_interpolation_references"]),
+    # A tuple derivation covers every figure on the row - the head AND the
+    # parenthesised split. The independent-remainder close (post-D12): the
+    # printed quoted/bareword splits were structurally invisible to this
+    # check (head-only extraction), demonstrated by swapping a split in the
+    # rendered text and watching the gate pass it untouched.
+    "interpolated refs": lambda m: (
+        len(m["string_interpolation_references"]),
+        m["counters"]["expandable_strings"]),
+    "lines": lambda m: m["source"]["line_count"],
+    "function-name lits": lambda m: _soft_split(m, "PSS3001"),
+    "script-var lits": lambda m: _soft_split(m, "PSS3002"),
+    "string constants": lambda m: (
+        m["counters"]["string_literals_quoted"]
+        + m["counters"]["string_literals_bareword"],
+        m["counters"]["string_literals_quoted"],
+        m["counters"]["string_literals_bareword"]),
     "usage-map population": lambda m: sum(1 for r in m["script_variables"]
                                           if r["record"] == "usage_map"),
     "unresolved reads": lambda m: sum(1 for r in m["limitations"]
@@ -553,29 +577,42 @@ def check_channel_agreement(model):
             continue
         label, _, value = line.partition(":")
         label = label.strip(" -")
-        head = value.strip().split()[0] if value.strip() else ""
+        v = value.strip()
+        head = v.split()[0] if v else ""
         if head.isdigit():
-            rendered[label] = int(head)
+            # The whole row: the head figure plus every standalone number
+            # inside parentheses. \b keeps a code like PSS2007 out (no
+            # word boundary splits an alphanumeric token), so "(PSS2007,
+            # in 172 expandable strings)" contributes 172 and nothing else.
+            nums = [int(head)]
+            for p in re.findall(r"\((.*?)\)", v):
+                nums += [int(x) for x in re.findall(r"\b\d+\b", p)]
+            rendered[label] = tuple(nums)
 
     missing = sorted(set(TEXT_CHANNEL_DERIVATIONS) - set(rendered))
     eq(missing, [],
        "channel agreement: every derivation has a row in the text channel")
 
-    disagreeing = {label: (rendered[label], derive(model))
+    def norm(v):
+        return v if isinstance(v, tuple) else (v,)
+
+    disagreeing = {label: (rendered[label], norm(derive(model)))
                    for label, derive in sorted(TEXT_CHANNEL_DERIVATIONS.items())
-                   if label in rendered and rendered[label] != derive(model)}
+                   if label in rendered
+                   and rendered[label] != norm(derive(model))}
     eq(disagreeing, {},
        "channel agreement: text figures reproduce from the JSON channel")
 
-    # Rows without a derivation here are listed rather than ignored, so that a
-    # figure added to the text channel without one becomes visible. `lines` is
-    # a source attribute rather than a measurement; the three soft-reference
-    # rows print a split whose parts this check does not yet decompose.
+    # Every numeric row carries a derivation (post-D12 independent-remainder
+    # close: the four rows this check used to record as uncovered now derive,
+    # split included). A figure added to the text channel without a
+    # derivation reddens here by name rather than joining a tolerated list -
+    # the tolerated list is what let the split blindness sit unnoticed.
     eq(sorted(label for label in rendered
               if label not in TEXT_CHANNEL_DERIVATIONS
               and not label.startswith("PSS")),
-       ["function-name lits", "lines", "script-var lits", "string constants"],
-       "channel agreement: the uncovered rows are the ones recorded as uncovered")
+       [],
+       "channel agreement: every numeric row carries a derivation")
 
 
 def check_projection_invariance(text, model_all):
