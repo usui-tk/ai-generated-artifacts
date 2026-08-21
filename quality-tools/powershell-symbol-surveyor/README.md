@@ -25,7 +25,7 @@ about any of them. Whether something is a defect, a risk or fine is the
 consumer's judgement, made on facts the model must therefore actually carry.
 
 ```
-# the default model - compact JSON on stdout
+# the default model - compact JSON, written to the given path
 python3 pss.py survey Script.ps1 --format json --out model.json
 
 # restore opt-in material: closure-sets, command-sites, local-sites, or 'all'
@@ -65,10 +65,12 @@ A `--scope` slice keeps or drops **whole records** by one membership rule and
 never rewrites a kept record (SPEC §5.7) — with one stated exception: every
 symbol identifier the kept records still reference is re-introduced as a
 **boundary stub** (`record: "stub"` plus the four identify-and-locate keys,
-copied verbatim from the input), so nothing a slice hands a reader dangles.
-`limitations` is kept in full, because it describes what the survey could
-*not* determine and filtering it would misrepresent the slice's own
-coverage. A model from another `model_version` is **refused** (`PSS9005`)
+copied verbatim from the input), so no identifier the **scoped collections**
+reference dangles. One stated exception, found by a round-4 reviewer reading
+the unqualified claim that used to sit here: `limitations` is kept in full,
+because it describes what the survey could *not* determine and filtering it
+would misrepresent the slice's own coverage — so a limitation's `owner` may
+name a function the slice carries no record for, by design (SPEC §5.7). A model from another `model_version` is **refused** (`PSS9005`)
 rather than sliced into a document whose stated version and actual shape
 disagree.
 
@@ -163,8 +165,9 @@ Entries live in `corpus/`. Identity is the **leading four-digit number** in the
 filename. Everything between the number and `.json` is descriptive and is never
 read back, so renaming an entry file cannot break a reference and cannot go
 stale. A fifth consecutive digit is refused rather than misread as a shorter
-number, a duplicate number is refused rather than silently resolved, and
-non-conforming files are ignored but reported.
+number (`00012` would otherwise read as `0001` plus a stray `2`), a duplicate
+number is refused rather than silently resolved, and non-conforming files
+are ignored but reported.
 
 The format follows the in-repo precedent set by
 `projects/bash-ol-aws-ami-builder/tests/ena/ena-driver-releases.json`: a header
@@ -200,8 +203,9 @@ verified on load rather than trusted.
 
 Entries are written only through the corpus manager, in the same way the
 manifest is written only through `canon-manifest-tool` (ADR 0011). The
-`generated_by` field records that. Its value still names `corpus.py`, the file
-the manager was in when the two committed entries were written: an entry is
+`generated_by` field records that. Its value still names `corpus.py`, the
+file the manager lived in when the two committed entries were written — the
+manager has since moved into `test_pss.py` as the `corpus` subcommand: an entry is
 byte-stable by construction, which is what makes growth detection possible at
 all, so re-pointing the string would rewrite two committed artefacts to record
 a fact about the tool rather than about the entries.

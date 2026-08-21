@@ -20,6 +20,34 @@ time, and are marked as such.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Round-4 documentation findings, all verified before being closed**
+  (docs-only; no model change). (F2) SPEC §3.1 and two §13.2 rows described
+  the delta record as not-implemented **in the present tense for four arcs
+  after the comparator shipped** — the descriptor said `implemented`
+  throughout; the prose now defers to the descriptor and records the drift.
+  (F3) The command-site count appeared as both 2,796 and 2,798 in one
+  document: **both were correct when written** — 2,796 was the measured
+  correction of an unmeasured 2,798 estimate, then the D10 [F4] closure put
+  the two `foreach`-condition calls in command position and moved the count
+  to a measured 2,798, re-confirmed against the "2" build; §5.6 now carries
+  the current figures (aggregate 5.1%, per-site 66.6% at `model_version` 4 —
+  the old 31.5% priced location-only records, pre-`arguments`/`span`) and
+  the two resolution-time records carry the sequence. (F1) The README's
+  "nothing dangles" claim is narrowed to the scoped collections with the
+  `limitations`-owner exception stated, and SPEC §5.7 now answers the
+  §5.8-vs-§5.7 question a reviewer read out of the two declarations
+  (`symbol_refs` declares what a value is; §5.7 declares what a slice
+  resolves). (F5) A survey example's "on stdout" comment contradicted its
+  own `--out`. (F6) Six EN/JA prose asymmetries synchronised in both
+  directions (the 230-generation evidence paragraph the Japanese page
+  lacked; the `00012` example the English page lacked; non-conforming-file
+  reporting, rename-safety, environment-stamp and ADR 0031 clauses) — the
+  structural lock-step gate holds headings and fence counts by design, and
+  round 4's bilingual spot-check was the prose check it explicitly leaves
+  to a reader.
+
 ### Added
 
 - **CI workflow** (`quality-tools__powershell-symbol-surveyor.yml`, the

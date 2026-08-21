@@ -377,11 +377,17 @@ shape emitted by `compare` and `trace`, the cost-report shape, and the structure
 payload. Ordering and determinism (§5.4) are stated there too, since a caller
 that intends to join or diff two models outside the tool depends on them.
 
-Four of those six are carried by the declarations this SPEC already holds:
-record shapes and the cost-report shape by §13.3's key-path set, and the
-identifier conventions and join keys by §5.8. The remaining two — the delta
-record and the error payload — are the two outputs that do not exist in this
-build, and are declared `not-implemented` per the rule above.
+Five of those six are carried by the declarations this SPEC already holds:
+record shapes and the cost-report shape by §13.3's key-path set, the
+identifier conventions and join keys by §5.8, and the delta record — built
+since — by §6.4's document contract, its descriptor block marked
+`implemented`. The remaining one, the error payload, is the output that does
+not exist in this build and is declared `not-implemented` per the rule above.
+*(This paragraph said "the remaining two … do not exist" for four arcs after
+the comparator shipped — found by a round-4 reviewer diffing the prose
+against the descriptor. The self-checks hold constants, not paragraphs;
+prose describing implementation status goes stale silently, which is why the
+descriptor is the master and this paragraph now defers to it.)*
 
 Errors are machine-readable when machine output was requested: with `--format
 json`, a usage error emits a JSON object on stderr carrying a stable category,
@@ -1052,10 +1058,14 @@ identity is the invoked name, not an enclosing function. The default
 `owners` (the sorted set of enclosing functions or `<script>`) — enough to
 answer "is there a call to this name, and from roughly where" without the
 per-site cost. `command-sites` restores one additional record per site,
-carrying `owner` and `line`. Measured on the reference target: the aggregate
-form costs 5.3% of the base model (93 names); the full site form costs 31.5%
-(2,796 sites) — the same order of magnitude that motivated `local-sites`
-originally, which is why this collection now follows the identical pattern
+carrying `owner` and `line`. Measured on the reference target at `model_version` 4: the
+aggregate form costs 5.1% of the base model (93 names); the full site form
+costs 66.6% (2,798 sites, each carrying the D12 `arguments`/`span`
+itemisation — the 31.5% this sentence carried before D12 priced the
+location-only site records, and the site count itself moved 2,796 → 2,798 at
+the D10 [F4] closure, which put the two `foreach`-condition calls in command
+position). The same order of magnitude that motivated `local-sites`
+originally, which is why this collection follows the identical pattern
 rather than being emitted unconditionally in full or gated as an
 all-or-nothing collection. (Both figures are the compact-JSON byte length of
 the collection alone, divided by the compact default-model byte length,
@@ -1199,7 +1209,14 @@ stubbed. The reference set is **declaration-driven**: the same
 `id`s on its first measurement, identifiers of a different form (§5.2) that
 never resolve into `symbols`, and the declaration already separates the
 two. `limitations` stays outside the rule for the same reason it is kept in
-full: it is whole-file context, not the slice's references.
+full: it is whole-file context, not the slice's references. §5.8's
+`symbol_refs` declaration for `limitations` (`owner`) remains **true** — the
+value joins into `symbols[].id` on an unsliced model — but on a slice that
+join may land on no record, by this exception; a round-4 reviewer read the
+two declarations side by side and correctly asked which one wins, so the
+answer is now written: §5.8 declares what a value *is*, this section
+declares what a slice *resolves*, and `limitations` is the one collection
+where they part.
 `slice` refuses a model carrying another `model_version` (`PSS9005`, §5.5):
 the stubs are a version-4 shape, and a document whose stated version and
 actual shape disagree is the false-delta problem in one file.
@@ -2260,7 +2277,7 @@ build actually runs today, and gates this SPEC requires of a *complete*
 | Cache generator | `test_pss.py` holds the SPEC §14.4 producer two ways. Structurally, this file's own syntax tree is parsed: no producer function may name `hashlib` and `baseline_digest` must have exactly one definition — the digest has one implementation, and a second would let a cache and this gate disagree about what was measured. The scope is the producer's named functions, and a function omitted from that list is not examined, so the list is checked against the module first. Behaviourally, a real two-generation cache is produced and its header compared with §14.4's field set **in both directions**, its axis set required to be complete, and its records required to carry `rev` and `blob` and nothing derivable from position. The digest and shape in the header must equal what `--emit-baseline-digest` gives |
 | File inventory | `test_pss.py` enumerates the tool's file set and requires an exact match, holding §14.1's two-file rule. Enumerated rather than counted: a list names the unaccounted file and also catches one that disappeared. Read from the committed inventory and, for `.py` only, from the working directory, so an unstaged third module fails too. `corpus/` is matched by pattern, since entries are meant to accumulate — what is held is that nothing which is not an entry appears. Adding a file means editing §14.1 and this list together, which is the intended cost |
 | Neutral naming | `test_pss.py` applies a denylist of judgement words to the fact-code descriptions and the subcommand help strings (§1.3), and checks the denylist actually covers every code and every subcommand rather than an empty set. **A denylist makes no completeness claim**: it stops listed words from returning and detects nothing worded some other way. SPEC prose is out of scope, because the rule itself has to be able to say the word in order to explain why a code may not |
-| Capability descriptor | `test_pss.py` compares every enumerated block of `--capabilities` with the constant it is supposed to be **reading** — a literal copied into the descriptor diverges the moment the constant moves — and the subcommand set against the §3 synopsis in both directions. The `implemented` / `not-implemented` marks are then checked **against the build**: `compare` must refuse, a usage error under `--format json` must not emit JSON, `survey --format json` must emit a model, and that model must carry the cost block. A mark cannot drift into a lie, and a feature cannot land while leaving its mark behind. Needs neither `git` nor `pwsh`, so it survives every degradation level of §14.3 |
+| Capability descriptor | `test_pss.py` compares every enumerated block of `--capabilities` with the constant it is supposed to be **reading** — a literal copied into the descriptor diverges the moment the constant moves — and the subcommand set against the §3 synopsis in both directions. The `implemented` / `not-implemented` marks are then checked **against the build** (as of the current build: `compare` emits the §6.4 delta document and its block is `implemented`; a usage error under `--format json` must not emit JSON while `error_payload` stays `not-implemented`; `survey --format json` must emit a model carrying the cost block). A mark cannot drift into a lie, and a feature cannot land while leaving its mark behind. Needs neither `git` nor `pwsh`, so it survives every degradation level of §14.3 |
 | Identifier forms and join keys | `--self-check` compares `pss.IDENTIFIER_FORMS` and `pss.COLLECTION_KEYS` with §5.8 on name **and** value — a form that agrees on its name while disagreeing on what it matches is exactly the drift a published descriptor makes dangerous. `test_pss.py` holds the declaration against the pinned blob: every listed field populated, every join value resolving into `symbols` or `<script>`, every other identifier matching exactly one declared form, and every declared unique key unique. The form set is checked for **exercise**, not only for agreement — a form no identifier at the pin belongs to is an enumeration nothing drives (§13.2) |
 | Declared schema | `--self-check` compares `pss.MODEL_SCHEMA` with §13.3 on path and kind; `test_pss.py` compares the declaration with what the pinned blob emits in both directions — emitted-but-undeclared and declared-but-unemitted are separate failures, and `optional` is the only exemption |
 | Cost report | `test_pss.py` **re-derives** the decomposition from the model — every list collection priced, `model_bytes` measured on the model less the block, `envelope` as the stated remainder — and compares by value. It does **not** re-check the block's own sum: `envelope` is computed as a remainder, so `sum + envelope == model_bytes` holds even when a whole collection is missing from the breakdown, which was demonstrated before landing |
@@ -2286,7 +2303,7 @@ should not assume any of these are currently enforced.
 
 | Gate | Requirement | Blocked on |
 |---|---|---|
-| Capability descriptor | **RESOLVED.** `--capabilities` is built and `test_pss.py` gates it two ways. Each enumerated block is compared with the constant it serialises, so the descriptor cannot become a second copy of a fact (§13.3, ADR 0036); and the `not-implemented` marks the descriptor carries for the delta record and the error payload are checked against behaviour — `compare` is run and must refuse, a usage error is provoked under `--format json` and must not emit JSON. Implementing either output without moving its mark reddens the gate, so the two outstanding items are visible in the published interface rather than absent from it | closed |
+| Capability descriptor | **RESOLVED.** `--capabilities` is built and `test_pss.py` gates it two ways. Each enumerated block is compared with the constant it serialises, so the descriptor cannot become a second copy of a fact (§13.3, ADR 0036); and the status marks are checked against behaviour — at resolution time `compare` refused and both the delta record and the error payload were `not-implemented`; the delta record has since shipped and its mark moved to `implemented` with the gate following (the mark-vs-behaviour coupling is exactly what forced the move), while `error_payload` remains `not-implemented` and a provoked usage error under `--format json` must still not emit JSON. Implementing an output without moving its mark reddens the gate, so an outstanding item is visible in the published interface rather than absent from it. *(Row re-worded post-round-4: it described the resolution-time state in the present tense for four arcs after the comparator shipped.)* | closed |
 | Projection invariance | **RESOLVED.** For each axis, `test_pss.py` surveys the pinned blob with and without it and checks **containment**, not equality: everything the narrower model says must also be said by the wider one, on the narrower model's own key vocabulary. The vocabulary is derived from the two models rather than read from §13.3, which marks a path `axis` without naming which axis contributes it — so this check does not inherit that declaration's errors. `cost` is excluded by name, because it describes the model and a smaller model is correctly a different size | closed |
 | Channel agreement | **RESOLVED, in full (post-D12 independent-remainder close).** `test_pss.py` carries a derivation per text-channel figure, written from this document's definitions and applied to the model rather than lifted from `render_text` — re-running the renderer's own expression would compare a restatement, not a measurement. The check reads **every figure on a row** — the head and each standalone number inside parentheses (a code like `PSS2007` contributes nothing: no word boundary splits an alphanumeric token) — and a derivation may return a tuple to cover the printed split. The four previously-uncovered rows (`lines`; the three soft-reference rows) now carry derivations, and the split coverage was demonstrated red-first: with head-only extraction, swapping `quoted 48 / bareword 1` to `quoted 1 / bareword 48` in the rendered text **passed the gate untouched**; the widened extraction reddens on exactly that swap. Three directions still redden it: a text figure the JSON does not support, a new numeric row with no derivation, and a derivation whose row has vanished. The conditional `boundary stubs` row (D12, §6.2) prints only on a stubbed slice — absent from every pin-model text the derivation table reads — and is held by fixture instead, together with the stub-aware `functions` derivation | closed |
 | Determinism | **RESOLVED.** `test_pss.py` extracts the pinned blob twice at each materialisation and compares the **serialised bytes**, not the parsed objects: key order is part of what §5.4 promises, and two dicts can compare equal while serialising differently. Re-checked now rather than left as written, because `--cost` re-runs the survey internally to price an absent axis (§3.1), so a default-materialisation model is produced by four extractions rather than one | closed |
@@ -2855,7 +2872,13 @@ so the two axes now follow one pattern rather than each being decided
 separately. Measured against the full 230-generation reference corpus at the
 time of resolution: 93 distinct names over 2,796 sites (corrects an earlier
 estimate of 2,798, carried in this section's own provisional note without a
-fresh measurement).
+fresh measurement). *Post-round-4 note: the D10 [F4] closure later moved the
+count 2,796 → 2,798 — the two `foreach`-condition calls it put in command
+position — re-measured against the "2" build to confirm the sequence. Both
+figures were correct when written; the coincidence that the count returned
+to the once-wrong estimate's value is exactly why a reviewer found "one
+document, two numbers for one fact" — the restamp sweeps Appendix B, not
+prose.*
 
 **F3 — orphaning is a transition and belongs in `compare` (RESOLVED, P24).**
 *Had callers, now has none* is the fact that would have caught all four
@@ -3733,7 +3756,9 @@ two (§15.2 carries the detail and the provenance note).
   place. Measured against the reference corpus: 93 distinct names over 2,796
   sites (this section's own prior estimate of 2,798 was not re-measured before
   being written down; corrected here per this document's own measurement
-  discipline, §15.1).
+  discipline, §15.1). *Post-round-4: the D10 [F4] closure moved the count to
+  2,798 — see §13.2's dynamic-sites resolution note for the measured
+  sequence.*
 
 **P15 through P19 were resolved on 2026-08-16 by external review** and their
 markers removed. Six respondents across two model families, all with code
