@@ -20,6 +20,21 @@ time, and are marked as such.
 
 ## [Unreleased]
 
+### Added
+
+- **SPEC §3.2 records survey round 5** — the first round designed to test
+  whether what earlier rounds caused to be written down works as written.
+  Three measurements: the §4.8 pre-flight was inherited, not re-derived
+  (both reviewers cited and followed it; neither invented a step); D13
+  closed the round-4 wall in the audits that hit it (three-way agreement
+  on every rhs, binding confirmed unnecessary in use); the descriptor
+  taught the interface with one measured boundary (positional operands
+  and option grammar live only in prose — inventoried). The
+  subject-existence rule's first live use, `declared synthetic` branch
+  included, worked without confusion. And for the first time, **no
+  convergence on the next fact** — two reviewers, two walls, recorded as
+  the finding: the one-wall era is over.
+
 ### Fixed
 
 - **Round-5 documentation findings, all verified before being closed**

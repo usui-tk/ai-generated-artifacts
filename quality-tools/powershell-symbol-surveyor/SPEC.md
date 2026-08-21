@@ -646,6 +646,53 @@ owners). What the round established:
   declared synthetic — against the kit's own contents before delivery**,
   the same class of packaging check as the round-3 listing rule.
 
+**2026-08-21 (fifth round).** Two reviewers, one per model family, on the
+first D13 kit — and a round designed differently from every predecessor:
+not "what should the model carry next" but **whether what earlier rounds
+caused to be written down now works as written**. Delivery per the standing
+rules (manifest diffed, key absence stated, both unprompted); the
+subject-existence rule saw its first live use, including its `declared
+synthetic` branch — one named function was stated up front not to exist,
+and both reviewers handled it exactly per §4.8's undeclared-name boundary
+without confusion. Three measurements:
+
+- **The §4.8 pre-flight was inherited, not re-derived** — both reviewers
+  found the stated procedure, cited it, and followed its three channels in
+  order; neither invented a step. The round-4 reviewer's discovery
+  completed its intended journey into a procedure a fresh consumer applies.
+  (The one reading fork — whether §13.2's target-join sits inside the
+  procedure or one step beyond it — produced identical facts either way
+  and is now bridged in §4.8.)
+- **D13 closed the round-4 wall in the audits that hit it** — six writes,
+  three-way agreement on every `rhs`, provenance chains followed to their
+  stated terminals (external parameter, member value, command output), and
+  both reviewers confirming in use that binding would not have changed a
+  conclusion. Both independently invented the same kit-only necessary
+  check (span width == UTF-8 byte length of `rhs`) — which, applied to all
+  5,373 writes during evaluation rather than to five samples, exposed the
+  span-unit defect recorded in §12.8's known-deviation note.
+- **The descriptor taught the interface — with a measured boundary.** Both
+  reviewers enumerated the flags, subcommands, axes, alias semantics and
+  output statuses from `capabilities.json` alone; one judged §3.1's
+  property met, the other **partially met**, naming the concrete gap:
+  positional operands, option value grammar and defaults live only in
+  prose. The gap is real (inventoried, §13.2).
+
+The round's harvest beyond the measurements: two staleness findings both
+traceable to **sweep gaps on our side** (the README registration figure
+the D13 sweep missed; the fourth stale-status site, which escaped the
+round-4 sweep because it lacks the grepped phrase — a lesson about
+phrase-anchored sweeps recorded where the fix landed), three
+one-sentence clarifications, and — for the first time — **no convergence
+on the next fact**: one reviewer asked for resolved-call-site
+itemisation with a §5.6-style estimate, the other for a structured
+provenance/reaching-writes layer with the position that costs must come
+from a prototype's own emission, not an estimate. Rounds 3 and 4 each
+ended with two reviewers pointing at the same wall; round 5 ended with
+two walls. Both are inventoried (§13.2) with single-reviewer basis, and
+the divergence itself is recorded as the finding: the one-wall era is
+over.
+
 ---
 
 ## 4. Fact specifications
