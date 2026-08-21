@@ -1144,16 +1144,20 @@ identity is the invoked name, not an enclosing function. The default
 `owners` (the sorted set of enclosing functions or `<script>`) — enough to
 answer "is there a call to this name, and from roughly where" without the
 per-site cost. `command-sites` restores one additional record per site,
-carrying `owner` and `line`. Measured on the reference target at `model_version` 4: the
-aggregate form costs 5.1% of the base model (93 names); the full site form
-costs 66.6% (2,798 sites, each carrying the D12 `arguments`/`span`
+carrying `owner` and `line`. Measured on the reference target at `model_version` 5: the
+aggregate form costs 5.0% of the base model (93 names); the full site form
+costs 64.8% (2,798 sites, each carrying the D12 `arguments`/`span`
 itemisation — the 31.5% this sentence carried before D12 priced the
 location-only site records, and the site count itself moved 2,796 → 2,798 at
 the D10 [F4] closure, which put the two `foreach`-condition calls in command
-position). The same order of magnitude that motivated `local-sites`
-originally, which is why this collection follows the identical pattern
-rather than being emitted unconditionally in full or gated as an
-all-or-nothing collection. (Both figures are the compact-JSON byte length of
+position; the percentages moved again at D13 because the base model grew by
+the script writes' `rhs`). The same order of magnitude that motivated
+`local-sites` originally, which is why this collection follows the identical
+pattern rather than being emitted unconditionally in full or gated as an
+all-or-nothing collection. D13's own price, measured at this version: `rhs`
++ `rhs_span` add 496 KB to the `local-sites` axis (4.31 → 4.80 MB against a
+1.09 MB base — the axis was already the largest by far) and 29 KB to the
+default model (the script writes, scope (ii)). (Both figures are the compact-JSON byte length of
 the collection alone, divided by the compact default-model byte length,
 re-measured against this version of the reference target; an earlier draft of
 this section carried 22.3% for the site form, which was not reproduced on
@@ -2446,7 +2450,7 @@ should not assume any of these are currently enforced.
 | Slice boundary stubs | **RESOLVED at the D12 arc.** Round 3 measured a function slice keeping 33 edge endpoints that resolved to nothing inside the slice; re-measured before implementation the same scope references 172 absent identifiers (47 from `edges`/`closures` alone). A `--scope` slice now re-introduces every referenced-but-absent symbol as a stub — `record: "stub"` plus the four common keys, copied verbatim from the input, additive only, declaration-driven off `COLLECTION_KEYS.symbol_refs` (§5.7) — and the `symbols` variant declaration was re-cut so the common set IS the stub set (§13.3). `slice` refuses a foreign `model_version` (`PSS9005`), for the same reason `compare` does. Held by a resolution gate (every referenced identifier resolves inside the slice), a verbatim-copy gate, and behavioural fixtures including slice-of-slice | closed |
 | Static analysis | **RESOLVED (post-D12 independent-remainder close).** Wired into a `pss.py`-specific CI run on the analyzer's precedent (`.github/workflows/quality-tools__powershell-symbol-surveyor.yml`): `py_compile` over both files as the fail-fast static-analysis step, then `--self-check`, then the full §13.1 battery with `pwsh` (preinstalled on the runner), per push/PR touching this directory. `fetch-depth: 0` is a **measured** requirement, not a default: on a depth-1 clone the battery fails — the B.7 corpus pair and the §14.4 generator read committed-generation blobs that exist only in history — while the pin itself survives shallowness only by the coincidence that the reference script's HEAD content still equals it | closed |
 | Docs | **RESOLVED.** `README.md`, `README.ja.md`, `SPEC.md`, `CHANGELOG.md` and `VERSION` all exist, and `test_pss.py` holds them rather than leaving their presence to inspection: each file must exist, `VERSION` must equal `pss.__version__` (one version, two places, so the file cannot go stale against the code), and the bilingual pair must be in **lock-step on structure** — the same heading text ordering by level, the same number of fenced blocks. Lock-step is checked structurally rather than by translation, and that limit is stated: it catches a section added to one and not the other, and says nothing about whether a paragraph's content still agrees | closed |
-| Writer right-hand side | Both round-4 reviewers, independently and unprompted, converged on the same next fact — the assignment right-hand side, **verbatim**, on the declaration-site record (`local-sites` axis): the same one-step-past-the-wall shape as round 3's `not_evaluated` convergence. The model locates every write but never says what was assigned, so a `Remove-Item $mount` audit and a `& $ExpandExe` pre-flight both stop exactly at the writer's `=` (§3.2, fourth round). The shape both reviewers proposed is the `PSS9002.target` discipline applied to the assignment: byte-adjacent verbatim text — one reviewer additionally proposed carrying the RHS span — no evaluation, no binding, no threshold. Costs measured in the round: the `local-sites` axis is already the largest (§5.6's order), and raw-text duplication was priced at 132,149 source bytes for the analogous site-record case, which is why one reviewer called refusal defensible. **Model-moving**: a D13-arc item, to be adjudicated and landed as a version bundle per §5.5, never piecemeal | inventoried (round 4; basis = independent two-reviewer convergence) |
+| Writer right-hand side | Both round-4 reviewers, independently and unprompted, converged on the same next fact — the assignment right-hand side, **verbatim**, on the declaration-site record (`local-sites` axis): the same one-step-past-the-wall shape as round 3's `not_evaluated` convergence. The model locates every write but never says what was assigned, so a `Remove-Item $mount` audit and a `& $ExpandExe` pre-flight both stop exactly at the writer's `=` (§3.2, fourth round). The shape both reviewers proposed is the `PSS9002.target` discipline applied to the assignment: byte-adjacent verbatim text — one reviewer additionally proposed carrying the RHS span — no evaluation, no binding, no threshold. Costs measured in the round: the `local-sites` axis is already the largest (§5.6's order), and raw-text duplication was priced at 132,149 source bytes for the analogous site-record case, which is why one reviewer called refusal defensible. **Model-moving**: a D13-arc item, to be adjudicated and landed as a version bundle per §5.5, never piecemeal **Landed at D13** (`model_version` "5"): §12.8 states the contract, both reference variants carry the conditional keys, and the gate holds `text[rhs_span] == rhs` over every pin write without sampling — the span the one reviewer proposed is what made the verbatim claim checkable. Measured price in §5.6 | closed (landed, D13) |
 | Emission coverage | every code in §4 blocks 1-4 (survey-emittable) appears as a `code` or `facts` value on at least one record somewhere in the regression corpus's models, or is documented as data-dependent-absent (e.g. `PSS1005` legitimately does not fire on a corpus with zero duplicate names) | `PSS2005`, `PSS4001`, `PSS4002` closed by manual audit. `PSS2002` closed for all five §12.2 sources at the D10 arc — each source is held red-first by a §13.1 fixture, which is stronger than corpus presence. No automated corpus-wide gate yet for the rest; S4 |
 | Declared model schema | **RESOLVED (ADR 0036).** §13.3 declares the path set (counts stated there, per materialisation) and `pss.MODEL_SCHEMA` carries it; `--self-check` holds the two together on path *and* kind, and `test_pss.py` holds the declaration against the pin in both directions. The pairing with the §3.1 descriptor is satisfied by the declaration living in the code, so `--capabilities` can serialise it rather than restate it | closed |
 | Version-decision enforcement | **RESOLVED (ADR 0036).** The parent commit's build is re-derived and compared; a model that moved without the version advancing is a failure. Measured against real history the check reddens at `44b97d1` (shape moved) and at `bc69c27` (shape identical, values moved) | closed |
@@ -3677,8 +3681,8 @@ is, so a bare count is unfalsifiable in the same way.
   "aggregate_records": 465
  },
  "model_shape": {
-  "all-axes": "4c8c4ccaeb6824a4",
-  "default": "3a513c698491cbe3"
+  "all-axes": "14f9456ec1e5e9db",
+  "default": "d20088c6a8894f31"
  },
  "references_outside_functions": {
   "all-axes": 556,
