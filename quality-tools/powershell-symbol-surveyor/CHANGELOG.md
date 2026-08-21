@@ -22,6 +22,25 @@ time, and are marked as such.
 
 ### Added
 
+- **The span-unit deviation is recorded and inventoried (D14)** — round
+  5's whole-population check exposed that `rhs_span` ships character
+  offsets against §12.8's declared byte offsets (4 of 5,373 pin writes
+  differ: exactly the non-ASCII `rhs` cases). §12.8 carries the
+  known-deviation note with the full detection account — the gate slices
+  decoded text and is unit-consistent with the code, blind to the
+  declaration; both reviewers' checks embodied the declaration but
+  sampled ASCII-only — and §13.2 opens the D14 row with the adjudicated
+  direction: implementation moves to bytes, and **the gate must embody
+  the declaration, not the code**. Model-moving, §5.5 bundle.
+- **Three more §13.2 inventory rows** from round 5: descriptor invocation
+  grammar (the half round-4's F4 close deliberately deferred; mechanism
+  only), resolved-call-site itemisation (single reviewer, with a
+  cross-checked 2,250-site ≈567 KB estimate and the correct observation
+  that §5.6's axis rule forbids the axis form), and a structured
+  provenance layer (the other reviewer, cost deliberately unpriced until
+  a prototype emits it). The two asks did not converge — the first round
+  without convergence, recorded as such.
+
 - **SPEC §3.2 records survey round 5** — the first round designed to test
   whether what earlier rounds caused to be written down works as written.
   Three measurements: the §4.8 pre-flight was inherited, not re-derived
