@@ -2307,7 +2307,10 @@ should not assume any of these are currently enforced.
 Registration as a whole-tool unit sets `tested = true` on the basis of the
 §13.1 self-test being green, not on the canon behavioural suite — and not on
 §13.2, which is why §13.2's rows are listed as owed rather than as blocking
-registration.
+registration. **Registered (post-D12):** `tool.powershell-symbol-surveyor` @
+0.4.0, kind `tool`, whole-directory unit on the analyzer's precedent, via the
+manifest CRUD (ADR 0011); Appendix F had been empty since 2026-08-16, so the
+condition above was already met.
 
 ---
 

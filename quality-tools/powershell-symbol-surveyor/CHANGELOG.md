@@ -20,6 +20,19 @@ time, and are marked as such.
 
 ## [Unreleased]
 
+### Added
+
+- **Registered in the manifest** — `tool.powershell-symbol-surveyor` @
+  0.4.0, kind `tool`, a whole-directory unit on the analyzer's precedent,
+  written through the manifest CRUD (ADR 0011; validator 0 findings). The
+  SPEC's own condition — Appendix F empty of provisional items — had been
+  met since 2026-08-16. This carries out the proposal recorded in the
+  README's registration note: the derived battery target lists start from
+  the manifest (ADR 0031), so the structural gates now read this directory,
+  closing the omission that let the file count grow from two to five
+  unseen in 2026-08-18's arc. STATUS's manifest figures (92 rows, 8
+  `tool`) move in the same commit, per the standing rule.
+
 ### Changed
 
 - **Channel agreement covers every figure on every row** (SPEC §13.2,

@@ -347,15 +347,18 @@ are skipped — and say so — where it is absent (§14.3).
 
 ## Registration
 
-Neither `pss.py` nor the gate's apparatus is registered in the manifest yet.
-`pss.py` registers when its SPEC has no provisional items left; the corpus
-manager and the cache producer are subcommands of `test_pss.py` and go with
-it. Registering a helper before the tool it serves would invert the order.
+The tool is registered: `tool.powershell-symbol-surveyor` @ 0.4.0, kind
+`tool`, a whole-directory unit on the analyzer's precedent. The corpus
+manager and the cache producer are subcommands of `test_pss.py` and are
+covered by the same unit. The SPEC's own condition — Appendix F empty of
+provisional items — had been met since 2026-08-16; registration sets
+`tested = true` on the §13.1 self-test being green.
 
-> **Note (2026-08-18):** deferring registration has a cost worth recording.
-> The derived battery target lists start from the manifest (ADR 0031), so
-> deferring registration **also defers every structural gate over this
-> directory**. In fact the file count grew from two to five in three days
-> against a SPEC that says "two `.py` files", and no gate could see it —
-> the baseline gate reads the model, not the directory tree. Registering
-> first has been proposed.
+> **Note (2026-08-18, resolved post-D12):** deferring registration had a
+> cost worth recording. The derived battery target lists start from the
+> manifest (ADR 0031), so deferring registration **also deferred every
+> structural gate over this directory**. In fact the file count grew from
+> two to five in three days against a SPEC that says "two `.py` files",
+> and no gate could see it — the baseline gate reads the model, not the
+> directory tree. Registering first was proposed, and the registration
+> above is that proposal carried out.
