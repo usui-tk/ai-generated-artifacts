@@ -20,6 +20,22 @@ time, and are marked as such.
 
 ## [Unreleased]
 
+### Added
+
+- **SPEC §3.2 records survey round 4** — the first post-D12 round, on a
+  tool-output-only kit that shipped the reconstructed README for its first
+  onboarding read. Exact three-way agreement on every counted population;
+  the D12 shapes (four-key stubs, itemisation-without-binding) endorsed
+  independently by both reviewers with the same reasoning; both converging
+  unprompted on the assignment right-hand side as the next fact (a D13
+  inventory row, not an action); the round's harvest being documentation
+  drift the self-checks cannot see. The round's one defect was in the ask
+  — a rename subject that does not exist in the reference target — flagged
+  by one reviewer per the round-3 delivery rule read broadly, and a third
+  method rule is adopted: every concrete subject a startup message names is
+  verified to exist (or declared synthetic) against the kit before
+  delivery.
+
 ### Fixed
 
 - **Round-4 documentation findings, all verified before being closed**

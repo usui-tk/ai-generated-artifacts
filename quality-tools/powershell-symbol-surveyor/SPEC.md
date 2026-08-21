@@ -574,6 +574,62 @@ round decided or found:
   specimens declare their own coverage status, so a deliberately partial
   candidate cannot be mistaken for a defective complete one.
 
+**2026-08-21 (fourth round).** Two reviewers, one per model family, given the
+first post-D12 kit: the pinned target's default and all-axes models, a real
+`--scope` slice, `--capabilities`, and — first time in a kit — the
+reconstructed README pair, with tool-output-only contents (no hand-built
+specimens, so the round-3 coverage rule had nothing to declare). Both
+reviewers applied the round-3 delivery rule unprompted: manifest diffed
+against the extraction before answering, answer-key absence stated. Every
+quantitative claim in both reports re-verified against the kit's data —
+**exact three-way agreement** on all counted populations (76 destructive
+sites over 42 owners with identical parameter splits; 26 dynamic sites over
+9 targets; 1 full + 172 stub records; the same four limitations-only
+owners). What the round established:
+
+- **The D12 shapes were independently endorsed in use.** Both reviewers,
+  unprompted and with the same reasoning, judged the four-key stub the
+  right payload (each candidate addition rejected as a copy-of-a-fact or
+  analysis-payload creep — one reviewer priced the alternatives: +6,446
+  bytes for a derived `name`, +60,585 for full records), and both judged
+  `arguments`/`span` itemisation-without-binding sufficient for the audit
+  it was built for, with binding explicitly *not* the missing piece.
+- **Both reviewers converged, independently, on the same next fact**: the
+  assignment right-hand side, verbatim, on the declaration-site record —
+  the same one-step-past-the-wall shape as round 3's `not_evaluated`
+  convergence. Inventoried as a D13 row (§13.2) rather than acted on.
+- **Documentation drift the self-checks cannot see** was the round's main
+  harvest, every finding re-verified and two re-measured against historical
+  builds before being closed: implementation-status prose four arcs stale
+  against a descriptor that was right all along; one document carrying two
+  figures for the site count, both correct when written (the measured
+  2,796 → 2,798 sequence through D10's [F4]); a slice claim broader than
+  its own stated exception; six bilingual prose asymmetries sitting
+  exactly in the gap the structural gate declares it does not cover.
+- **A stated-vs-discovered boundary in rename pre-flight**: one reviewer
+  constructed a clearance argument this SPEC nowhere states (`PSS3001`
+  absence closes the in-file-literal channel for a *declared* name) and
+  found its failure mode (an *undeclared* name has no literal-evidence
+  channel at all, §4.3's population being declared-name matches) — both
+  reviewers hit the second fact, one flagged it as worth stating. §4.8's
+  join promise oversells the member-chain case the same way (the emitted
+  `target` matches no §5.8 identifier form; tail-stripping is a consumer
+  operation no section specifies). Documentation follow-ups adjudicated
+  separately.
+- **Method — the round's one defect was in the ask, and the rule that
+  should have caught it did not exist yet**: the startup message named
+  `Expand-ArchiveFile` as a rename subject, and the function does not exist
+  in the reference target (re-verified: absent from all 480 symbols, all
+  93 unresolved-command names, all soft-reference literals). One reviewer
+  flagged it before answering, exactly per the round-3 delivery rule read
+  broadly; the other absorbed it silently into a correct undeclared-name
+  analysis. The blunder was productive — it is what surfaced the
+  undeclared-name blind spot above — but productive-by-accident is not a
+  method. Rule adopted: **every concrete subject a startup message names
+  (functions, variables, files) is verified to exist — or is explicitly
+  declared synthetic — against the kit's own contents before delivery**,
+  the same class of packaging check as the round-3 listing rule.
+
 ---
 
 ## 4. Fact specifications
