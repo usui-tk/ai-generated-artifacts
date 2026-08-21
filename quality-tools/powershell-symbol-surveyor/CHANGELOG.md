@@ -22,6 +22,13 @@ time, and are marked as such.
 
 ### Added
 
+- **A D13 inventory row: the writer right-hand side** (SPEC §13.2,
+  round-4 F8). Both reviewers converged, independently and unprompted, on
+  the same next fact — the assignment RHS, verbatim, on the
+  declaration-site record, the `PSS9002.target` discipline applied to the
+  writer's `=` — the same convergence pattern as round 3's `not_evaluated`.
+  Inventoried with its measured costs, not acted on: model-moving, a
+  D13-arc bundle item per the §5.5 version discipline.
 - **The descriptor carries the tool's own entry points** (SPEC §3.1,
   round-4 F4; both reviewers, from different sides). `global_flags` — the
   four global flags, declared once in `pss.GLOBAL_FLAGS` and read twice by
