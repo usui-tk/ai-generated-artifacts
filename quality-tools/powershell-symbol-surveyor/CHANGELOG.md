@@ -18,7 +18,7 @@ This file starts at `0.2.0`. Entries before it are reconstructed from the
 commit history and the SPEC's own decision records rather than written at the
 time, and are marked as such.
 
-## [Unreleased]
+## [0.6.0] - 2026-08-21 (`model_version` "5" -> "6"; the D14 arc)
 
 ### Added
 
