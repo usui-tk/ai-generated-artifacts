@@ -4443,10 +4443,37 @@ def capabilities_document(parser):
         opts = sorted(
             o for a in sp._actions for o in a.option_strings
             if o.startswith("--") and o != "--help")
+        # Round-5 (D14): the invocation GRAMMAR, read from the parser the
+        # same way the option list is - positional operands in declaration
+        # order, and per-option value shape / default / choices / help. A
+        # round-5 reviewer enumerated the whole surface from the descriptor
+        # alone and then named this as the measured boundary of 3.1
+        # ("discovery works; complete invocation learning does not"); the
+        # round-4 F4 close carried the global flags and deliberately
+        # deferred this half. Nothing here is restated: argparse already
+        # holds every field.
+        positionals = [
+            {"name": a.dest, "help": a.help}
+            for a in sp._actions if not a.option_strings]
+        option_grammar = {}
+        for a in sp._actions:
+            for o in a.option_strings:
+                if not o.startswith("--") or o == "--help":
+                    continue
+                takes_value = a.nargs != 0
+                option_grammar[o] = {
+                    "value": ((a.metavar or a.dest.upper())
+                              if takes_value else None),
+                    "default": a.default,
+                    "choices": sorted(a.choices) if a.choices else None,
+                    "help": a.help,
+                }
         subcommands[choice] = {
             "summary": next((c.help for c in sub._choices_actions
                              if c.dest == choice), None),
             "options": opts,
+            "positionals": positionals,
+            "option_grammar": option_grammar,
         }
 
     formats = sorted(next(

@@ -2310,6 +2310,43 @@ def check_capability_descriptor():
               "descriptor: %s runs and emits (exit 0)" % flag,
               "rc=%d" % r.returncode)
 
+    # Round-5 (D14 part 2): the invocation GRAMMAR - positionals, option
+    # value shapes, defaults - serialised from the parser, so the boundary a
+    # round-5 reviewer measured ("discovery works; complete invocation
+    # learning does not") closes without a restated copy of the help text.
+    # Held both ways against the parser's real surface; behaviour of every
+    # subcommand under these defaults is exercised throughout this battery,
+    # so the check here is declaration == parser, not a re-run.
+    sub_action = [a for a in pss.build_parser()._subparsers._group_actions
+                  if isinstance(a, __import__("argparse")._SubParsersAction)][0]
+    for name in sorted(sub_action.choices):
+        sp = sub_action.choices[name]
+        block = doc.get("subcommands", {}).get(name, {})
+        real_pos = [a.dest for a in sp._actions if not a.option_strings]
+        eq([p.get("name") for p in block.get("positionals", [])], real_pos,
+           "descriptor grammar: %s positionals match the parser, in order"
+           % name)
+        gram = block.get("option_grammar", {})
+        real_flags = sorted(o for a in sp._actions for o in a.option_strings
+                            if o.startswith("--") and o != "--help")
+        eq(sorted(gram), real_flags,
+           "descriptor grammar: %s option_grammar covers the parser's "
+           "surface, both directions" % name)
+        for a in sp._actions:
+            for o in a.option_strings:
+                if not o.startswith("--") or o == "--help":
+                    continue
+                g = gram.get(o, {})
+                takes_value = a.nargs != 0
+                eq(g.get("value"),
+                   (a.metavar or a.dest.upper()) if takes_value else None,
+                   "descriptor grammar: %s %s value shape" % (name, o))
+                eq(g.get("default"), a.default,
+                   "descriptor grammar: %s %s default" % (name, o))
+                eq(g.get("choices"),
+                   sorted(a.choices) if a.choices else None,
+                   "descriptor grammar: %s %s choices" % (name, o))
+
     # F4 (round 4): the axes 'all' alias, declared and true.
     eq(doc.get("axes_alias"), dict(pss.AXES_ALIAS),
        "descriptor: axes_alias serialises pss.AXES_ALIAS")

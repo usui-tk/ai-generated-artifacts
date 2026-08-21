@@ -22,6 +22,16 @@ time, and are marked as such.
 
 ### Added
 
+- **The descriptor carries the full invocation grammar** (SPEC §3.1, D14
+  part 2; the round-5 measured boundary, and the half the round-4 F4
+  close deliberately deferred). Each subcommand block gains
+  `positionals` (operands in declaration order, with help) and
+  `option_grammar` (per-option value shape, default, choices, help) —
+  read from the argument parser exactly as the option list is, nothing
+  restated. Gate: declaration == parser in both directions, per
+  subcommand and per option (34 red on the pre-implementation build);
+  behaviour under these defaults is what the rest of the battery already
+  exercises. Gate 13: 406 → 461 with `pwsh`.
 - **`model_version` "5" -> "6" — the D14 arc, part 1: every span is the
   byte offset the SPEC declares.** `rhs_span` (§12.8) and the D12 site
   `span` (§5.6) — the sibling defect found during the D14 design — now

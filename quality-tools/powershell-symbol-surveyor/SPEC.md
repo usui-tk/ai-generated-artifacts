@@ -343,13 +343,19 @@ originating use that process is another language model (§1.1). Two consequences
 are normative.
 
 **The interface must be discoverable without prose.** `--capabilities` emits a
-structured document — subcommands, the tool's own global flag surface
-(`global_flags`, added post-round-4: a reviewer found the descriptor silent
-on the very flags one learns it through), the axis vocabulary of §5.6 with
-its one alias (`axes_alias`: the `all` reading on `survey` and on `slice`),
-the fact catalogue, exit-code meanings, available output formats and the
-current `model_version` — so that a caller can determine what it may ask for
-without parsing help text. A descriptor that has drifted from the tool is worse than no
+structured document — subcommands **with their full invocation grammar**
+(positional operands in order, and per-option value shape, default, choices
+and help — added post-round-5, when a reviewer enumerated the whole surface
+from the descriptor alone and then measured the boundary precisely:
+"discovery works; complete invocation learning does not"; the grammar was
+the half the round-4 F4 close deliberately deferred), the tool's own global
+flag surface (`global_flags`, added post-round-4: a reviewer found the
+descriptor silent on the very flags one learns it through), the axis
+vocabulary of §5.6 with its one alias (`axes_alias`: the `all` reading on
+`survey` and on `slice`), the fact catalogue, exit-code meanings, available
+output formats and the current `model_version` — so that a caller can
+determine what it may ask for, and construct a valid invocation, without
+parsing help text. A descriptor that has drifted from the tool is worse than no
 descriptor, because it produces confident wrong requests; §13 therefore gates
 the descriptor against this document.
 
