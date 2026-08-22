@@ -35,10 +35,12 @@ python3 pss.py survey Script.ps1 --axes all --out model.json
 python3 pss.py survey Script.ps1 --axes all --cost
 ```
 
-The default model is deliberately not everything. Three **materialisation
+The default model is deliberately not everything. Four **materialisation
 axes** (SPEC §5.6) hold the bulk material — transitive closure sets, one
 record per unresolved command-invocation site (carrying the invocation's
-argument itemisation and byte span), one record per local-variable
+argument itemisation and byte span), per-site records on each resolved
+call edge (the same itemisation, attached to the `edges[]` rows), one
+record per local-variable
 reference — and every model states which axes it carries in its
 `materialization` block, so a narrower model can never pass as a full one.
 Every model also carries `model_version`, which advances whenever the model

@@ -18,6 +18,40 @@ This file starts at `0.2.0`. Entries before it are reconstructed from the
 commit history and the SPEC's own decision records rather than written at the
 time, and are marked as such.
 
+## [0.7.0] - 2026-08-22 (`model_version` "6" -> "7"; the D15 arc)
+
+The bundle survey round 6 adjudicated (SPEC 3.2/13.2): both round-5 walls,
+landed in the converged reduced shape, prototyped and measured before a line
+of mainline changed.
+
+### Added
+- **`resolved-sites` materialisation axis** (SPEC 5.6): `site_records` on
+  each `edges[]` row - line, [start, end) byte span, the D12 argument
+  itemisation, and a conditional verbatim `name` when the invoked token
+  differs from the declared function name. Ordered as the edge's own
+  ascending `lines`; alignment and the counter tie
+  (sum == commands_named - unresolved sites) gate-held over the whole
+  population. Measured 491,981 B on the reference target, axis-gated -
+  the default model does not carry it.
+- **`rhs_refs` on every rhs-bearing write** (SPEC 12.9, new section):
+  the static references inside the supplying expression - variables
+  (verbatim name; the id the site's own SPEC 12.6 classification
+  assigned; a PSS9004 site contributes its name with no id), command
+  heads by the same 10.6 walk that produces the edges. Automatic
+  variables itemised (adjudicated on measurement). The reverse join is
+  one sentence of 12.9 prose, deliberately not payload. Measured
+  26,668 B on the default model, 691,996 B on default+`local-sites`.
+- `edges` enters `RECORD_VARIANTS` (8th declared collection); the
+  MODEL_SCHEMA gains the site_records and rhs_refs path families.
+
+### Changed
+- `MODEL_VERSION` "6" -> "7"; Appendix B.8 model_shape restamped once at
+  the arc's end (both fingerprints; every other figure unmoved; B.7's
+  pins verified unmoved). Derived caches regenerated at "7".
+- The battery's ALL_AXES was a hard-coded copy of the axis vocabulary
+  and drifted the moment a fourth axis existed; now derived from
+  pss.AXES (in-arc defect, fixed where found).
+
 ## [0.6.0] - 2026-08-21 (`model_version` "5" -> "6"; the D14 arc)
 
 ### Added
