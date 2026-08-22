@@ -729,6 +729,152 @@ def check_resolved_sites_pin(text, model_all):
        "unresolved sites - the itemisation and the counters agree")
 
 
+def check_rhs_refs_fixture():
+    """SPEC 12.9 (D15): a write's supplying expression carries its static
+    references. Written red-first against the "6" build: no record carried
+    `rhs_refs`. Adjudicated at survey round 6 as the reduced provenance
+    layer - the reverse join is SPEC prose, and automatics stay itemised
+    (both measured, SPEC 3.2). The shapes below exercise every stated rule:
+    the id join per class, splat, the PSS9004 id omission, the in-string
+    exclusion, dedup-first, command heads, and the automatic itemisation.
+    """
+    body = ("$Script:Top = 'seed'\n"
+            "function Get-Part { param($Id) $Id }\n"
+            "function Use-Part {\n"
+            "  param($w)\n"
+            "  $args2 = @{ Id = 1 }\n"
+            "  $a = Get-Part -Id $w\n"
+            "  $b = $a + $a\n"
+            "  $c = \"text $inner\"\n"
+            "  $d = $undeclaredRead\n"
+            "  $e = Invoke-External @args2\n"
+            "  $f = $_.Exception.Message\n"
+            "  $g = $Script:Top\n"
+            "}\n")
+    m = pss.Survey("refs.ps1", body, axes={"local-sites"}).run().model()
+    w = {r["name"]: r for r in m["local_variables"]
+         if r.get("record") == "reference" and r.get("role") == "write"
+         and "rhs" in r}
+    check(all("rhs_refs" in r for r in w.values()),
+          "rhs_refs fixture: every rhs-bearing write carries rhs_refs",
+          "missing on %r" % [k for k, r in w.items() if "rhs_refs" not in r])
+    eq(w["a"]["rhs_refs"],
+       {"variables": [{"name": "w", "id": "variable:local/Use-Part#w"}],
+        "commands": ["Get-Part"]},
+       "rhs_refs fixture: a resolved command head plus a local variable, "
+       "id-joined by the site's own class")
+    eq(w["b"]["rhs_refs"],
+       {"variables": [{"name": "a", "id": "variable:local/Use-Part#a"}],
+        "commands": []},
+       "rhs_refs fixture: distinct-variable dedup keeps the first "
+       "occurrence only")
+    eq(w["c"]["rhs_refs"], {"variables": [], "commands": []},
+       "rhs_refs fixture: a reference inside an expandable string is "
+       "PSS2007's population, not itemised here")
+    eq(w["d"]["rhs_refs"],
+       {"variables": [{"name": "undeclaredRead"}], "commands": []},
+       "rhs_refs fixture: a PSS9004 site contributes its name with the id "
+       "OMITTED - never guessed")
+    eq(w["e"]["rhs_refs"],
+       {"variables": [{"name": "@args2", "id": "variable:local/Use-Part#args2"}],
+        "commands": ["Invoke-External"]},
+       "rhs_refs fixture: a splatted @name keeps its sigil and joins to "
+       "the variable it splats")
+    eq(w["f"]["rhs_refs"],
+       {"variables": [{"name": "_", "id": "variable:automatic/_"}],
+        "commands": []},
+       "rhs_refs fixture: an automatic variable is itemised like any "
+       "other reference (round-6 adjudication)")
+    eq(w["g"]["rhs_refs"],
+       {"variables": [{"name": "Script:Top", "id": "variable:script/Top"}],
+        "commands": []},
+       "rhs_refs fixture: a qualified reference keeps the qualifier in "
+       "the verbatim name and joins the script identity")
+    top = [r for r in m["script_variables"]
+           if r.get("role") == "write" and r.get("name") == "Top"][0]
+    eq(top["rhs_refs"], {"variables": [], "commands": []},
+       "rhs_refs fixture: a script write on the DEFAULT-model collection "
+       "carries the key with the same shape")
+    reads = [r for c in ("script_variables", "local_variables")
+             for r in m[c] if r.get("role") == "read"]
+    check(all("rhs_refs" not in r for r in reads),
+          "rhs_refs fixture: a read carries no rhs_refs",
+          "rhs_refs on a read record")
+
+
+def check_rhs_refs_pin(model_all):
+    """SPEC 12.9 (D15), whole-population over the pin: rhs_refs travels
+    with rhs on every write; every emitted id resolves into the model's
+    own identity population; and the itemisation agrees with an
+    INDEPENDENT derivation - the expression re-tokenised standalone by
+    the tool's own tokenizer and walked by the same 10.6 rule. The
+    implementation joins by offset against the main scan; the derivation
+    here re-reads the verbatim text; the two reach the same references
+    from different directions (the CommandAst-differential pattern), and
+    they were measured equal on all 5,113 writes before this check was
+    wired.
+    """
+    ids = set()
+    for coll in ("script_variables", "local_variables",
+                 "string_interpolation_references"):
+        for r in model_all[coll]:
+            if r.get("id"):
+                ids.add(r["id"])
+    unpaired, badid, vdiff, cdiff = [], [], [], []
+    n = 0
+    for coll in ("script_variables", "local_variables",
+                 "string_interpolation_references"):
+        for r in model_all[coll]:
+            if ("rhs" in r) != ("rhs_refs" in r):
+                unpaired.append((coll, r.get("name"), r.get("line")))
+                continue
+            if "rhs_refs" not in r:
+                continue
+            n += 1
+            rr = r["rhs_refs"]
+            for v in rr["variables"]:
+                if "id" in v and v["id"] not in ids:
+                    badid.append((v["id"], r.get("line")))
+            toks = pss.tokenize(r["rhs"])
+            sig = pss.significant(toks)
+            snames, seen = [], set()
+            for t in toks:
+                if t.kind != "var":
+                    continue
+                d = t.text.lstrip("$")
+                if d.startswith("{") and d.endswith("}"):
+                    d = d[1:-1]
+                q, _, bn = d.lstrip("@").rpartition(":")
+                k = (bn.lower(), q.lower())
+                if k in seen:
+                    continue
+                seen.add(k)
+                snames.append(d)
+            if snames != [v["name"] for v in rr["variables"]]:
+                vdiff.append((r.get("line"), r["rhs"][:40]))
+            if [t.text for _, t in pss.iter_command_words(toks, sig)] \
+                    != rr["commands"]:
+                cdiff.append((r.get("line"), r["rhs"][:40]))
+    check(not unpaired,
+          "rhs_refs pin: rhs_refs and rhs travel together over every pin "
+          "write", "%d unpaired; first: %r" % (len(unpaired), unpaired[:3]))
+    check(not badid,
+          "rhs_refs pin: every emitted id resolves into the model's own "
+          "identity population",
+          "%d dangling; first: %r" % (len(badid), badid[:3]))
+    check(not vdiff,
+          "rhs_refs pin: the offset-join and a standalone re-tokenisation "
+          "of the rhs enumerate the same variables, whole population",
+          "%d differ; first: %r" % (len(vdiff), vdiff[:3]))
+    check(not cdiff,
+          "rhs_refs pin: the offset-join and the standalone 10.6 walk "
+          "enumerate the same command heads, whole population",
+          "%d differ; first: %r" % (len(cdiff), cdiff[:3]))
+    check(n > 4000,
+          "rhs_refs pin: the pin's writes overwhelmingly carry rhs_refs",
+          "only %d" % n)
+
+
 def check_writer_rhs():
     """SPEC 12.8 (D13): a write carries its supplying expression, verbatim.
 
@@ -4720,6 +4866,8 @@ def main():
         check_rhs_integrity(text, model_all)
         check_resolved_sites_fixture()
         check_resolved_sites_pin(text, model_all)
+        check_rhs_refs_fixture()
+        check_rhs_refs_pin(model_all)
 
         check_channel_agreement(model_all)
 

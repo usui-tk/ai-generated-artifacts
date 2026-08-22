@@ -2568,6 +2568,55 @@ round-4 audits that hit this wall were script-variable audits). On
 carry them; on `script_variables` they are present in the default model,
 which therefore moved at this version.
 
+### 12.9 Writer right-hand references (normative, D15)
+
+Every record carrying `rhs` also carries **`rhs_refs`** — the static
+references inside the supplying expression, so a consumer following a value
+backwards reads structure instead of re-parsing verbatim text:
+
+```json
+"rhs_refs": {"variables": [{"name": "Script:SourceDir",
+                            "id": "variable:script/SourceDir"}],
+             "commands": ["Join-Path"]}
+```
+
+- **`variables`** — one entry per distinct variable referenced in the
+  expression, in source order, first occurrence kept. `name` is the token,
+  verbatim, minus the `$` sigil and any `{ }` wrapper (a splatted `@name`
+  keeps its `@`). `id` is the identity **the site's own §12.6
+  classification assigned** — this section adds no second resolution rule:
+  the references inside an rhs span were already scanned and classified by
+  the main pass, and `rhs_refs` joins them by position, one classification
+  consumed twice. A splatted reference joins to the variable it splats. A
+  site the classification could not resolve (`PSS9004`) contributes its
+  `name` with **no `id` key** — an identity this tool cannot state is
+  omitted, never guessed (§1.3). References inside expandable strings are
+  not itemised here (they are `PSS2007`'s population, §5.3); a
+  function-side rhs may legitimately reference a `variable:local/…` id
+  whose per-site records ride the `local-sites` axis — the id is the join
+  key, not a claim that the records are materialised.
+- **`commands`** — the command heads inside the expression, in source
+  order, duplicates kept, produced by the same §10.6 command-position walk
+  that produces the edges and the `PSS2009` population.
+- **Automatic variables are itemised like any other reference** —
+  adjudicated at round 6 against both reviewers' first instinct, on
+  measurement (§3.2): excluding them saves 40,877 bytes and erases the
+  only reference carried by 105 writes whose rhs is an
+  `$_.Exception.Message`-class terminal. A consumer that wants them out
+  filters the `variable:automatic/` id prefix.
+- **The reverse join is prose, not payload** — adjudicated at round 6: the
+  statically-possible supplying writes of a read are **every write record
+  sharing the read's variable `id`; statically possible only — no flow
+  ordering, no dominance, no verdict.** The round's prototype emitted this
+  join as per-read lists and a per-record identity; both reviewers
+  measured it derivable from `id` + `role` alone (18,501 of 18,501 lists
+  reproduced) and rejected the 2.67 MB of scaffolding. This sentence is
+  what shipped instead.
+
+This is itemisation, not binding (§1.2): nothing is evaluated, nothing is
+ranked, and `rhs_refs` states which references appear — never which one
+supplies the value at run time.
+
 ## 13. Self-quality gates
 
 This section lists two different things and does not blur them: gates this
@@ -2765,6 +2814,11 @@ materialisation, the difference being the ten `axis` paths.
 | `/local_variables[]/id` | axis |
 | `/local_variables[]/in_expandable_string` | axis |
 | `/local_variables[]/rhs` | axis |
+| `/local_variables[]/rhs_refs` | axis |
+| `/local_variables[]/rhs_refs/commands` | axis |
+| `/local_variables[]/rhs_refs/variables` | axis |
+| `/local_variables[]/rhs_refs/variables[]/id` | optional |
+| `/local_variables[]/rhs_refs/variables[]/name` | axis |
 | `/local_variables[]/rhs_span` | axis |
 | `/local_variables[]/line` | axis |
 | `/local_variables[]/local_declared` | always |
@@ -2783,6 +2837,11 @@ materialisation, the difference being the ten `axis` paths.
 | `/script_variables[]/id` | always |
 | `/script_variables[]/in_expandable_string` | optional |
 | `/script_variables[]/rhs` | optional |
+| `/script_variables[]/rhs_refs` | optional |
+| `/script_variables[]/rhs_refs/commands` | optional |
+| `/script_variables[]/rhs_refs/variables` | optional |
+| `/script_variables[]/rhs_refs/variables[]/id` | optional |
+| `/script_variables[]/rhs_refs/variables[]/name` | optional |
 | `/script_variables[]/rhs_span` | optional |
 | `/script_variables[]/line` | always |
 | `/script_variables[]/name` | always |
@@ -2893,9 +2952,9 @@ absent from the declaration is uniform, and the gate holds that claim too.
 | `closures` | `closure-row` | `record == closure` | `facts` `id` `record` `transitive_callee_count` `transitive_caller_count` | — | 480 |
 | `closures` | `uncalled-fact` | `code == PSS4003` | `code` `id` | `named_by_literal` | 26 |
 | `closures` | `cycle-fact` | `code == PSS4004` | `code` `members` | — | 3 |
-| `local_variables` | `reference` | `record == reference` | `code` `id` `line` `name` `owner` `record` `role` | `in_expandable_string` `rhs` `rhs_span` | 22427 |
+| `local_variables` | `reference` | `record == reference` | `code` `id` `line` `name` `owner` `record` `role` | `in_expandable_string` `rhs` `rhs_refs` `rhs_span` | 22427 |
 | `local_variables` | `aggregate` | `record == aggregate` | `automatic_refs` `local_declared` `local_refs` `owner` `record` `unresolved_refs` | — | 465 |
-| `script_variables` | `reference` | `record == reference` | `code` `id` `line` `name` `owner` `qualifier` `record` `role` | `in_expandable_string` `rhs` `rhs_span` | 1879 |
+| `script_variables` | `reference` | `record == reference` | `code` `id` `line` `name` `owner` `qualifier` `record` `role` | `in_expandable_string` `rhs` `rhs_refs` `rhs_span` | 1879 |
 | `script_variables` | `usage-map` | `record == usage_map` | `code` `id` `name` `reader_count` `readers` `record` `writer_count` `writers` | — | 156 |
 | `string_interpolation_references` | `reference` | `record == reference` | `code` `id` `in_expandable_string` `line` `name` `owner` `record` `role` | `qualifier` | 118 |
 | `unresolved_named_commands` | `site` | `record == site` | `arguments` `code` `line` `name` `owner` `record` `span` | — | 2798 |

@@ -1188,6 +1188,11 @@ MODEL_SCHEMA = {
     "/local_variables[]/id": "axis",
     "/local_variables[]/in_expandable_string": "axis",
     "/local_variables[]/rhs": "axis",
+    "/local_variables[]/rhs_refs": "axis",
+    "/local_variables[]/rhs_refs/commands": "axis",
+    "/local_variables[]/rhs_refs/variables": "axis",
+    "/local_variables[]/rhs_refs/variables[]/id": "optional",
+    "/local_variables[]/rhs_refs/variables[]/name": "axis",
     "/local_variables[]/rhs_span": "axis",
     "/local_variables[]/line": "axis",
     "/local_variables[]/local_declared": "always",
@@ -1206,6 +1211,11 @@ MODEL_SCHEMA = {
     "/script_variables[]/id": "always",
     "/script_variables[]/in_expandable_string": "optional",
     "/script_variables[]/rhs": "optional",
+    "/script_variables[]/rhs_refs": "optional",
+    "/script_variables[]/rhs_refs/commands": "optional",
+    "/script_variables[]/rhs_refs/variables": "optional",
+    "/script_variables[]/rhs_refs/variables[]/id": "optional",
+    "/script_variables[]/rhs_refs/variables[]/name": "optional",
     "/script_variables[]/rhs_span": "optional",
     "/script_variables[]/line": "always",
     "/script_variables[]/name": "always",
@@ -1417,6 +1427,15 @@ RECORD_VARIANTS = {
                                        "end) byte offsets with text[start:end]"
                                        " == rhs, gate-held (SPEC 12.8)",
                      "absence_means": "exactly when rhs is absent"},
+                 "rhs_refs": {
+                     "presence_means": "exactly when rhs is present: the "
+                                       "static references inside the "
+                                       "supplying expression - variables "
+                                       "id-joined by the site's own SPEC "
+                                       "12.6 class, command heads by the "
+                                       "10.6 walk; itemisation, not "
+                                       "binding (SPEC 12.9)",
+                     "absence_means": "exactly when rhs is absent"},
                  "in_expandable_string": {
                  "presence_means": "true - the site sits inside an "
                                    "expandable string",
@@ -1448,6 +1467,15 @@ RECORD_VARIANTS = {
                      "presence_means": "exactly when rhs is present: [start, "
                                        "end) byte offsets with text[start:end]"
                                        " == rhs, gate-held (SPEC 12.8)",
+                     "absence_means": "exactly when rhs is absent"},
+                 "rhs_refs": {
+                     "presence_means": "exactly when rhs is present: the "
+                                       "static references inside the "
+                                       "supplying expression - variables "
+                                       "id-joined by the site's own SPEC "
+                                       "12.6 class, command heads by the "
+                                       "10.6 walk; itemisation, not "
+                                       "binding (SPEC 12.9)",
                      "absence_means": "exactly when rhs is absent"},
                  "in_expandable_string": {
                  "presence_means": "true - the site sits inside an "
@@ -1843,6 +1871,7 @@ class Survey:
             self.func_by_lname.setdefault(f.name.lower(), []).append(f)
         self.func_ids = {id(f): function_id(f) for f in self.funcs}
         self.limitations = []
+        self.cmd_words = []
         self.edges = {}
         self.params_by_func = {}
 
@@ -1938,10 +1967,64 @@ class Survey:
         self._precompute_parameters()
         self._scan()
         self._classify_variables()
+        self._attach_rhs_refs()
         self._build_usage_map()
         self._scan_soft_references()
         self._compute_closures()
         return self
+
+    def _attach_rhs_refs(self):
+        """SPEC 12.9 (D15): every rhs-bearing write carries `rhs_refs` - the
+        static references inside its supplying expression. Itemisation, not
+        binding: variables as (verbatim name, the identity SPEC 12.6's own
+        classification gave that site), command heads by the same 10.6 walk
+        that produced the edges. Nothing here re-tokenises or re-resolves:
+        the sites inside an rhs span were already scanned, classified and
+        identified by the main pass, and this pass joins them by offset -
+        one classification, consumed twice. Adjudicated at survey round 6
+        (SPEC 3.2/13.2) as the reduced provenance layer: the reverse join
+        (supplied-by) is deliberately NOT emitted - it is one sentence of
+        SPEC 12.9 prose, derivable by the consumer - and automatic
+        variables stay itemised (measured: excluding them saves 40,877 B
+        and erases the only reference on 105 real terminals).
+        """
+        import bisect
+        vsites = sorted(
+            (s for s in self.var_sites if not s["in_string"]),
+            key=lambda s: s["offset"])
+        voffs = [s["offset"] for s in vsites]
+        cwords = sorted(self.cmd_words)
+        coffs = [o for o, _ in cwords]
+        for coll in (self.script_records, self.detail_records,
+                     self.interp_records):
+            for rec in coll:
+                span = rec.pop("_rhs_char", None)
+                if span is None:
+                    continue
+                a, b = span
+                variables, seen = [], set()
+                for i in range(bisect.bisect_left(voffs, a),
+                               bisect.bisect_left(voffs, b)):
+                    s = vsites[i]
+                    disp = s["vtext"].lstrip("$")
+                    if disp.startswith("{") and disp.endswith("}"):
+                        disp = disp[1:-1]
+                    key = s["vid"] if s.get("vid") else disp.lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    entry = {"name": disp}
+                    if s.get("vid"):
+                        # Absent exactly when the site classified PSS9004
+                        # (SPEC 12.6): the read resolves to no surveyed
+                        # identity, and an id this tool cannot state is
+                        # omitted, never guessed (SPEC 1.3).
+                        entry["id"] = s["vid"]
+                    variables.append(entry)
+                commands = [w for _, w in cwords[
+                    bisect.bisect_left(coffs, a):bisect.bisect_left(coffs, b)]]
+                rec["rhs_refs"] = {"variables": variables,
+                                   "commands": commands}
 
     def _decl_add(self, owner, name):
         low = name.lower()
@@ -2100,6 +2183,11 @@ class Survey:
     def _scan_command_stream(self, toks, sig):
         for k, t in iter_command_words(toks, sig):
             self.counters["commands_named"] += 1
+            # SPEC 12.9 (D15): every command word, with its offset, so a
+            # write's rhs_refs can enumerate the command heads inside its
+            # own span by the SAME 10.6 walk that produced the edges and the
+            # PSS2009 population - one walk, consumed twice, never restated.
+            self.cmd_words.append((t.start, t.text))
             targets = self.func_by_lname.get(t.text.lower())
             if not targets:
                 # SPEC 15.4 F4 / P25: counted here, once per model, in
@@ -2342,7 +2430,7 @@ class Survey:
         self.var_sites.append({
             "offset": offset, "name": name, "qualifier": qualifier,
             "owner": owner, "role": role, "in_string": in_string,
-            "splatted": splatted, "rhs_span": rhs_span,
+            "splatted": splatted, "rhs_span": rhs_span, "vtext": vtext,
         })
 
     def _classify_variables(self):
@@ -2380,6 +2468,9 @@ class Survey:
                 base["rhs"] = self.text[a:b]
                 ba, bb = self._bspan((a, b))
                 base["rhs_span"] = [ba, bb]
+                # working key for the SPEC 12.9 post-pass (char space, where
+                # the site offsets live); popped before emission
+                base["_rhs_char"] = (a, b)
             if s["in_string"]:
                 # PSS2007 is an explicit exception to the SPEC 5.3 tiering rule:
                 # these are the principal path by which a text-substitution
@@ -2395,13 +2486,14 @@ class Survey:
                 rec = dict(base)
                 rec["code"] = "PSS2004"
                 rec["qualifier"] = scope
-                rec["id"] = "variable:%s/%s" % (scope, name)
+                rec["id"] = s["vid"] = "variable:%s/%s" % (scope, name)
                 self.script_records.append(rec)
                 if scope == 'script':
                     self._usage_add(low, name, owner, role)
                 continue
 
             if low in AUTOMATIC_VARIABLES:
+                s["vid"] = "variable:automatic/%s" % low
                 self._agg(owner)["automatic_refs"] += 1
                 if "local-sites" in self.axes:
                     rec = dict(base)
@@ -2414,7 +2506,7 @@ class Survey:
                 rec = dict(base)
                 rec["code"] = "PSS2006" if role == "write" else "PSS2004"
                 rec["qualifier"] = "script"
-                rec["id"] = "variable:script/" + name
+                rec["id"] = s["vid"] = "variable:script/" + name
                 self.script_records.append(rec)
                 # Deferred to `_build_usage_map`: admitting this site now would
                 # make the writer set depend on document order - a script-side
@@ -2425,6 +2517,7 @@ class Survey:
                 continue
 
             if low in self.local_decls.get(owner, ()):
+                s["vid"] = "variable:local/%s#%s" % (owner.split('/')[-1], name)
                 agg = self._agg(owner)
                 agg["local_refs"] += 1
                 if role == "write":
@@ -2460,6 +2553,7 @@ class Survey:
                 # Declared at script level and not shadowed here, so the binding
                 # really does reach the script scope. This - and ONLY this - is
                 # what admits an unqualified name to the usage map.
+                s["vid"] = "variable:script/" + self.script_decl_names[low]
                 self._usage_add(low, self.script_decl_names[low], owner, role)
 
     def _agg(self, owner):
