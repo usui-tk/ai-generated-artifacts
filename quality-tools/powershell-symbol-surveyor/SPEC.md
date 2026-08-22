@@ -699,6 +699,73 @@ two walls. Both are inventoried (§13.2) with single-reviewer basis, and
 the divergence itself is recorded as the finding: the one-wall era is
 over.
 
+**2026-08-22 (sixth round).** Two reviewers, one per model family, on the
+first **prototype-adjudication** kit: the round designed to resolve round
+5's non-convergence not by argument but by use — a working prototype of
+**each** open ask (throwaway builds importing the shipped `"6"` build's own
+machinery, mainline untouched), its trial model, and its measured cost put
+in front of the consumers, whose task performance and cost judgement
+adjudicate the D15 bundle. Delivery per the standing rules (both verified
+the archive listing against the manifest, both stated the contamination
+check clean); the subject-existence rule applied with its first
+no-synthetic declaration (all three named subjects verified against the
+kit before delivery). Both trial models stamped a suffixed
+`model_version` (`"6+proto-A"`/`"6+proto-B"`) so shipped verbs refuse
+them — stated up front as correct behaviour. Quantitative verification of
+the answers: one reviewer's every figure re-derived exactly (≈30 claims,
+0 divergences); the other ≈35 claims with 33 exact — including the four
+non-ASCII `rhs` records named by sid and measured to the byte, the
+decisive **derivability measurement (18,501 of 18,501 `supplied_by` lists
+reproduce from the model's pre-existing `id`+`role` fields; re-verified
+independently)**, and `$null`'s supplied-by lists alone measured at
+**1,093,110 bytes = 32.5% of prototype B's entire increment** — one minor
+miscount in a secondary breakdown (`$_` empty-reads 743 where 739
+measures) and one final reduced-B byte pair (677,714 / −14,865) that
+re-measurement could not reproduce under any cut tried (the two dominant
+recoveries it was built from are exact; recorded as not reproduced, per
+the round-4 rule that a wrong figure is recorded as one). Three
+measurements the round returns:
+
+- **D14 held on both fronts.** The round-5 necessary check (span width ==
+  UTF-8 byte length of `rhs`), run by both reviewers over all 5,113
+  rhs-bearing writes: **0 divergences** (the `"5"` build showed 4, and the
+  four non-ASCII records that diverged then were individually exercised
+  and pass). And both constructed complete valid invocations from
+  `capabilities.json` alone, every token licensed by a named descriptor
+  field: the round-5 "partially met" gap (positionals, option value
+  grammar, defaults) is judged **closed** by both — §3.1's promise holds.
+  Residuals noted without reopening it: `argv[0]` is outside the
+  descriptor; positional `help` is null on three verbs; two pieces of
+  value syntax live as prose inside the descriptor.
+- **The two walls converged into one shape.** Independently, both
+  reviewers adjudicated the same modified form: land prototype A; reduce
+  prototype B to `rhs_refs` only; **reject `sid` + `supplied_by`**
+  (derivable — the 18,501/18,501 measurement; a precomputed reverse index
+  whose identity scaffolding is 79.4% of B's cost and whose `$null`
+  pathology is semantically false provenance); state the derivation rule
+  as one sentence of SPEC prose; land A first. After a round that ended
+  with two walls, this one ended with one answer.
+- **The prototype surfaced a fact class the model cannot state.** Four
+  reads of script variables with no write record anywhere in the model
+  (`$Script:ErrorsJsonlPath` ×2, `$Script:ScriptPath` ×2) — reads whose
+  writers exist only in §12.8's unmodeled channels (`Set-Variable`-class,
+  `-OutVariable`, dot-sourcing). Inventoried (§13.2), not bundled.
+
+The round's one defect was **ours, in the answer key**: it named an
+"external parameter terminal" on the `$WorkRoot` chain where the model
+shows the `param()` **default write** (a literal) plus the self-rebase
+cycle — both reviewers independently read the model correctly against the
+key. And the adjudication consumed one more emit-then-measure pass, this
+time turned on the adjudicator's own counter-proposal (the round's method
+applied to itself): the edges-attached axis form of A measured **491,970 B
+against the standalone collection's 767,914 B (−35.9%)** with the Q3 task
+reproduced 12/12 and the §5.6 collection invariant kept, and the
+automatics-exclusion cut measured at 40,877 B saved against **105 writes
+whose only rhs reference is a non-constant automatic** (`$_.Exception.
+Message`-class terminals) that exclusion would render indistinguishable
+from literal-only rhs. Both measurements are folded into the §13.2
+adjudications rather than argued from discipline.
+
 ---
 
 ## 4. Fact specifications
