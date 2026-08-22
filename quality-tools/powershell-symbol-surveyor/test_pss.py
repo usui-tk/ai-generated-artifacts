@@ -89,7 +89,14 @@ sys.path.insert(0, HERE)
 
 import pss  # noqa: E402
 
-ALL_AXES = ["closure-sets", "local-sites", "command-sites"]
+# The full axis set, derived from the single AXES declaration rather than
+# restated: this line WAS a hard-coded copy, and it drifted the moment the
+# D15 arc added a fourth axis - caught by its own battery, fixed by making
+# it a derivation. The parent-build re-derivation (version decision, SPEC
+# 13.1) passes the same set to the parent module, which ignores an axis it
+# does not know - so a parent without the new axis surveys its own full
+# vocabulary, which is exactly the comparison the check wants.
+ALL_AXES = sorted(pss.AXES)
 
 _PASS = []
 _FAIL = []
@@ -613,6 +620,113 @@ def check_channel_agreement(model):
               and not label.startswith("PSS")),
        [],
        "channel agreement: every numeric row carries a derivation")
+
+
+def check_resolved_sites_fixture():
+    """SPEC 5.6 (D15): the `resolved-sites` axis restores per-site detail on
+    the edges rows. Written red-first against the "6" build: no edge carried
+    `site_records` under any axis set, and MODEL_VERSION had not moved.
+    Adjudicated at survey round 6 (SPEC 3.2/13.2) as the edges-attached
+    form - the fold is the withholding, so the axis enriches the fold's own
+    rows; a standalone collection would break this section's invariant.
+    """
+    body = ("function Get-Widget { param($Name) $Name }\n"
+            "function Use-Widget { param($w)\n"
+            "  Get-Widget -Name $w\n"
+            "  get-widget -Name 'x'\n"
+            "}\n"
+            "Get-Widget -Name $top\n")
+    m_def = pss.Survey("widget.ps1", body).run().model()
+    check(all("site_records" not in e for e in m_def["edges"]),
+          "resolved-sites fixture: the default model carries no site_records",
+          "axis key leaked into the default materialisation")
+
+    m_ax = pss.Survey("widget.ps1", body,
+                      axes={"resolved-sites"}).run().model()
+    check(all("site_records" in e for e in m_ax["edges"]),
+          "resolved-sites fixture: every edge carries site_records under "
+          "the axis", "an edge without site_records")
+    for e in m_ax["edges"]:
+        eq([s["line"] for s in e["site_records"]], e["lines"],
+           "resolved-sites fixture: site_records align with the edge's own "
+           "ascending lines (%s -> %s)" % (e["from"], e["to"]))
+    inner = [e for e in m_ax["edges"]
+             if e["from"] == "function/Use-Widget"][0]
+    eq(inner["sites"], 2,
+       "resolved-sites fixture: the fold and the itemisation count the "
+       "same sites")
+    matched, mismatched = inner["site_records"]
+    check("name" not in matched,
+          "resolved-sites fixture: a case-matched invocation carries no "
+          "name key (SPEC 5.6, the qualifier precedent)",
+          "name emitted where invoked token == declared name")
+    eq(mismatched.get("name"), "get-widget",
+       "resolved-sites fixture: a case-mismatched invocation carries the "
+       "invoked token, verbatim, as the conditional name")
+    eq([(a["kind"], a["text"]) for a in matched["arguments"]],
+       [("parameter", "-Name"), ("variable", "$w")],
+       "resolved-sites fixture: site_records carry the D12 argument "
+       "itemisation")
+    bb = body.encode("utf-8")
+    for s in inner["site_records"]:
+        a, b = s["span"]
+        check(bb[a:b].decode("utf-8").startswith(s.get("name", "Get-Widget")),
+              "resolved-sites fixture: encoded_source[span] opens with the "
+              "invoked token (byte unit, D14 rule)",
+              "span %r opens %r" % (s["span"], bb[a:b][:20]))
+
+    dropped = pss.slice_model(m_ax, axes=[])
+    check(all("site_records" not in e for e in dropped["edges"]),
+          "resolved-sites fixture: dropping the axis on slice strips "
+          "site_records and nothing else touches the edge",
+          "site_records survived an axis drop")
+    kept = [{k: v for k, v in e.items() if k != "site_records"}
+            for e in m_ax["edges"]]
+    eq(dropped["edges"], kept,
+       "resolved-sites fixture: the axis drop is a field strip, not a "
+       "rewrite (SPEC 5.6 projection)")
+
+
+def check_resolved_sites_pin(text, model_all):
+    """SPEC 5.6 (D15), whole-population over the pin's all-axes model:
+    the itemisation and the fold must be the same enumeration - counts,
+    line alignment, and byte spans that open with the invoked name. The
+    counter tie closes the loop the round-5 estimate cross-checked by hand:
+    sum(edges[].sites) == commands_named - unresolved_named_command_sites.
+    """
+    tb = text.encode("utf-8")
+    declared = {s["id"]: s.get("name") for s in model_all["symbols"]
+                if s.get("record") != "stub"}
+    n_sites = 0
+    misaligned, badspan = [], []
+    for e in model_all["edges"]:
+        srs = e.get("site_records")
+        if srs is None:
+            misaligned.append((e["from"], e["to"], "absent"))
+            continue
+        n_sites += len(srs)
+        if len(srs) != e["sites"] or [s["line"] for s in srs] != e["lines"]:
+            misaligned.append((e["from"], e["to"], "misaligned"))
+        want = declared.get(e["to"], "")
+        for s in srs:
+            a, b = s["span"]
+            token = s.get("name", want)
+            if not tb[a:b].decode("utf-8", errors="replace").startswith(token):
+                badspan.append((e["to"], s["line"]))
+    check(not misaligned,
+          "resolved-sites pin: every edge itemises, aligned with its own "
+          "lines and sites, over the whole population",
+          "%d edges; first: %r" % (len(misaligned), misaligned[:3]))
+    check(not badspan,
+          "resolved-sites pin: encoded_source[span] opens with the invoked "
+          "name over every resolved site",
+          "%d of %d violate; first: %r" % (len(badspan), n_sites,
+                                           badspan[:3]))
+    expected = (model_all["counters"]["commands_named"]
+                - model_all["counters"]["unresolved_named_command_sites"])
+    eq(n_sites, expected,
+       "resolved-sites pin: sum(site_records) == commands_named - "
+       "unresolved sites - the itemisation and the counters agree")
 
 
 def check_writer_rhs():
@@ -4604,6 +4718,8 @@ def main():
 
         check_writer_rhs()
         check_rhs_integrity(text, model_all)
+        check_resolved_sites_fixture()
+        check_resolved_sites_pin(text, model_all)
 
         check_channel_agreement(model_all)
 

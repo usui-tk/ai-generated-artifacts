@@ -1261,11 +1261,31 @@ by which a caller asks for one such omission to be restored.
 | `closure-sets` | `transitive_callees` and `transitive_callers` on each closure record, alongside the counts | Derivable from the `edges` master (§11.1) |
 | `local-sites` | One record per function-local variable reference, alongside the retained per-function aggregates | Folded into an aggregate (§5.3) |
 | `command-sites` | One record per unresolved command-invocation site — carrying the argument itemisation and source span — alongside the retained per-name aggregates | Folded into a per-name aggregate (§4.2 PSS2009 / §15.4 F2) |
+| `resolved-sites` | `site_records` on each `edges[]` row — one record per resolved command-invocation site, carrying the argument itemisation and source span — alongside the retained per-edge aggregates | Folded into a per-(from, to) aggregate (§5.9 / D15) |
 
-Neither axis adds or removes a collection: `closures`, `local_variables` and
-`unresolved_named_commands` are present in every model, and an axis only
-changes what a record in them carries or how many records the collection
-holds — never which collections exist.
+Neither axis adds or removes a collection: `closures`, `edges`,
+`local_variables` and `unresolved_named_commands` are present in every model,
+and an axis only changes what a record in them carries or how many records the
+collection holds — never which collections exist.
+
+**`resolved-sites` (D15, adjudicated at survey round 6 — §3.2, §13.2).** The
+resolved counterpart of `command-sites`, restored where the fold lives: an
+`edges[]` row is a per-(from, to) aggregate — `sites` and `lines` are the
+fold of its call sites — so the axis enriches the edge row with
+`site_records`, one per site, each carrying `line`, the `[start, end)` byte
+`span`, the D12 `arguments` itemisation, and a conditional `name` (the
+invoked token, verbatim, present only when it differs from the declared
+function name — zero such sites at the pinned basis, the `qualifier`
+precedent). Records are in source-position order, which is the edge's own
+ascending `lines` order, duplicates included — an alignment the gate holds
+over the whole population. `from`/`to` are stated once by the edge row
+rather than repeated per site: measured at adjudication, the edge-attached
+form costs 491,970 B against 767,914 B for a standalone per-site
+collection (−35.9%), and a standalone collection could not have been an
+axis at all under this section's own invariant. The round-5 reading that
+the axis form was forbidden here (recorded on the §13.2 row) is
+**superseded** by that adjudication: per-site detail for resolved calls is
+exactly what the per-(from, to) fold withheld.
 
 **`command-sites`, resolved (§15.4 F2 / P23).** The population is not
 withheld the way `local-sites` is folded into a per-function aggregate — it
@@ -2724,6 +2744,13 @@ materialisation, the difference being the ten `axis` paths.
 | `/edges[]/code` | always |
 | `/edges[]/from` | always |
 | `/edges[]/lines` | always |
+| `/edges[]/site_records` | axis |
+| `/edges[]/site_records[]/arguments` | axis |
+| `/edges[]/site_records[]/arguments[]/kind` | axis |
+| `/edges[]/site_records[]/arguments[]/text` | axis |
+| `/edges[]/site_records[]/line` | axis |
+| `/edges[]/site_records[]/name` | optional |
+| `/edges[]/site_records[]/span` | axis |
 | `/edges[]/sites` | always |
 | `/edges[]/to` | always |
 | `/limitations` | always |
@@ -2859,6 +2886,7 @@ absent from the declaration is uniform, and the gate holds that claim too.
 
 | Collection | Variant | When | Carries (beyond common) | Conditional | Observed at the pin |
 |---|---|---|---|---|---:|
+| `edges` | `edge` | `code == PSS2001` | `code` `from` `lines` `sites` `to` | — | 1281 |
 | `symbols` | `top-level` | `depth == 0` | `depth` `facts` `hash_body` `hash_full` `hash_raw` `name` `parameters` | `ordinal` | 479 |
 | `symbols` | `nested` | `depth >= 1` | `depth` `facts` `hash_body` `hash_full` `hash_raw` `name` `parameters` `parent` | `ordinal` | 1 |
 | `symbols` | `stub` | `record == stub` | `record` | — | slice-only (§5.7); exercised on the pin slice |
@@ -2882,20 +2910,25 @@ record of that collection carries — for `symbols`, since D12, the four
 identify-and-locate keys a boundary stub shares with a full record); every
 other collection declares its full key set per variant. The
 `closures` `closure-row` variant additionally carries `transitive_callees`
-and `transitive_callers` **under the `closure-sets` axis** — the axis kind
-composes with the variant rather than replacing it. Seven collections are
-declared: the six of the D11 adjudication (measurement corrected the round's
+and `transitive_callers` **under the `closure-sets` axis**, and the `edges`
+`edge` variant carries `site_records` **under the `resolved-sites` axis**
+(D15) — the axis kind composes with the variant rather than replacing it.
+Eight collections are declared: the six of the D11 adjudication
+(measurement corrected the round's
 five-collection estimate by adding `string_interpolation_references`, whose
 `qualifier` is conditional — 5 of 118 at the pin), plus `limitations`, which
 joined at the D12 arc the moment `PSS9002` records gained `target` — one code
 carrying a key three others do not is a variant, and its discriminator is
-`code`, which every limitations record carries exactly once. An observed
+`code`, which every limitations record carries exactly once — plus `edges`,
+which joined at the D15 arc the moment the `resolved-sites` axis gave its
+rows an axis key (uniform until then, and therefore undeclared until then).
+An observed
 column that is prose rather than a number marks a variant the pinned blob
 cannot produce (two limitations codes; the slice-only boundary stub): the
 gate's observed-column comparison reads numeric cells only, and the
 exercised check — widened from pin-only to every checked model at the same
-arc — is what holds those variants instead. `edges` and `soft_references`
-are uniform and therefore undeclared — and the gate holds the uniformity
+arc — is what holds those variants instead. `soft_references`
+is uniform and therefore undeclared — and the gate holds the uniformity
 claim rather than assuming it.
 
 `--capabilities` serialises the declaration verbatim (`record_variants`)

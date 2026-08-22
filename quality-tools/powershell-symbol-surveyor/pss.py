@@ -39,7 +39,7 @@ import re
 import sys
 
 __version__ = "0.6.0"
-MODEL_VERSION = "6"
+MODEL_VERSION = "7"
 
 MIN_PYTHON = (3, 12)
 
@@ -82,6 +82,10 @@ AXES = {
     "command-sites": "one record per unresolved command-invocation site - "
                      "carrying the argument itemisation and source span - "
                      "alongside the retained per-name aggregates",
+    "resolved-sites": "site_records on each edges[] row - one record per "
+                      "resolved command-invocation site, carrying the "
+                      "argument itemisation and source span - alongside the "
+                      "retained per-edge aggregates",
 }
 
 EXIT_OK = 0
@@ -1163,6 +1167,13 @@ MODEL_SCHEMA = {
     "/edges[]/code": "always",
     "/edges[]/from": "always",
     "/edges[]/lines": "always",
+    "/edges[]/site_records": "axis",
+    "/edges[]/site_records[]/arguments": "axis",
+    "/edges[]/site_records[]/arguments[]/kind": "axis",
+    "/edges[]/site_records[]/arguments[]/text": "axis",
+    "/edges[]/site_records[]/line": "axis",
+    "/edges[]/site_records[]/name": "optional",
+    "/edges[]/site_records[]/span": "axis",
     "/edges[]/sites": "always",
     "/edges[]/to": "always",
     "/limitations": "always",
@@ -1310,6 +1321,20 @@ NULLABLE_PATHS = {
 # --self-check against the SPEC 13.3 table in both directions and by the
 # gate against the pinned blob, a slice and the fixtures.
 RECORD_VARIANTS = {
+    "edges": {
+        # D15: edges was uniform (and therefore undeclared) until the
+        # `resolved-sites` axis gave its rows an axis key. One variant, no
+        # conditionality at the record level; the discriminator is `code`,
+        # which every edge carries exactly once (PSS2001).
+        "common_keys": (),
+        "variants": (
+            {"name": "edge",
+             "when": {"path": "code", "equals": "PSS2001"},
+             "carries": ("code", "from", "lines", "sites", "to"),
+             "conditional_keys": {},
+             "axis_keys": {"resolved-sites": ("site_records",)}},
+        ),
+    },
     "symbols": {
         # D12: the common set SHRANK to what a boundary stub carries - the
         # four keys that identify and locate a symbol. Everything analytic
@@ -2103,11 +2128,34 @@ class Survey:
             dst = self.func_ids[id(targets[0])]
             rec = self.edges.get((src, dst))
             if rec is None:
-                self.edges[(src, dst)] = {"from": src, "to": dst, "sites": 1,
-                                          "lines": [self.line_of(t.start)]}
+                self.edges[(src, dst)] = rec = {"from": src, "to": dst,
+                                                "sites": 1,
+                                                "lines": [self.line_of(t.start)]}
             else:
                 rec["sites"] += 1
                 rec["lines"].append(self.line_of(t.start))
+            if "resolved-sites" in self.axes:
+                # SPEC 5.6 (D15): the per-site detail the per-(from, to) fold
+                # withholds - the same argument itemisation and byte span the
+                # unresolved sites gained at D12, restored HERE, on the edge
+                # row, so from/to are stated once by the aggregate they
+                # already live on. Adjudicated at round 6 (SPEC 3.2, 13.2):
+                # the edges-attached form measured 35.9% below a standalone
+                # collection, and a standalone collection could not be an
+                # axis at all (SPEC 5.6's invariant: an axis never adds or
+                # removes a collection).
+                arguments, span = _command_arguments(
+                    self.text, self.toks, self.sig, k, t)
+                site = {"offset": t.start, "line": self.line_of(t.start),
+                        "span": span, "arguments": arguments}
+                if t.text != targets[0].name:
+                    # Conditional key, the D12 `qualifier` precedent: the
+                    # invoked token, verbatim, only when it differs from the
+                    # declared name (PowerShell resolves case-insensitively;
+                    # the pin carries zero such sites, measured before this
+                    # key was made conditional).
+                    site["name"] = t.text
+                rec.setdefault("_sites", []).append(site)
 
     def _bspan(self, span):
         """SPEC 12.8 / 5.6 (D14): convert a token-level character span to the
@@ -2690,6 +2738,18 @@ class Survey:
             # reading a copy, and a copy of a fact is the shape this SPEC
             # spends 13.2 rows fighting.
             e["lines"].sort()
+            sites = e.pop("_sites", None)
+            if sites is not None:
+                # SPEC 5.6 (D15): source-position order. Offset increases
+                # with line, so this ordering IS the ascending `lines` order,
+                # duplicates included - the alignment the gate holds.
+                sites.sort(key=lambda s: s["offset"])
+                e["site_records"] = [
+                    dict([("line", s["line"]),
+                          ("span", list(self._bspan(s["span"])))]
+                         + ([("name", s["name"])] if "name" in s else [])
+                         + [("arguments", s["arguments"])])
+                    for s in sites]
 
         closures = sorted(self.closures, key=lambda r: r["id"])
         # PSS4003.named_by_literal (SPEC 4.4, F1/P22): sourced from the
@@ -3541,6 +3601,10 @@ def slice_model(model, scope=None, axes=None):
                 {k: v for k, v in r.items()
                  if k not in ("transitive_callees", "transitive_callers")}
                 for r in out["closures"]]
+        if "resolved-sites" in dropped and "edges" in out:
+            out["edges"] = [
+                {k: v for k, v in r.items() if k != "site_records"}
+                for r in out["edges"]]
         if "local-sites" in dropped and "local_variables" in out:
             out["local_variables"] = [
                 r for r in out["local_variables"] if r.get("record") != "reference"]
