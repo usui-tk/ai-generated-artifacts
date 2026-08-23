@@ -1780,6 +1780,45 @@ exactly the direction declared and no more. The native parser is a
 **gate-time oracle only**: `pss.py` runs without PowerShell, and no runtime
 dependency is added.
 
+### 5.11 The limitation-disposition catalogue (normative)
+
+Every model carries a top-level **`limitation_dispositions`** block — always
+present, materialisation-invariant — with exactly one entry per code the
+`limitations` collection can carry. It answers, **from the model**, the
+question the §3.3 adoption evaluation had to answer by reading this
+document: told that a `&`-invocation target is unresolved, which kind of
+limit is that — a defect in the input, a question no static analysis could
+ever settle, or a fully-stated property the caller merely needs to respect?
+
+| Code | `static_disposition` | `resolution_requirement` | Reading |
+|---|---|---|---|
+| `PSS9001` | `input-anomaly` | `input-correction` | the input's own termination or balance is defective (§5.10); nothing about the analysis resolves it — correcting the source does |
+| `PSS9002` | `statically-undecidable` | `runtime-evidence` | a dynamically-computed invocation target; no static analysis, this tool's or any other, could name it — only runtime observation could |
+| `PSS9003` | `statically-undecidable` | `runtime-evidence` | a dynamically-selected enclosing scope; as `PSS9002` |
+| `PSS9004` | `statically-undecidable` | `runtime-evidence` | a read whose declaration is not statically resolvable; as `PSS9002` |
+| `PSS9007` | `statically-stated` | `none` | the duplicate structure is fully stated (every definition, location and ordinal); the record is advice about key durability (§5.2), not an unknown awaiting resolution |
+
+The catalogue is **per code, not per record**: every record of one code
+shares one disposition (measured over the pinned blob before this shape was
+chosen — 26 `PSS9002`, 1 `PSS9003`, 11 `PSS9004` records, uniformly), so
+per-record carriage would restate a payload-derivable fact — the Round 6
+principle. The key set is held against the `limitations` record variants in
+both directions by `--self-check` and by the gate, so a new limitations code
+cannot ship without declaring its dispositions, and a stale entry cannot
+outlive its code.
+
+**The vocabulary is exactly what the catalogue bears.** No value is
+declared that no code carries — a declared-but-unborne enum value is the
+pre-D16 `PSS9001` defect class in miniature (§13.2 Emission coverage). A
+future code introducing a genuinely new kind of limit extends the
+vocabulary in the same change, under the same gate. One asymmetry against
+the §3.3 evaluating analyser is deliberate and recorded: its
+`AnalyzerLimitation` kind — *the tool could do better* — has **no entry
+here**, because in this model that kind never becomes a record. What this
+tool could do better lives in §12.8 and §13.2 as prose about the tool, not
+as facts about the surveyed script; the records only ever carry the other
+kinds.
+
 ---
 
 ## 6. Output formats and consumer layers
@@ -2915,7 +2954,7 @@ detected — absent at the pin and on every corpus generation (all are clean;
 §5.10), so the presence gate reads it on the corrupted scan fixtures, which
 are retained as test assets for exactly this reason.
 
-Counts at the pinned blob: **154** paths at `all-axes`, **127** at the default
+Counts at the pinned blob: **170** paths at `all-axes`, **143** at the default
 materialisation. The difference of 27 is the 26 `axis` paths plus one
 data-dependent `optional` path (`/local_variables[]/rhs_refs/variables[]/id`)
 that can only materialise under `local-sites`. *(D16 correction: the previous
@@ -2974,6 +3013,22 @@ survived green. The figures above are re-measured with the gate's own
 | `/edges[]/site_records[]/span` | axis |
 | `/edges[]/sites` | always |
 | `/edges[]/to` | always |
+| `/limitation_dispositions/PSS9001/resolution_requirement` | always |
+| `/limitation_dispositions/PSS9001/static_disposition` | always |
+| `/limitation_dispositions/PSS9001` | always |
+| `/limitation_dispositions/PSS9002/resolution_requirement` | always |
+| `/limitation_dispositions/PSS9002/static_disposition` | always |
+| `/limitation_dispositions/PSS9002` | always |
+| `/limitation_dispositions/PSS9003/resolution_requirement` | always |
+| `/limitation_dispositions/PSS9003/static_disposition` | always |
+| `/limitation_dispositions/PSS9003` | always |
+| `/limitation_dispositions/PSS9004/resolution_requirement` | always |
+| `/limitation_dispositions/PSS9004/static_disposition` | always |
+| `/limitation_dispositions/PSS9004` | always |
+| `/limitation_dispositions/PSS9007/resolution_requirement` | always |
+| `/limitation_dispositions/PSS9007/static_disposition` | always |
+| `/limitation_dispositions/PSS9007` | always |
+| `/limitation_dispositions` | always |
 | `/limitations` | always |
 | `/limitations[]/check` | optional |
 | `/limitations[]/code` | always |

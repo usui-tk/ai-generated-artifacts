@@ -2304,6 +2304,63 @@ def run_scan_fixtures():
           "default: %r / axes: %r" % (plain.get("scan"), axed.get("scan")))
 
 
+def run_limitation_disposition_fixture():
+    """SPEC 5.11 (D17): the catalogue on a fixture model, no corpus needed.
+
+    Written red-first: every check fails against the parent "8" build,
+    which emits no `limitation_dispositions` block. getattr with a
+    sentinel per the check_record_variants precedent - red by name on a
+    build without the constant, never a crash, never a vacuous pass.
+    """
+    decl = getattr(pss, "LIMITATION_DISPOSITIONS", None)
+    check(isinstance(decl, dict) and len(decl) > 0,
+          "dispositions: pss.LIMITATION_DISPOSITIONS is declared")
+    model = _scan_fixture_model("dispo-fixture",
+                                "function Get-One { 'x' }\nGet-One\n")
+    block = model.get("limitation_dispositions")
+    check(isinstance(block, dict),
+          "dispositions: block present on every model, clean input included",
+          "block: %r" % (block,))
+    if not isinstance(decl, dict) or not isinstance(block, dict):
+        return
+    eq(block, decl,
+       "dispositions: the emitted block equals the declared catalogue")
+    variant_codes = sorted(
+        v["when"]["equals"]
+        for v in pss.RECORD_VARIANTS["limitations"]["variants"])
+    eq(sorted(decl), variant_codes,
+       "dispositions: catalogue keys equal the limitations variant codes, "
+       "both directions")
+    for code, entry in sorted(decl.items()):
+        eq(sorted(entry), ["resolution_requirement", "static_disposition"],
+           "dispositions: %s carries exactly the two axes" % code)
+    # Vocabulary reachability (the D16 discipline applied to an enum):
+    # every distinct value is borne by at least one code BY CONSTRUCTION
+    # here, because the vocabulary is derived from the catalogue rather
+    # than declared beside it - so what is asserted is that the derived
+    # vocabularies match SPEC 5.11's fixed sets exactly.
+    sd = sorted({e["static_disposition"] for e in decl.values()})
+    rr = sorted({e["resolution_requirement"] for e in decl.values()})
+    eq(sd, ["input-anomaly", "statically-stated", "statically-undecidable"],
+       "dispositions: static_disposition vocabulary is exactly what the "
+       "catalogue bears")
+    eq(rr, ["input-correction", "none", "runtime-evidence"],
+       "dispositions: resolution_requirement vocabulary is exactly what "
+       "the catalogue bears")
+
+
+def check_limitation_dispositions_pin(model_def, model_all):
+    """SPEC 5.11 pin half: present, invariant, equal to the catalogue."""
+    decl = getattr(pss, "LIMITATION_DISPOSITIONS", "<undeclared>")
+    for label, m in (("default", model_def), ("all-axes", model_all)):
+        eq(m.get("limitation_dispositions"), decl,
+           "dispositions: pin %s block equals the catalogue" % label)
+    check(isinstance(model_def.get("limitation_dispositions"), dict)
+          and model_def.get("limitation_dispositions")
+          == model_all.get("limitation_dispositions"),
+          "dispositions: block is materialisation-invariant")
+
+
 def check_scan_pin(model_def, model_all):
     """The false-positive gate, pin half (SPEC 5.10; D16 design gate 3).
 
@@ -5168,6 +5225,7 @@ def main():
     run_command_position_fixtures()
     run_call_site_fixtures()
     run_scan_fixtures()
+    run_limitation_disposition_fixture()
 
     # Builds its own repositories, so it needs the `git` binary and not this
     # checkout (SPEC 14.3: a missing runtime degrades the gate, never the tool).
@@ -5260,6 +5318,7 @@ def main():
         # plus the slice, because a variant contract that breaks under
         # projection would be a contract about one materialisation only.
         check_scan_pin(model_def, model_all)
+        check_limitation_dispositions_pin(model_def, model_all)
 
         variant_models = {
             "pin-default": model_def,

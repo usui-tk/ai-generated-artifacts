@@ -39,7 +39,7 @@ import re
 import sys
 
 __version__ = "0.8.0"
-MODEL_VERSION = "8"
+MODEL_VERSION = "9"
 
 MIN_PYTHON = (3, 12)
 
@@ -94,6 +94,31 @@ SCAN_CHECKS = {
 # report is what the named checks found, never a claim about the language.
 SCAN_OUTCOME_CLEAN = "no-anomaly-detected"
 SCAN_OUTCOME_FOUND = "anomalies-detected"
+
+# D17: the limitation-disposition catalogue (SPEC 5.11). One entry per code
+# the `limitations` collection can carry - the key set is gate-held against
+# the limitations record variants in BOTH directions, so a new limitations
+# code cannot ship without declaring its dispositions and a stale entry
+# cannot outlive its code. The vocabulary is exactly what the catalogue
+# bears: no value is declared that no code carries (the D16 reachability
+# discipline applied to an enum - a declared-but-unborne value is the
+# PSS9001 defect class in miniature). Answers, from the model, the question
+# the 3.3 adoption evaluation had to answer by reading the SPEC: WHICH KIND
+# of limit is this - a defect in the input, a question no static analysis
+# could ever settle, or a fully-stated property the caller merely needs to
+# respect.
+LIMITATION_DISPOSITIONS = {
+    "PSS9001": {"static_disposition": "input-anomaly",
+                "resolution_requirement": "input-correction"},
+    "PSS9002": {"static_disposition": "statically-undecidable",
+                "resolution_requirement": "runtime-evidence"},
+    "PSS9003": {"static_disposition": "statically-undecidable",
+                "resolution_requirement": "runtime-evidence"},
+    "PSS9004": {"static_disposition": "statically-undecidable",
+                "resolution_requirement": "runtime-evidence"},
+    "PSS9007": {"static_disposition": "statically-stated",
+                "resolution_requirement": "none"},
+}
 
 AXES = {
     "closure-sets": "transitive_callees and transitive_callers on each closure record",
@@ -1210,6 +1235,22 @@ MODEL_SCHEMA = {
     "/edges[]/site_records[]/span": "axis",
     "/edges[]/sites": "always",
     "/edges[]/to": "always",
+    "/limitation_dispositions": "always",
+    "/limitation_dispositions/PSS9001": "always",
+    "/limitation_dispositions/PSS9001/resolution_requirement": "always",
+    "/limitation_dispositions/PSS9001/static_disposition": "always",
+    "/limitation_dispositions/PSS9002": "always",
+    "/limitation_dispositions/PSS9002/resolution_requirement": "always",
+    "/limitation_dispositions/PSS9002/static_disposition": "always",
+    "/limitation_dispositions/PSS9003": "always",
+    "/limitation_dispositions/PSS9003/resolution_requirement": "always",
+    "/limitation_dispositions/PSS9003/static_disposition": "always",
+    "/limitation_dispositions/PSS9004": "always",
+    "/limitation_dispositions/PSS9004/resolution_requirement": "always",
+    "/limitation_dispositions/PSS9004/static_disposition": "always",
+    "/limitation_dispositions/PSS9007": "always",
+    "/limitation_dispositions/PSS9007/resolution_requirement": "always",
+    "/limitation_dispositions/PSS9007/static_disposition": "always",
     "/limitations": "always",
     "/limitations[]/check": "optional",
     "/limitations[]/code": "always",
@@ -3051,6 +3092,14 @@ class Survey:
             "materialization": {"axes": sorted(self.axes)},
             # SPEC 5.10 (D16): always present, on every materialisation.
             "scan": self._scan_block(),
+            # D17 (SPEC 5.11): the per-code disposition catalogue, emitted
+            # once per model rather than repeated on every record - all
+            # records of one code share one disposition (measured before
+            # being chosen), so per-record carriage would restate a
+            # payload-derivable fact (the Round 6 principle).
+            "limitation_dispositions": {
+                code: dict(entry)
+                for code, entry in LIMITATION_DISPOSITIONS.items()},
             "counters": dict(sorted(self.counters.items())),
             "symbols": self._emit(symbols),
             "edges": self._emit(edges),
@@ -3413,6 +3462,56 @@ def self_check():
             print("  scan     : %d checks in SCAN_CHECKS, %d in SPEC.md "
                   "section 5.10, agree on name and description; outcome "
                   "vocabulary stated" % (len(SCAN_CHECKS), len(spec_checks)))
+
+    # Limitation-disposition catalogue (SPEC 5.11, D17): the constant
+    # against the SPEC table, both directions, on code AND both axis values.
+    # The catalogue's key set is additionally held against the limitations
+    # record variants, so the three declarations (variants, catalogue, SPEC
+    # table) cannot drift apart.
+    ldstart = spec.find("### 5.11 The limitation-disposition catalogue")
+    ldend = spec.find("## 6. Output formats")
+    if ldstart < 0 or ldend < 0 or ldend <= ldstart:
+        print("  FAIL: could not locate SPEC section 5.11")
+        rc = EXIT_ERROR
+    else:
+        ldsection = spec[ldstart:ldend]
+        spec_rows = {c: (sd, rr) for c, sd, rr in re.findall(
+            r'^\| `(PSS\d{4})` \| `([a-z-]+)` \| `([a-z-]+)` \|',
+            ldsection, re.M)}
+        code_rows = {c: (e["static_disposition"], e["resolution_requirement"])
+                     for c, e in LIMITATION_DISPOSITIONS.items()}
+        ld_missing_in_code = sorted(set(spec_rows) - set(code_rows))
+        ld_missing_in_spec = sorted(set(code_rows) - set(spec_rows))
+        ld_disagrees = sorted(c for c in set(spec_rows) & set(code_rows)
+                              if spec_rows[c] != code_rows[c])
+        variant_codes = sorted(
+            v["when"]["equals"]
+            for v in RECORD_VARIANTS["limitations"]["variants"])
+        ld_vs_variants = (sorted(code_rows) != variant_codes)
+        if ld_missing_in_code:
+            print("  FAIL: disposition row in SPEC.md 5.11 but not in "
+                  "LIMITATION_DISPOSITIONS: %s"
+                  % ", ".join(ld_missing_in_code))
+            rc = EXIT_ERROR
+        if ld_missing_in_spec:
+            print("  FAIL: disposition in LIMITATION_DISPOSITIONS but "
+                  "absent from SPEC.md 5.11: %s"
+                  % ", ".join(ld_missing_in_spec))
+            rc = EXIT_ERROR
+        if ld_disagrees:
+            print("  FAIL: disposition values disagree between pss.py and "
+                  "SPEC.md 5.11: %s" % ", ".join(ld_disagrees))
+            rc = EXIT_ERROR
+        if ld_vs_variants:
+            print("  FAIL: LIMITATION_DISPOSITIONS keys do not equal the "
+                  "limitations record-variant codes: %r vs %r"
+                  % (sorted(code_rows), variant_codes))
+            rc = EXIT_ERROR
+        if not (ld_missing_in_code or ld_missing_in_spec or ld_disagrees
+                or ld_vs_variants):
+            print("  dispo    : %d limitation dispositions, SPEC.md 5.11 "
+                  "and pss.py agree; key set equals the limitations "
+                  "variant codes" % len(code_rows))
 
     # Identifier forms and collection join keys (SPEC 5.8), in both
     # directions, exactly as the catalogue and the axis vocabulary above. The
