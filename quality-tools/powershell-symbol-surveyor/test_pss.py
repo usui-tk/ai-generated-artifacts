@@ -2163,6 +2163,218 @@ function Invoke-VariantDemo {
 Invoke-VariantDemo
 """
 
+# ==========================================================================
+# D16: the scan fixtures (SPEC 5.10). Corrupted inputs are RETAINED as test
+# assets (the evaluated analyser's ParseErrorFixture precedent): each names
+# the exact anomaly set the six checks must report, measured before being
+# pinned. `native` records what `Parser::ParseFile()` does with the same
+# bytes and is asserted in the differential leg - which is what keeps the
+# one-direction implication (native error>0 => PSS anomaly>0) from ever
+# being vacuously true, the S4 lesson (SPEC 13.2 Emission coverage).
+# `dup-def` is the deliberate negative control: a file native accepts and
+# the checks must stay silent on, because duplicate definitions are a
+# grammatical fact (PSS1005), not a termination or balance anomaly.
+
+SCAN_FIXTURE_VARIANT_NAME = "scan-variant-demo.ps1"
+SCAN_FIXTURE_VARIANT = """function Get-Ok { 'x' }
+$v = $arr[0
+<# opened and never closed
+"""
+
+SCAN_FIXTURES = (
+    # (basename, native, expected check-name set, source)
+    ("scan-clean", "accepts", (),
+     "#Requires -Version 5.1\n"
+     "function Get-Alpha { param($x) \"a: $x\" }\n"
+     "function Get-Beta { (Get-Alpha 1) + $script:total }\n"
+     "Get-Beta\n"),
+    ("scan-dup-def", "accepts", (),
+     "function Get-Dup { 'one' }\n"
+     "function Get-Dup { 'two' }\n"
+     "Get-Dup\n"),
+    ("scan-a1-body", "rejects",
+     ("brace-imbalance", "unterminated-function-body"),
+     "function Get-First { 'a' }\n"
+     "function Get-Broken {\n"
+     "    'never closed'\n"
+     "function Get-Last { 'c' }\n"),
+    ("scan-a2-param", "rejects",
+     ("paren-imbalance", "unterminated-declaration-parameters"),
+     "function Get-Ok { 'x' }\n"
+     "function Get-Torn ($alpha,\n"),
+    ("scan-a3-dquote", "rejects", ("unterminated-lexical-region",),
+     "function Get-Ok { 'x' }\n"
+     "$msg = \"never terminated\n"),
+    ("scan-a3-here", "rejects", ("unterminated-lexical-region",),
+     "function Get-Ok { 'x' }\n"
+     "$doc = @\"\n"
+     "body line\n"),
+    ("scan-a3-comment", "rejects", ("unterminated-lexical-region",),
+     "function Get-Ok { 'x' }\n"
+     "<# an opened block comment\n"),
+    ("scan-a4-stray", "rejects", ("brace-imbalance",),
+     "function Get-Ok { 'x' }\n"
+     "}\n"),
+    ("scan-a5-open", "rejects", ("paren-imbalance",),
+     "function Get-Ok { 'x' }\n"
+     "$v = (1 + (2 * 3)\n"),
+    ("scan-a6-open", "rejects", ("bracket-imbalance",),
+     "function Get-Ok { 'x' }\n"
+     "$v = $arr[0\n"),
+)
+
+SCAN_NATIVE_PROBE = r"""$ErrorActionPreference = 'Stop'
+$out = [ordered]@{ pwsh = $PSVersionTable.PSVersion.ToString() }
+Get-ChildItem -LiteralPath $env:PSS_SCAN_DIR -Filter *.ps1 |
+    Sort-Object Name | ForEach-Object {
+        $t = $null; $e = $null
+        [void][System.Management.Automation.Language.Parser]::ParseFile(
+            $_.FullName, [ref]$t, [ref]$e)
+        $out[$_.BaseName] = @($e).Count
+    }
+$out | ConvertTo-Json -Compress
+"""
+
+
+def _scan_fixture_model(name, src):
+    return pss.Survey(name + ".ps1", src).run().model()
+
+
+def run_scan_fixtures():
+    """SPEC 5.10 (D16): the six checks, the always-present block, PSS9001.
+
+    Written red-first: every check here fails against the parent build,
+    which emits no `scan` block and no PSS9001 record - the declared code
+    with no emit path that every earlier gate passed over, because none of
+    them asked whether a declared code is reachable (SPEC 13.2, the 3.3
+    adoption-evaluation finding).
+    """
+    for name, native, expected, src in SCAN_FIXTURES:
+        model = _scan_fixture_model(name, src)
+        scan = model.get("scan")
+        check(isinstance(scan, dict)
+              and sorted(scan) == ["anomalies", "checks", "outcome"],
+              "scan: %s: block present with exactly the three declared keys"
+              % name, "scan: %r" % (scan,))
+        if not isinstance(scan, dict):
+            continue
+        eq(scan.get("checks"), len(pss.SCAN_CHECKS),
+           "scan: %s: `checks` states the declared check count" % name)
+        recs = [r for r in model.get("limitations", ())
+                if r.get("code") == "PSS9001"]
+        eq(scan.get("anomalies"), len(recs),
+           "scan: %s: `anomalies` equals the PSS9001 record count" % name)
+        want = pss.SCAN_OUTCOME_FOUND if expected else pss.SCAN_OUTCOME_CLEAN
+        eq(scan.get("outcome"), want,
+           "scan: %s: outcome states what the checks found, in the "
+           "no-success vocabulary" % name)
+        eq(sorted({r.get("check") for r in recs}), sorted(expected),
+           "scan: %s: exactly the measured check set fires" % name)
+        for r in recs:
+            check(r.get("check") in pss.SCAN_CHECKS,
+                  "scan: %s: record's `check` is a declared check" % name,
+                  "check: %r" % (r.get("check"),))
+            check(all(k in r for k in ("code", "detail", "line", "owner")),
+                  "scan: %s: record carries the limitations common keys"
+                  % name, "keys: %r" % (sorted(r),))
+            if r.get("check") == "unterminated-lexical-region":
+                check("target" not in r,
+                      "scan: %s: lexical-region record carries no target "
+                      "(nothing to name beyond its position)" % name)
+            else:
+                check("target" in r,
+                      "scan: %s: %s record names its target"
+                      % (name, r.get("check")))
+
+    # Kind `always` (SPEC 13.3): the block is present - and identical - on
+    # an axes materialisation of the same source; axes add records, never
+    # scan findings. Presence is asserted, not just equality: `None == None`
+    # would read as green on a build that emits no block at all - exactly
+    # the vacuous-truth failure this arc exists to close.
+    name, _, expected, src = SCAN_FIXTURES[2]
+    plain = _scan_fixture_model(name, src)
+    axed = pss.Survey(name + ".ps1", src, axes=sorted(pss.AXES)).run().model()
+    check(isinstance(plain.get("scan"), dict)
+          and axed.get("scan") == plain.get("scan"),
+          "scan: block is materialisation-invariant (kind `always`)",
+          "default: %r / axes: %r" % (plain.get("scan"), axed.get("scan")))
+
+
+def check_scan_pin(model_def, model_all):
+    """The false-positive gate, pin half (SPEC 5.10; D16 design gate 3).
+
+    The corpus-wide half lives in the cache producer (`build`): the only
+    place every generation is materialised, where a scan anomaly on a
+    known-good committed script refuses the cache outright.
+    """
+    # getattr with a sentinel, the check_record_variants precedent: against
+    # a build that declares no outcome vocabulary the comparison must red by
+    # name (None vs the sentinel), never crash and never pass vacuously.
+    clean = getattr(pss, "SCAN_OUTCOME_CLEAN", "<undeclared>")
+    for label, m in (("default", model_def), ("all-axes", model_all)):
+        scan = m.get("scan") or {}
+        eq(scan.get("anomalies"), 0,
+           "scan: pin %s: zero anomalies (false-positive gate)" % label)
+        eq(scan.get("outcome"), clean,
+           "scan: pin %s: outcome is the no-anomaly vocabulary" % label)
+        eq([r for r in m.get("limitations", ())
+            if r.get("code") == "PSS9001"], [],
+           "scan: pin %s: no PSS9001 record" % label)
+
+
+def run_scan_differential(pwsh):
+    """One-direction native gate (SPEC 5.10; D16 design gate 2).
+
+    Checked: native error>0 => PSS anomaly>0, over the retained corrupted
+    assets. The reverse direction (completeness) is deliberately NOT
+    checked - SPEC 5.10 does not claim it, and a gate must match its
+    declaration (the S4 lesson: a gate asserting a direction the tool does
+    not promise reads as evidence while measuring nothing). The oracle's
+    version is recorded in the gate output; per-fixture native behaviour is
+    itself asserted, so the implication is never vacuously true.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        target_dir = os.path.join(td, "targets")
+        os.mkdir(target_dir)
+        for name, native, expected, src in SCAN_FIXTURES:
+            with open(os.path.join(target_dir, name + ".ps1"), "w",
+                      encoding="utf-8") as fh:
+                fh.write(src)
+        probe = os.path.join(td, "probe.ps1")
+        with open(probe, "w", encoding="utf-8") as fh:
+            fh.write(SCAN_NATIVE_PROBE)
+        env = dict(os.environ, PSS_SCAN_DIR=target_dir)
+        out = subprocess.run([pwsh, "-NoProfile", "-File", probe],
+                             capture_output=True, env=env)
+    if out.returncode != 0:
+        check(False, "scan-differential: reference parser ran",
+              out.stderr.decode()[-400:])
+        return
+    ast = json.loads(out.stdout.decode())
+    print("   scan-differential oracle: pwsh %s" % ast.get("pwsh"))
+    rejected = 0
+    for name, native, expected, src in SCAN_FIXTURES:
+        errs = ast.get(name)
+        model = _scan_fixture_model(name, src)
+        anomalies = (model.get("scan") or {}).get("anomalies", 0)
+        if native == "rejects":
+            check(isinstance(errs, int) and errs > 0,
+                  "scan-differential: native rejects %s" % name,
+                  "parse errors: %r" % (errs,))
+            if isinstance(errs, int) and errs > 0:
+                rejected += 1
+                check(anomalies > 0,
+                      "scan-differential: native error>0 => PSS anomaly>0 "
+                      "(%s)" % name)
+        else:
+            eq(errs, 0, "scan-differential: native accepts %s" % name)
+            eq(anomalies, 0,
+               "scan-differential: PSS is silent where native accepts (%s)"
+               % name)
+    check(rejected > 0,
+          "scan-differential: the implication is non-vacuous "
+          "(%d native-rejected fixtures)" % rejected)
+
 
 def load_delta_baseline():
     """Read the delta master out of SPEC Appendix B.7.
@@ -3577,6 +3789,18 @@ def build(entry_path, out_path, limit, root, progress, baseline):
             text = cache_git_show(root, gen["blob"])
             model = pss.Survey(script_path, text,
                                axes=sorted(pss.AXES)).run().model()
+            # D16 false-positive gate, corpus half (SPEC 5.10): this loop is
+            # the only place every generation is materialised. A corpus
+            # generation is a committed, working script, so a scan anomaly
+            # here is by definition a false positive - a build that misreads
+            # known-good history must not bake a cache.
+            anomalies = (model.get("scan") or {}).get("anomalies")
+            if anomalies:
+                raise RuntimeError(
+                    "scan reports %s anomalies on corpus generation rev %s "
+                    "blob %s - a known-good committed script, so this is a "
+                    "false positive; refusing to produce a cache from this "
+                    "build" % (anomalies, gen["rev"][:12], gen["blob"][:12]))
             # rev and blob only. A position is derivable from this file's own
             # order, and ADR 0033 puts identity in the blob.
             out.write(cache_canonical({"blob": gen["blob"], "rev": gen["rev"],
@@ -4749,6 +4973,7 @@ def main():
     run_declaration_fixtures()
     run_command_position_fixtures()
     run_call_site_fixtures()
+    run_scan_fixtures()
 
     # Builds its own repositories, so it needs the `git` binary and not this
     # checkout (SPEC 14.3: a missing runtime degrades the gate, never the tool).
@@ -4839,6 +5064,8 @@ def main():
         # the same population the nullability declaration is held over,
         # plus the slice, because a variant contract that breaks under
         # projection would be a contract about one materialisation only.
+        check_scan_pin(model_def, model_all)
+
         variant_models = {
             "pin-default": model_def,
             "pin-all": model_all,
@@ -4851,6 +5078,12 @@ def main():
                 FIXTURE_PUBLISH_NAME, FIXTURE_PUBLISH).run().model(),
             "fixture-variants": pss.Survey(
                 FIXTURE_VARIANTS_NAME, FIXTURE_VARIANTS).run().model(),
+            # D16: the corrupted source whose model carries PSS9001 records
+            # both with a target (bracket-imbalance) and without one
+            # (unterminated-lexical-region) - the scan-anomaly variant and
+            # its conditional key, exercised in both directions.
+            "fixture-scan-anomaly": pss.Survey(
+                SCAN_FIXTURE_VARIANT_NAME, SCAN_FIXTURE_VARIANT).run().model(),
         }
         check_record_variants(variant_models)
 
@@ -4873,6 +5106,7 @@ def main():
 
         if args.pwsh and os.path.exists(args.pwsh):
             run_differential(args.pwsh, text, measured)
+            run_scan_differential(args.pwsh)
         else:
             print("-- pwsh unavailable: frozen regression only (SPEC 14.3) --")
 

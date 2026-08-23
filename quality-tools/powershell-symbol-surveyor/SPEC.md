@@ -1069,7 +1069,7 @@ candidate together with the evidence that produced it.
 
 | Code | Fact |
 |---|---|
-| `PSS9001` | A region could not be parsed. Carries location and extent. |
+| `PSS9001` | A region could not be parsed. One record per §5.10 scan anomaly (D16 — until then this code was declared with no emit path). Carries `check` (which of the six §5.10 checks fired) and, where the check names a concrete construct, `target`: a declaration name for the unterminated-body/parameter checks, a delimiter-count description for the imbalance checks; the unterminated-lexical-region check carries no `target` (nothing to name beyond the recorded position). |
 | `PSS9002` | A call site could not be statically resolved — invocation through `&` with a non-literal target, or an equivalent dynamic dispatch. Carries `target` (D12): the name expression, **verbatim**, extended over byte-adjacent member/index/call tails only — the §10.6 adjacency discipline applied to the expression side. A plain-variable `target` joins against the variable collections directly; a **member-chain** `target` (`$robocopy.Source`) matches no §5.8 identifier form as emitted — the consumer strips the tail and joins the **base** variable, and the member's value has no records to join at all (§12.2's member-LHS exclusion). Stated here post-round-4: the previous sentence promised the join without the stripping, and a reviewer performing it correctly asked where the operation was specified. |
 | `PSS9003` | A parent-scope write that cannot be tracked: `Set-Variable` / `New-Variable` with `-Scope`, or `[ref]` passing. |
 | `PSS9004` | A variable read with no resolvable declaration in the enclosing function and no scope qualifier — a dynamic-scope inheritance candidate. Carries the enclosing function's static callers and, for each, whether it declares that name. Where there are none, "zero static callers" is itself the reported fact. |
@@ -2810,9 +2810,20 @@ declaration covered was the finding, and declaring it is the close.
 can therefore appear only on a `--scope` slice — a surveyed model never
 emits it, so it is absent at the pin and on every corpus generation by
 construction, and the presence gate reads it on the pin slice instead.
+`/limitations[]/check` (D16) is the fifth: it names which of the six §5.10
+checks produced a `PSS9001` record, emitted only when a scan anomaly is
+detected — absent at the pin and on every corpus generation (all are clean;
+§5.10), so the presence gate reads it on the corrupted scan fixtures, which
+are retained as test assets for exactly this reason.
 
-Counts at the pinned blob: **129** paths at `all-axes`, **115** at the default
-materialisation, the difference being the ten `axis` paths.
+Counts at the pinned blob: **154** paths at `all-axes`, **127** at the default
+materialisation. The difference of 27 is the 26 `axis` paths plus one
+data-dependent `optional` path (`/local_variables[]/rhs_refs/variables[]/id`)
+that can only materialise under `local-sites`. *(D16 correction: the previous
+figures — 129/115, "the difference being the ten axis paths" — had gone stale
+across the D13–D15 arcs; no gate reads this sentence, which is how it
+survived green. The figures above are re-measured with the gate's own
+`key_paths` derivation over the pinned blob.)*
 
 | Key path | Kind |
 |---|---|
@@ -2865,6 +2876,7 @@ materialisation, the difference being the ten `axis` paths.
 | `/edges[]/sites` | always |
 | `/edges[]/to` | always |
 | `/limitations` | always |
+| `/limitations[]/check` | optional |
 | `/limitations[]/code` | always |
 | `/limitations[]/detail` | always |
 | `/limitations[]/line` | always |
@@ -2894,6 +2906,10 @@ materialisation, the difference being the ten `axis` paths.
 | `/materialization/axes` | always |
 | `/model_version` | always |
 | `/pss_version` | always |
+| `/scan` | always |
+| `/scan/anomalies` | always |
+| `/scan/checks` | always |
+| `/scan/outcome` | always |
 | `/script_variables` | always |
 | `/script_variables[]/code` | always |
 | `/script_variables[]/id` | always |
@@ -3021,6 +3037,7 @@ absent from the declaration is uniform, and the gate holds that claim too.
 | `string_interpolation_references` | `reference` | `record == reference` | `code` `id` `in_expandable_string` `line` `name` `owner` `record` `role` | `qualifier` | 118 |
 | `unresolved_named_commands` | `site` | `record == site` | `arguments` `code` `line` `name` `owner` `record` `span` | — | 2798 |
 | `unresolved_named_commands` | `aggregate` | `record == aggregate` | `code` `name` `owners` `record` `sites` | — | 93 |
+| `limitations` | `scan-anomaly` | `code == PSS9001` | `check` | `target` | absent at the pin; exercised on the scan-anomaly fixture |
 | `limitations` | `unresolved-call-site` | `code == PSS9002` | `target` | — | 26 |
 | `limitations` | `untrackable-scope-write` | `code == PSS9003` | (common only) | — | 1 |
 | `limitations` | `unresolvable-read` | `code == PSS9004` | (common only) | — | 11 |

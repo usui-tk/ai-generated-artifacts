@@ -39,7 +39,7 @@ import re
 import sys
 
 __version__ = "0.7.0"
-MODEL_VERSION = "7"
+MODEL_VERSION = "8"
 
 MIN_PYTHON = (3, 12)
 
@@ -75,6 +75,25 @@ AXES_ALIAS = {
            "already carries on slice (a slice never adds material, SPEC "
            "5.7); must appear alone, never combined with named axes",
 }
+
+SCAN_CHECKS = {
+    "unterminated-function-body":
+        "a function or filter declaration whose body brace never closes",
+    "unterminated-declaration-parameters":
+        "a declaration parameter list whose parenthesis never closes",
+    "unterminated-lexical-region":
+        "a quote, here-string or block comment the scan had to truncate at "
+        "end of input because its terminator never appeared",
+    "brace-imbalance": "'{' and '}' do not balance over the token stream",
+    "paren-imbalance": "'(' and ')' do not balance over the token stream",
+    "bracket-imbalance": "'[' and ']' do not balance over the token stream",
+}
+
+# SPEC 4.2 PSS9001 / SPEC 5.10: the two outcomes this tool is entitled to
+# state. Neither is "parsed": PSS has no grammar (SPEC 1.1), so the honest
+# report is what the named checks found, never a claim about the language.
+SCAN_OUTCOME_CLEAN = "no-anomaly-detected"
+SCAN_OUTCOME_FOUND = "anomalies-detected"
 
 AXES = {
     "closure-sets": "transitive_callees and transitive_callers on each closure record",
@@ -867,7 +886,7 @@ def _match_paren(toks, sig, pos):
     return None
 
 
-def find_functions(toks, sig):
+def find_functions(toks, sig, anomalies=None):
     """Locate function/filter definitions (SPEC 10.1).
 
     A definition is a `function`/`filter` keyword in command position, followed
@@ -876,6 +895,8 @@ def find_functions(toks, sig):
     counts prose inside comments as definitions (SPEC Appendix D.2). Comments
     are already separate tokens here, so they cannot contribute.
     """
+    if anomalies is None:
+        anomalies = []
     funcs = []
     cmd_pos = True
     k = 0
@@ -891,6 +912,12 @@ def find_functions(toks, sig):
                 if k3 < len(sig) and toks[sig[k3]].kind == 'op' and toks[sig[k3]].text == '(':
                     close = _match_paren(toks, sig, k3)
                     if close is None:
+                        # SPEC 5.10 (D16): this `continue` used to be the whole
+                        # story - the declaration vanished and the model said
+                        # nothing. The skip stays (there is no body to survey);
+                        # what changes is that it is now REPORTED.
+                        anomalies.append(("unterminated-declaration-parameters",
+                                          toks[sig[k3]].start, name))
                         k += 1
                         continue
                     param_span = (k3 + 1, close)
@@ -898,6 +925,13 @@ def find_functions(toks, sig):
                 if k3 < len(sig) and toks[sig[k3]].kind == 'op' and toks[sig[k3]].text == '{':
                     close = _match_brace(toks, sig, k3)
                     if close is None:
+                        # SPEC 5.10 (D16): the defect of the 3.3 adoption
+                        # evaluation lived exactly here. A file whose MIDDLE
+                        # function is unterminated silently lost that function
+                        # and reported the others as an ordinary, complete
+                        # inventory - not silence, a confident wrong answer.
+                        anomalies.append(("unterminated-function-body",
+                                          t.start, name))
                         k += 1
                         continue
                     funcs.append(FunctionDef(
@@ -1177,6 +1211,7 @@ MODEL_SCHEMA = {
     "/edges[]/sites": "always",
     "/edges[]/to": "always",
     "/limitations": "always",
+    "/limitations[]/check": "optional",
     "/limitations[]/code": "always",
     "/limitations[]/detail": "always",
     "/limitations[]/line": "always",
@@ -1203,6 +1238,10 @@ MODEL_SCHEMA = {
     "/local_variables[]/role": "axis",
     "/local_variables[]/unresolved_refs": "always",
     "/materialization": "always",
+    "/scan": "always",
+    "/scan/anomalies": "always",
+    "/scan/checks": "always",
+    "/scan/outcome": "always",
     "/materialization/axes": "always",
     "/model_version": "always",
     "/pss_version": "always",
@@ -1527,6 +1566,22 @@ RECORD_VARIANTS = {
     "limitations": {
         "common_keys": ("code", "detail", "line", "owner"),
         "variants": (
+            # D16: the PSS9001 record. `check` names which of the six
+            # SCAN_CHECKS fired; `target` is conditional because the
+            # unterminated-lexical-region check has no construct to name
+            # beyond its position, while the other five do (a declaration
+            # name or a delimiter-count description).
+            {"name": "scan-anomaly",
+             "when": {"path": "code", "equals": "PSS9001"},
+             "carries": ("check",),
+             "conditional_keys": {"target": {
+                 "presence_means": "the check names a concrete construct - "
+                                   "a declaration name or a delimiter-count "
+                                   "description",
+                 "absence_means": "the anomaly has no nameable target "
+                                  "beyond its recorded position "
+                                  "(unterminated-lexical-region)"}},
+             "axis_keys": {}},
             {"name": "unresolved-call-site",
              "when": {"path": "code", "equals": "PSS9002"},
              "carries": ("target",), "conditional_keys": {}, "axis_keys": {}},
@@ -1865,7 +1920,10 @@ class Survey:
         self.lines = LineIndex(text)
         self.toks = tokenize(text)
         self.sig = significant(self.toks)
-        self.funcs, self.dupes = find_functions(self.toks, self.sig)
+        self.scan_anomalies = []
+        self.funcs, self.dupes = find_functions(self.toks, self.sig,
+                                                self.scan_anomalies)
+        self._scan_lexical_and_balance()
         self.func_by_lname = {}
         for f in self.funcs:
             self.func_by_lname.setdefault(f.name.lower(), []).append(f)
@@ -1962,6 +2020,100 @@ class Survey:
         return self.func_ids[id(f)] if f is not None else "<script>"
 
     # -- passes ------------------------------------------------------------
+    def _scan_lexical_and_balance(self):
+        """SPEC 5.10 (D16), checks A3-A6: the anomalies the declaration walk
+        cannot see.
+
+        A3 - the tokenizer closes an unterminated quote, here-string or block
+        comment at end of input rather than failing, so a region whose token
+        ENDS at end of input without its terminator is a region that was
+        truncated, not a region that ended.
+
+        A4-A6 - delimiter balance over the significant token stream. Balance
+        is walked over TOKENS, so a brace inside a string or a comment cannot
+        derail it - the same discipline as the 10.6 walk. An extra CLOSING
+        delimiter is invisible to A1 (every declaration still matched), which
+        is why depth is reported both at end of input and where it first went
+        negative.
+        """
+        n = len(self.text)
+        for t in self.toks:
+            if t.end != n:
+                continue
+            s = t.text
+            trunc = False
+            if t.kind == 'comment' and s.startswith('<#'):
+                trunc = not s.endswith('#>')
+            elif s[:1] == '@' and s[1:2] in ("'", '"'):
+                trunc = ('\n' + s[1] + '@') not in s[2:]
+            elif t.kind in ('str', 'estr') and s[:1] in ("'", '"'):
+                trunc = not (len(s) > 1 and s.endswith(s[0]))
+            if trunc:
+                self.scan_anomalies.append(
+                    ("unterminated-lexical-region", t.start, None))
+
+        pairs = (('{', '}', "brace-imbalance"),
+                 ('(', ')', "paren-imbalance"),
+                 ('[', ']', "bracket-imbalance"))
+        depth = {p[2]: 0 for p in pairs}
+        first_negative = {}
+        opener = {p[0]: p[2] for p in pairs}
+        closer = {p[1]: p[2] for p in pairs}
+        for idx in self.sig:
+            t = self.toks[idx]
+            if t.kind != 'op':
+                continue
+            if t.text in opener:
+                depth[opener[t.text]] += 1
+            elif t.text in closer:
+                name = closer[t.text]
+                depth[name] -= 1
+                if depth[name] < 0 and name not in first_negative:
+                    first_negative[name] = t.start
+        for _, _, name in pairs:
+            if name in first_negative:
+                self.scan_anomalies.append((name, first_negative[name],
+                                            "unmatched closing delimiter"))
+            elif depth[name] != 0:
+                self.scan_anomalies.append(
+                    (name, n, "%d unclosed at end of input" % depth[name]))
+
+    def _scan_block(self):
+        """SPEC 5.10 (D16): always present, zero-valued on a clean scan.
+
+        A key that appears only on failure cannot be told apart from a tool
+        that never looked - which is precisely the confusion the 3.3 adoption
+        evaluation had to work around by running a real parser first. The
+        outcome vocabulary deliberately excludes any word meaning "parsed":
+        this states what six named checks found, and nothing about the
+        language.
+        """
+        found = bool(self.scan_anomalies)
+        return {
+            "outcome": SCAN_OUTCOME_FOUND if found else SCAN_OUTCOME_CLEAN,
+            "checks": len(SCAN_CHECKS),
+            "anomalies": len(self.scan_anomalies),
+        }
+
+    def _scan_limitations(self):
+        """One PSS9001 record per anomaly (SPEC 4.2). Until D16 this code was
+        declared in FACTS and in SPEC 4 with no emit path anywhere in this
+        file - a declared fact that could never fire, which every gate passed
+        because none of them asked whether a declared code is reachable."""
+        out = []
+        for check, offset, target in self.scan_anomalies:
+            rec = {
+                "code": "PSS9001",
+                "owner": self._owner_id_fast(offset),
+                "line": self.line_of(offset),
+                "detail": "%s: %s" % (check, SCAN_CHECKS[check]),
+                "check": check,
+            }
+            if target:
+                rec["target"] = target
+            out.append(rec)
+        return out
+
     def run(self):
         self._owner_cache_build()
         self._precompute_parameters()
@@ -2892,6 +3044,8 @@ class Survey:
             # `compare`) can tell what this model does and does not carry
             # without re-deriving it from which fields happen to be present.
             "materialization": {"axes": sorted(self.axes)},
+            # SPEC 5.10 (D16): always present, on every materialisation.
+            "scan": self._scan_block(),
             "counters": dict(sorted(self.counters.items())),
             "symbols": self._emit(symbols),
             "edges": self._emit(edges),
@@ -2910,7 +3064,7 @@ class Survey:
             # not a second mechanism.
             "unresolved_named_commands": self._emit(self._unresolved_command_records()),
             "limitations": self._emit(sorted(
-                self.limitations,
+                self.limitations + self._scan_limitations(),
                 key=lambda r: (r["code"], r.get("line", 0), r.get("owner", "")))),
         }
         if with_cost:
