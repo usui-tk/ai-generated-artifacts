@@ -1074,7 +1074,7 @@ candidate together with the evidence that produced it.
 | `PSS9003` | A parent-scope write that cannot be tracked: `Set-Variable` / `New-Variable` with `-Scope`, or `[ref]` passing. |
 | `PSS9004` | A variable read with no resolvable declaration in the enclosing function and no scope qualifier — a dynamic-scope inheritance candidate. Carries the enclosing function's static callers and, for each, whether it declares that name. Where there are none, "zero static callers" is itself the reported fact. |
 | `PSS9005` | The comparison could not be performed for a named unit — for example a model produced under a different `model_version`. |
-| `PSS9006` | **Self-diagnostic.** A hash-triple combination outside the four reachable states of §10.5 was observed. This indicates a defect in `pss.py`, not in the surveyed script. |
+| `PSS9006` | **Self-diagnostic.** A hash-triple combination outside the four reachable states of §10.5 was observed. This indicates a defect in `pss.py`, not in the surveyed script. Emitted by `compare`/`trace` **in place of** a `PSS7001` value for that subject, carrying the three per-hash equality booleans (D16 — until then this code was declared with no emit path). Its `surveyed` tally counts every hash-triple read as `examined`, so `emitted: 0` is a measurement over a non-empty population. |
 | `PSS9007` | A symbol identifier required an ordinal disambiguator (§5.2). Ordinals are position-dependent and therefore unstable across edits; a caller must not treat an ordinal-bearing identifier as a durable key. |
 
 **On `PSS9004` as a corpus measure.** In the reference target this fires 11
@@ -1126,14 +1126,14 @@ caller is claiming, and therefore in what may be said.
   only require it to be made, which is why it is a verb and not a defaulted
   flag. Nothing in a model records where it came from.
 
-Fifteen of the eighteen comparison codes hold without any relation between the
+Sixteen of the nineteen comparison codes hold without any relation between the
 inputs and are emitted by **both** verbs. Three require the assertion, and are
 emitted by **`trace` only**: `PSS8005`, `PSS8006` and `PSS8007` — precisely the
 three rules of §12.7. "An incomplete rename" is not a fact about two unrelated
 files; it presupposes that one was derived from the other. Emitting it for an
 arbitrary pair would not be a caveated fact but noise.
 
-The neutral fifteen are worded neutrally in §4.5–§4.7: **model A and model B**,
+The neutral sixteen are worded neutrally in §4.5–§4.7: **model A and model B**,
 and *differs* rather than *changed*. Under `trace` the same facts may be
 presented in before/after terms, because there the ordering is what the caller
 asserted. The wording is not cosmetic — a code that says "changed" has already
@@ -1813,11 +1813,11 @@ change has to argue against.
 enumeration instead of the counts, and under `trace` the fourth is `{}`.)
 
 **`delta_records` carries differences only, as a flat list.** Not one array per
-kind of change: a collection per code would add eighteen keys to the public
+kind of change: a collection per code would add nineteen keys to the public
 contract, force a choice between emitting empty arrays and omitting keys — and
 an omitted key is exactly the silence §4.6 forbids — and oblige a consumer to
 learn a second vocabulary alongside the fact codes it already knows. Flat also
-keeps the eighteen codes level with one another; grouping them would put a
+keeps the nineteen codes level with one another; grouping them would put a
 claim about which distinction matters into the structure, which §1.2 reserves
 for the caller.
 
@@ -1842,7 +1842,7 @@ omitted the tally. `--capabilities` (§3.1) states the same fact statically;
 reviewers proposed it independently). It maps every catalogued comparison code
 absent from `surveyed` to the reason: under `compare` that is exactly the
 three succession-only codes with the §4.9 reason, and under `trace` — which
-evaluates all eighteen — it is `{}`, emitted rather than omitted, because an
+evaluates all nineteen — it is `{}`, emitted rather than omitted, because an
 omitted key is the silence §4.6 forbids. The map costs tens of bytes and
 closes the one question the tally's absence-signal left the reader to infer.
 
@@ -2055,7 +2055,26 @@ Exactly **four** combinations are reachable. `PSS7001` emits one of:
 | differs | differs | differs | `code-changed` |
 
 The remaining four combinations are unreachable. Observing one is a defect in
-`pss.py`; the tool emits `PSS9006` rather than an out-of-enum value.
+`pss.py`; the tool emits `PSS9006` rather than an out-of-enum value — the
+record replaces the `PSS7001` value for that subject, and `PSS9006`'s
+`surveyed` tally counts every hash-triple read as `examined`, so a zero
+`emitted` is a measurement over a non-empty population, never a vacuous
+assertion about a code with no emit path.
+
+**D16 correction (defect record).** Until D16 the shipped ladder tested
+COARSEST-first — `hash_full` equality (the comments-and-strings-stripped
+hash) returned `identical` before the finer hashes were consulted — so a
+comment-only or string-only pair classified `identical`, and
+`comment-or-whitespace-only` / `string-literal-only` were **unreachable in
+shipped code**: the same defect class as the pre-D16 `PSS9001`/`PSS9006`
+(declared, never emittable), living inside `PSS7001`'s own value enum. This
+is also the mechanism behind the withdrawn B.7 aggregate table (ADR 0036):
+re-measurement with the shipped comparator found zero of both middle values
+in every candidate window because the shipped comparator could not produce
+them — the uncommitted instrument that produced the original 13/9 evidently
+carried the correct ladder. Found by the D16 reachability lens in the act of
+placing the `PSS9006` fallback; both middle values are now fixture-held
+(`test_pss.py`, red-first against the pre-fix build).
 
 This was verified over 2,607 same-name function comparisons across 12
 consecutive historical states of the reference target: all four reachable
@@ -3625,11 +3644,11 @@ recorded beside the values in the machine block below.
 
 **The adjudicated pair** is generations 93 → 94 of entry `0002`. It is the
 pair consumer review was performed on (§3.2), and it exercises the comparator
-rather than sampling it: all eighteen codes examine a non-empty population,
+rather than sampling it: all nineteen codes examine a non-empty population,
 sixteen emit, and `PSS8008` emits exactly one record naming
 `function/Restore-BootWimFromSourceIso` — the fact a reviewer identified as
 the most review-worthy in the change and found carried by neither candidate
-shape. The same pair is measured under both verbs, so the fifteen shared
+shape. The same pair is measured under both verbs, so the sixteen shared
 tallies state as re-derived values what §12.7 states as structure: `trace` is
 `compare` plus the rule layer, and nothing else.
 

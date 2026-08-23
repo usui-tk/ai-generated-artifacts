@@ -1591,9 +1591,11 @@ def check_comparator():
                  paths[x], paths[y], "--format", "json"] + list(extra),
                 capture_output=True, cwd=d)
             try:
-                return r.returncode, json.loads(r.stdout.decode("utf-8"))
+                doc = json.loads(r.stdout.decode("utf-8"))
             except Exception:
                 return r.returncode, None
+            note_emitted("delta", doc.get("delta_records", []))
+            return r.returncode, doc
 
         rc, same = run("compare", "a", "a")
         eq(rc, 0, "comparator: a model compares against itself")
@@ -2237,7 +2239,9 @@ $out | ConvertTo-Json -Compress
 
 
 def _scan_fixture_model(name, src):
-    return pss.Survey(name + ".ps1", src).run().model()
+    model = pss.Survey(name + ".ps1", src).run().model()
+    note_emitted("fixture", model)
+    return model
 
 
 def run_scan_fixtures():
@@ -2376,6 +2380,194 @@ def run_scan_differential(pwsh):
           "(%d native-rejected fixtures)" % rejected)
 
 
+# ==========================================================================
+# D16 C2: emission reachability (SPEC 13.2 Emission coverage, widened to
+# every declared code) and the SPEC 10.5 classification reachability.
+#
+# The collector records which codes were EMITTED - a `code` value or a
+# `facts` member on an actual record - in the artifacts the battery already
+# builds. A code appearing only as a `surveyed` tally key or in prose is
+# deliberately not evidence: a tally row proves the code was evaluated, not
+# that its emit path exists, and PSS9001/PSS9006 sat un-emittable behind
+# green gates for exactly that distinction (SPEC 13.2, the 3.3 finding).
+
+_EMITTED_EVIDENCE = {}
+_PSS_CODE = re.compile(r"^PSS\d{4}$")
+
+
+def note_emitted(label, obj):
+    """Record every code emitted on a record inside `obj` under `label`."""
+    def rec(o):
+        if isinstance(o, dict):
+            c = o.get("code")
+            if isinstance(c, str) and _PSS_CODE.match(c):
+                _EMITTED_EVIDENCE.setdefault(c, set()).add(label)
+            f = o.get("facts")
+            if isinstance(f, (list, tuple)):
+                for x in f:
+                    if isinstance(x, str) and _PSS_CODE.match(x):
+                        _EMITTED_EVIDENCE.setdefault(x, set()).add(label)
+            for v in o.values():
+                rec(v)
+        elif isinstance(o, (list, tuple)):
+            for v in o:
+                rec(v)
+    rec(obj)
+
+
+# Where each declared fact code's emission is evidenced. Measured before
+# being declared (the class assignments are this arc's coverage measurement,
+# 2026-08-23): `pin` = emitted on the pinned blob's models; `fixture` =
+# emitted only on a battery fixture model (the pin cannot produce it);
+# `delta` = emitted on a battery delta document (the corpus adjudicated
+# pair, the comparator fixtures, the succession pair, or the --all leg -
+# PSS6003 records exist only under --all); `refusal` = named in a refusal
+# the gate drives (never a record); `diagnostic` = unreachable on healthy
+# input BY CONSTRUCTION - its absence from every healthy artifact is
+# asserted, and its emit path is exercised synthetically.
+EMISSION_EVIDENCE = {
+    "pin": ("PSS1001", "PSS1002", "PSS1003", "PSS1004",
+            "PSS2001", "PSS2002", "PSS2003", "PSS2004", "PSS2005",
+            "PSS2006", "PSS2007", "PSS2008", "PSS2009",
+            "PSS3001", "PSS3002",
+            "PSS4001", "PSS4002", "PSS4003", "PSS4004",
+            "PSS9002", "PSS9003", "PSS9004"),
+    "fixture": ("PSS1005", "PSS9001", "PSS9007"),
+    "delta": ("PSS6001", "PSS6002", "PSS6003",
+              "PSS7001", "PSS7002", "PSS7003", "PSS7004", "PSS7005",
+              "PSS7006", "PSS7007",
+              "PSS8001", "PSS8002", "PSS8003", "PSS8004", "PSS8005",
+              "PSS8006", "PSS8007", "PSS8008"),
+    "refusal": ("PSS9005",),
+    "diagnostic": ("PSS9006",),
+}
+
+
+def check_hash_classification():
+    """SPEC 10.5 (D16): the middle two classification values are reachable.
+
+    Written red-first: the parent ladder tested coarsest-first (hash_full -
+    the comments-AND-strings-stripped hash - decided first), so a
+    comment-only or string-only pair classified `identical`, and
+    `comment-or-whitespace-only` / `string-literal-only` were unreachable
+    in shipped code: the PSS9001/PSS9006 defect class, living inside
+    PSS7001's own value enum. It is also the mechanism behind the withdrawn
+    B.7 aggregate (ADR 0036): re-measurement found zero of both values in
+    every window because the shipped comparator could not produce them.
+    """
+    base = ("function Get-Demo {\n"
+            "    # original comment\n"
+            "    $x = 'hello'\n"
+            "    return $x\n"
+            "}\nGet-Demo\n")
+    cases = (
+        ("comment-or-whitespace-only",
+         base.replace("# original comment", "# a changed comment")),
+        ("string-literal-only", base.replace("'hello'", "'goodbye'")),
+        ("code-changed", base.replace("return $x", "return $x + 1")),
+    )
+    doc_a = json.loads(_run_pss(["survey", "@SCRIPT@", "--format", "json"],
+                                text=base).stdout)
+    for want, text in cases:
+        doc_b = json.loads(_run_pss(["survey", "@SCRIPT@", "--format",
+                                     "json"], text=text).stdout)
+        doc = _delta_via_cli("compare", "a", doc_a, "b", doc_b)
+        if doc is None:
+            check(False, "hash-classification: compare produced a document "
+                         "(%s)" % want)
+            continue
+        got = [r["detail"]["classification"]
+               for r in doc.get("delta_records", ())
+               if r.get("code") == "PSS7001"]
+        eq(got, [want],
+           "hash-classification: a %s pair classifies as itself" % want)
+
+
+def check_emission_reachability(model_def, model_all):
+    """SPEC 13.2 Emission coverage, widened to EVERY declared code (D16).
+
+    Each code in the FACTS catalogue must be one of: emitted on the pin,
+    emitted on a battery fixture or delta, named by a driven refusal, or
+    declared unreachable-by-construction with the declaration itself held -
+    absence asserted on every healthy artifact AND the emit path exercised
+    synthetically. A declared code covered by none of these is PSS9001
+    before D16: a catalogue entry no input can ever produce, invisible to
+    every gate because none asked. Runs in the git section - the corpus
+    adjudicated pair is part of the delta evidence (SPEC 14.3).
+    """
+    note_emitted("pin", model_def)
+    note_emitted("pin", model_all)
+
+    declared = [c for cls in EMISSION_EVIDENCE.values() for c in cls]
+    eq(sorted(declared), sorted(set(declared)),
+       "reachability: no code is declared in two evidence classes")
+    eq(sorted(set(declared)), sorted(pss.FACTS),
+       "reachability: the evidence declaration covers the FACTS catalogue "
+       "exactly, both directions")
+
+    for cls, wanted_label in (("pin", "pin"), ("fixture", "fixture"),
+                              ("delta", "delta")):
+        missing = [c for c in EMISSION_EVIDENCE[cls]
+                   if wanted_label not in _EMITTED_EVIDENCE.get(c, ())]
+        eq(missing, [],
+           "reachability: every `%s`-class code was emitted on a %s "
+           "artifact this run" % (cls, wanted_label))
+
+    # `refusal`: PSS9005 is never a record - it is how the tool refuses a
+    # foreign model_version. Driven here so the evidence is this run's.
+    doc = json.loads(_run_pss(["survey", "@SCRIPT@", "--format", "json"],
+                              text="function Tiny { 1 }\nTiny\n").stdout)
+    foreign = dict(doc, model_version=doc["model_version"] + "-foreign")
+    with tempfile.TemporaryDirectory() as d:
+        pa = os.path.join(d, "a.json")
+        pb = os.path.join(d, "b.json")
+        json.dump(doc, open(pa, "w"))
+        json.dump(foreign, open(pb, "w"))
+        r = subprocess.run(
+            [sys.executable, os.path.join(HERE, "pss.py"), "compare",
+             pa, pb, "--format", "json"], capture_output=True, cwd=d)
+    check(r.returncode != 0 and r.stdout == b""
+          and b"PSS9005" in r.stderr,
+          "reachability: PSS9005 is named by the refusal it exists for",
+          "rc=%d stdout=%r stderr=%r" % (r.returncode, r.stdout[:60],
+                                         r.stderr[-200:]))
+
+    # `diagnostic`: PSS9006. Two claims, both held. (1) It was emitted on NO
+    # healthy artifact this run - which is only a meaningful assertion now
+    # that the code CAN emit (before D16 the same zero was vacuously true of
+    # a code with no emit path). (2) The emit path exists and fires: a
+    # symbol's hash_body is tampered so the triple violates the SPEC 10.5
+    # implications (raw equal, body differs - an unreachable state), and the
+    # REAL compare path must emit PSS9006 for that subject INSTEAD of a
+    # PSS7001 value.
+    eq(sorted(_EMITTED_EVIDENCE.get("PSS9006", ())), [],
+       "reachability: PSS9006 emitted on no healthy artifact "
+       "(unreachable-by-construction, now measured rather than vacuous)")
+    tampered = json.loads(json.dumps(doc))
+    victim = tampered["symbols"][0]
+    victim["hash_body"] = "0" * len(victim["hash_body"])
+    delta_doc = _delta_via_cli("compare", "a", doc, "b", tampered)
+    if delta_doc is None:
+        check(False, "reachability: the tampered pair compared")
+    else:
+        sid = victim["id"]
+        nine = [r for r in delta_doc.get("delta_records", ())
+                if r.get("code") == "PSS9006"]
+        seven = [r for r in delta_doc.get("delta_records", ())
+                 if r.get("code") == "PSS7001" and r.get("subject") == sid]
+        eq([r.get("subject") for r in nine], [sid],
+           "reachability: an unreachable hash triple emits PSS9006 through "
+           "the real compare path")
+        eq(seven, [],
+           "reachability: PSS9006 is emitted INSTEAD of a PSS7001 value "
+           "(SPEC 10.5)")
+        tally = (delta_doc.get("surveyed") or {}).get("PSS9006") or {}
+        check(tally.get("examined", 0) > 0 and tally.get("emitted") == 1,
+              "reachability: the PSS9006 tally shows a non-empty examined "
+              "population - the S4 zero is a measurement, not a vacuity",
+              "tally: %r" % (tally,))
+
+
 def load_delta_baseline():
     """Read the delta master out of SPEC Appendix B.7.
 
@@ -2411,9 +2603,11 @@ def _delta_via_cli(verb, name_a, model_a, name_b, model_b):
         if r.returncode != 0:
             return None
         try:
-            return json.loads(r.stdout.decode("utf-8"))
+            doc = json.loads(r.stdout.decode("utf-8"))
         except Exception:
             return None
+        note_emitted("delta", doc.get("delta_records", []))
+        return doc
 
 
 def _check_delta_leg(label, doc, pinned):
@@ -4986,6 +5180,7 @@ def main():
     # so it stays checked at every degradation level (SPEC 14.3).
     check_cache_generator()
     check_comparator()
+    check_hash_classification()
     # SPEC B.7's independent pair: embedded fixtures, so it stays checked at
     # every degradation level; the corpus half runs below, where git is known.
     delta_baseline = load_delta_baseline()
@@ -5086,6 +5281,9 @@ def main():
                 SCAN_FIXTURE_VARIANT_NAME, SCAN_FIXTURE_VARIANT).run().model(),
         }
         check_record_variants(variant_models)
+        for _vlabel, _vmodel in variant_models.items():
+            if not _vlabel.startswith("pin-"):
+                note_emitted("fixture", _vmodel)
 
         check_slice_projection(model_all, variant_models["pin-slice"])
 
@@ -5103,6 +5301,8 @@ def main():
         check_rhs_refs_pin(model_all)
 
         check_channel_agreement(model_all)
+
+        check_emission_reachability(model_def, model_all)
 
         if args.pwsh and os.path.exists(args.pwsh):
             run_differential(args.pwsh, text, measured)

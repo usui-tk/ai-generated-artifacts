@@ -96,7 +96,7 @@ tally) and `examined_subjects` (the compared population by identifier). All
 three are needed: a code missing from `surveyed` **did not run**, which is not
 the same as running and finding nothing, and a name missing from
 `examined_subjects` was never compared, which is not the same as being
-unchanged. `compare` evaluates the fifteen codes that hold without a claim of
+unchanged. `compare` evaluates the sixteen codes that hold without a claim of
 succession; `trace` evaluates those and the three rules of §12.7, which
 presuppose the assertion `trace` exists to carry. Each produces a candidate
 with its evidence, never a conclusion.

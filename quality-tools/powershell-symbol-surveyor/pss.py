@@ -1771,6 +1771,11 @@ COMPARATOR_CODES = (
     "PSS7001", "PSS7002", "PSS7003", "PSS7004", "PSS7005", "PSS7006",
     "PSS7007",
     "PSS8001", "PSS8002", "PSS8003", "PSS8004", "PSS8008",
+    # D16: the SPEC 10.5 self-diagnostic. `examined` counts every hash-triple
+    # read alongside PSS7001; `emitted` counts unreachable combinations
+    # observed - zero on a healthy build, and now a zero measured over a
+    # non-empty population rather than asserted of a code with no emit path.
+    "PSS9006",
 )
 
 # The three rules of SPEC 12.7. They presuppose that one model is a later
@@ -4048,12 +4053,28 @@ def _transitive(adjacency, start):
 
 
 def _hash_classification(a, b):
-    """SPEC 4.6's four values, read off the hash triple."""
-    if a.get("hash_full") == b.get("hash_full"):
-        return "identical"
-    if a.get("hash_body") == b.get("hash_body"):
-        return "comment-or-whitespace-only"
-    if a.get("hash_raw") == b.get("hash_raw"):
+    """SPEC 10.5's four values read off the triple - or None on one of the
+    four unreachable combinations, which the caller reports as PSS9006.
+
+    Most-sensitive hash first: `hash_raw` (verbatim) implies the other two;
+    `hash_body` (comments stripped, strings retained) implies `hash_full`
+    (comments AND strings stripped). Until D16 this ladder tested
+    COARSEST-first - `hash_full` equality returned `identical` before the
+    finer hashes were consulted - so a comment-only or string-only pair
+    classified `identical` and the middle two enum values were unreachable
+    in shipped code: the PSS9001/PSS9006 defect class inside PSS7001's own
+    value enum. The withdrawn B.7 aggregate (ADR 0036) measured zero of
+    both values in every window for exactly this reason. Found by the D16
+    reachability lens in the act of placing this fallback.
+    """
+    raw = a.get("hash_raw") == b.get("hash_raw")
+    body = a.get("hash_body") == b.get("hash_body")
+    full = a.get("hash_full") == b.get("hash_full")
+    if raw:
+        return "identical" if (body and full) else None
+    if body:
+        return "comment-or-whitespace-only" if full else None
+    if full:
         return "string-literal-only"
     return "code-changed"
 
@@ -4140,11 +4161,24 @@ def compare_models(model_a, model_b):
         a, b = fa[sid], fb[sid]
 
         classification = _hash_classification(a, b)
-        if classification == "identical":
-            delta.equal("PSS7001")
+        if classification is None:
+            # SPEC 10.5: an unreachable hash-triple combination is a defect
+            # in pss.py, reported as PSS9006 INSTEAD of a PSS7001 value -
+            # never as an out-of-enum classification. `examined` on PSS9006
+            # counts every triple read (the `equal` branch below), so a zero
+            # `emitted` is a measurement over a non-empty population, not a
+            # vacuity - the D16 S4 correction.
+            delta.emit("PSS9006", sid, "function", detail={
+                "hash_full_equal": a.get("hash_full") == b.get("hash_full"),
+                "hash_body_equal": a.get("hash_body") == b.get("hash_body"),
+                "hash_raw_equal": a.get("hash_raw") == b.get("hash_raw")})
         else:
-            delta.emit("PSS7001", sid, "function", equality="differs",
-                       detail={"classification": classification})
+            delta.equal("PSS9006")
+            if classification == "identical":
+                delta.equal("PSS7001")
+            else:
+                delta.emit("PSS7001", sid, "function", equality="differs",
+                           detail={"classification": classification})
 
         sig_a, sig_b = _parameter_signature(a), _parameter_signature(b)
         if sig_a == sig_b:
@@ -4376,6 +4410,9 @@ def trace_models(model_before, model_after):
         a, b = functions_before.get(fid), functions_after.get(fid)
         if a is None or b is None:
             return None
+        # An unreachable triple (None, PSS9006 territory) reads as "changed"
+        # here: conservative for rule (a)'s writer/reader question, and the
+        # compare path has already reported the defect itself.
         return _hash_classification(a, b) == "identical"
 
     # Rule (a), PSS8006: a writer changed and a reader did not. If the writer
