@@ -51,7 +51,14 @@ termination-and-balance checks found over the tool's own token stream. The
 outcome vocabulary claims no success (`no-anomaly-detected`, never
 "parsed": PSS has no grammar), and an anomaly also emits a `PSS9001`
 limitation record per finding, so "nothing there" and "could not be read"
-are no longer the same silence.
+are no longer the same silence. Two more always-present blocks state what
+kind of model this is: `limitation_dispositions` (§5.11) says of every
+limitation code whether it marks an input anomaly, a statically
+undecidable question, or a fully-stated property — and what, if anything,
+would resolve it; `collection_declarations` (§5.12) says how directly each
+collection's records were observed (observed / derived /
+derived-from-derived) and names the call graph's claim for what it is: a
+structural candidate, never runtime-binding proof.
 
 ---
 

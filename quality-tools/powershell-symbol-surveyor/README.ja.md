@@ -49,6 +49,14 @@ python3 pss.py survey Script.ps1 --axes all --cost
 (`no-anomaly-detected` であって「parsed」ではない: PSS は文法を持ちません)。
 異常は所見ごとに `PSS9001` limitation レコードとしても出力されるため、
 「何もなかった」と「読めなかった」が同じ沈黙になることはもうありません。
+さらに 2 つの常在ブロックがこのモデルの性格を述べます:
+`limitation_dispositions` (§5.11) は各 limitation コードについて、それが
+入力の異常なのか、静的には決定不能な問いなのか、完全に記述済みの性質
+なのか — そして何がそれを解決しうるのか — を述べます。
+`collection_declarations` (§5.12) は各コレクションのレコードがどれだけ
+直接的に観測されたか (observed / derived / derived-from-derived) を述べ、
+コールグラフの主張をその実名で呼びます: 構造上の候補であって、実行時
+バインディングの証明では決してない、と。
 
 ---
 

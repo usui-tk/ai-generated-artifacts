@@ -18,6 +18,63 @@ This file starts at `0.2.0`. Entries before it are reconstructed from the
 commit history and the SPEC's own decision records rather than written at the
 time, and are marked as such.
 
+## [0.9.0] - 2026-08-23 (`model_version` "8" -> "9"; the D17 arc)
+
+The adoption-contract arc: the three model-moving rows and the ledger row
+the §3.3 evaluation left open, closed. The model now states its own
+limits' kinds, its records' observation depth, and its relation claims'
+nature — the questions the evaluation had to answer by reading the SPEC.
+
+### Added
+- **`limitation_dispositions`** (SPEC 5.11): always-present per-code
+  catalogue — `static_disposition` and `resolution_requirement` for every
+  code the limitations collection can carry (per code, not per record:
+  every record of one code shares one disposition, measured before the
+  shape was chosen). Vocabulary is exactly what the catalogue bears — no
+  declared-but-unborne enum value (the D16 reachability discipline). The
+  evaluating analyser's tool-could-do-better kind deliberately has no
+  entry: in this model that kind never becomes a record (recorded
+  asymmetry, §5.11). 512 bytes at the pin.
+- **`collection_declarations`** (SPEC 5.12): always-present per-collection
+  block — `authority` (observed / derived / derived-from-derived, this
+  tool's own token-stream basis, not native AST terms) on all nine record
+  collections, and `binding_disposition =
+  structural-candidate-not-runtime-binding-proof` on exactly the
+  relation-asserting two (`edges`, `closures`) — §12.9's closing sentence
+  serialised into the payload the consumer actually reads. 565 bytes at
+  the pin.
+- **The differential ledger** (SPEC 13.4): the discipline for
+  PSS-vs-native divergences — (A) PSS defect / (B) definitional
+  difference / (C) native capability worth a §13.2 row — with the domain
+  asymmetry stated (on syntax validity native is definitionally the
+  authority; on derived facts it is no authority at all), the
+  follow-latest oracle policy with per-run version recording (recording
+  landed at D16), and two opening entries: the `counters.assignments`
+  definitional difference (B) and the D16 ladder defect, retrospective
+  (A).
+- Gates: fixture + pin legs for both new blocks (constant equality, key
+  sets held both directions — dispositions against the limitations
+  variant codes, declarations against the model's actual record
+  collections — vocabulary exactness, materialisation invariance), each
+  demonstrated red against the parent build; `--self-check` holds SPEC
+  5.11 and 5.12 against their constants both directions.
+
+### Fixed
+- **Self-check section parsers** ended at "## 6" instead of the next
+  heading, so every later 5.x table fell inside the 5.8 join-key
+  parser's range — latent until 5.12's table matched its row shape.
+  All three affected parsers (5.8, 5.10, 5.11) now end at the next
+  heading.
+
+### Changed
+- `MODEL_VERSION` "8" -> "9" (two new always-present blocks move the
+  model for a fixed input). Caches at "8" are expired; caches regenerate
+  at "9". Appendix B.8 restamped once for the bundle; B.7 unmoved
+  (delta documents carry neither block).
+- SPEC 13.3 path counts re-measured twice along the arc: 154/127 ->
+  170/143 (C1, +16) -> 191/164 (C2, +21); the axis/optional difference
+  of 27 is unchanged.
+
 ## [0.8.0] - 2026-08-23 (`model_version` "7" -> "8"; the D16 arc)
 
 The scan-outcome arc: the two declared-but-unemittable codes (PSS9001,
