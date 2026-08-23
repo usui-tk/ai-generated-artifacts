@@ -107,6 +107,41 @@ SCAN_OUTCOME_FOUND = "anomalies-detected"
 # of limit is this - a defect in the input, a question no static analysis
 # could ever settle, or a fully-stated property the caller merely needs to
 # respect.
+# D17: the collection declarations (SPEC 5.12). One entry per record
+# collection, stating how directly its records were observed - the 3.3
+# evaluation's finding that this model mixes directly-read and computed
+# records without marking them, so a consumer must accept or demote the
+# WHOLE model instead of weighing records by observation depth. The
+# vocabulary is this tool's own basis (its token stream, SPEC 1.1), not
+# native AST terms: `observed` = read directly off the token stream;
+# `derived` = computed from observed records (the 10.6 command-position
+# walk joined against the symbol inventory); `derived-from-derived` =
+# computed from derived records again. `binding_disposition` appears on
+# exactly the collections whose records assert an inter-symbol relation
+# (edges, closures) and serialises the SPEC 12.9 closing sentence INTO the
+# payload - a consumer reads the payload and not this document, and the
+# misuse the 3.3 evaluation guarded against (treating structural call
+# edges as runtime-binding proof) is the one a payload-level disposition
+# forestalls. Key set and values are gate-held against the model and the
+# SPEC 5.12 table in both directions.
+COLLECTION_DECLARATIONS = {
+    "symbols": {"authority": "observed"},
+    "script_variables": {"authority": "observed"},
+    "local_variables": {"authority": "observed"},
+    "string_interpolation_references": {"authority": "observed"},
+    "soft_references": {"authority": "observed"},
+    "limitations": {"authority": "observed"},
+    "edges": {
+        "authority": "derived",
+        "binding_disposition":
+            "structural-candidate-not-runtime-binding-proof"},
+    "unresolved_named_commands": {"authority": "derived"},
+    "closures": {
+        "authority": "derived-from-derived",
+        "binding_disposition":
+            "structural-candidate-not-runtime-binding-proof"},
+}
+
 LIMITATION_DISPOSITIONS = {
     "PSS9001": {"static_disposition": "input-anomaly",
                 "resolution_requirement": "input-correction"},
@@ -1198,6 +1233,27 @@ MODEL_SCHEMA = {
     "/closures[]/transitive_callees": "axis",
     "/closures[]/transitive_caller_count": "always",
     "/closures[]/transitive_callers": "axis",
+    "/collection_declarations": "always",
+    "/collection_declarations/closures": "always",
+    "/collection_declarations/closures/authority": "always",
+    "/collection_declarations/closures/binding_disposition": "always",
+    "/collection_declarations/edges": "always",
+    "/collection_declarations/edges/authority": "always",
+    "/collection_declarations/edges/binding_disposition": "always",
+    "/collection_declarations/limitations": "always",
+    "/collection_declarations/limitations/authority": "always",
+    "/collection_declarations/local_variables": "always",
+    "/collection_declarations/local_variables/authority": "always",
+    "/collection_declarations/script_variables": "always",
+    "/collection_declarations/script_variables/authority": "always",
+    "/collection_declarations/soft_references": "always",
+    "/collection_declarations/soft_references/authority": "always",
+    "/collection_declarations/string_interpolation_references": "always",
+    "/collection_declarations/string_interpolation_references/authority": "always",
+    "/collection_declarations/symbols": "always",
+    "/collection_declarations/symbols/authority": "always",
+    "/collection_declarations/unresolved_named_commands": "always",
+    "/collection_declarations/unresolved_named_commands/authority": "always",
     "/cost": "always",
     "/cost/axis_increment": "always",
     "/cost/axis_increment[]/axis": "always",
@@ -3100,6 +3156,13 @@ class Survey:
             "limitation_dispositions": {
                 code: dict(entry)
                 for code, entry in LIMITATION_DISPOSITIONS.items()},
+            # D17 (SPEC 5.12): per-collection observation depth and,
+            # where records assert an inter-symbol relation, the binding
+            # disposition - serialised so the consumer reads it from the
+            # payload, not from the SPEC.
+            "collection_declarations": {
+                name: dict(entry)
+                for name, entry in COLLECTION_DECLARATIONS.items()},
             "counters": dict(sorted(self.counters.items())),
             "symbols": self._emit(symbols),
             "edges": self._emit(edges),
@@ -3425,7 +3488,7 @@ def self_check():
     # claims success (SPEC 1.1: PSS has no grammar, so "parsed" is a claim
     # the tool is not entitled to make).
     scstart = spec.find("### 5.10 The scan-outcome declaration")
-    scend = spec.find("## 6. Output formats")
+    scend = spec.find("### 5.11")
     if scstart < 0 or scend < 0 or scend <= scstart:
         print("  FAIL: could not locate SPEC section 5.10")
         rc = EXIT_ERROR
@@ -3469,7 +3532,7 @@ def self_check():
     # record variants, so the three declarations (variants, catalogue, SPEC
     # table) cannot drift apart.
     ldstart = spec.find("### 5.11 The limitation-disposition catalogue")
-    ldend = spec.find("## 6. Output formats")
+    ldend = spec.find("### 5.12")
     if ldstart < 0 or ldend < 0 or ldend <= ldstart:
         print("  FAIL: could not locate SPEC section 5.11")
         rc = EXIT_ERROR
@@ -3513,12 +3576,60 @@ def self_check():
                   "and pss.py agree; key set equals the limitations "
                   "variant codes" % len(code_rows))
 
+    # Collection declarations (SPEC 5.12, D17): the constant against the
+    # SPEC table, both directions, on collection name, authority and
+    # binding disposition (an empty binding cell in the table is a
+    # collection with no binding_disposition key).
+    cdstart = spec.find("### 5.12 Collection declarations")
+    cdend = spec.find("## 6. Output formats")
+    if cdstart < 0 or cdend < 0 or cdend <= cdstart:
+        print("  FAIL: could not locate SPEC section 5.12")
+        rc = EXIT_ERROR
+    else:
+        cdsection = spec[cdstart:cdend]
+        spec_cols = {}
+        for name, auth, bind in re.findall(
+                r'^\| `([a-z_]+)` \| `([a-z-]+)` \| (`[a-z-]+`|—) \|',
+                cdsection, re.M):
+            entry = {"authority": auth}
+            if bind != "—":
+                entry["binding_disposition"] = bind.strip("`")
+            spec_cols[name] = entry
+        cd_missing_in_code = sorted(set(spec_cols)
+                                    - set(COLLECTION_DECLARATIONS))
+        cd_missing_in_spec = sorted(set(COLLECTION_DECLARATIONS)
+                                    - set(spec_cols))
+        cd_disagrees = sorted(
+            n for n in set(spec_cols) & set(COLLECTION_DECLARATIONS)
+            if spec_cols[n] != COLLECTION_DECLARATIONS[n])
+        if cd_missing_in_code:
+            print("  FAIL: collection row in SPEC.md 5.12 but not in "
+                  "COLLECTION_DECLARATIONS: %s"
+                  % ", ".join(cd_missing_in_code))
+            rc = EXIT_ERROR
+        if cd_missing_in_spec:
+            print("  FAIL: collection in COLLECTION_DECLARATIONS but "
+                  "absent from SPEC.md 5.12: %s"
+                  % ", ".join(cd_missing_in_spec))
+            rc = EXIT_ERROR
+        if cd_disagrees:
+            print("  FAIL: collection declarations disagree between pss.py "
+                  "and SPEC.md 5.12: %s" % ", ".join(cd_disagrees))
+            rc = EXIT_ERROR
+        if not (cd_missing_in_code or cd_missing_in_spec or cd_disagrees):
+            print("  colls    : %d collection declarations, SPEC.md 5.12 "
+                  "and pss.py agree on authority and binding disposition"
+                  % len(COLLECTION_DECLARATIONS))
+
     # Identifier forms and collection join keys (SPEC 5.8), in both
     # directions, exactly as the catalogue and the axis vocabulary above. The
     # descriptor of SPEC 3.1 serialises these constants, so a drift here would
     # be published to callers as fact.
     kstart = spec.find("### 5.8 Identifier forms and collection join keys")
-    kend = spec.find("## 6. Output formats")
+    # End at the NEXT heading: an end anchor at "## 6" swallows every
+    # later 5.x table into this parser's range (latent until D17 added
+    # a table whose first column matches the join-key row shape).
+    kend = spec.find("### 5.9")
     fstart_5_8 = spec.find("#### Identifier forms", kstart) if kstart >= 0 else -1
     cstart_5_8 = spec.find("#### Collection join keys", kstart) if kstart >= 0 else -1
     if kstart < 0 or kend < 0 or fstart_5_8 < 0 or cstart_5_8 < 0 or not (

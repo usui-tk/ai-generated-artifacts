@@ -1819,6 +1819,52 @@ tool could do better lives in §12.8 and §13.2 as prose about the tool, not
 as facts about the surveyed script; the records only ever carry the other
 kinds.
 
+### 5.12 Collection declarations (normative)
+
+Every model carries a top-level **`collection_declarations`** block — always
+present, materialisation-invariant — with exactly one entry per record
+collection, stating how directly that collection's records were observed
+and, where the records assert an inter-symbol relation, what kind of claim
+that relation is. The §3.3 evaluation's verdict demoted the **whole model**
+to secondary evidence because directly-read and computed records were
+indistinguishable in the payload; this block lets a consumer weigh
+collections instead.
+
+| Collection | `authority` | `binding_disposition` | Basis |
+|---|---|---|---|
+| `symbols` | `observed` | — | declarations read directly off the token stream (§10.1); the hash triple is computed over the observed span (§10.2–10.4) |
+| `script_variables` | `observed` | — | sites read directly (§12.2); `rhs`/`rhs_refs` keys are enrichments documented in §12.9 |
+| `local_variables` | `observed` | — | sites read directly (§12.4) |
+| `string_interpolation_references` | `observed` | — | sites read directly inside expandable strings (§12.5) |
+| `soft_references` | `observed` | — | string matches read directly (§12.6); by definition never a binding claim |
+| `limitations` | `observed` | — | each record states a directly-read site or scan position; `PSS9007` entries derive from the identifier assignment (§5.2), the collection's one exception, recorded here |
+| `edges` | `derived` | `structural-candidate-not-runtime-binding-proof` | the §10.6 command-position walk joined against the symbol inventory |
+| `unresolved_named_commands` | `derived` | — | the same walk and join, negative side; asserts no relation, so it carries no binding disposition |
+| `closures` | `derived-from-derived` | `structural-candidate-not-runtime-binding-proof` | computed from `edges`, which are themselves derived |
+
+**`authority` is this tool's own basis, not native AST terms.** PSS reads a
+token stream (§1.1), so the vocabulary is `observed` (read directly off
+that stream), `derived` (computed from observed records), and
+`derived-from-derived` (computed from derived records again). The
+declaration states each collection's records' primary observation depth at
+collection granularity; per-key derivations inside a record (a
+`script_variables` record's `rhs_refs`, a symbol's hashes) are documented
+in their own sections and do not change the collection's classification.
+
+**`binding_disposition` puts §12.9's closing sentence in the payload.**
+Round 6 established that a fact derivable from the payload belongs in prose
+rather than the payload; this key is that principle's other edge — a
+consumer reads the payload and not this document, and the misuse the §3.3
+evaluation guarded against (treating structural call edges as proof of
+runtime binding) is exactly what a payload-level disposition forestalls. It
+appears on exactly the collections whose records assert an inter-symbol
+relation — `edges` and `closures` — and its single value is the claim's
+honest name: a structural candidate, never runtime-binding proof.
+`--self-check` holds this table against `pss.COLLECTION_DECLARATIONS` in
+both directions, on name, authority and binding disposition; the gate
+additionally holds the key set against the model's actual record
+collections, so a new collection cannot ship undeclared.
+
 ---
 
 ## 6. Output formats and consumer layers
@@ -2954,7 +3000,7 @@ detected — absent at the pin and on every corpus generation (all are clean;
 §5.10), so the presence gate reads it on the corrupted scan fixtures, which
 are retained as test assets for exactly this reason.
 
-Counts at the pinned blob: **170** paths at `all-axes`, **143** at the default
+Counts at the pinned blob: **191** paths at `all-axes`, **164** at the default
 materialisation. The difference of 27 is the 26 `axis` paths plus one
 data-dependent `optional` path (`/local_variables[]/rhs_refs/variables[]/id`)
 that can only materialise under `local-sites`. *(D16 correction: the previous
@@ -2976,6 +3022,27 @@ survived green. The figures above are re-measured with the gate's own
 | `/closures[]/transitive_callees` | axis |
 | `/closures[]/transitive_caller_count` | always |
 | `/closures[]/transitive_callers` | axis |
+| `/collection_declarations/closures/authority` | always |
+| `/collection_declarations/closures/binding_disposition` | always |
+| `/collection_declarations/closures` | always |
+| `/collection_declarations/edges/authority` | always |
+| `/collection_declarations/edges/binding_disposition` | always |
+| `/collection_declarations/edges` | always |
+| `/collection_declarations/limitations/authority` | always |
+| `/collection_declarations/limitations` | always |
+| `/collection_declarations/local_variables/authority` | always |
+| `/collection_declarations/local_variables` | always |
+| `/collection_declarations/script_variables/authority` | always |
+| `/collection_declarations/script_variables` | always |
+| `/collection_declarations/soft_references/authority` | always |
+| `/collection_declarations/soft_references` | always |
+| `/collection_declarations/string_interpolation_references/authority` | always |
+| `/collection_declarations/string_interpolation_references` | always |
+| `/collection_declarations/symbols/authority` | always |
+| `/collection_declarations/symbols` | always |
+| `/collection_declarations/unresolved_named_commands/authority` | always |
+| `/collection_declarations/unresolved_named_commands` | always |
+| `/collection_declarations` | always |
 | `/cost` | always |
 | `/cost/axis_increment` | always |
 | `/cost/axis_increment[]/axis` | always |

@@ -2361,6 +2361,60 @@ def check_limitation_dispositions_pin(model_def, model_all):
           "dispositions: block is materialisation-invariant")
 
 
+def run_collection_declaration_fixture():
+    """SPEC 5.12 (D17): the declarations on a fixture model, no corpus.
+
+    Red-first against the parent build (no block, no constant): getattr
+    sentinel, red by name, never a crash. The key set is held against the
+    model's ACTUAL record collections in both directions - a new
+    collection cannot ship undeclared, and a stale declaration cannot
+    outlive its collection.
+    """
+    decl = getattr(pss, "COLLECTION_DECLARATIONS", None)
+    check(isinstance(decl, dict) and len(decl) > 0,
+          "collections: pss.COLLECTION_DECLARATIONS is declared")
+    model = _scan_fixture_model("colls-fixture",
+                                "function Get-One { 'x' }\nGet-One\n")
+    block = model.get("collection_declarations")
+    check(isinstance(block, dict),
+          "collections: block present on every model",
+          "block: %r" % (block,))
+    if not isinstance(decl, dict) or not isinstance(block, dict):
+        return
+    eq(block, decl,
+       "collections: the emitted block equals the declared constant")
+    actual = sorted(k for k, v in model.items() if isinstance(v, list))
+    eq(sorted(decl), actual,
+       "collections: declaration keys equal the model's record "
+       "collections, both directions")
+    for name, entry in sorted(decl.items()):
+        check(entry.get("authority") in
+              ("observed", "derived", "derived-from-derived"),
+              "collections: %s authority is a declared vocabulary value"
+              % name, "authority: %r" % (entry.get("authority"),))
+    with_binding = sorted(n for n, e in decl.items()
+                          if "binding_disposition" in e)
+    eq(with_binding, ["closures", "edges"],
+       "collections: binding_disposition appears on exactly the "
+       "relation-asserting collections")
+    eq(sorted({e["binding_disposition"] for e in decl.values()
+               if "binding_disposition" in e}),
+       ["structural-candidate-not-runtime-binding-proof"],
+       "collections: the binding disposition is the single honest claim")
+
+
+def check_collection_declarations_pin(model_def, model_all):
+    """SPEC 5.12 pin half: present, invariant, equal to the constant."""
+    decl = getattr(pss, "COLLECTION_DECLARATIONS", "<undeclared>")
+    for label, m in (("default", model_def), ("all-axes", model_all)):
+        eq(m.get("collection_declarations"), decl,
+           "collections: pin %s block equals the constant" % label)
+    check(isinstance(model_def.get("collection_declarations"), dict)
+          and model_def.get("collection_declarations")
+          == model_all.get("collection_declarations"),
+          "collections: block is materialisation-invariant")
+
+
 def check_scan_pin(model_def, model_all):
     """The false-positive gate, pin half (SPEC 5.10; D16 design gate 3).
 
@@ -5226,6 +5280,7 @@ def main():
     run_call_site_fixtures()
     run_scan_fixtures()
     run_limitation_disposition_fixture()
+    run_collection_declaration_fixture()
 
     # Builds its own repositories, so it needs the `git` binary and not this
     # checkout (SPEC 14.3: a missing runtime degrades the gate, never the tool).
@@ -5319,6 +5374,7 @@ def main():
         # projection would be a contract about one materialisation only.
         check_scan_pin(model_def, model_all)
         check_limitation_dispositions_pin(model_def, model_all)
+        check_collection_declarations_pin(model_def, model_all)
 
         variant_models = {
             "pin-default": model_def,
