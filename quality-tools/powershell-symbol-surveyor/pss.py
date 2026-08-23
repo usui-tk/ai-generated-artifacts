@@ -38,7 +38,7 @@ import os
 import re
 import sys
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 MODEL_VERSION = "8"
 
 MIN_PYTHON = (3, 12)
@@ -3367,6 +3367,52 @@ def self_check():
         if not axis_missing_in_code and not axis_missing_in_spec:
             print("  axes     : %d in AXES, %d in SPEC.md section 5.6, agree"
                   % (len(code_axes), len(spec_axes)))
+
+    # Scan-check vocabulary (SPEC 5.10, D16): the SCAN_CHECKS dict against
+    # the SPEC 5.10 table, both directions, on name AND description - the
+    # EXIT_CODES discipline, because the description is what a reader acts
+    # on. The outcome vocabulary is also held: both declared constants must
+    # appear in the section, and the section must never contain a word that
+    # claims success (SPEC 1.1: PSS has no grammar, so "parsed" is a claim
+    # the tool is not entitled to make).
+    scstart = spec.find("### 5.10 The scan-outcome declaration")
+    scend = spec.find("## 6. Output formats")
+    if scstart < 0 or scend < 0 or scend <= scstart:
+        print("  FAIL: could not locate SPEC section 5.10")
+        rc = EXIT_ERROR
+    else:
+        scsection = spec[scstart:scend]
+        spec_checks = dict(re.findall(r'^\| `([a-z-]+)` \| (.+?) \|$',
+                                      scsection, re.M))
+        chk_missing_in_code = sorted(set(spec_checks) - set(SCAN_CHECKS))
+        chk_missing_in_spec = sorted(set(SCAN_CHECKS) - set(spec_checks))
+        chk_disagrees = sorted(
+            k for k in set(spec_checks) & set(SCAN_CHECKS)
+            if " ".join(spec_checks[k].split())
+            != " ".join(SCAN_CHECKS[k].split()))
+        if chk_missing_in_code:
+            print("  FAIL: scan check in SPEC.md 5.10 but not compiled into "
+                  "pss.py: %s" % ", ".join(chk_missing_in_code))
+            rc = EXIT_ERROR
+        if chk_missing_in_spec:
+            print("  FAIL: scan check compiled into pss.py but absent from "
+                  "SPEC.md 5.10: %s" % ", ".join(chk_missing_in_spec))
+            rc = EXIT_ERROR
+        if chk_disagrees:
+            print("  FAIL: scan check described differently in pss.py and "
+                  "SPEC.md 5.10: %s" % ", ".join(chk_disagrees))
+            rc = EXIT_ERROR
+        vocab_missing = [v for v in (SCAN_OUTCOME_CLEAN, SCAN_OUTCOME_FOUND)
+                         if "`%s`" % v not in scsection]
+        if vocab_missing:
+            print("  FAIL: outcome vocabulary absent from SPEC.md 5.10: %s"
+                  % ", ".join(vocab_missing))
+            rc = EXIT_ERROR
+        if not (chk_missing_in_code or chk_missing_in_spec or chk_disagrees
+                or vocab_missing):
+            print("  scan     : %d checks in SCAN_CHECKS, %d in SPEC.md "
+                  "section 5.10, agree on name and description; outcome "
+                  "vocabulary stated" % (len(SCAN_CHECKS), len(spec_checks)))
 
     # Identifier forms and collection join keys (SPEC 5.8), in both
     # directions, exactly as the catalogue and the axis vocabulary above. The

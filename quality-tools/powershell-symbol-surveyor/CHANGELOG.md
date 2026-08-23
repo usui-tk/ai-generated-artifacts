@@ -18,6 +18,70 @@ This file starts at `0.2.0`. Entries before it are reconstructed from the
 commit history and the SPEC's own decision records rather than written at the
 time, and are marked as such.
 
+## [0.8.0] - 2026-08-23 (`model_version` "7" -> "8"; the D16 arc)
+
+The scan-outcome arc: the two declared-but-unemittable codes (PSS9001,
+PSS9006 — SPEC 13.2, the §3.3 adoption-evaluation finding) given real emit
+paths, with the reachability of every declared code now gate-held.
+
+### Added
+- **The `scan` block** (SPEC 5.10): always present on every materialisation,
+  `{outcome, checks, anomalies}`, zero-valued on a clean scan — a key
+  appearing only on failure cannot be told apart from a tool that never
+  looked. Outcome vocabulary claims no success: `no-anomaly-detected` /
+  `anomalies-detected`. No new exit code. 66 bytes at the pin (0.006%).
+- **Six scan checks** over the tool's own token stream (unterminated
+  function body / declaration parameters / lexical region; brace / paren /
+  bracket imbalance), wired at the scanner's own silent-skip sites. Design
+  measurement, native `Parser::ParseFile()` as oracle: 146/147
+  native-rejected mutations detected (99.3%), zero false positives on 28
+  native-accepted mutations, 83 real files (3.89 MB) and all 230 corpus
+  generations. The single miss is a named class: a grammatical error that
+  leaves every delimiter balanced is structurally invisible to checks that
+  see termination and balance.
+- **PSS9001 emits**: one limitations record per anomaly, + `check`,
+  conditional `target` (absent on unterminated-lexical-region). Declared in
+  `MODEL_SCHEMA` (`/limitations[]/check`, optional) and as the
+  `scan-anomaly` record variant.
+- **PSS9006 emits** (SPEC 10.5): on an unreachable hash-triple combination
+  the comparator emits PSS9006 for that subject in place of a PSS7001
+  value, carrying the three per-hash equality booleans. Joined
+  `COMPARATOR_CODES` (sixteen shared codes, nineteen total); its tally
+  counts every hash-triple read as `examined`, so `emitted: 0` is a
+  measurement over a non-empty population.
+- **Gates**: ten corrupted scan fixtures retained as test assets; the pin
+  and cache-producer false-positive gates (a scan anomaly on a known-good
+  corpus generation refuses the cache); the one-direction native
+  differential (oracle version recorded per run); the emission-reachability
+  gate holding all 45 FACTS codes to a measured evidence class (22 pin /
+  3 fixture / 18 delta / 1 refusal / 1 diagnostic); `--self-check` holds
+  SPEC 5.10 against `SCAN_CHECKS` both directions, on name and description.
+
+### Fixed
+- **The hash-classification ladder** (SPEC 10.5, defect record there): the
+  shipped ladder tested coarsest-first, so a comment-only or string-only
+  pair classified `identical` and `comment-or-whitespace-only` /
+  `string-literal-only` were unreachable in shipped code — the same defect
+  class as pre-D16 PSS9001/PSS9006, inside PSS7001's own value enum, and
+  the mechanism behind the withdrawn B.7 aggregate (ADR 0036: zero of both
+  values in every re-measured window). Corrected to most-sensitive-first;
+  the four combinations violating the §10.5 implications now return the
+  PSS9006 fallback. Both middle values are fixture-held red-first.
+- **SPEC 13.3 path counts** had gone stale across D13–D15 (129/115 with an
+  incoherent difference note); re-measured with the gate's own derivation:
+  154 all-axes / 127 default, difference 27 = 26 axis + 1 data-dependent
+  optional path.
+
+### Changed
+- `MODEL_VERSION` "7" -> "8" (the SPEC 5.5 bundle: the always-present
+  `scan` block and the PSS9001 records move the model for a fixed input).
+  Every derived cache taken under "7" is expired; caches regenerate at "8".
+- Appendix B.8 restamped once for the bundle (model shape, digest); B.7
+  restamped for the PSS9006 tally row — the per-code figures are otherwise
+  unchanged on the adjudicated pair (PSS7001 split 359 equal /
+  6 code-changed, unmoved: the pair contains no comment-only or
+  string-only same-name change).
+
 ## [0.7.0] - 2026-08-22 (`model_version` "6" -> "7"; the D15 arc)
 
 The bundle survey round 6 adjudicated (SPEC 3.2/13.2): both round-5 walls,

@@ -45,7 +45,13 @@ reference — and every model states which axes it carries in its
 `materialization` block, so a narrower model can never pass as a full one.
 Every model also carries `model_version`, which advances whenever the model
 emitted for a fixed input can differ (§5.5); it is what decides whether two
-models are comparable at all.
+models are comparable at all. And every model carries a **`scan`** block
+(§5.10) — always present, zero-valued on a clean scan — stating what six
+termination-and-balance checks found over the tool's own token stream. The
+outcome vocabulary claims no success (`no-anomaly-detected`, never
+"parsed": PSS has no grammar), and an anomaly also emits a `PSS9001`
+limitation record per finding, so "nothing there" and "could not be read"
+are no longer the same silence.
 
 ---
 
