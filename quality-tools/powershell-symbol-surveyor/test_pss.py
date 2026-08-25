@@ -42,6 +42,7 @@ so - in a checkout that has none.
 """
 
 import argparse
+import ast
 import collections
 import gzip
 import hashlib
@@ -2677,6 +2678,323 @@ def check_emission_reachability(model_def, model_all):
               "reachability: the PSS9006 tally shows a non-empty examined "
               "population - the S4 zero is a measurement, not a vacuity",
               "tally: %r" % (tally,))
+
+
+# ---------------------------------------------------------------------------
+# SPEC 13.5 - enumerated-set bearing (D18)
+# ---------------------------------------------------------------------------
+
+# The generalisation of the D16 FACTS reachability discipline (SPEC 13.2,
+# Enumerated-constant reachability). Enumerating a capability the machinery
+# cannot exercise has failed twice in the same shape - four fact codes with no
+# emit path, and three assignment operators the tokenizer could not produce -
+# and both times every gate stayed green because the checks compared names
+# rather than behaviour. This section makes the discipline total: every
+# module-level enumerated constant is mechanically discovered from pss.py's own
+# syntax tree and must carry exactly one disposition below; the input-vocabulary
+# sets are then measured member-by-member in their own consumption bases.
+
+BEARING_FIXTURE_NAME = "bearing.ps1"
+
+# Drives every set member the pinned basis does not bear, so the beyond-corpus
+# register can be empty at D18. The fixture's claim is pss-scan-clean (checked
+# below), NOT native-parseable: a handful of KEYWORDS members are reserved or
+# edition-specific words (`define`, `from`, the workflow family) that PS 7
+# cannot write outside strings - which is exactly why the pin never bears them
+# - and this tool is grammarless by design (SPEC 1.3, 5.10), so its
+# classification branch must still run on them. Everything writable is written
+# as real PowerShell. The lone-CR line is deliberate: the character before a
+# `#` must be `\r` ITSELF to bear it - in a CRLF file the preceding character
+# is the `\n`.
+BEARING_FIXTURE = (
+    "using namespace System\n"
+    "function Invoke-BearingAutomatics {\n"
+    "    dynamicparam { }\n"
+    "    process {\n"
+    "        $sink = @(" + ", ".join(
+        "$" + _n for _n in (
+            "_ psitem true false null args input error matches myinvocation "
+            "pscmdlet psboundparameters pscommandpath psscriptroot pwd host "
+            "home profile lastexitcode pid psversiontable stacktrace this ofs "
+            "shellid executioncontext consolefilename nestedpromptlevel "
+            "psculture psuiculture psdebugcontext psemailserver pshome "
+            "psedition islinux ismacos iswindows iscoreclr foreach switch "
+            "sender eventargs event eventsubscriber verbosepreference "
+            "erroractionpreference warningpreference debugpreference "
+            "informationpreference progresspreference confirmpreference "
+            "whatifpreference outputencoding").split()) + ")\n"
+    "        [void]$sink\n"
+    "    }\n"
+    "}\n"
+    "workflow Invoke-BearingFlow {\n"
+    "    parallel {\n"
+    "        inlinescript { Get-Date }\n"
+    "    }\n"
+    "    sequence { Get-Date }\n"
+    "}\n"
+    "function Invoke-BearingBlocks {\n"
+    "    begin { $b = 0 }\n"
+    "    process { $b += 1 }\n"
+    "    end { $b }\n"
+    "}\n"
+    "class BearingType {\n"
+    "    hidden [int]$Depth\n"
+    "    static [int] Get() { return 1 }\n"
+    "}\n"
+    "enum BearingKind {\n"
+    "    One\n"
+    "}\n"
+    "filter Invoke-BearingFilter { $_ }\n"
+    "trap { continue }\n"
+    "do { $d = 1 } until ($true)\n"
+    "data BearingData { }\n"
+    "configuration BearingConfig { }\n"
+    "define\n"
+    "from\n"
+    "$a = 1\n"
+    "$a += 1\n"
+    "$a -= 1\n"
+    "$a *= 2\n"
+    "$a /= 2\n"
+    "$a %= 2\n"
+    "$a ??= 3\n"
+    "Get-Item . -OutVariable ov -ErrorVariable ev -WarningVariable wv "
+    "-InformationVariable iv -PipelineVariable pv | Out-Null\n"
+    "Get-Date && Get-Date\n"
+    "Get-Date || Get-Date\n"
+    "$c1 = 1 #c space\n"
+    "$c2 = 1\t#c tab\n"
+    "#c full-line (newline)\n"
+    "$cr = 1\r#c lone CR\n"
+    "$c3 = @(#c open-paren\n"
+    "1)\n"
+    "$c4 = (1)#c close-paren\n"
+    "$c5 = @{#c open-brace\n"
+    "}\n"
+    "if ($true) {}#c close-brace\n"
+    "$c6 = @(1,2)[#c open-bracket\n"
+    "0]\n"
+    "$c7 = @(1)[0]#c close-bracket\n"
+    "$c8 = 1;#c semicolon\n"
+    "Get-Date |#c pipe\n"
+    "Out-Null\n"
+    "$c9 = 1,#c comma\n"
+    "2\n"
+    "Get-Date &#c ampersand\n"
+    "$ca =#c equals\n"
+    "1\n"
+    "$cb = 1 +#c plus\n"
+    "2\n"
+)
+
+# Exactly one disposition per discovered constant. `bearing` = an input
+# vocabulary measured member-by-member below; `held-by:` names the existing
+# gate that already holds the constant against behaviour; `not-vocabulary:`
+# states why bearing does not apply. The table is held against the discovery
+# in BOTH directions, so a new enumerated constant cannot land undispositioned
+# and a dead entry cannot linger after its constant is retired.
+ENUMERATED_SET_DISPOSITIONS = {
+    # -- bearing-class: input vocabularies, measured in their own bases --
+    "KEYWORDS": "bearing",
+    "STATEMENT_KEYWORDS": "bearing",
+    "AUTOMATIC_VARIABLES": "bearing",
+    "_ASSIGN_OPS": "bearing",
+    "_OUTVAR_PARAMS": "bearing",
+    "_CMD_POS_OPS": "bearing",
+    "_COMMENT_OK_BEFORE": "bearing",
+    # -- held elsewhere: the named gate compares behaviour, not names --
+    "FACTS": "held-by: the emission-reachability gate (SPEC 13.2 Emission "
+             "coverage, D16)",
+    "SCAN_CHECKS": "held-by: --self-check's SPEC 5.10 both-direction "
+                   "comparison and the scan fixture battery (D16)",
+    "LIMITATION_DISPOSITIONS": "held-by: the SPEC 5.11 catalogue gates (D17)",
+    "COLLECTION_DECLARATIONS": "held-by: the SPEC 5.12 declaration gates "
+                               "(D17)",
+    "AXES": "held-by: projection invariance per axis and the descriptor "
+            "axes block",
+    "AXES_ALIAS": "held-by: the descriptor axes-alias resolution check "
+                  "(round 4)",
+    "GLOBAL_FLAGS": "held-by: the descriptor global-flag surface check "
+                    "(round 4)",
+    "MODEL_SCHEMA": "held-by: the declared-model-schema gates (ADR 0036; "
+                    "--self-check SPEC 13.3)",
+    "MODEL_SCHEMA_KINDS": "held-by: the declared-model-schema gates (path "
+                          "AND kind)",
+    "NULLABLE_PATHS": "held-by: the value-nullability gates (SPEC 13.3)",
+    "RECORD_VARIANTS": "held-by: the per-record presence gates (D11)",
+    "IDENTIFIER_FORMS": "held-by: the SPEC 5.8 identifier-form behaviour "
+                        "gates",
+    "COLLECTION_KEYS": "held-by: the SPEC 5.8 join-key gates",
+    "COLLECTION_KEY_FIELDS": "held-by: the SPEC 5.8 join-key gates",
+    "EXIT_CODES": "held-by: --self-check's SPEC 9 exit-code comparison",
+    "MACHINE_OUTPUTS": "held-by: the capability-descriptor block and "
+                       "mark-vs-behaviour checks",
+    "MACHINE_FORMATS": "held-by: the capability-descriptor block checks",
+    "MACHINE_OUTPUT_STATUSES": "held-by: the capability-descriptor "
+                               "mark-vs-behaviour checks",
+    "COMPARATOR_CODES": "held-by: the comparator surveyed-coverage property "
+                        "(SPEC 6.4)",
+    "SUCCESSION_CODES": "held-by: the comparator no-succession-code property "
+                        "(SPEC 6.4)",
+    "PSS7005_CLASSIFICATIONS": "held-by: the D10 declared-vs-emitted "
+                               "classification fixtures (SPEC 11.3)",
+    "_PSS7005_ROWS": "held-by: the D10 declared-vs-emitted classification "
+                     "fixtures (SPEC 11.3)",
+    "_PSS7005_CELL": "held-by: the D10 declared-vs-emitted classification "
+                     "fixtures (SPEC 11.3; derived zip of the two above)",
+    "PSS7006_CLASSIFICATIONS": "held-by: the D10 declared-vs-emitted "
+                               "classification fixtures (SPEC 11.4)",
+    "_PSS7006_ROWS": "held-by: the D10 declared-vs-emitted classification "
+                     "fixtures (SPEC 11.4)",
+    "_PSS7006_CELL": "held-by: the D10 declared-vs-emitted classification "
+                     "fixtures (SPEC 11.4; derived zip of the two above)",
+    "SLICE_PROJECTION": "held-by: the slice projection gates (SPEC 5.7, D11)",
+    "_SCOPED_COLLECTIONS": "held-by: the slice projection gates (SPEC 5.7, "
+                           "D11)",
+    # -- not a vocabulary --
+    "MIN_PYTHON": "not-vocabulary: a runtime version floor, not an input "
+                  "vocabulary",
+}
+
+# Members legitimately enumerated beyond what the measured inputs bear
+# (language completeness past the corpus). One key per bearing-class set, so
+# the register's coverage is itself explicit; a member listed here that IS
+# measured borne reddens as a stale registration. EMPTY at D18: the bearing
+# fixture supplies everything the pin does not.
+BEYOND_CORPUS = {
+    "KEYWORDS": frozenset(),
+    "STATEMENT_KEYWORDS": frozenset(),
+    "AUTOMATIC_VARIABLES": frozenset(),
+    "_ASSIGN_OPS": frozenset(),
+    "_OUTVAR_PARAMS": frozenset(),
+    "_CMD_POS_OPS": frozenset(),
+    "_COMMENT_OK_BEFORE": frozenset(),
+}
+
+
+def _discover_enumerated_constants():
+    """AST-discover pss.py's module-level enumerated constants.
+
+    A constant is enumerated when its module-level value is a dict / tuple /
+    list / set literal or a direct frozenset / set / tuple / list / dict call,
+    under an UPPER_CASE name. Scalars (version strings, exit integers) carry
+    no member set and are excluded by type; regexes are calls to an attribute
+    (re.compile) and fall outside the rule by construction. Reading the syntax
+    tree rather than dir(pss) is deliberate: it sees exactly what the file
+    declares, in the file-inventory gate's spirit.
+    """
+    tree = ast.parse(open(PSS, encoding="utf-8").read())
+    found = []
+    for node in tree.body:
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            continue
+        name = node.targets[0].id
+        if name != name.upper() or not any(c.isalpha() for c in name):
+            continue
+        value = node.value
+        if isinstance(value, (ast.Dict, ast.Tuple, ast.List, ast.Set)):
+            found.append(name)
+        elif (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+              and value.func.id in ("frozenset", "set", "tuple", "list",
+                                    "dict")):
+            found.append(name)
+    return found
+
+
+def _bearing_from_tokens(borne, src):
+    """Fold one source's token stream into the borne sets, each set observed
+    in its own consumption basis: word tokens (lower-cased) for the keyword
+    and parameter sets, op tokens for the operator sets, and the character
+    preceding each comment token for the comment-context set. Presence in
+    source text is NOT the evidence - the token must come out of the tool's
+    OWN tokenizer, because the historical failure was precisely members the
+    tokenizer could not produce."""
+    for tok in pss.tokenize(src):
+        if tok.kind == "word":
+            low = tok.text.lower()
+            if low in pss.KEYWORDS:
+                borne["KEYWORDS"].add(low)
+            if low in pss.STATEMENT_KEYWORDS:
+                borne["STATEMENT_KEYWORDS"].add(low)
+            if low in pss._OUTVAR_PARAMS:
+                borne["_OUTVAR_PARAMS"].add(low)
+        elif tok.kind == "op":
+            if tok.text in pss._ASSIGN_OPS:
+                borne["_ASSIGN_OPS"].add(tok.text)
+            if tok.text in pss._CMD_POS_OPS:
+                borne["_CMD_POS_OPS"].add(tok.text)
+        elif tok.kind == "comment":
+            if tok.start > 0 and src[tok.start - 1] in pss._COMMENT_OK_BEFORE:
+                borne["_COMMENT_OK_BEFORE"].add(src[tok.start - 1])
+
+
+def _note_automatic_records(borne, model):
+    """Automatic-variable bearing is read from emitted PSS2005 records - the
+    D16 rule that evidence is what the tool emits, never a name match over
+    the input."""
+    for coll in ("local_variables", "script_variables"):
+        for rec in model.get(coll, ()):
+            if rec.get("code") != "PSS2005":
+                continue
+            rid = rec.get("id", "")
+            if rid.startswith("variable:automatic/"):
+                borne["AUTOMATIC_VARIABLES"].add(rid.split("/", 1)[1])
+
+
+def check_enumerated_set_bearing(text, model_all):
+    """SPEC 13.5 - the disposition table held both directions against the
+    AST discovery, and every bearing-class member measured borne (or
+    registered beyond-corpus, the register itself measured) over the pinned
+    basis plus the bearing fixture. Sits in the blob-fed section: the pin is
+    half of the measured input (SPEC 14.3)."""
+    discovered = _discover_enumerated_constants()
+    eq(sorted(discovered), sorted(ENUMERATED_SET_DISPOSITIONS),
+       "bearing: every module-level enumerated constant is dispositioned, "
+       "both directions")
+
+    bad = [(n, d) for n, d in sorted(ENUMERATED_SET_DISPOSITIONS.items())
+           if d != "bearing" and not d.startswith("held-by: ")
+           and not d.startswith("not-vocabulary: ")]
+    eq(bad[:3], [],
+       "bearing: every disposition is bearing / held-by / not-vocabulary "
+       "(%d violations)" % len(bad))
+
+    bearing_sets = sorted(n for n, d in ENUMERATED_SET_DISPOSITIONS.items()
+                          if d == "bearing")
+    eq(sorted(BEYOND_CORPUS), bearing_sets,
+       "bearing: the beyond-corpus register covers exactly the bearing-class "
+       "sets")
+
+    fixture_model = pss.Survey(BEARING_FIXTURE_NAME, BEARING_FIXTURE,
+                               axes=set(pss.AXES)).run().model()
+    scan = fixture_model.get("scan", {})
+    check(scan.get("outcome") == "no-anomaly-detected"
+          and scan.get("anomalies") == 0,
+          "bearing: the bearing fixture is scan-clean - its measurements "
+          "stand on a fully-read source",
+          "scan: %r" % (scan,))
+
+    borne = {name: set() for name in bearing_sets}
+    _bearing_from_tokens(borne, text)
+    _bearing_from_tokens(borne, BEARING_FIXTURE)
+    _note_automatic_records(borne, model_all)
+    _note_automatic_records(borne, fixture_model)
+
+    for name in bearing_sets:
+        members = set(getattr(pss, name))
+        beyond = BEYOND_CORPUS[name]
+        unaccounted = sorted(members - borne[name] - beyond)
+        check(not unaccounted,
+              "bearing: every %s member is borne or registered beyond-corpus"
+              % name,
+              "%d unaccounted, first: %s" % (len(unaccounted),
+                                             unaccounted[:3]))
+        stale = sorted(borne[name] & beyond)
+        check(not stale,
+              "bearing: no %s beyond-corpus registration is stale" % name,
+              "%d registered yet measured borne, first: %s"
+              % (len(stale), stale[:3]))
 
 
 def load_delta_baseline():
@@ -5418,6 +5736,8 @@ def main():
         check_channel_agreement(model_all)
 
         check_emission_reachability(model_def, model_all)
+
+        check_enumerated_set_bearing(text, model_all)
 
         if args.pwsh and os.path.exists(args.pwsh):
             run_differential(args.pwsh, text, measured)

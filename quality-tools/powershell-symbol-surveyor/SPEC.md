@@ -2942,7 +2942,7 @@ should not assume any of these are currently enforced.
 | Emission coverage | every code in §4 blocks 1-4 (survey-emittable) appears as a `code` or `facts` value on at least one record somewhere in the regression corpus's models, or is documented as data-dependent-absent (e.g. `PSS1005` legitimately does not fire on a corpus with zero duplicate names). **The block-1-4 scope is itself the finding of 2026-08-23 (§3.3): block 9 is excluded, and block 9 is where the two codes with no emit path at all turned out to live** — measured over `pss.py`, `PSS9001` and `PSS9006` occur nowhere outside the `FACTS` catalogue. `PSS9006`'s case is the sharper one: §10.5 says the tool emits it rather than an out-of-enum value, and the S4 "Reachability" row below asserts its corpus count is zero — an assertion that is **vacuously true of a code that cannot be emitted**, so the gate reads as evidence while measuring nothing. Widening this row's scope to every declared code, and requiring each to be either emitted, held by fixture, or declared unreachable-by-construction with the declaration itself gate-held, is the second half of the D16 candidate below | `PSS2005`, `PSS4001`, `PSS4002` closed by manual audit. `PSS2002` closed for all five §12.2 sources at the D10 arc — each source is held red-first by a §13.1 fixture, which is stronger than corpus presence. **closed (widened) — landed at the D16 arc (C2)**: the emission-reachability gate holds every FACTS code to a measured evidence class (22 pin / 3 fixture / 18 delta / 1 refusal / 1 diagnostic), both directions against the catalogue, with evidence read from emitted records only (a tally key or prose never counts). PSS9006's path exposed and fixed the inverted classification ladder on the way in (§10.5 defect record) |
 | Declared model schema | **RESOLVED (ADR 0036).** §13.3 declares the path set (counts stated there, per materialisation) and `pss.MODEL_SCHEMA` carries it; `--self-check` holds the two together on path *and* kind, and `test_pss.py` holds the declaration against the pin in both directions. The pairing with the §3.1 descriptor is satisfied by the declaration living in the code, so `--capabilities` can serialise it rather than restate it | closed |
 | Version-decision enforcement | **RESOLVED (ADR 0036).** The parent commit's build is re-derived and compared; a model that moved without the version advancing is a failure. Measured against real history the check reddens at `44b97d1` (shape moved) and at `bc69c27` (shape identical, values moved) | closed |
-| Enumerated-constant reachability | **the generalisation of the row above.** Every constant this tool enumerates — fact codes, the assignment-operator set, the automatic-variable set, the axis vocabulary — is demonstrably reachable: some input drives it, or it is documented as data-dependent-absent. Enumerating a capability the machinery cannot exercise has now failed twice in the same shape — four fact codes defined and never emitted, and three assignment operators the tokenizer could not produce (§12.2) — and both times every gate stayed green because the check compared *names* rather than *behaviour*. `test_pss.py`'s fixtures cover the operator set; the fact catalogue and the automatic-variable set are not yet covered | S4 |
+| Enumerated-constant reachability | **the generalisation of the row above.** Every constant this tool enumerates — fact codes, the assignment-operator set, the automatic-variable set, the axis vocabulary — is demonstrably reachable: some input drives it, or it is documented as data-dependent-absent. Enumerating a capability the machinery cannot exercise has now failed twice in the same shape — four fact codes defined and never emitted, and three assignment operators the tokenizer could not produce (§12.2) — and both times every gate stayed green because the check compared *names* rather than *behaviour*. `test_pss.py`'s fixtures cover the operator set; the fact catalogue and the automatic-variable set are not yet covered | **closed — landed at the D18 arc** (§13.5): every module-level enumerated constant is AST-discovered and dispositioned `bearing` / `held-by` / `not-vocabulary`, the table held against the discovery both directions; the seven input-vocabulary sets measured member-by-member in their own consumption bases (tokens from the tool's own tokenizer for the operator and keyword sets, emitted `PSS2005` records for the automatic-variable set) over the pin plus a dedicated bearing fixture; the beyond-corpus register gate-held both directions and **empty at landing** — the fixture bears the 67 members the pin does not, `&&` and `||` among them. Docs+gate only: `model_version` and `pss_version` unmoved, no restamp |
 
 Registration as a whole-tool unit sets `tested = true` on the basis of the
 §13.1 self-test being green, not on the canon behavioural suite — and not on
@@ -3353,6 +3353,79 @@ following latest safe.
 A new entry is appended in the same change that resolves or pins its
 divergence, so the ledger and the gates cannot drift apart; ids are
 allocation-ordered and never reused.
+
+
+### 13.5 Enumerated-set bearing (normative)
+
+The generalisation of the D16 reachability discipline from the fact catalogue
+to **every** enumerated constant. Enumerating a capability the machinery
+cannot exercise has failed twice in the same shape — four fact codes defined
+and never emitted, and three assignment operators the tokenizer could not
+produce — and both times every gate stayed green because the checks compared
+*names* rather than *behaviour*. This section closes the class rather than
+the instances.
+
+**Discovery is mechanical.** The gate reads `pss.py`'s own syntax tree and
+enumerates every module-level UPPER-case constant whose value is a
+collection (a dict / tuple / list / set literal, or a direct `frozenset` /
+`set` / `tuple` / `list` / `dict` call). Scalars carry no member set and are
+excluded by type; regexes are calls to an attribute and fall outside the
+rule by construction. A new enumerated constant therefore cannot land
+undispositioned — the same file-inventory principle applied to the file's
+constants.
+
+**Every discovered constant carries exactly one disposition**, and the
+disposition table is held against the discovery in both directions:
+
+- **`bearing`** — an input vocabulary, measured member-by-member below.
+  At D18 these are the seven extraction-side sets: `KEYWORDS`,
+  `STATEMENT_KEYWORDS`, `AUTOMATIC_VARIABLES`, `_ASSIGN_OPS`,
+  `_OUTVAR_PARAMS`, `_CMD_POS_OPS` and `_COMMENT_OK_BEFORE`.
+- **`held-by: <gate>`** — the constant is already held against behaviour by
+  a named existing gate (the fact catalogue by the emission-reachability
+  gate, the model schema by the declared-schema gates, the classification
+  vocabularies by the D10 fixtures, and so on). The disposition names the
+  gate so the claim is checkable by a reader.
+- **`not-vocabulary: <reason>`** — bearing does not apply and the reason is
+  stated (`MIN_PYTHON` is a runtime version floor, not a vocabulary).
+
+**Bearing is measured in each set's own consumption basis**, over the pinned
+basis plus a dedicated bearing fixture. Presence in source text is *not*
+evidence: the token must come out of the tool's **own** tokenizer, because
+the historical failure was precisely members the tokenizer could not
+produce. The bases: word tokens (lower-cased) for the keyword and parameter
+sets; op tokens for the operator sets; the character preceding each comment
+token for `_COMMENT_OK_BEFORE`; and, for `AUTOMATIC_VARIABLES`, **emitted
+`PSS2005` records** rather than tokens — evidence is what the tool emits,
+the D16 rule. Measured before the design was fixed: every `_ASSIGN_OPS` and
+`_CMD_POS_OPS` member is tokenizer-producible, the PowerShell-7 chain
+operators `&&` and `||` among them — no dead member exists in shipped code.
+
+**The beyond-corpus register.** A member may be legitimately enumerated
+beyond what the measured inputs bear (language completeness past the
+corpus). Such a member must be registered, one register key per
+bearing-class set, and the register is itself measured in both directions: an
+unborne member absent from the register reddens, and a registered member
+that *is* measured borne reddens as a stale registration. **At D18 the
+register is empty** — the bearing fixture supplies the 67 members the pinned
+basis does not (37 automatic variables, 16 keywords, 6 command-position
+operators, 3 compound assignment operators, all 5 output-variable
+parameters, and 13 comment-context characters).
+
+**The bearing fixture's claim is scan-clean, not native-parseable** — and
+the gate checks the scan outcome, because bearing measured over a partially
+read source would stand on nothing. A handful of `KEYWORDS` members are
+reserved or edition-specific words (`define`, `from`, the workflow family)
+that PowerShell 7 cannot write outside strings — which is exactly why the
+pin never bears them — and this tool is grammarless by design (§1.3, §5.10),
+so its classification branch must still run on them; everything natively
+writable is written as real PowerShell.
+
+**Claim limits.** Bearing says a member is exercised by some measured input.
+It does not claim the member's *handling* is correct — that is the fixture
+batteries' job — and it makes no completeness claim about the vocabulary
+against the language, which is the same limit §5.10 states for the scan
+checks and §13.1 states for the neutral-naming denylist.
 
 
 ## 14. Test-data acquisition

@@ -18,6 +18,31 @@ This file starts at `0.2.0`. Entries before it are reconstructed from the
 commit history and the SPEC's own decision records rather than written at the
 time, and are marked as such.
 
+## [Unreleased] - the D18 arc (gate + SPEC only; `pss_version` 0.9.0 and `model_version` "9" unmoved)
+
+No `pss.py` change: the build and the model contract are exactly 0.9.0 /
+"9", every "9"-generation derived cache stays valid, and Appendix B.7/B.8
+are unmoved. To be folded into the next released version's entry.
+
+### Added
+
+- **SPEC §13.5 enumerated-set bearing (normative)** — the D16 reachability
+  discipline generalised from the fact catalogue to every enumerated
+  constant. `test_pss.py` AST-discovers every module-level enumerated
+  constant in `pss.py` and holds a disposition table against the discovery
+  in both directions (`bearing` / `held-by: <gate>` / `not-vocabulary:
+  <reason>`); the seven input-vocabulary sets are measured member-by-member
+  in their own consumption bases — tokens from the tool's own tokenizer for
+  the operator and keyword sets, emitted `PSS2005` records for the
+  automatic-variable set — over the pinned basis plus a dedicated bearing
+  fixture; the beyond-corpus register is gate-held in both directions and
+  empty at landing (the fixture bears the 67 members the pin does not,
+  `&&` and `||` among them). SPEC §13.2's Enumerated-constant reachability
+  row closes. Four defect classes demonstrated red against the shipped
+  build: a fabricated unborne member, a stale beyond-corpus registration,
+  an undispositioned new constant, and a disposition outside the
+  vocabulary.
+
 ## [0.9.0] - 2026-08-23 (`model_version` "8" -> "9"; the D17 arc)
 
 The adoption-contract arc: the three model-moving rows and the ledger row
