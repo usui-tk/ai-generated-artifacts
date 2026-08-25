@@ -43,6 +43,14 @@ are unmoved. To be folded into the next released version's entry.
   an undispositioned new constant, and a disposition outside the
   vocabulary.
 
+### Changed
+
+- **SPEC §13.2** — a new inventoried row formalises the entry-context
+  reachability / extent-granularity carryover from the §3.3 adoption
+  evaluation, so this document (not a session slot) is its carrier; blocked
+  on the evaluating analyser's own EntryContext and extent-granularity
+  definitions, to be obtained at the next adoption-evaluation dialogue.
+
 ## [0.9.0] - 2026-08-23 (`model_version` "8" -> "9"; the D17 arc)
 
 The adoption-contract arc: the three model-moving rows and the ledger row
