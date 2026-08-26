@@ -55,6 +55,15 @@ are unmoved. To be folded into the next released version's entry.
   `PSS4003` -> `PSS3001` join (26 orphans, 17 named-by-literal, 17/17
   joining on the pin).
 
+- **Clause-3 identity re-supply emission (D19)** — `--emit-baseline-digest`
+  additionally prints the build identity (`repo_commit`, the running
+  `pss_py_blob`), the axes vocabulary, the scan check count, and the
+  corpus generation count; additive keys only, appended outside
+  `identity_document`, so cache headers keep their exact shape and every
+  "9"-generation cache stays valid. Every `--pwsh` battery run now stamps
+  the native oracle's identity (version / edition / platform) per run —
+  the clause-1 recording duty made contractual.
+
 ### Changed
 
 - **SPEC §13.2** — a new inventoried row formalises the entry-context

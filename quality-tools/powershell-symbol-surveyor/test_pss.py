@@ -416,12 +416,42 @@ def identity_document(root, baseline):
 
 
 def emit_baseline_digest(baseline):
-    """Print the SPEC 14.4 cache-header identity for this build, or fail."""
+    """Print the SPEC 14.4 cache-header identity for this build, or fail.
+
+    Round 7 (SPEC 3.3, clause 3): beyond the cache-header identity, the
+    printed document carries the re-supply fields the adopting analysers
+    require on every identity move - the build identity (repository commit
+    and the running ``pss.py`` blob), the axes vocabulary, the scan check
+    count, and the corpus generation count standing behind the FP=0 claim.
+    Additive keys ONLY, appended here and never in ``identity_document``:
+    cache headers keep the exact ``identity_document`` shape, so every
+    existing "9"-generation cache stays valid. The native-oracle identity is
+    deliberately absent - it is a per-run stamped value (printed by every
+    ``--pwsh`` battery run), not a build constant.
+    """
     root = repo_root()
     if not root:
         print(json.dumps({"error": "git-unavailable"}), file=sys.stderr)
         return 2
-    print(canonical_json(identity_document(root, baseline)))
+    doc = dict(identity_document(root, baseline))
+    head = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True,
+                          cwd=root).stdout.decode("ascii", "replace").strip()
+    blob = subprocess.run(["git", "hash-object",
+                           os.path.join(HERE, "pss.py")],
+                          capture_output=True,
+                          cwd=root).stdout.decode("ascii", "replace").strip()
+    doc["build"] = {"repo_commit": head or None, "pss_py_blob": blob or None}
+    doc["axes"] = sorted(pss.AXES)
+    doc["scan_checks"] = pss.Survey(
+        "probe.ps1", "1\n").run().model()["scan"]["checks"]
+    generations = 0
+    corpus_dir = os.path.join(HERE, "corpus")
+    for name in sorted(os.listdir(corpus_dir)):
+        if name.endswith(".json"):
+            with open(os.path.join(corpus_dir, name), encoding="utf-8") as fh:
+                generations += len(json.load(fh)["generations"])
+    doc["corpus_generations"] = generations
+    print(canonical_json(doc))
     return 0
 
 
@@ -5740,6 +5770,13 @@ def main():
         check_enumerated_set_bearing(text, model_all)
 
         if args.pwsh and os.path.exists(args.pwsh):
+            oracle = subprocess.run(
+                [args.pwsh, "-NoProfile", "-Command",
+                 "$v = $PSVersionTable; "
+                 "'{0} {1} {2}' -f $v.PSVersion, $v.PSEdition, $v.Platform"],
+                capture_output=True).stdout.decode("utf-8", "replace").strip()
+            print("-- native oracle: %s (stamped per run; SPEC 3.3 clause 1,"
+                  " round 7) --" % (oracle or "unidentified"))
             run_differential(args.pwsh, text, measured)
             run_scan_differential(args.pwsh)
         else:
