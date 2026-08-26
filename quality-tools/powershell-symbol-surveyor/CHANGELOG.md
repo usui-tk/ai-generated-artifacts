@@ -18,7 +18,7 @@ This file starts at `0.2.0`. Entries before it are reconstructed from the
 commit history and the SPEC's own decision records rather than written at the
 time, and are marked as such.
 
-## [Unreleased] - the D18 arc (gate + SPEC only; `pss_version` 0.9.0 and `model_version` "9" unmoved)
+## [Unreleased] - the D18 and D19 arcs (gate + SPEC only; `pss_version` 0.9.0 and `model_version` "9" unmoved)
 
 No `pss.py` change: the build and the model contract are exactly 0.9.0 /
 "9", every "9"-generation derived cache stays valid, and Appendix B.7/B.8
@@ -42,6 +42,18 @@ are unmoved. To be folded into the next released version's entry.
   build: a fabricated unborne member, a stale beyond-corpus registration,
   an undispositioned new constant, and a disposition outside the
   vocabulary.
+
+- **SPEC §3.3 Round 7 amendment (D19)** — the clause-1 relaxation
+  adjudicated accept-with-conditions by two independent evaluating
+  analysers; the accepted clause-1 text and the clause-3 identity-re-supply
+  list are recorded verbatim in §3.3, which is the committed carrier (the
+  round documents are deliberately not committed). SPEC §13.2's
+  entry-context reachability / extent-granularity row closes as
+  **already-covered**, carrying the evaluator definitions (EntryContext =
+  consumer-owned (E, R); function-level extent = id + lines; byte spans
+  never raw-compared to native character offsets) and the verified
+  `PSS4003` -> `PSS3001` join (26 orphans, 17 named-by-literal, 17/17
+  joining on the pin).
 
 ### Changed
 

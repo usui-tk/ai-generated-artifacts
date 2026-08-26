@@ -813,6 +813,54 @@ only by reading this document rather than the model is. Four rows enter
 §13.2 from this evaluation, one for the defect and three for what the
 evaluating analyser does that this model does not.
 
+**Round 7 amendment (2026-08-26).** The clause-1 relaxation this stream
+proposed after D16 was adjudicated by two independent evaluating analysers,
+both responding against the same repository point, both reproducing the
+§14.4 identity bit-exactly, and both re-measuring the D16 evidence they
+relied on. Both returned accept-with-conditions, and the conditions
+converge. The round documents are deliberately not committed, so this
+section is the committed carrier of the accepted clause texts (a process
+addition both evaluators endorsed: contract clause texts travel verbatim,
+and the SPEC carries the standing form).
+
+> **Clause 1 (accepted form, Round 7).** `scan.outcome ==
+> "no-anomaly-detected"` is a mandatory precondition for any consumption of
+> a surveyed model, and is read from the same emitted model that is
+> consumed — never from a separate run over what is assumed to be the same
+> source. Grammar-error-class coverage — native parsing under the
+> consumer's target edition — is **required by default** for any
+> consumption that makes a grammar-validity, inventory-completeness,
+> refactoring-safety, reachability-completeness, qualification, or
+> merge-readiness claim. A consumer relying on `scan.outcome` alone must
+> record that opt-out in the document that records the consumption, quoting
+> this SPEC's own limit (§5.10: the checks see termination and balance; a
+> grammatical error that leaves every delimiter balanced is structurally
+> invisible to them), and the result is labelled supplementary /
+> provisional. PSS remains supplementary evidence, not the analysis
+> authority. The one-direction scan differential is re-measured whenever
+> the scanner's check set, check count, or tokenizer moves, with the native
+> oracle's identity (version / edition / platform) stamped per differential
+> run; any newly observed miss class lands in the §13.4 ledger before the
+> relaxed clause continues to be relied on. The relaxation covers `survey`
+> consumption; `compare` / `trace` consumption inherits it per input model.
+
+Evaluator-context instances recorded with the clause: the
+update-windows-server-iso adoption keeps native-first — its Stage-2 Windows
+PowerShell 5.1 `ParseFile` zero-error gate — for its own governed claims,
+an instance of the default polarity above, not an exception to it; and per
+the same evaluator, a PowerShell 7 parse cannot substitute for a 5.1
+edition gate where 5.1 compatibility is the claim.
+
+> **Clause 3 (identity re-supply, Round 7).** On every identity move PSS
+> re-supplies, beyond `pss_version` / `model_version` / `baseline_digest`:
+> both model-shape fingerprints, the full basis tuple (corpus entry,
+> generation index, blob, revision), the build identity (repository commit
+> and the running `pss.py` blob), the axes vocabulary, the scan check
+> count, and the corpus generation count standing behind the FP=0 claim.
+> `--emit-baseline-digest` prints all of these; the native-oracle identity
+> is deliberately a per-run stamped value — printed by every `--pwsh`
+> battery run — not a build constant.
+
 
 ## 4. Fact specifications
 
@@ -2943,7 +2991,7 @@ should not assume any of these are currently enforced.
 | Declared model schema | **RESOLVED (ADR 0036).** §13.3 declares the path set (counts stated there, per materialisation) and `pss.MODEL_SCHEMA` carries it; `--self-check` holds the two together on path *and* kind, and `test_pss.py` holds the declaration against the pin in both directions. The pairing with the §3.1 descriptor is satisfied by the declaration living in the code, so `--capabilities` can serialise it rather than restate it | closed |
 | Version-decision enforcement | **RESOLVED (ADR 0036).** The parent commit's build is re-derived and compared; a model that moved without the version advancing is a failure. Measured against real history the check reddens at `44b97d1` (shape moved) and at `bc69c27` (shape identical, values moved) | closed |
 | Enumerated-constant reachability | **the generalisation of the row above.** Every constant this tool enumerates — fact codes, the assignment-operator set, the automatic-variable set, the axis vocabulary — is demonstrably reachable: some input drives it, or it is documented as data-dependent-absent. Enumerating a capability the machinery cannot exercise has now failed twice in the same shape — four fact codes defined and never emitted, and three assignment operators the tokenizer could not produce (§12.2) — and both times every gate stayed green because the check compared *names* rather than *behaviour*. `test_pss.py`'s fixtures cover the operator set; the fact catalogue and the automatic-variable set are not yet covered | **closed — landed at the D18 arc** (§13.5): every module-level enumerated constant is AST-discovered and dispositioned `bearing` / `held-by` / `not-vocabulary`, the table held against the discovery both directions; the seven input-vocabulary sets measured member-by-member in their own consumption bases (tokens from the tool's own tokenizer for the operator and keyword sets, emitted `PSS2005` records for the automatic-variable set) over the pin plus a dedicated bearing fixture; the beyond-corpus register gate-held both directions and **empty at landing** — the fixture bears the 67 members the pin does not, `&&` and `||` among them. Docs+gate only: `model_version` and `pss_version` unmoved, no restamp |
-| Entry-context reachability / extent granularity | Carried since the §3.3 adoption evaluation as a session-slot title only; formalised here so this document is the carrier. What is on file: the evaluation named reachability from a dynamically-resolved entry among the boundaries PSS cannot settle alone (§3.3; declared at §12.8), and the PSS-side neighbours exist — a closures record's `transitive_callers` makes reachability-from-`<script>` a per-record derivation, `PSS4003` states the no-static-caller fact with its `named_by_literal` qualifier, and §5.11 classifies the dynamic-target limitations. What is NOT on file: the evaluating analyser's own EntryContext and extent-granularity definitions — without them the item can neither be designed against nor honestly closed as already-covered. Prerequisite: obtain those definitions at the next adoption-evaluation dialogue | inventoried (carryover formalised at D18; blocked on the evaluation-side definitions) |
+| Entry-context reachability / extent granularity | Carried since the §3.3 adoption evaluation as a session-slot title only; formalised here so this document is the carrier. What is on file: the evaluation named reachability from a dynamically-resolved entry among the boundaries PSS cannot settle alone (§3.3; declared at §12.8), and the PSS-side neighbours exist — a closures record's `transitive_callers` makes reachability-from-`<script>` a per-record derivation, `PSS4003` states the no-static-caller fact with its `named_by_literal` qualifier, and §5.11 classifies the dynamic-target limitations. What is NOT on file: the evaluating analyser's own EntryContext and extent-granularity definitions — without them the item can neither be designed against nor honestly closed as already-covered. Prerequisite: obtain those definitions at the next adoption-evaluation dialogue | **closed — adjudicated already-covered at Round 7 (D19)**: both evaluating analysers supplied their definitions and independently adjudicated coverage; the round documents are not committed, so this row carries the substance. EntryContext is consumer-owned — an entry-point set E and an edge relation R: E = `<script>` ∪ D, where D (dynamically-resolved entries) exists only where consumer-side runtime/config evidence resolves a name to exactly one function id — `named_by_literal` is a candidate signal, not a resolution, and creates no entry; R = static call edges only (`edges[]`), with data-flow / event / import relations separately typed, never folded in. Extent: reachability adjudication is function-level — id plus `start_line`/`end_line`, which `symbols[]` already carries; byte spans (§5.6, encoded-source offsets) are the exact site address and are never raw-compared against native `IScriptExtent` character offsets (explicit conversion against the same bytes and declared encoding — the D14 mis-addressing class, stated so it is not rebuilt in reverse by a consumer of both models). Coverage: `<script>`-reachability is a per-record derivation (`<script>` ∈ `transitive_callers`); the D candidate signal is `PSS4003` + `named_by_literal`, whose evidence sites join to `PSS3001` records by a single id equality (verified on the pin at Round 7: 26 orphans, 17 named-by-literal, 17/17 joining); membership of D itself is consumer-side evidence — the §5.11 dispositions state that boundary in the record payloads, and the division of labour is agreed on the record: determining D is not this tool's to model (§1.3). No new model element is required; one evaluator expressly recommends against itemising literal sites on the `PSS4003` record (a single-join duplication of records the model already carries) |
 
 Registration as a whole-tool unit sets `tested = true` on the basis of the
 §13.1 self-test being green, not on the canon behavioural suite — and not on
