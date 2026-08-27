@@ -2833,6 +2833,10 @@ ENUMERATED_SET_DISPOSITIONS = {
     "_CMD_POS_OPS": "bearing",
     "_COMMENT_OK_BEFORE": "bearing",
     # -- held elsewhere: the named gate compares behaviour, not names --
+    "_ACCESS_KINDS": "held-by: the access fixture battery (every value on "
+                     "its bearing shape, SPEC 12.10) and the pin population "
+                     "check (every emitted value in the vocabulary, all "
+                     "values borne) (D21)",
     "FACTS": "held-by: the emission-reachability gate (SPEC 13.2 Emission "
              "coverage, D16)",
     "SCAN_CHECKS": "held-by: --self-check's SPEC 5.10 both-direction "
@@ -5779,6 +5783,120 @@ def check_consumption_derivations(model_all):
           "as the section warns")
 
 
+def run_access_fixture():
+    """SPEC 12.10: the access chain, held by shape against a bearing fixture.
+
+    Every claim the section makes is asserted here: the three values on
+    their bearing shapes, byte-adjacency, the chain walk (member after
+    index, member after member), the mid-chain invocation stop, the
+    no-claim cases (plain member read, dynamic member name), and role
+    staying `read` on every access-bearing record - the key refines the
+    role, it never replaces it.
+    """
+    src = (
+        "$Script:Buf = [System.Collections.ArrayList]@()\n"
+        "$Script:Reg = @{}\n"
+        "$Script:Buf.Add(1) | Out-Null\n"           # L3 member-invocation
+        "$Script:Reg['k'] = 1\n"                    # L4 element-assignment
+        "$Script:Reg['k'] += 1\n"                   # L5 element-assignment
+        "$local = @{}\n"
+        "$local.Prop = 2\n"                         # L7 member-assignment
+        "$local.A.B = 3\n"                          # L8 member chain
+        "$Script:Reg[0].End = 4\n"                  # L9 index-then-member
+        "$local.Get(3)\n"                           # L10 invocation ends chain
+        "$n = $local.Count\n"                       # L11 plain read: no key
+        "$obj = @{}\n"
+        "$name = 'X'\n"
+        "$obj.$name = 5\n"                          # L14 dynamic member: no claim
+    )
+    model = pss.Survey("access.ps1", src, axes=ALL_AXES).run().model()
+    eq(model["scan"]["anomalies"], 0, "access fixture: scan-clean")
+    refs = [r for r in model["script_variables"]
+            if r.get("record") == "reference"] \
+        + [r for r in model["local_variables"]
+           if r.get("record") == "reference"]
+
+    def at(line, name):
+        rec = [r for r in refs if r["line"] == line
+               and r["name"].lower() == name.lower()]
+        eq(len(rec), 1, "access fixture: one reference at L%d $%s"
+           % (line, name))
+        return rec[0] if rec else {}
+
+    eq(at(3, "Buf").get("access"), "member-invocation",
+       "access fixture: member invocation bears member-invocation")
+    eq(at(4, "Reg").get("access"), "element-assignment",
+       "access fixture: index left-hand side bears element-assignment")
+    eq(at(5, "Reg").get("access"), "element-assignment",
+       "access fixture: compound assignment through an index bears "
+       "element-assignment")
+    eq(at(7, "local").get("access"), "member-assignment",
+       "access fixture: property left-hand side bears member-assignment")
+    eq(at(8, "local").get("access"), "member-assignment",
+       "access fixture: a member chain classifies by its last segment")
+    eq(at(9, "Reg").get("access"), "member-assignment",
+       "access fixture: index-then-member classifies by the member")
+    eq(at(10, "local").get("access"), "member-invocation",
+       "access fixture: an invocation terminates the chain")
+    check("access" not in at(11, "local"),
+          "access fixture: a plain member read carries no key")
+    check("access" not in at(14, "obj"),
+          "access fixture: a dynamic member name is no claim")
+    check("access" not in at(14, "name"),
+          "access fixture: the member-name variable carries no key")
+    bearing = [r for r in refs if "access" in r]
+    check(all(r["role"] == "read" for r in bearing),
+          "access fixture: role stays read on every access-bearing record",
+          "violating: %s" % [(r["line"], r["name"], r["role"])
+                             for r in bearing if r["role"] != "read"][:3])
+    eq(sorted({r["access"] for r in bearing}), sorted(pss._ACCESS_KINDS),
+       "access fixture: the fixture bears the whole vocabulary")
+
+
+def check_access_population(model_all):
+    """SPEC 12.10 held at the pin, population-level (D21).
+
+    The fixture holds every value on its bearing shape; this holds the
+    whole emitted population: every value in the vocabulary, every value
+    borne (the D16 reachability discipline applied to an output enum),
+    and the two invariants the section states - role stays read, and no
+    in-string record carries the key (it is computed only on the
+    non-string walk).
+    """
+    refs = [r for r in model_all["script_variables"]
+            if r.get("record") == "reference"] \
+        + [r for r in model_all["local_variables"]
+           if r.get("record") == "reference"]
+    bearing = [r for r in refs if "access" in r]
+    seen = {r["access"] for r in bearing}
+    check(seen <= set(pss._ACCESS_KINDS),
+          "access population: every emitted value is in the vocabulary",
+          "out-of-vocabulary: %s" % sorted(seen - set(pss._ACCESS_KINDS)))
+    eq(sorted(seen), sorted(pss._ACCESS_KINDS),
+       "access population: the pin bears the whole vocabulary")
+    check(all(r["role"] == "read" for r in bearing),
+          "access population: role is read on every bearing record")
+    check(not any(r.get("in_expandable_string") for r in bearing),
+          "access population: no in-string record carries the key")
+    tally = collections.Counter(r["access"] for r in bearing)
+    eq((tally["member-invocation"], tally["member-assignment"],
+        tally["element-assignment"]), (1174, 398, 88),
+       "access population: the SPEC 12.10 figures re-derive at the pin")
+    # SPEC 12.10 "what this refines": mutation-only material - aggregated
+    # role set {read} with every read bearing access - exactly one name at
+    # the pin, derived from the records, never read from the document.
+    by_id = collections.defaultdict(list)
+    for r in refs:
+        by_id[r["id"]].append(r)
+    mutation_only = sorted(
+        i for i, rr in by_id.items()
+        if all(r["role"] == "read" for r in rr)
+        and all("access" in r for r in rr))
+    eq(len(mutation_only), 1,
+       "access population: SPEC 12.10's mutation-only material count "
+       "re-derives at the pin")
+
+
 def main():
     # The corpus manager is dispatched before the gate's own parser sees the
     # argument vector, rather than as an argparse subparser. Bare invocation
@@ -5819,6 +5937,7 @@ def main():
     run_scan_fixtures()
     run_limitation_disposition_fixture()
     run_collection_declaration_fixture()
+    run_access_fixture()
 
     # Builds its own repositories, so it needs the `git` binary and not this
     # checkout (SPEC 14.3: a missing runtime degrades the gate, never the tool).
@@ -5864,6 +5983,7 @@ def main():
            "baseline string_interpolation_references")
 
         check_consumption_derivations(model_all)
+        check_access_population(model_all)
 
         eq(shape_fingerprint(model_def), baseline["model_shape"]["default"],
            "model shape: default materialisation")

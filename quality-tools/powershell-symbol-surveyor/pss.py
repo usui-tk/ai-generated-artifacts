@@ -38,8 +38,8 @@ import os
 import re
 import sys
 
-__version__ = "0.9.1"
-MODEL_VERSION = "9"
+__version__ = "0.10.0"
+MODEL_VERSION = "10"
 
 MIN_PYTHON = (3, 12)
 
@@ -400,6 +400,15 @@ _COMMENT_OK_BEFORE = frozenset(" \t\r\n(){}[];|,&=+")
 # tokenizer and the role test cannot enumerate different operators. `??=` is
 # three characters and is handled beside this set at both sites.
 _ASSIGN_OPS = frozenset(('+=', '-=', '*=', '/=', '%='))
+
+# SPEC 12.10: the access-chain classification vocabulary. A variable
+# reference that is the byte-adjacent base of a member/index chain ending
+# in an invocation or an assignment carries `access` with one of these
+# values; role stays `read` (the base is read to reach its object). An
+# output vocabulary: held by the access fixture battery and the pin
+# population check, D18-dispositioned in the gate's table.
+_ACCESS_KINDS = ("element-assignment", "member-assignment",
+                 "member-invocation")
 
 # The common parameters that declare a variable in the calling scope
 # (SPEC 12.2). The parameter word is matched lower-cased; the value token
@@ -1315,6 +1324,7 @@ MODEL_SCHEMA = {
     "/limitations[]/owner": "always",
     "/limitations[]/target": "always",
     "/local_variables": "always",
+    "/local_variables[]/access": "axis",
     "/local_variables[]/automatic_refs": "always",
     "/local_variables[]/code": "axis",
     "/local_variables[]/id": "axis",
@@ -1343,6 +1353,7 @@ MODEL_SCHEMA = {
     "/model_version": "always",
     "/pss_version": "always",
     "/script_variables": "always",
+    "/script_variables[]/access": "always",
     "/script_variables[]/code": "always",
     "/script_variables[]/id": "always",
     "/script_variables[]/in_expandable_string": "optional",
@@ -1551,6 +1562,15 @@ RECORD_VARIANTS = {
              "carries": ("code", "id", "line", "name", "owner", "record",
                          "role"),
              "conditional_keys": {
+                 "access": {
+                     "presence_means": "the reference is the byte-adjacent "
+                                       "base of a member/index chain ending "
+                                       "in an invocation or an assignment - "
+                                       "one of the SPEC 12.10 values; role "
+                                       "stays read",
+                     "absence_means": "no such chain: a plain reference, a "
+                                      "plain member read, or one of SPEC "
+                                      "12.10's no-claim cases"},
                  "rhs": {
                      "presence_means": "role is write and the declaration has "
                                        "a supplying expression - carried "
@@ -1592,6 +1612,15 @@ RECORD_VARIANTS = {
              "carries": ("code", "id", "line", "name", "owner", "qualifier",
                          "record", "role"),
              "conditional_keys": {
+                 "access": {
+                     "presence_means": "the reference is the byte-adjacent "
+                                       "base of a member/index chain ending "
+                                       "in an invocation or an assignment - "
+                                       "one of the SPEC 12.10 values; role "
+                                       "stays read",
+                     "absence_means": "no such chain: a plain reference, a "
+                                      "plain member read, or one of SPEC "
+                                      "12.10's no-claim cases"},
                  "rhs": {
                      "presence_means": "role is write and the declaration has "
                                        "a supplying expression - carried "
@@ -2357,6 +2386,7 @@ class Survey:
                 member_name = (prv is not None and prv.kind == 'op'
                                and prv.text in ('.', '::'))
                 assignment = False
+                access = None
                 if nxt is not None and nxt.kind == 'op' and not member_name:
                     if nxt.text == '=' or nxt.text == '??=' or nxt.text in _ASSIGN_OPS:
                         role = "write"
@@ -2365,6 +2395,11 @@ class Survey:
                         # A member or index left-hand side REFERENCES the
                         # variable; it never declares anything (SPEC 12.2).
                         role = "read"
+                        # SPEC 12.10: when the chain is byte-adjacent and
+                        # ends in an invocation or an assignment, the
+                        # reference additionally states HOW it is the base.
+                        if nxt.text in ('.', '[') and nxt.start == t.end:
+                            access = self._access_kind(toks, sig, k)
                 # A param() entry, inline signature parameter or foreach loop
                 # variable is a declaration site (SPEC 12.2): its role is
                 # "write" whether or not an assignment operator follows. The
@@ -2386,7 +2421,8 @@ class Survey:
                 elif role == "write":
                     rhs_span = self.foreach_rhs.get(t.start)
                 self._note_variable(t.start, t.text, in_string=False,
-                                    role=role, rhs_span=rhs_span)
+                                    role=role, rhs_span=rhs_span,
+                                    access=access)
                 if assignment:
                     self.counters["assignments"] += 1
 
@@ -2671,7 +2707,71 @@ class Survey:
             if t.kind == 'nl':
                 return
 
-    def _note_variable(self, offset, vtext, in_string, role, rhs_span=None):
+    def _access_kind(self, toks, sig, k):
+        """SPEC 12.10: classify the byte-adjacent member/index chain.
+
+        Walks `.word` and `[ ... ]` segments while each opener sits
+        byte-adjacent to what precedes it, then classifies by what ends
+        the walk: `(` byte-adjacent to a member word is `member-invocation`
+        (and stops there - what follows the call's return is the returned
+        object's business, not this base's); an assignment operator after
+        the chain is `member-assignment` or `element-assignment` by the
+        LAST segment's kind. Whitespace anywhere inside the chain, a
+        dynamic member name (`.$name`), an unbalanced index, or a chain
+        ending in a plain read all return None - no claim (SPEC 1.3).
+        The assignment operator itself is NOT adjacency-checked, mirroring
+        the role test above it.
+        """
+        t = toks[sig[k]]
+        prev_end = t.end
+        last = None
+        j = k + 1
+        while j < len(sig):
+            op = toks[sig[j]]
+            if op.kind != 'op' or op.start != prev_end:
+                break
+            if op.text == '.':
+                nm = toks[sig[j + 1]] if j + 1 < len(sig) else None
+                if nm is None or nm.kind != 'word' or nm.start != op.end:
+                    return None
+                par = toks[sig[j + 2]] if j + 2 < len(sig) else None
+                if par is not None and par.kind == 'op' \
+                        and par.text == '(' and par.start == nm.end:
+                    return "member-invocation"
+                last = 'member'
+                prev_end = nm.end
+                j += 2
+            elif op.text == '[':
+                depth = 1
+                j2 = j + 1
+                while j2 < len(sig) and depth:
+                    tt = toks[sig[j2]]
+                    if tt.kind == 'op':
+                        if tt.text == '[':
+                            depth += 1
+                        elif tt.text == ']':
+                            depth -= 1
+                    if depth:
+                        j2 += 1
+                if depth:
+                    return None
+                last = 'index'
+                prev_end = toks[sig[j2]].end
+                j = j2 + 1
+            else:
+                break
+        if last is None:
+            return None
+        nxt = toks[sig[j]] if j < len(sig) else None
+        if nxt is not None and nxt.kind == 'op' \
+                and (nxt.text == '=' or nxt.text == '??='
+                     or nxt.text in _ASSIGN_OPS):
+            return ("member-assignment" if last == 'member'
+                    else "element-assignment")
+        return None
+
+    def _note_variable(self, offset, vtext, in_string, role, rhs_span=None,
+                       access=None):
         qualifier, name, splatted = parse_var_token(vtext)
         self.counters["variable_refs"] += 1
         if in_string:
@@ -2685,6 +2785,7 @@ class Survey:
             "offset": offset, "name": name, "qualifier": qualifier,
             "owner": owner, "role": role, "in_string": in_string,
             "splatted": splatted, "rhs_span": rhs_span, "vtext": vtext,
+            "access": access,
         })
 
     def _classify_variables(self):
@@ -2710,6 +2811,10 @@ class Survey:
                 "line": line, "offset": offset, "role": role,
                 "in_expandable_string": s["in_string"],
             }
+            # SPEC 12.10: the access chain, conditional. Computed only on
+            # the non-string walk, so no in-string record ever carries it.
+            if s.get("access"):
+                base["access"] = s["access"]
             # SPEC 12.8 (D13): a write carries its supplying expression,
             # verbatim, plus the byte span that IS the verbatim contract -
             # text[a:b] == rhs, held by the gate over every write. Flows

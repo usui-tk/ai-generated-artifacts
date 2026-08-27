@@ -3022,6 +3022,61 @@ This is itemisation, not binding (§1.2): nothing is evaluated, nothing is
 ranked, and `rhs_refs` states which references appear — never which one
 supplies the value at run time.
 
+### 12.10 The access chain (normative, D21)
+
+The §12.3 role vocabulary is deliberately two-valued, and §12.2 places a
+member or index left-hand side on the *read* side: `$s['k'] = 1` and
+`$s.Add($x)` reference `$s` — they never declare it. That choice is
+correct for declaration analysis and blind for retirement analysis: a
+state variable whose every occurrence is such a mutation aggregates as
+read-only, exactly as if it were consumed. This section closes that
+blindness with one conditional key, without touching the role vocabulary.
+
+**The key.** A non-string variable reference that is the **byte-adjacent
+base of a member/index chain ending in an invocation or an assignment**
+carries `access` with exactly one of three values (`pss._ACCESS_KINDS`,
+serialised in the §13.3 variant declaration for both reference variants):
+
+- `member-invocation` — the chain reaches a member word whose `(` is
+  byte-adjacent: `$s.Add(…)`, `$list[0].Clear()`. The walk **stops at the
+  first invocation**: whatever follows the call operates on the returned
+  value, and a claim about the base past that point would be evaluation.
+- `member-assignment` — the chain's **last segment is a member word** and
+  an assignment operator follows: `$s.Prop = …`, `$s.A.B = …`,
+  `$reg[$id].EndedAt = …`.
+- `element-assignment` — the chain's **last segment is an index** and an
+  assignment operator follows: `$s['k'] = …`, `$s[0] += 1`.
+
+**The walk.** From the reference, `.word` and `[ … ]` segments are
+consumed while each opener (`.`, `[`, the member word after a `.`, the
+`(` of an invocation) sits byte-adjacent to what precedes it — the
+`PSS9002.target` adjacency discipline applied to a chain. Index segments
+are matched by bracket depth over the token stream. The assignment
+operator itself is **not** adjacency-checked, mirroring the §12.3 role
+test; the operator set is the role test's own (`=`, `??=`, the compound
+set).
+
+**No claim.** The key is omitted — never emitted with a fourth value —
+for: a plain member read (`$n = $s.Count`); a dynamic member name
+(`$obj.$name = …`: the member is not statically known, so which member is
+touched is not a fact); a whitespace-broken chain; an unbalanced index.
+`role` stays `read` on every bearing record, in-string references never
+carry the key (it is computed only on the non-string walk), and the
+member-name variable itself (`$name` above) is the §12.3 look-behind's
+read, unmarked. Measured at the pinned basis: 1,660 bearing records —
+1,174 `member-invocation`, 398 `member-assignment`, 88
+`element-assignment` — every one `role: read`, none in-string
+(re-derived by the gate per run).
+
+**What this refines.** §6.5 P7's stated boundary ("a name whose only
+occurrences are such mutations aggregates as read-only") becomes
+detectable: a name whose aggregated role set is `{read}` and whose every
+read bears `access` is **mutation-only material** — live state being
+built, not state being consumed — and the pinned basis carries exactly
+one such name. The key states *how* the base is touched; whether a
+mutation keeps a variable alive is, as everywhere in this model, the
+consumer's judgement over the facts (§1.2).
+
 ## 13. Self-quality gates
 
 This section lists two different things and does not blur them: gates this
@@ -3269,6 +3324,7 @@ survived green. The figures above are re-measured with the gate's own
 | `/limitations[]/owner` | always |
 | `/limitations[]/target` | always |
 | `/local_variables` | always |
+| `/local_variables[]/access` | axis |
 | `/local_variables[]/automatic_refs` | always |
 | `/local_variables[]/code` | axis |
 | `/local_variables[]/id` | axis |
@@ -3297,6 +3353,7 @@ survived green. The figures above are re-measured with the gate's own
 | `/scan/checks` | always |
 | `/scan/outcome` | always |
 | `/script_variables` | always |
+| `/script_variables[]/access` | always |
 | `/script_variables[]/code` | always |
 | `/script_variables[]/id` | always |
 | `/script_variables[]/in_expandable_string` | optional |
@@ -3416,9 +3473,9 @@ absent from the declaration is uniform, and the gate holds that claim too.
 | `closures` | `closure-row` | `record == closure` | `facts` `id` `record` `transitive_callee_count` `transitive_caller_count` | — | 480 |
 | `closures` | `uncalled-fact` | `code == PSS4003` | `code` `id` | `named_by_literal` | 26 |
 | `closures` | `cycle-fact` | `code == PSS4004` | `code` `members` | — | 3 |
-| `local_variables` | `reference` | `record == reference` | `code` `id` `line` `name` `owner` `record` `role` | `in_expandable_string` `rhs` `rhs_refs` `rhs_span` | 22427 |
+| `local_variables` | `reference` | `record == reference` | `code` `id` `line` `name` `owner` `record` `role` | `access` `in_expandable_string` `rhs` `rhs_refs` `rhs_span` | 22427 |
 | `local_variables` | `aggregate` | `record == aggregate` | `automatic_refs` `local_declared` `local_refs` `owner` `record` `unresolved_refs` | — | 465 |
-| `script_variables` | `reference` | `record == reference` | `code` `id` `line` `name` `owner` `qualifier` `record` `role` | `in_expandable_string` `rhs` `rhs_refs` `rhs_span` | 1879 |
+| `script_variables` | `reference` | `record == reference` | `code` `id` `line` `name` `owner` `qualifier` `record` `role` | `access` `in_expandable_string` `rhs` `rhs_refs` `rhs_span` | 1879 |
 | `script_variables` | `usage-map` | `record == usage_map` | `code` `id` `name` `reader_count` `readers` `record` `writer_count` `writers` | — | 156 |
 | `string_interpolation_references` | `reference` | `record == reference` | `code` `id` `in_expandable_string` `line` `name` `owner` `record` `role` | `qualifier` | 118 |
 | `unresolved_named_commands` | `site` | `record == site` | `arguments` `code` `line` `name` `owner` `record` `span` | — | 2798 |
@@ -4536,8 +4593,8 @@ is, so a bare count is unfalsifiable in the same way.
   "aggregate_records": 465
  },
  "model_shape": {
-  "all-axes": "71465e05ca0fddbd",
-  "default": "2a18be2f5b927304"
+  "all-axes": "7820d48156f361c4",
+  "default": "74e55cd1defc3ddc"
  },
  "references_outside_functions": {
   "all-axes": 556,
