@@ -18,6 +18,53 @@ This file starts at `0.2.0`. Entries before it are reconstructed from the
 commit history and the SPEC's own decision records rather than written at the
 time, and are marked as such.
 
+## [0.10.0] - 2026-08-27 (`model_version` "9" -> "10"; the D21 arc)
+
+The access-chain arc: the one blindness §6.5 P7 had to state as a
+boundary — a mutation through a variable reads as a plain read — becomes
+a fact, and the last open §13.2 row closes as derivable. Every
+"9"-generation derived cache expires; both cache entries were rebuilt at
+"10" in the same arc (`baseline_digest ede46269e8295aa7`).
+
+### Added
+
+- **SPEC §12.10 the access chain** — a non-string variable reference that
+  is the byte-adjacent base of a member/index chain ending in an
+  invocation or an assignment carries the conditional key `access`, one
+  of `element-assignment` / `member-assignment` / `member-invocation`
+  (`pss._ACCESS_KINDS`). The walk consumes `.word` and `[ … ]` segments
+  while byte-adjacent (the `PSS9002.target` adjacency discipline applied
+  to a chain), classifies by the last segment, stops at the first
+  invocation, and makes no claim on dynamic member names,
+  whitespace-broken chains, unbalanced indexes or plain member reads.
+  `role` stays `read` on every bearing record — the key refines the
+  §12.3 vocabulary, it never replaces it. Declared at code parity:
+  `MODEL_SCHEMA` paths (`axis` on the local side, `always` on the script
+  side), both §13.3 reference variants, the D18 disposition table;
+  `--self-check` demonstrated red on the variant signature before the
+  SPEC learned the key. Pinned basis: 1,660 bearing records (1,174 /
+  398 / 88 by value), gate-re-derived per run.
+
+- **SPEC §6.5 P10 unmodeled-writer material (and the §13.2 close)** — a
+  script-scope name read with no modeled writer states itself in the
+  `PSS2008` usage map (`writer_count == 0`, `reader_count > 0`); the
+  round-6 "Model-external writes" row closes as **derivable** because a
+  new limitations code or record key would duplicate a fact the payload
+  already carries. P7 is rewritten from a stated boundary into a
+  derivation (mutation-only material: aggregated role `{read}` with
+  every read access-bearing — exactly one name at the pin); P8 records
+  why it needs no amendment. **Every §13.2 row is now closed.**
+
+### Changed
+
+- `MODEL_VERSION` `"9"` -> `"10"` (a reference record can now carry a key
+  it could not before); Appendix B.8 `model_shape` restamped once at C1;
+  **B.7's pins verified unmoved** — the adjudicated-pair deltas do not
+  read the new key. Battery grew 683 -> **714** (`--pwsh`) / 655 ->
+  **686** (no `pwsh`) / 346 -> **369** (no `git` — the access fixture
+  runs on every leg). Ten tamper-red families across the arc, each
+  demonstrated against its parent build before landing.
+
 ## [0.9.1] - 2026-08-27 (`model_version` "9" unmoved; the D18, D19 and D20 arcs)
 
 Docs + gate only across all three arcs: no `pss.py` model-contract change,
