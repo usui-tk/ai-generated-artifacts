@@ -5782,6 +5782,23 @@ def check_consumption_derivations(model_all):
           "6.5 P9: the declaration-included join is vacuously narrower, "
           "as the section warns")
 
+    # P10 - unmodeled-writer material: the PSS2008 usage map already
+    # states it (writer_count == 0, reader_count > 0), which is why the
+    # 13.2 row closed as derivable rather than as a new payload shape.
+    usage = [r for r in model_all["script_variables"]
+             if r.get("record") == "usage_map"]
+    unwritten = sorted(r["id"] for r in usage
+                       if r["writer_count"] == 0 and r["reader_count"] > 0)
+    eq(len(unwritten), 1,
+       "6.5 P10: unmodeled-writer material reproduces the worked example")
+    script_writes = {r["id"] for r in model_all["script_variables"]
+                     if r.get("record") == "reference"
+                     and r["role"] == "write"}
+    check(not (set(unwritten) & script_writes),
+          "6.5 P10: a zero-writer usage map has no write-role record "
+          "under its id",
+          "violating: %s" % sorted(set(unwritten) & script_writes)[:3])
+
 
 def run_access_fixture():
     """SPEC 12.10: the access chain, held by shape against a bearing fixture.

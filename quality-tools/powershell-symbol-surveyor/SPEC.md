@@ -2201,18 +2201,24 @@ count — the tie a consumer can assert before trusting either.
 (`local_variables` and `script_variables`, `record: "reference"`) each
 carry `id` and `role`; grouping by `id` yields the per-name read/write
 ledger, and the group totals must sum to the reference-record population.
-The current role vocabulary is two-valued (`read` / `write`): a structural
+The role vocabulary is two-valued (`read` / `write`): a structural
 mutation or member invocation through a variable (`$s.Add(...)`,
-`$s['k'] = ...`) classifies as a *read* of the variable, so a name whose
-only occurrences are such mutations aggregates as read-only. State that
-boundary when consuming the ledger for retirement analysis.
+`$s['k'] = ...`) classifies as a *read* of the variable — and, since
+D21, such a read additionally carries the §12.10 `access` key stating
+how it is the base. A name whose aggregated role set is `{read}` with
+every read access-bearing is **mutation-only material** (live state
+being built, not consumed); the pinned basis carries exactly one such
+name, re-derived by the gate.
 
 **P8 — Write-only material.** The names whose aggregated role set is
 `{write}` are the write-only **material** (the retirement *candidate* is a
 consumer disposition, per §1.2). Cross-check: a write-only id must appear in
 no write-site's `rhs_refs.variables` list — a right-hand-side reference is a
-read and would have contributed a read record. Pinned basis: 15 write-only
-ids, 0 violating the cross-check.
+read and would have contributed a read record. The §12.10 `access` key
+cannot appear on these names by construction — an access-bearing record
+is a read record — so the write-only derivation needs no D21 amendment;
+the mutation-only refinement lives on the read side (P7). Pinned basis:
+15 write-only ids, 0 violating the cross-check.
 
 **P9 — Parameter use beyond declaration.** A function parameter's
 declaration is itself a §12.2 declaration site (`PSS2002`, role `write`),
@@ -2226,6 +2232,21 @@ unqualified top-level parameter that nothing references sits outside the
 §12.6 population by that section's own admission rule, and this model
 carries no record of it. Pinned basis: 5 function parameters with no
 reference beyond their declaration.
+
+**P10 — Unmodeled-writer material.** A script-scope name that is read
+but has no modeled writer states itself in the `PSS2008` usage map:
+`writer_count == 0` with `reader_count > 0`. Its writers, if any exist,
+sit in §12.8's unmodeled channels (`Set-Variable`-class declaration, a
+`-Scope` write, an environment set outside the file) — which is why this
+is **material** for a missing-initialisation or dead-read question and
+never a verdict. The population boundary is §12.6's own admission rule:
+a name enters the script population by qualifier or by cross-boundary
+read, so an unqualified top-level-only name never reaches the usage map,
+and on the local side the aggregate's `unresolved_refs` carries the
+analogous count. Everything here composes records the model already
+publishes — the round-6 rule again: the derivation belongs in prose, not
+the payload. Pinned basis: 1 usage-map name with readers and no modeled
+writer, re-derived by the gate.
 
 **What stays consumer-side, by design.** Candidate dispositions, verdicts,
 thresholds, similarity measures, requirement-and-test coverage, and
@@ -3153,7 +3174,7 @@ should not assume any of these are currently enforced.
 | Limitation disposition axes | The evaluating analyser classifies every limitation on two orthogonal axes this model has no equivalent of: `StaticDisposition` — `AnalyzerLimitation` (the tool could do better) versus `UnresolvedStaticRelationship` (statically undecidable at all) — and `ResolutionRequirement` — `AnalyzerMethodExtensionRequired` versus `RuntimeEvidenceRequired` — alongside an origin stage and a stable class id, with a catalogue that refuses duplicate class names. `PSS9002`–`PSS9004` carry a code, an owner, a line and a prose detail, and nothing that answers *which kind of limit is this*. That question is exactly what the §3.3 evaluation had to answer by reading this document: told that a `&`-invocation target is unresolved, a consumer cannot tell from the model whether a future PSS could resolve it or whether nothing static ever could. The axes are classification metadata over records that already exist, so the cost is per-record and small; the design work is the catalogue, not the plumbing. **Model-moving**, §5.5 bundle | **closed — landed at the D17 arc (C1)**: §5.11's per-CODE catalogue (`limitation_dispositions`, always present; per-code rather than per-record because every record of one code shares one disposition, measured before the shape was chosen), key set gate-held against the limitations variant codes both directions, vocabulary exactly what the catalogue bears |
 | Record authority | Every fact the evaluating analyser emits declares its own provenance — `NativePowerShellAst` for directly observed nodes, `DerivedNativePowerShellAst` for anything computed from them. This model mixes the two without marking them: a `symbols` record is read off the source, while an `edges` row is derived by the §10.6 command-position walk and a closure is derived from those edges again. The evaluation's verdict was that PSS may not stand as the analysis authority; a model whose records each state how directly they were observed lets a consumer weigh them instead of accepting or rejecting the whole. Cheap per record and orthogonal to every other row here. **Model-moving**, §5.5 bundle | **closed — landed at the D17 arc (C2)**: §5.12's `collection_declarations` (always present) states each record collection's observation depth in this tool's own basis — observed / derived / derived-from-derived — at collection granularity (measured per-record carriage priced at ~1 MB on the all-axes pin and rejected); key set gate-held against the model's actual record collections both directions |
 | Binding disposition in the payload | The evaluating analyser's call graph carries `BindingDisposition = StructuralCandidateNotRuntimeBindingProof` **in its output**, and its self-validation checks that string. This SPEC says the same thing at length — §1.2, §12.9's closing sentence — and the model says it nowhere. Round 6 established that a fact derivable from the payload belongs in prose rather than the payload; this row is that principle's other edge, because **a consumer reads the payload and not this document**, and the misuse the §3.3 evaluation guarded against (treating structural call edges as proof of runtime binding) is exactly the one a payload-level disposition forestalls. The cheapest row here by a wide margin: a fixed string per derived collection, gate-held against the constant it serialises. **Model-moving** (shape only), §5.5 bundle | **closed — landed at the D17 arc (C2)**: `binding_disposition = structural-candidate-not-runtime-binding-proof` on exactly the relation-asserting collections (`edges`, `closures`) inside §5.12's block — §12.9's closing sentence, now in the payload where the consumer reads |
-| Model-external writes | Round 6's provenance prototype surfaced four reads of script variables with **no write record anywhere in the model** — `$Script:ErrorsJsonlPath` ×2 (`Add-ErrorJsonlEntry`, lines 2224/2241) and `$Script:ScriptPath` ×2 (`Show-PowerShellEnvironment`, line 2769); verified across every id namespace. Their writers exist only in §12.8's unmodeled channels (`Set-Variable`-class, `-OutVariable`, dot-sourcing) — precisely the boundary §12.8 declares, made visible by a reaching join for the first time. Whether the model should state "this read has no modeled writer" as a fact (a limitations code? a key on the read record?) is undesigned; the shape needs its own adjudication and does not travel with D15 | inventoried (round 6; basis = prototype finding, single round) |
+| Model-external writes | Round 6's provenance prototype surfaced four reads of script variables with **no write record anywhere in the model** — `$Script:ErrorsJsonlPath` ×2 (`Add-ErrorJsonlEntry`, lines 2224/2241) and `$Script:ScriptPath` ×2 (`Show-PowerShellEnvironment`, line 2769); verified across every id namespace. Their writers exist only in §12.8's unmodeled channels (`Set-Variable`-class, `-OutVariable`, dot-sourcing) — precisely the boundary §12.8 declares, made visible by a reaching join for the first time. Whether the model should state "this read has no modeled writer" as a fact (a limitations code? a key on the read record?) is undesigned; the shape needs its own adjudication and does not travel with D15. **Adjudicated at D21, and the answer is neither shape: the fact is already stated.** The `PSS2008` usage map's `writer_count == 0` with `reader_count > 0` IS "read with no modeled writer", per name, in the payload today — so a new limitations code or record key would duplicate a derivable fact, exactly what the round-6 rule and both round-7 reviewers' `supplied_by` rejections exclude. §6.5 P10 states the derivation (with the §12.6 population boundary and the local-side `unresolved_refs` analogue) and the gate re-derives its pin figure per run. Re-measured on the way in: the round-6 finding had meanwhile halved itself — `$Script:ScriptPath` gained a modeled writer when the §12.3 order-independence correction landed, and the pin's remaining population is exactly one name (`$Script:ErrorsJsonlPath`), which is the measured trace of both the correction and the boundary | closed (derivable — §6.5 P10, D21; gate-held figure) |
 | Emission coverage | every code in §4 blocks 1-4 (survey-emittable) appears as a `code` or `facts` value on at least one record somewhere in the regression corpus's models, or is documented as data-dependent-absent (e.g. `PSS1005` legitimately does not fire on a corpus with zero duplicate names). **The block-1-4 scope is itself the finding of 2026-08-23 (§3.3): block 9 is excluded, and block 9 is where the two codes with no emit path at all turned out to live** — measured over `pss.py`, `PSS9001` and `PSS9006` occur nowhere outside the `FACTS` catalogue. `PSS9006`'s case is the sharper one: §10.5 says the tool emits it rather than an out-of-enum value, and the S4 "Reachability" row below asserts its corpus count is zero — an assertion that is **vacuously true of a code that cannot be emitted**, so the gate reads as evidence while measuring nothing. Widening this row's scope to every declared code, and requiring each to be either emitted, held by fixture, or declared unreachable-by-construction with the declaration itself gate-held, is the second half of the D16 candidate below | `PSS2005`, `PSS4001`, `PSS4002` closed by manual audit. `PSS2002` closed for all five §12.2 sources at the D10 arc — each source is held red-first by a §13.1 fixture, which is stronger than corpus presence. **closed (widened) — landed at the D16 arc (C2)**: the emission-reachability gate holds every FACTS code to a measured evidence class (22 pin / 3 fixture / 18 delta / 1 refusal / 1 diagnostic), both directions against the catalogue, with evidence read from emitted records only (a tally key or prose never counts). PSS9006's path exposed and fixed the inverted classification ladder on the way in (§10.5 defect record) |
 | Declared model schema | **RESOLVED (ADR 0036).** §13.3 declares the path set (counts stated there, per materialisation) and `pss.MODEL_SCHEMA` carries it; `--self-check` holds the two together on path *and* kind, and `test_pss.py` holds the declaration against the pin in both directions. The pairing with the §3.1 descriptor is satisfied by the declaration living in the code, so `--capabilities` can serialise it rather than restate it | closed |
 | Version-decision enforcement | **RESOLVED (ADR 0036).** The parent commit's build is re-derived and compared; a model that moved without the version advancing is a failure. Measured against real history the check reddens at `44b97d1` (shape moved) and at `bc69c27` (shape identical, values moved) | closed |
