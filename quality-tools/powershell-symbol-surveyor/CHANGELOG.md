@@ -18,13 +18,41 @@ This file starts at `0.2.0`. Entries before it are reconstructed from the
 commit history and the SPEC's own decision records rather than written at the
 time, and are marked as such.
 
-## [Unreleased] - the D18 and D19 arcs (gate + SPEC only; `pss_version` 0.9.0 and `model_version` "9" unmoved)
+## [0.9.1] - 2026-08-27 (`model_version` "9" unmoved; the D18, D19 and D20 arcs)
 
-No `pss.py` change: the build and the model contract are exactly 0.9.0 /
-"9", every "9"-generation derived cache stays valid, and Appendix B.7/B.8
-are unmoved. To be folded into the next released version's entry.
+Docs + gate only across all three arcs: no `pss.py` model-contract change,
+`model_version` stays "9", every "9"-generation derived cache stays valid,
+and Appendix B.7/B.8 are unmoved. The version advances because the
+published document set and the battery contract did: enumerated-set
+bearing (D18), the Round-7 adjudication as committed carrier (D19), and
+the general consumption patterns with their gate-executed derivations
+(D20).
 
 ### Added
+
+- **SPEC §6.5 general consumption patterns (D20)** — externally observed
+  consumption of the survey model, generalised into nine reusable
+  derivation procedures over the published collections (P1–P9: function
+  size partition; exact-duplicate bodies via `hash_body`; SCC
+  decomposition reproducing `PSS4004`; two-derivation pair-graph
+  isolation with the `<script>` exclusion; the orphan × `PSS3001`
+  literal-name join; command-lookup itemisation with the aggregate↔site
+  tie; name-level role aggregation; write-only material with the
+  `rhs_refs` cross-check; parameter-use-beyond-declaration with the
+  `PSS2002` declaration-site exclusion, without which the join is
+  vacuous). Every procedure is consumer-side — nothing enters the
+  payload — and every worked-example figure is re-derived per run by
+  `check_consumption_derivations`, which executes the section's own
+  wording against the pin (14 checks, blob-fed section; figures outside
+  the B.8 digest block). Seven tamper-red families demonstrated against
+  the parent build. Battery: 683/683 (`--pwsh`) / 655/655 / 346/346.
+
+- **SPEC §13.4 `LEDGER-0003` (C) (D20)** — derived-fact parity across a
+  second PowerShell runtime lineage recorded as a native capability this
+  tool does not have: the fact layer runs outside PowerShell and the
+  oracle is a single `follow-latest` lineage. A boundary entry, not a
+  §13.2 row — a consumer requiring multi-runtime parity of derived facts
+  qualifies it on its own side against `source.sha256`.
 
 - **SPEC §13.5 enumerated-set bearing (normative)** — the D16 reachability
   discipline generalised from the fact catalogue to every enumerated

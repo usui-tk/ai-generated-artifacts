@@ -38,7 +38,7 @@ import os
 import re
 import sys
 
-__version__ = "0.9.0"
+__version__ = "0.9.1"
 MODEL_VERSION = "9"
 
 MIN_PYTHON = (3, 12)
