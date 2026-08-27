@@ -5589,6 +5589,196 @@ def run_corpus_selftest():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def check_consumption_derivations(model_all):
+    """SPEC 6.5: each written consumption procedure, executed against the pin.
+
+    The section's figures are worked examples, so every one of them is
+    re-derived here by running the documented procedure — never read back
+    from the document (ADR 0036). The derivations are deliberately written
+    from the SPEC's own wording, not from pss.py's internals: this gate
+    holds the *procedure as published*, so a model change that silently
+    breaks a documented derivation reddens here even if every other gate
+    stays green. None of these figures enter the B.8 digest block."""
+    symbols = model_all["symbols"]
+    edges = model_all["edges"]
+    closures = model_all["closures"]
+
+    # P1 - function size partition: extents are facts, thresholds are the
+    # consumer's; the worked example must nest monotonically.
+    sizes = {s["id"]: s["end_line"] - s["start_line"] + 1 for s in symbols}
+    check(all(v >= 1 for v in sizes.values()),
+          "6.5 P1: every function extent spans at least one line")
+    over = lambda n: {i for i, v in sizes.items() if v > n}  # noqa: E731
+    o100, o250, o500 = over(100), over(250), over(500)
+    eq((len(o100), len(o250), len(o500)), (61, 8, 1),
+       "6.5 P1: size partition reproduces the worked example (>100/>250/>500)")
+    check(o500 <= o250 <= o100,
+          "6.5 P1: the threshold sets nest monotonically")
+
+    # P2 - exact-duplicate bodies: hash_body equality classes, members >= 2.
+    by_body = collections.defaultdict(list)
+    for s in symbols:
+        by_body[s["hash_body"]].append(s["id"])
+    eq(sum(1 for v in by_body.values() if len(v) > 1), 0,
+       "6.5 P2: exact-duplicate groups reproduce the worked example")
+
+    # P3 - strongly connected components over function-pair edges must
+    # reproduce the PSS4004 groups exactly (size>=2 components plus
+    # self-loop singletons). Iterative Tarjan: stdlib-only, no recursion
+    # limit exposure.
+    nodes = sorted(s["id"] for s in symbols)
+    node_set = set(nodes)
+    adj = collections.defaultdict(set)
+    for e in edges:
+        if e["from"] != "<script>" and e["from"] in node_set \
+                and e["to"] in node_set:
+            adj[e["from"]].add(e["to"])
+    index = {}
+    low = {}
+    onstack = set()
+    stack = []
+    sccs = []
+    counter = [0]
+    for root in nodes:
+        if root in index:
+            continue
+        work = [(root, iter(sorted(adj[root])))]
+        index[root] = low[root] = counter[0]
+        counter[0] += 1
+        stack.append(root)
+        onstack.add(root)
+        while work:
+            v, it = work[-1]
+            advanced = False
+            for w in it:
+                if w not in index:
+                    index[w] = low[w] = counter[0]
+                    counter[0] += 1
+                    stack.append(w)
+                    onstack.add(w)
+                    work.append((w, iter(sorted(adj[w]))))
+                    advanced = True
+                    break
+                if w in onstack:
+                    low[v] = min(low[v], index[w])
+            if advanced:
+                continue
+            work.pop()
+            if work:
+                low[work[-1][0]] = min(low[work[-1][0]], low[v])
+            if low[v] == index[v]:
+                comp = []
+                while True:
+                    w = stack.pop()
+                    onstack.discard(w)
+                    comp.append(w)
+                    if w == v:
+                        break
+                sccs.append(sorted(comp))
+    derived_groups = sorted(
+        [c for c in sccs if len(c) > 1]
+        + [c for c in sccs if len(c) == 1 and c[0] in adj[c[0]]])
+    stated_groups = sorted(sorted(c["members"]) for c in closures
+                           if c.get("code") == "PSS4004")
+    eq(derived_groups, stated_groups,
+       "6.5 P3: SCC decomposition reproduces the PSS4004 groups")
+
+    # P4 - pair-graph isolation, two independent derivations, with the
+    # <script> exclusion the section warns about.
+    pair_ends = set()
+    for e in edges:
+        if e["from"] != "<script>":
+            pair_ends.add(e["from"])
+            pair_ends.add(e["to"])
+    iso_edges = node_set - pair_ends
+    iso_closures = {c["id"] for c in closures
+                    if c.get("record") == "closure"
+                    and c.get("transitive_callee_count") == 0
+                    and not [x for x in c.get("transitive_callers", [])
+                             if x != "<script>"]}
+    eq(iso_edges, iso_closures,
+       "6.5 P4: the two isolation derivations agree")
+    eq(len(iso_edges), 10,
+       "6.5 P4: isolation reproduces the worked example")
+
+    # P5 - no-static-caller functions and the literal-name join. The three
+    # figures are the same ones the 13.2 entry-context row records.
+    orphans = [c for c in closures if c.get("code") == "PSS4003"]
+    named = [c for c in orphans if c.get("named_by_literal")]
+    matches = {r["matches"] for r in model_all["soft_references"]
+               if r["code"] == "PSS3001"}
+    joined = [c for c in named if c["id"] in matches]
+    eq((len(orphans), len(named), len(joined)), (26, 17, 17),
+       "6.5 P5: orphan / named-by-literal / PSS3001 join reproduce "
+       "the worked example")
+
+    # P6 - command-lookup itemisation: the aggregate<->site tie, every name.
+    agg_sites = {}
+    site_tally = collections.Counter()
+    for r in model_all["unresolved_named_commands"]:
+        if r.get("record") == "aggregate":
+            agg_sites[r["name"]] = r["sites"]
+        elif r.get("record") == "site":
+            site_tally[r["name"]] += 1
+    check(agg_sites == dict(site_tally),
+          "6.5 P6: every aggregate's sites count equals its site-record count",
+          "differing names: %s"
+          % sorted(set(agg_sites) ^ set(site_tally)
+                   | {n for n in agg_sites
+                      if agg_sites.get(n) != site_tally.get(n)})[:5])
+
+    # P7 - name-level role aggregation: group totals sum back to the
+    # reference-record population.
+    refs = [r for r in model_all["local_variables"]
+            if r.get("record") == "reference"] \
+        + [r for r in model_all["script_variables"]
+           if r.get("record") == "reference"]
+    ledger = collections.defaultdict(collections.Counter)
+    for r in refs:
+        ledger[r["id"]][r["role"]] += 1
+    check(sum(sum(c.values()) for c in ledger.values()) == len(refs),
+          "6.5 P7: role-ledger totals sum to the reference population")
+
+    # P8 - write-only material and the rhs_refs cross-check.
+    write_only = {i for i, c in ledger.items()
+                  if c.get("read", 0) == 0 and c.get("write", 0) > 0}
+    rhs_ids = set()
+    for coll in ("local_variables", "script_variables"):
+        for r in model_all[coll]:
+            rr = r.get("rhs_refs")
+            if rr:
+                for v in rr.get("variables", []):
+                    if v.get("id"):
+                        rhs_ids.add(v["id"])
+    eq(len(write_only), 15,
+       "6.5 P8: write-only material reproduces the worked example")
+    check(not (write_only & rhs_ids),
+          "6.5 P8: no write-only id appears in any rhs_refs variable list",
+          "violating: %s" % sorted(write_only & rhs_ids)[:5])
+
+    # P9 - parameter use beyond declaration: the PSS2002 exclusion is the
+    # procedure; without it the join is vacuous for every parameter.
+    beyond = collections.defaultdict(set)
+    for r in refs:
+        if r.get("code") != "PSS2002":
+            beyond[r["owner"]].add(r["name"].lower())
+    vacuous = collections.defaultdict(set)
+    for r in refs:
+        vacuous[r["owner"]].add(r["name"].lower())
+    unref = [(s["id"], p["name"]) for s in symbols
+             for p in s.get("parameters", [])
+             if p["name"].lower() not in beyond.get(s["id"], set())]
+    unref_vacuous = [(s["id"], p["name"]) for s in symbols
+                     for p in s.get("parameters", [])
+                     if p["name"].lower() not in vacuous.get(s["id"], set())]
+    eq(len(unref), 5,
+       "6.5 P9: declaration-excluded parameter join reproduces "
+       "the worked example")
+    check(len(unref_vacuous) < len(unref),
+          "6.5 P9: the declaration-included join is vacuously narrower, "
+          "as the section warns")
+
+
 def main():
     # The corpus manager is dispatched before the gate's own parser sees the
     # argument vector, rather than as an argparse subparser. Bare invocation
@@ -5672,6 +5862,8 @@ def main():
         eq(measured["string_interpolation_references"],
            baseline["string_interpolation_references"],
            "baseline string_interpolation_references")
+
+        check_consumption_derivations(model_all)
 
         eq(shape_fingerprint(model_def), baseline["model_shape"]["default"],
            "model shape: default materialisation")

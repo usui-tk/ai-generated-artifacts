@@ -2122,6 +2122,118 @@ say which two models produced it is not a fact about anything, and both
 reviewers of the pre-implementation specimens raised its absence
 independently (§3.2).
 
+### 6.5 General consumption patterns (informative, gate-held)
+
+External refactoring efforts over large single-file scripts consume this
+model as their static-fact supply. This section records those consumption
+patterns as **reusable derivation procedures over the published collections**
+— generalised from observed external use, named for the question each
+answers, and bound to no particular project. Two disciplines govern the
+section:
+
+- **Every procedure is a consumer-side derivation.** Nothing here adds a
+  fact to the model; each procedure composes records the model already
+  carries. A derivation that this section can state is precisely what §1.3's
+  fact test excludes from the payload — publishing the procedure instead of
+  a precomputed result is the round-6 rule ("a fact derivable from the
+  payload belongs in prose rather than the payload") applied at
+  documentation scope.
+- **Every stated figure is re-derived.** The worked-example figures below
+  are measured on the pinned basis, and `test_pss.py` re-derives each on
+  every run by executing the written procedure against the pin model (the
+  ADR 0036 discipline). They are **not** part of the Appendix B.8 digest
+  block, so this section moves neither `model_version` nor any derived
+  cache.
+
+**P1 — Function size partition.** A function's line extent is
+`end_line − start_line + 1` on its `symbols` record. Partitioning by
+thresholds (a common large-function debt classification uses >100, >250,
+>500) is threshold-parameterised and therefore consumer-side; the extents
+themselves are facts. Pinned basis: 61 / 8 / 1 functions exceed 100 / 250 /
+500 lines, and the three sets nest monotonically.
+
+**P2 — Exact-duplicate bodies.** Two functions whose `hash_body` values are
+equal have byte-identical bodies under §10.3's identity rule; the
+equality classes with two or more members are the exact-duplicate groups.
+Near-duplicate *similarity* is deliberately not a fact here: any similarity
+measure embeds a threshold and a judgement, which §1.3 places on the
+consumer. Pinned basis: 0 duplicate groups.
+
+**P3 — Recursion groups and strongly connected components.** `PSS4004`
+records state the recursion groups directly. The full strongly-connected
+decomposition, condensation and transitive-pair counts are standard graph
+derivations over `edges[]` restricted to function-pair rows (`from` ≠
+`<script>`); the components of size two or more, plus any self-loop
+singleton, must reproduce the `PSS4004` groups exactly — a consumer running
+the decomposition has that cross-check for free. Pinned basis: 3 recursion
+groups, reproduced by decomposition.
+
+**P4 — Function-pair-graph isolation.** A function is isolated on the
+function-pair graph when it appears on no function-pair edge. Two
+independent derivations must agree: (a) the symbol ids absent from every
+function-pair `edges[]` endpoint; (b) the `closures` records with zero
+transitive callees and no transitive caller other than `<script>`. Note the
+`<script>` exclusion: a function invoked only from the top level is
+*root-reachable but pair-isolated*, and folding the two notions together is
+the commonest mis-derivation. Pinned basis: 10, both derivations agreeing.
+
+**P5 — No-static-caller functions and the literal-name join.** The
+`PSS4003` records name every function with no static caller; the
+`named_by_literal` qualifier marks those whose name also occurs as a string
+literal, and each such record joins to its `PSS3001` evidence sites by a
+single id equality. The division of labour is the §3.3 adjudication: the
+join is a **candidate signal** for dynamically-dispatched entry points, and
+membership of any entry-point set is consumer-side evidence, never this
+model's claim. The unjoined remainder is the dead-candidate **material** —
+still not a verdict, because §12.8's unmodeled channels and the consumer's
+runtime evidence stand between material and decision. Pinned basis: 26
+no-static-caller functions, 17 named-by-literal, 17/17 joining.
+
+**P6 — Command-lookup itemisation.** Where a consumer needs the names a
+script passes to name-resolving commands, the `command-sites` axis
+itemises every unresolved invocation's arguments verbatim
+(itemisation-not-binding, §4.2); filtering the site records by command name
+and reading their `arguments` is the whole procedure. The per-name
+`aggregate` record's `sites` count must equal that name's site-record
+count — the tie a consumer can assert before trusting either.
+
+**P7 — Name-level role aggregation.** The reference records
+(`local_variables` and `script_variables`, `record: "reference"`) each
+carry `id` and `role`; grouping by `id` yields the per-name read/write
+ledger, and the group totals must sum to the reference-record population.
+The current role vocabulary is two-valued (`read` / `write`): a structural
+mutation or member invocation through a variable (`$s.Add(...)`,
+`$s['k'] = ...`) classifies as a *read* of the variable, so a name whose
+only occurrences are such mutations aggregates as read-only. State that
+boundary when consuming the ledger for retirement analysis.
+
+**P8 — Write-only material.** The names whose aggregated role set is
+`{write}` are the write-only **material** (the retirement *candidate* is a
+consumer disposition, per §1.2). Cross-check: a write-only id must appear in
+no write-site's `rhs_refs.variables` list — a right-hand-side reference is a
+read and would have contributed a read record. Pinned basis: 15 write-only
+ids, 0 violating the cross-check.
+
+**P9 — Parameter use beyond declaration.** A function parameter's
+declaration is itself a §12.2 declaration site (`PSS2002`, role `write`),
+so joining `symbols[].parameters` to same-owner reference records **without
+excluding the declaration record** is vacuously satisfied for every
+parameter. The correct material is: parameters whose `(owner, name)` has no
+reference record other than the `PSS2002` declaration. Top-level `param()`
+parameters are a stated boundary rather than a gap: a script-qualified
+top-level parameter enters the script population and this derivation; an
+unqualified top-level parameter that nothing references sits outside the
+§12.6 population by that section's own admission rule, and this model
+carries no record of it. Pinned basis: 5 function parameters with no
+reference beyond their declaration.
+
+**What stays consumer-side, by design.** Candidate dispositions, verdicts,
+thresholds, similarity measures, requirement-and-test coverage, and
+membership of any dynamically-resolved entry-point set (§3.3) are consumer
+judgements over these facts. A consumer that needs them recorded should
+record them in its own artefacts against this model's `source.sha256` — the
+model's determinism (§5.4) makes that binding reproducible.
+
 ---
 
 ## 7. Jurisdiction boundary with psa.py
@@ -3398,6 +3510,7 @@ following latest safe.
 |---|---|---|---|
 | `LEDGER-0001` | (B) | `counters.assignments` does not equal the evaluating analyser's B.4 "Assignment statements": PSS counts assignment *tokens* over its stream, the analyser counts `AssignmentStatementAst` nodes; compound and pipeline-embedded forms split differently | pinned as a definitional difference; the standing `counters.assignments is not B.4` gate holds the two apart by name, and neither figure is corrected toward the other |
 | `LEDGER-0002` | (A) | the pre-D16 hash-classification ladder tested coarsest-first, so a comment-only or string-only pair classified `identical` and two declared `PSS7001` values were unreachable in shipped code (§10.5 defect record). Recorded retrospectively: found by the D16 reachability lens rather than by a native differential — the ledger records comparator defects regardless of the channel that exposed them | fixed at D16 (most-sensitive-first ladder, `PSS9006` fallback), both middle values fixture-held red-first; the withdrawn B.7 aggregate's zero counts are the measured trace of the defect |
+| `LEDGER-0003` | (C) | **derived-fact parity across a second PowerShell runtime lineage.** External analysers built on the native AST qualify their whole fact layer on more than one runtime (Windows PowerShell 5.1 alongside PowerShell 7) and hold the two runs to digest equality. This tool cannot state that property: its fact layer runs outside PowerShell entirely, and its oracle is a single `follow-latest` lineage — the §13.1 differential leg exercises one parser, not two. The capability is native's by construction, exactly the (C) shape | recorded as a boundary, not opened as a §13.2 row: no design is adjudicated, and the honest present-tense statement is that a consumer requiring multi-runtime parity of *derived facts* must qualify it on its own side, against this model's `source.sha256`. A future adjudication may narrow this (e.g. a second oracle lineage on the differential leg); until then the ledger entry is the carrier |
 
 A new entry is appended in the same change that resolves or pins its
 divergence, so the ledger and the gates cannot drift apart; ids are
