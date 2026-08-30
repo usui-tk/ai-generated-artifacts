@@ -18,6 +18,32 @@ This file starts at `0.2.0`. Entries before it are reconstructed from the
 commit history and the SPEC's own decision records rather than written at the
 time, and are marked as such.
 
+## [0.10.1] - 2026-08-30 (`model_version` "10" unmoved; the D22 arc)
+
+Docs + gate only: the round-8 consumer review of §6.5 / §12.10, landed
+entirely as prose + gate under the round-6 rule. No payload change, the
+"10" caches stay valid, B.7/B.8 unmoved.
+
+### Added
+
+- **§6.5 P7 write-permitted mutation-only derivation** (strict 1 /
+  write-permitted 143 at the pin, superset gate-held), **P8 scope
+  statement** (the ledger spans both reference collections) with the
+  P9-subset consequence (5 of 15, gate-held), and the **readers-means-
+  touches caution** (superset on every usage-map row, strictly larger
+  for 4 - both gate-held).
+- **§6.5 P11-P14**, two patterns from each evaluating analyser, every
+  figure re-verified before landing: dynamic-invocation evidence chain
+  (26 walked / 0 landing at the pin - the chain does not cross call
+  boundaries; positive shape fixture-held), per-function script-scope
+  footprint (ties to the 1,879-record population), static root
+  reachability (181 / 299, two derivations agreeing, 0 recursive
+  islands - island shape fixture-held), cross-owner state coupling
+  (875 triples over 140 names).
+- **§3.3 round-8 echo-back closure**: both evaluators confirmed the
+  Round-7 carrier; the committed text stands. Battery grew to
+  **730** (`--pwsh`) / **702** / **374** (no `git`).
+
 ## [0.10.0] - 2026-08-27 (`model_version` "9" -> "10"; the D21 arc)
 
 The access-chain arc: the one blindness §6.5 P7 had to state as a
