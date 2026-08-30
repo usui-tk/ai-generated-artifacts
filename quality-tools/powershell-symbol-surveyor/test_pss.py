@@ -5799,6 +5799,132 @@ def check_consumption_derivations(model_all):
           "under its id",
           "violating: %s" % sorted(set(unwritten) & script_writes)[:3])
 
+    # P7 (write-permitted variant) - at least one read, every read
+    # access-bearing, writes permitted; a superset of the strict set the
+    # access-population check derives.
+    by_id = collections.defaultdict(list)
+    for r in refs:
+        by_id[r["id"]].append(r)
+    refined = {i for i, rr in by_id.items()
+               if any(r["role"] == "read" for r in rr)
+               and all("access" in r for r in rr if r["role"] == "read")}
+    eq(len(refined), 143,
+       "6.5 P7: the write-permitted mutation-only derivation reproduces "
+       "the worked example")
+    strict = {i for i in refined
+              if all(r["role"] == "read" for r in by_id[i])}
+    check(strict <= refined,
+          "6.5 P7: the strict set is a subset of the write-permitted set")
+
+    # P8 scope consequence: P9's unreferenced parameters are a subset of
+    # the write-only material (a declaration-only local write is both).
+    unref_ids = set()
+    for s in symbols:
+        for p_ in s.get("parameters", []):
+            if p_["name"].lower() not in beyond.get(s["id"], set()):
+                unref_ids.add("variable:local/%s#%s"
+                              % (s["name"], p_["name"]))
+    wo_ids = {i for i, c in ledger.items()
+              if c.get("read", 0) == 0 and c.get("write", 0) > 0}
+    check(unref_ids <= wo_ids,
+          "6.5 P8: P9's parameter material is a subset of the write-only "
+          "material",
+          "outside: %s" % sorted(unref_ids - wo_ids)[:3])
+    eq((len(unref_ids), len(wo_ids)), (5, 15),
+       "6.5 P8: the subset's worked figures re-derive (5 of 15)")
+
+    # P8 caution: readers means "touches" - a superset of the
+    # reference-record owner set on every usage-map row, and strictly
+    # larger for some.
+    touch = collections.defaultdict(set)
+    for r in model_all["script_variables"]:
+        if r.get("record") == "reference":
+            touch[r["id"]].add(r["owner"])
+    supersets = strict_over = 0
+    for r in usage:
+        if set(r["readers"]) >= touch.get(r["id"], set()):
+            supersets += 1
+            if set(r["readers"]) > touch.get(r["id"], set()):
+                strict_over += 1
+    eq((supersets, strict_over), (len(usage), 4),
+       "6.5 P8 caution: readers is a superset of the reference-record "
+       "owner set on every row, strictly larger for the worked count")
+
+    # P11 - dynamic-invocation evidence chain: walk every PSS9002 target;
+    # on the pin every chain ends at a parameter- or expression-fed write.
+    lits = {r["literal"] for r in model_all["soft_references"]
+            if r["code"] == "PSS3001"}
+    writes_by_name = collections.defaultdict(list)
+    for r in refs:
+        if r["role"] == "write":
+            writes_by_name[r["name"].lower()].append(r)
+
+    def chase(varname, seen):
+        hits = set()
+        key = varname.lower()
+        if key in seen or len(seen) > 8:
+            return hits
+        seen.add(key)
+        for w in writes_by_name.get(key, ()):
+            rhs = w.get("rhs") or ""
+            for lit in lits:
+                if lit in rhs:
+                    hits.add(lit)
+            for v in (w.get("rhs_refs") or {}).get("variables", []):
+                hits |= chase(v.get("id", "").rsplit("/", 1)[-1], seen)
+        return hits
+
+    p9002 = [l for l in model_all["limitations"] if l["code"] == "PSS9002"]
+    landed = 0
+    for l in p9002:
+        mm = re.match(r"\$([\w:]+)", l.get("target") or "")
+        if mm and chase(mm.group(1).split(":")[-1], set()):
+            landed += 1
+    eq((len(p9002), landed), (26, 0),
+       "6.5 P11: all pinned targets walked; no chain crosses the "
+       "call boundary (the worked figures)")
+
+    # P12 - footprint tie: per-owner grouping sums back to the
+    # script-scope reference population.
+    script_refs = [r for r in model_all["script_variables"]
+                   if r.get("record") == "reference"]
+    fp = collections.Counter((r["owner"], r["id"]) for r in script_refs)
+    eq(sum(fp.values()), 1879,
+       "6.5 P12: the footprint sums to the script-scope reference "
+       "population (worked figure)")
+
+    # P13 - root reachability: two derivations agree; islands re-derived.
+    root_direct = {e["to"] for e in edges if e["from"] == "<script>"}
+    seen_r = set()
+    stack = list(root_direct)
+    while stack:
+        v = stack.pop()
+        if v in seen_r:
+            continue
+        seen_r.add(v)
+        stack.extend(adj[v] - seen_r)
+    reach_cl = {c["id"] for c in closures
+                if c.get("record") == "closure"
+                and "<script>" in c.get("transitive_callers", [])}
+    eq(seen_r, reach_cl,
+       "6.5 P13: the two root-reachability derivations agree")
+    eq((len(reach_cl), len(node_set - reach_cl)), (181, 299),
+       "6.5 P13: reachable / disconnected re-derive the worked figures")
+    islands = [g for g in stated_groups if not (set(g) & reach_cl)]
+    eq(len(islands), 0,
+       "6.5 P13: root-disconnected recursive islands re-derive "
+       "(the positive shape is fixture-held)")
+
+    # P14 - cross-owner coupling triples.
+    W = collections.defaultdict(set)
+    R = collections.defaultdict(set)
+    for r in script_refs:
+        (W if r["role"] == "write" else R)[r["id"]].add(r["owner"])
+    triples = [(w, v, rd) for v in set(W) | set(R)
+               for w in W.get(v, ()) for rd in R.get(v, ()) if w != rd]
+    eq((len(triples), len({t[1] for t in triples})), (875, 140),
+       "6.5 P14: the coupling triples re-derive the worked figures")
+
 
 def run_access_fixture():
     """SPEC 12.10: the access chain, held by shape against a bearing fixture.
@@ -5914,6 +6040,80 @@ def check_access_population(model_all):
        "re-derives at the pin")
 
 
+def run_consumption_shape_fixture():
+    """SPEC 6.5 P11/P13: the positive shapes the pin does not bear.
+
+    The pin's worked figures for P11 (0 chains landing) and P13 (0
+    islands) are honest zeros; this fixture holds the shapes that make
+    the procedures non-vacuous: a registry-fed dynamic invocation whose
+    chain lands on a PSS3001 literal, and a mutually recursive pair with
+    no static path from the root.
+    """
+    src = (
+        "$Script:Phases = @(@{ Id = 'P1'; Func = 'Invoke-PhaseOne' })\n"
+        "function Invoke-PhaseOne { return 1 }\n"
+        "function Invoke-IslandA { Invoke-IslandB }\n"
+        "function Invoke-IslandB { Invoke-IslandA }\n"
+        "$runner = $Script:Phases[0]\n"
+        "& $runner.Func | Out-Null\n"
+    )
+    model = pss.Survey("chain.ps1", src, axes=ALL_AXES).run().model()
+    eq(model["scan"]["anomalies"], 0, "consumption shapes: scan-clean")
+    refs = [r for r in model["script_variables"]
+            if r.get("record") == "reference"] \
+        + [r for r in model["local_variables"]
+           if r.get("record") == "reference"]
+    lits = {r["literal"] for r in model["soft_references"]
+            if r["code"] == "PSS3001"}
+    writes_by_name = collections.defaultdict(list)
+    for r in refs:
+        if r["role"] == "write":
+            writes_by_name[r["name"].lower()].append(r)
+
+    def chase(varname, seen):
+        hits = set()
+        if varname.lower() in seen:
+            return hits
+        seen.add(varname.lower())
+        for w in writes_by_name.get(varname.lower(), ()):
+            rhs = w.get("rhs") or ""
+            for lit in lits:
+                if lit in rhs:
+                    hits.add(lit)
+            for v in (w.get("rhs_refs") or {}).get("variables", []):
+                hits |= chase(v.get("id", "").rsplit("/", 1)[-1], seen)
+        return hits
+
+    p9002 = [l for l in model["limitations"] if l["code"] == "PSS9002"]
+    eq(len(p9002), 1, "consumption shapes: one dynamic invocation")
+    mm = re.match(r"\$([\w:]+)", p9002[0].get("target") or "")
+    landed = chase(mm.group(1).split(":")[-1], set()) if mm else set()
+    eq(landed, {"Invoke-PhaseOne"},
+       "consumption shapes: the P11 chain lands on the registry literal")
+
+    nodes = {s["id"] for s in model["symbols"]}
+    adj = collections.defaultdict(set)
+    for e in model["edges"]:
+        if e["from"] != "<script>":
+            adj[e["from"]].add(e["to"])
+    seen_r = set()
+    stack = [e["to"] for e in model["edges"] if e["from"] == "<script>"]
+    while stack:
+        v = stack.pop()
+        if v in seen_r:
+            continue
+        seen_r.add(v)
+        stack.extend(adj[v] - seen_r)
+    groups = [set(c["members"]) for c in model["closures"]
+              if c.get("code") == "PSS4004"]
+    islands = [g for g in groups if not (g & seen_r)]
+    eq(len(islands), 1,
+       "consumption shapes: the P13 root-disconnected island bears")
+    eq(sorted(islands[0]) if islands else [],
+       ["function/Invoke-IslandA", "function/Invoke-IslandB"],
+       "consumption shapes: the island is the mutual pair")
+
+
 def main():
     # The corpus manager is dispatched before the gate's own parser sees the
     # argument vector, rather than as an argparse subparser. Bare invocation
@@ -5955,6 +6155,7 @@ def main():
     run_limitation_disposition_fixture()
     run_collection_declaration_fixture()
     run_access_fixture()
+    run_consumption_shape_fixture()
 
     # Builds its own repositories, so it needs the `git` binary and not this
     # checkout (SPEC 14.3: a missing runtime degrades the gate, never the tool).

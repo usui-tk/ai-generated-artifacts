@@ -861,6 +861,15 @@ edition gate where 5.1 compatibility is the claim.
 > is deliberately a per-run stamped value — printed by every `--pwsh`
 > battery run — not a build constant.
 
+**Round 8 echo-back (2026-08-30).** The verbatim-carriage process closed
+its loop: both evaluating analysers, responding against the 0.10.0
+repository point and reproducing its identity bit-exactly, confirmed
+that the two clause blocks and the evaluator-context instances above
+carry their accepted conditions with no addition, loss, or shift of
+meaning. The carrier text stands as the committed form. The same round's
+consumer review of §6.5 and §12.10 is reflected where it landed (§6.5
+P7/P8 and P11–P14); round documents remain uncommitted.
+
 
 ## 4. Fact specifications
 
@@ -2205,20 +2214,51 @@ The role vocabulary is two-valued (`read` / `write`): a structural
 mutation or member invocation through a variable (`$s.Add(...)`,
 `$s['k'] = ...`) classifies as a *read* of the variable — and, since
 D21, such a read additionally carries the §12.10 `access` key stating
-how it is the base. A name whose aggregated role set is `{read}` with
-every read access-bearing is **mutation-only material** (live state
-being built, not consumed); the pinned basis carries exactly one such
-name, re-derived by the gate.
+how it is the base. Two mutation-only derivations follow, both
+gate-held; consumer review (round 8) established that the second is
+the one large scripts actually need:
+
+- **strict**: aggregated role set `{read}` and every read
+  access-bearing — a name mutated but never assigned in-file. Pinned
+  basis: 1.
+- **write-permitted**: at least one read, **every** read
+  access-bearing, writes permitted — the ordinary shape of state
+  declared once at the top and then only built (`$s = @{}` … `$s[$k]
+  = …`), which the strict rule excludes because the declaration is a
+  write. Pinned basis: 143, a superset of the strict set.
+
+Both are **material** (live state being built, not consumed); one
+plain read anywhere drops a name out of both.
 
 **P8 — Write-only material.** The names whose aggregated role set is
 `{write}` are the write-only **material** (the retirement *candidate* is a
-consumer disposition, per §1.2). Cross-check: a write-only id must appear in
+consumer disposition, per §1.2). **Scope: the P7 ledger spans both
+reference collections** (`local_variables` and `script_variables`) —
+deriving over one collection alone silently narrows the material, a
+mis-derivation consumer review actually produced. A consequence worth
+stating: a declaration-only local write is write-only material *and*,
+when it is a parameter's `PSS2002` declaration, P9's
+unreferenced-parameter material — the two patterns overlap by
+construction, and on the pinned basis P9's set is a subset of this one
+(5 of 15), gate-held. Cross-check: a write-only id must appear in
 no write-site's `rhs_refs.variables` list — a right-hand-side reference is a
 read and would have contributed a read record. The §12.10 `access` key
 cannot appear on these names by construction — an access-bearing record
 is a read record — so the write-only derivation needs no D21 amendment;
 the mutation-only refinement lives on the read side (P7). Pinned basis:
 15 write-only ids, 0 violating the cross-check.
+
+**A caution that protects P7 and P8: the usage map's `readers` means
+"touches", not "reads".** §12.3 places an owner in `readers` when it
+contains *any* reference, and the map is fed from more channels than
+role-bearing reference records (declaration sites, in-string
+references), so `readers` is a **superset** of the reference-record
+owner set — never smaller, and strictly larger for 4 names on the
+pinned basis, both facts gate-held. A consumer who shortcuts P7/P8
+through the map gets wrong answers (a write-only name can carry
+`reader_count > 0`); role aggregation over reference records is the
+only source of read/write truth. P10 is unaffected: `writer_count ==
+0` still states "no modeled writer" exactly.
 
 **P9 — Parameter use beyond declaration.** A function parameter's
 declaration is itself a §12.2 declaration site (`PSS2002`, role `write`),
@@ -2247,6 +2287,47 @@ analogous count. Everything here composes records the model already
 publishes — the round-6 rule again: the derivation belongs in prose, not
 the payload. Pinned basis: 1 usage-map name with readers and no modeled
 writer, re-derived by the gate.
+
+**P11 — Dynamic-invocation evidence chain.** `PSS9002` states each
+unresolved invocation's target verbatim. From the target's leading
+variable, follow `rhs_refs` transitively through write records, and
+intersect the literals occurring in those writes' `rhs` strings with
+`PSS3001` sites: the result is an ordered evidence chain from an
+unresolved invocation to a named function — a *narrower candidate
+signal* than P5's join alone, still never membership of any entry-point
+set (§3.3). **The chain does not cross call boundaries**: a
+parameter-fed target (its write is a `PSS2002` declaration with no
+`rhs`) ends the chase, which is §12.8's boundary showing up exactly
+where it should. Pinned basis: all 26 `PSS9002` sites walked, 0 chains
+landing on a `PSS3001` literal — every pinned target is parameter- or
+expression-fed; the positive shape is fixture-held.
+
+**P12 — Per-function script-scope footprint.** Grouping script-scope
+reference records by `owner`, then `id`, with `role` and `access`,
+states what script-scope state each function touches and how — the cost
+of extracting or moving it. Cross-check: footprint records summed over
+all owners must equal the script-scope reference population (1,879 on
+the pinned basis, gate-held).
+
+**P13 — Static root reachability.** The transitive closure from
+`<script>` over `edges[]` partitions `symbols[]` into statically
+root-reachable and root-disconnected material. Two independent
+derivations must agree: (a) breadth-first search from the root edges;
+(b) the `closures` records whose `transitive_callers` contain
+`<script>`. A root-disconnected recursive island — a `PSS4004` group
+disjoint from the closure — is the shape P5 cannot expose, because every
+member has a static caller. Pinned basis: 181 reachable / 299
+disconnected, derivations agreeing; 0 islands (the shape is
+fixture-held). Not a dead-code verdict: dynamic invocation and §12.8
+channels stay outside the graph.
+
+**P14 — Cross-owner state coupling.** Over script-scope reference
+records, for each id let `W` be the distinct owners of its write records
+and `R` of its read records; the triples `(writer, id, reader)` with
+`writer ≠ reader` are the structural shared-state dependencies between
+owners. Whether a dependency blocks extraction or should become a
+parameter is consumer judgement. Pinned basis: 875 triples over 140
+names, gate-held.
 
 **What stays consumer-side, by design.** Candidate dispositions, verdicts,
 thresholds, similarity measures, requirement-and-test coverage, and
