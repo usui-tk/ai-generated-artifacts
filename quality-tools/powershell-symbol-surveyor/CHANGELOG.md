@@ -18,6 +18,35 @@ This file starts at `0.2.0`. Entries before it are reconstructed from the
 commit history and the SPEC's own decision records rather than written at the
 time, and are marked as such.
 
+## [0.10.2] - 2026-09-05 (`model_version` "10" unmoved; the D23 arc)
+
+Docs + gate only. Material: an external review (N23, uncommitted Tier-P)
+that cross-checked this tool against an independent native-AST
+PowerShell analyzer over the same reference script - every structural
+population agreed, and two of that analyzer's candidate classes were
+wrong where this model was right. No payload change, the "10" caches
+stay valid, B.7/B.8 unmoved.
+
+### Added
+
+- **§6.5 P15 literal-seeded reachability ceiling**: the closure seeded
+  with `<script>` plus every `PSS3001`-named function is a *ceiling* on
+  functions reachable by any modeled channel, never an entry-point claim.
+  Pinned basis re-derived per run: 49 sites / 28 named functions;
+  181 (P13) -> **469 in the ceiling / 11 outside** of 480; P13
+  strict-subset and literal-containment held; withhold-all returns
+  P13's 181; 17 of 28 seeds load-bearing. The consumption-shape fixture
+  bears the positive shape. (The same derivation reproduces, name for
+  name, the eleven functions the reviewed project's own native-AST
+  investigation placed outside its governed closure.)
+- **§6.5 P9 scoping rule** stated: nested-scriptblock references count
+  as use of the enclosing function's parameter; a nested `param()`
+  block's parameters are not the enclosing function's. New fixture
+  (four nesting forms, one genuinely unreferenced parameter each), red-
+  demonstrated against a scratch mutation that reproduces the reviewed
+  analyzer's 12-false-positive shape. Battery grew to **742**
+  (`--pwsh`) / **714** / **379** (no `git`).
+
 ## [0.10.1] - 2026-08-30 (`model_version` "10" unmoved; the D22 arc)
 
 Docs + gate only: the round-8 consumer review of §6.5 / §12.10, landed
