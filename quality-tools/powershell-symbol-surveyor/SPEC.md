@@ -2271,7 +2271,16 @@ top-level parameter enters the script population and this derivation; an
 unqualified top-level parameter that nothing references sits outside the
 §12.6 population by that section's own admission rule, and this model
 carries no record of it. Pinned basis: 5 function parameters with no
-reference beyond their declaration.
+reference beyond their declaration. **Scoping rule the join relies on:**
+a reference inside a scriptblock nested in the function body — a
+`Where-Object { … }` filter, a `foreach` body, a job or callback
+scriptblock, a local `$sb = { … }` — is owned by the enclosing function
+and counts as use of that function's parameter; and a nested
+scriptblock's own `param()` block declares *its* parameters, which are
+not the enclosing function's and never enter this join. A join that
+keys nested-scriptblock references under a separate owner reports every
+filter-referenced parameter as unused; the shape is fixture-held, four
+nesting forms, exactly one genuinely unreferenced parameter per fixture.
 
 **P10 — Unmodeled-writer material.** A script-scope name that is read
 but has no modeled writer states itself in the `PSS2008` usage map:
@@ -2328,6 +2337,31 @@ and `R` of its read records; the triples `(writer, id, reader)` with
 owners. Whether a dependency blocks extraction or should become a
 parameter is consumer judgement. Pinned basis: 875 triples over 140
 names, gate-held.
+
+**P15 — Literal-seeded reachability ceiling.** P13's closure from
+`<script>` alone under-counts on any script that dispatches through a
+data table (`Get-Command -Name $entry.Func` over a registry), and P11
+correctly reports that no evidence chain crosses that call boundary.
+What the model *can* bound is the other side: seed the closure with
+`<script>` **and every function that some `PSS3001` literal names**
+(`soft_references[].matches`), then take the transitive closure over
+`edges[]`. Every function reachable by name dispatch is inside this
+set — a literal that names it must exist for the dispatch to resolve —
+so the set is a **ceiling** on statically-reachable-by-any-modeled-
+channel functions, never a membership claim: a function named only in a
+log string is counted too. Its complement is the material a
+dead-surface question starts from, one step tighter than P13's. Two
+consequences hold by construction and are gate-held: P13's reachable
+set is a subset of P15's (strictly so whenever a literal names a
+root-disconnected function), and every literal-named function is
+inside P15's set. Pinned basis: 49 `PSS3001` sites naming 28 distinct
+functions; 181 root-reachable (P13) → **469 in the ceiling / 11
+outside**, of 480; withholding every literal returns exactly P13's 181,
+and 17 of the 28 seeds are load-bearing (withholding any one of them
+shrinks the ceiling) — both gate-held so the figure stays a derivation
+rather than a stamp. Which of the 28 are entry points, and whether the 11
+are dead, remain consumer questions (§3.3, and the closing paragraph of
+this section).
 
 **What stays consumer-side, by design.** Candidate dispositions, verdicts,
 thresholds, similarity measures, requirement-and-test coverage, and

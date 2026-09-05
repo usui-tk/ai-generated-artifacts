@@ -5925,6 +5925,111 @@ def check_consumption_derivations(model_all):
     eq((len(triples), len({t[1] for t in triples})), (875, 140),
        "6.5 P14: the coupling triples re-derive the worked figures")
 
+    # P15 - literal-seeded reachability ceiling: root plus every
+    # PSS3001-named function, closed over edges. Subset and containment
+    # consequences held, the worked figures re-derived, and the derivation
+    # shown to move when one registry-naming literal is withheld (the
+    # tamper-red family, executed as a real derivation here).
+    def seeded_closure(seed_ids):
+        seen_s = set()
+        stack_s = [e["to"] for e in edges if e["from"] == "<script>"] \
+            + sorted(seed_ids)
+        while stack_s:
+            v = stack_s.pop()
+            if v in seen_s:
+                continue
+            seen_s.add(v)
+            stack_s.extend(adj[v] - seen_s)
+        return seen_s
+
+    lit_recs = [r for r in model_all["soft_references"]
+                if r["code"] == "PSS3001" and r["matches"] in node_set]
+    lit_named = {r["matches"] for r in lit_recs}
+    ceiling = seeded_closure(lit_named)
+    eq((len(lit_recs), len(lit_named)), (49, 28),
+       "6.5 P15: PSS3001 sites and distinct literal-named functions "
+       "(worked figures)")
+    check(reach_cl < ceiling,
+          "6.5 P15: P13's reachable set is a strict subset of the ceiling")
+    check(lit_named <= ceiling,
+          "6.5 P15: every literal-named function is inside the ceiling")
+    eq((len(ceiling), len(node_set - ceiling)), (469, 11),
+       "6.5 P15: ceiling / outside re-derive the worked figures")
+    outside_names = sorted(i.rsplit("/", 1)[-1] for i in node_set - ceiling)
+    eq(outside_names[:3],
+       ["Disable-DebugTraceFileOutput", "Get-LatestSevenZipUrl",
+        "Get-PatchKbId"],
+       "6.5 P15: the outside set opens with the P5 no-static-caller names")
+    eq(seeded_closure(set()), reach_cl,
+       "6.5 P15: withholding every literal collapses the ceiling to P13")
+    load_bearing = [x for x in sorted(lit_named)
+                    if len(seeded_closure(lit_named - {x})) < len(ceiling)]
+    eq(len(load_bearing), 17,
+       "6.5 P15: 17 of the 28 literal-named functions are load-bearing "
+       "seeds - withholding any one shrinks the ceiling (the derivation "
+       "is live, not a stamped figure)")
+
+
+def run_p9_scoping_fixture():
+    """SPEC 6.5 P9: nested-scriptblock references count as parameter use.
+
+    Four nesting forms - a Where-Object filter, a foreach body, a job
+    scriptblock with its own param() block, and a local scriptblock with
+    its own param() block - each in a function that also carries exactly
+    one genuinely unreferenced parameter. The join must report the one
+    and only the one; an implementation that keys nested references
+    under a separate owner reports the filter-referenced parameters too.
+    """
+    src = (
+        "function Get-ByYear { param([int]$Year, [string]$Unused1)\n"
+        "  return @($Rows | Where-Object { [int]$_.Y -eq $Year })\n"
+        "}\n"
+        "function Get-ByRoles { param([string[]]$Roles, [string]$Unused2)\n"
+        "  return @($Rows | Where-Object { $ok = $false\n"
+        "    foreach ($r in $Roles) { if ($_.R -eq $r) { $ok = $true } }\n"
+        "    $ok })\n"
+        "}\n"
+        "function Start-Fetch { param([string]$Uri, [string]$Unused3)\n"
+        "  $job = Start-Job -ScriptBlock { param($u) Invoke-WebRequest $u }"
+        " -ArgumentList $Uri\n"
+        "  return $job\n"
+        "}\n"
+        "function Get-Findings { param([string]$Level, [string]$Unused4)\n"
+        "  $found = @()\n"
+        "  $add = { param($Kind, $Message)"
+        " $found += @{ Level = $Level; Kind = $Kind; Message = $Message } }\n"
+        "  & $add 'boot' 'x'\n"
+        "  return $found\n"
+        "}\n"
+    )
+    model = pss.Survey("scoping.ps1", src, axes=ALL_AXES).run().model()
+    eq(model["scan"]["anomalies"], 0, "P9 scoping: scan-clean")
+    refs = [r for r in model["local_variables"]
+            if r.get("record") == "reference"]
+    beyond = collections.defaultdict(set)
+    for r in refs:
+        if r.get("code") != "PSS2002":
+            beyond[r["owner"]].add(r["name"].lower())
+    unref = sorted((s["id"].rsplit("/", 1)[-1], p["name"])
+                   for s in model["symbols"] if s["kind"] == "function"
+                   for p in s.get("parameters", [])
+                   if p["name"].lower() not in beyond.get(s["id"], set()))
+    eq(unref, [("Get-ByRoles", "Unused2"), ("Get-ByYear", "Unused1"),
+               ("Get-Findings", "Unused4"), ("Start-Fetch", "Unused3")],
+       "P9 scoping: exactly the four declared-unreferenced parameters, "
+       "none of the nested-scriptblock-referenced ones")
+    inner = {(s["id"].rsplit("/", 1)[-1], p["name"])
+             for s in model["symbols"] if s["kind"] == "function"
+             for p in s.get("parameters", [])}
+    check(("Start-Fetch", "u") not in inner
+          and ("Get-Findings", "Kind") not in inner,
+          "P9 scoping: a nested param() block's parameters are not the "
+          "enclosing function's")
+    owners = {r["owner"] for r in refs}
+    check(owners <= {s["id"] for s in model["symbols"]} | {"<script>"},
+          "P9 scoping: every nested reference is owned by a declared "
+          "function or the script, never by a scriptblock")
+
 
 def run_access_fixture():
     """SPEC 12.10: the access chain, held by shape against a bearing fixture.
@@ -6112,6 +6217,20 @@ def run_consumption_shape_fixture():
     eq(sorted(islands[0]) if islands else [],
        ["function/Invoke-IslandA", "function/Invoke-IslandB"],
        "consumption shapes: the island is the mutual pair")
+    lit_named = {r["matches"] for r in model["soft_references"]
+                 if r["code"] == "PSS3001" and r["matches"] in nodes}
+    ceiling = set(seen_r)
+    stack = sorted(lit_named)
+    while stack:
+        v = stack.pop()
+        if v in ceiling:
+            continue
+        ceiling.add(v)
+        stack.extend(adj[v] - ceiling)
+    eq((sorted(seen_r), sorted(ceiling)),
+       ([], ["function/Invoke-PhaseOne"]),
+       "consumption shapes: the P15 ceiling admits the registry-named "
+       "function that P13 cannot reach")
 
 
 def main():
@@ -6156,6 +6275,7 @@ def main():
     run_collection_declaration_fixture()
     run_access_fixture()
     run_consumption_shape_fixture()
+    run_p9_scoping_fixture()
 
     # Builds its own repositories, so it needs the `git` binary and not this
     # checkout (SPEC 14.3: a missing runtime degrades the gate, never the tool).
