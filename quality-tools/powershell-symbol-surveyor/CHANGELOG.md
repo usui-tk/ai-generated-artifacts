@@ -18,6 +18,52 @@ This file starts at `0.2.0`. Entries before it are reconstructed from the
 commit history and the SPEC's own decision records rather than written at the
 time, and are marked as such.
 
+## [0.11.0] - 2026-09-06 (`model_version` "10" -> "11"; the D24 arc)
+
+Model-moving. Lands the Round-9 prototype adjudication (three evaluating
+analysers; Part A 3/3 `met`, Part B 3/3 adopt). Every "10" cache expired
+at C1; both corpus entries rebuilt at "11" (`baseline_digest
+760471fda52a9c63`). B.8 `model_shape` all-axes restamped once
+(`7820d481…` -> `e93cd5a3…`), default unmoved; B.7 unmoved.
+
+### Added
+
+- **§12.10 `member_dynamic`** — two facts, two keys: `access` keeps its
+  three values with the definition *declared* broadened (a walked member
+  segment's name may be a `$variable`; the name was never the claim), and a
+  bearing record carries `member_dynamic: true` when **any** walked member
+  segment's name is a variable, for assignment and invocation. An
+  index-expression variable is not a member-name segment; a dynamic segment
+  after the first invocation is never walked; plain reads, whitespace-broken
+  chains and the member-name variable itself stay unmarked. The former
+  no-claim reason-sentence is removed. Pin: bearing 1,660 -> 1,662
+  (member-assignment 398 -> 400); exactly 2 carry the flag, both
+  function-local, so the default materialisation is byte-unmoved at the pin.
+  §6.5 P7 now classifies the phase-runner bag idiom
+  (`$Script:State.$Phase = …`) as mutation-only instead of consumed.
+- **§12.8 at the access site** — `rhs` / `rhs_span` / `rhs_refs` on
+  `member-assignment` and `element-assignment` records by the
+  declaration-write rule; never on `member-invocation`; the LHS never in
+  `rhs_refs`; the descriptor's `rhs.presence_means` redefined. Pin: all 488
+  (400 + 88) carry `rhs` with `encoded_source[rhs_span] == rhs`; the
+  two-derivation `rhs_refs` differential runs over them.
+- Declarations: `/local_variables[]/member_dynamic` (axis),
+  `/script_variables[]/member_dynamic` (optional); both reference variants
+  declare the new key and the redefined `rhs`.
+- §3.3 Round-9 record; §13.2 B1-5 closed (landed) and `hash_alpha` opened as
+  *proposed* with its landing bar; §6.5 preamble source-dependent-procedure
+  rule, P8 boundaries, three consumer-side shapes; §10.5 line-terminator
+  note.
+
+### Gate
+
+- Fixtures: `member_dynamic` (13 shapes incl. the adjudicated negatives),
+  access-site `rhs` (the five Round-9 red-first cases), the access fixture's
+  L14 flip; pin checks for the 2 flagged sites, the 488 `rhs` carriers, and
+  the invocation-never-carries-`rhs` rule. Red demonstrated: 9 named FAILs
+  (Part A) against 0.10.2; 6 named FAILs (Part B) against the Part-A-only
+  build. Battery **790** (`--pwsh`) / **762** / **422** (no `git`).
+
 ## [0.10.2] - 2026-09-05 (`model_version` "10" unmoved; the D23 arc)
 
 Docs + gate only. Material: an external review (N23, uncommitted Tier-P)
