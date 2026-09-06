@@ -870,6 +870,41 @@ meaning. The carrier text stands as the committed form. The same round's
 consumer review of §6.5 and §12.10 is reflected where it landed (§6.5
 P7/P8 and P11–P14); round documents remain uncommitted.
 
+**Round 9 prototype adjudication (2026-09-06).** Round 8's one
+non-convergence — the shape of the dynamic-member claim (§12.10) — was
+closed by the stream's prototype practice: both candidate shapes were
+built and measured on the specimen and the pinned basis, and the kit
+carried both Round-8 positions verbatim. Three evaluating analysers
+responded (Anthropic Claude Fable 5.1; OpenAI ChatGPT Sol 5.6; and a
+third, labelled "Astra 6" by the stream, which described itself as
+"ChatGPT (exact serving-model identifier unavailable)" and answered
+*as* the Round-8 Evaluator-B requirement without claiming memory of it);
+every quantitative claim in all three was re-verified against the kit
+and none discarded. **Part A, 3/3 `met`:** the two positions served the
+same consumption (P7) and differed on vocabulary hygiene; the adopted
+shape separates the two facts into two keys — `access` with its
+definition *declared* broadened, plus `member_dynamic` — over any walked
+segment, for assignment and invocation, with the no-claim residue
+unchanged (§12.10, D24). The evaluators' accepted clause texts are the
+§12.10 "walk, amended" and `member_dynamic` paragraphs, the index-
+expression and absence-scope sentences, and the descriptor's
+`member_dynamic` and redefined `rhs` presence texts. Three kit defects
+the evaluators found are recorded: the prototype emitted `dynamic_member`
+where the prose said `member_dynamic` (one spelling chosen); the
+prototype file was key-sorted rather than §5.4-ordered; one cited fixture
+variant was not in the kit. **Part B, 3/3 adopt:** `rhs`/`rhs_span`/
+`rhs_refs` on the two assignment-kind access records (§12.8, D24),
+bundled into the same version move under the rule the round converged
+on — *only because* the prototype and its whole-population gate were
+green before Part A's fixture landed. **Part C:** the alpha-renamed
+equality class (Q8-C1's fact-shaped alternative) moved from "named" to
+"proposed" (two evaluators) with the third holding it to an exact,
+implemented, fixture-held rule before payload — recorded as the §13.2
+`hash_alpha` row with that bar as its landing condition; the boundary
+against threshold-bearing similarity was confirmed 3/3. Round documents
+remain uncommitted; a Round-10 echo-back of the clause texts as
+committed is owed.
+
 
 ## 4. Fact specifications
 
@@ -2147,6 +2182,12 @@ section:
   a precomputed result is the round-6 rule ("a fact derivable from the
   payload belongs in prose rather than the payload") applied at
   documentation scope.
+- **A source-dependent procedure is not a payload-only derivation.** A
+  pattern that needs the source bytes (bound by `source.sha256`) as well as
+  the model — a renaming-equality comparison, a documentation join — may be
+  stated here only with that dependence named in its first sentence; it is
+  never filed as one of this section's payload-only derivations, and the
+  gate does not execute it against the pin.
 - **Every stated figure is re-derived.** The worked-example figures below
   are measured on the pinned basis, and `test_pss.py` re-derives each on
   every run by executing the written procedure against the pin model (the
@@ -2245,7 +2286,15 @@ no write-site's `rhs_refs.variables` list — a right-hand-side reference is a
 read and would have contributed a read record. The §12.10 `access` key
 cannot appear on these names by construction — an access-bearing record
 is a read record — so the write-only derivation needs no D21 amendment;
-the mutation-only refinement lives on the read side (P7). Pinned basis:
+the mutation-only refinement lives on the read side (P7). Two boundaries
+a consumer must keep: **preference and automatic variables are never
+write-only material** — `$ErrorActionPreference = …` at script level is
+read by the engine, and the model already classifies it `PSS2005`
+(§13.5's set), so it never enters this join; and the **`PSS2008` usage
+map is not a shortcut** — its `readers` lists every function that
+*touches* the name (the D22 caution), so `reader_count == 0` does not
+mean write-only; the only sanctioned path is the role aggregation above
+over the reference records. Pinned basis:
 15 write-only ids, 0 violating the cross-check.
 
 **A caution that protects P7 and P8: the usage map's `readers` means
@@ -2369,6 +2418,26 @@ membership of any dynamically-resolved entry-point set (§3.3) are consumer
 judgements over these facts. A consumer that needs them recorded should
 record them in its own artefacts against this model's `source.sha256` — the
 model's determinism (§5.4) makes that binding reproducible.
+
+Three consumer-side patterns observed at an external review (N23) are
+recorded here as shapes, not as gate-held derivations, because each needs
+material outside the model. **Change-scope evidence:** the `compare` delta
+document between the pre- and post-states of a source-changing step is
+the structural statement of what the step touched — every name the step
+claims to have changed should appear (`PSS6001`/`PSS6002`,
+`PSS7001 code-changed`, `PSS8008`) and nothing outside the claim should;
+a consumer that records its refactoring by hashes alone has no such
+statement. **Documented surfaces:** a join of `symbols[].name` against
+external documents (a README, a specification) yields the set of functions
+a document names; the model reads only the script (§2.6), so the join is
+the consumer's, made against `source.sha256`, and it is the material that
+keeps an uncalled-but-documented function out of a retirement pile.
+**Script-state member invocation as a limitation:** an `access:
+member-invocation` record on script state is where the model states that
+the base was invoked through and nothing about the effect; a consumer that
+carries its own limitation taxonomy will file the same site as
+"runtime evidence required" — the two vocabularies coincide, and this
+model carries the site as an access fact rather than a limitation record.
 
 ---
 
@@ -2518,6 +2587,15 @@ Exactly **four** combinations are reachable. `PSS7001` emits one of:
 | same | same | differs | `comment-or-whitespace-only` |
 | same | differs | differs | `string-literal-only` |
 | differs | differs | differs | `code-changed` |
+
+A change of line terminator alone moves `hash_raw` and nothing else — the
+whitespace collapse folds `\r` — so it lands on the
+`comment-or-whitespace-only` rung, indistinguishable there from a comment
+edit; a consumer that needs the distinction normalises terminators before
+surveying, or compares `hash_raw` of terminator-normalised copies itself
+(measured: an LF copy of the pinned basis against a CRLF copy of the same
+bytes moves `hash_raw` on 475 of 480 functions and `hash_body`/`hash_full`
+on none).
 
 The remaining four combinations are unreachable. Observing one is a defect in
 `pss.py`; the tool emits `PSS9006` rather than an out-of-enum value — the
@@ -3345,6 +3423,8 @@ should not assume any of these are currently enforced.
 | Model-external writes | Round 6's provenance prototype surfaced four reads of script variables with **no write record anywhere in the model** — `$Script:ErrorsJsonlPath` ×2 (`Add-ErrorJsonlEntry`, lines 2224/2241) and `$Script:ScriptPath` ×2 (`Show-PowerShellEnvironment`, line 2769); verified across every id namespace. Their writers exist only in §12.8's unmodeled channels (`Set-Variable`-class, `-OutVariable`, dot-sourcing) — precisely the boundary §12.8 declares, made visible by a reaching join for the first time. Whether the model should state "this read has no modeled writer" as a fact (a limitations code? a key on the read record?) is undesigned; the shape needs its own adjudication and does not travel with D15. **Adjudicated at D21, and the answer is neither shape: the fact is already stated.** The `PSS2008` usage map's `writer_count == 0` with `reader_count > 0` IS "read with no modeled writer", per name, in the payload today — so a new limitations code or record key would duplicate a derivable fact, exactly what the round-6 rule and both round-7 reviewers' `supplied_by` rejections exclude. §6.5 P10 states the derivation (with the §12.6 population boundary and the local-side `unresolved_refs` analogue) and the gate re-derives its pin figure per run. Re-measured on the way in: the round-6 finding had meanwhile halved itself — `$Script:ScriptPath` gained a modeled writer when the §12.3 order-independence correction landed, and the pin's remaining population is exactly one name (`$Script:ErrorsJsonlPath`), which is the measured trace of both the correction and the boundary | closed (derivable — §6.5 P10, D21; gate-held figure) |
 | Emission coverage | every code in §4 blocks 1-4 (survey-emittable) appears as a `code` or `facts` value on at least one record somewhere in the regression corpus's models, or is documented as data-dependent-absent (e.g. `PSS1005` legitimately does not fire on a corpus with zero duplicate names). **The block-1-4 scope is itself the finding of 2026-08-23 (§3.3): block 9 is excluded, and block 9 is where the two codes with no emit path at all turned out to live** — measured over `pss.py`, `PSS9001` and `PSS9006` occur nowhere outside the `FACTS` catalogue. `PSS9006`'s case is the sharper one: §10.5 says the tool emits it rather than an out-of-enum value, and the S4 "Reachability" row below asserts its corpus count is zero — an assertion that is **vacuously true of a code that cannot be emitted**, so the gate reads as evidence while measuring nothing. Widening this row's scope to every declared code, and requiring each to be either emitted, held by fixture, or declared unreachable-by-construction with the declaration itself gate-held, is the second half of the D16 candidate below | `PSS2005`, `PSS4001`, `PSS4002` closed by manual audit. `PSS2002` closed for all five §12.2 sources at the D10 arc — each source is held red-first by a §13.1 fixture, which is stronger than corpus presence. **closed (widened) — landed at the D16 arc (C2)**: the emission-reachability gate holds every FACTS code to a measured evidence class (22 pin / 3 fixture / 18 delta / 1 refusal / 1 diagnostic), both directions against the catalogue, with evidence read from emitted records only (a tally key or prose never counts). PSS9006's path exposed and fixed the inverted classification ladder on the way in (§10.5 defect record) |
 | Declared model schema | **RESOLVED (ADR 0036).** §13.3 declares the path set (counts stated there, per materialisation) and `pss.MODEL_SCHEMA` carries it; `--self-check` holds the two together on path *and* kind, and `test_pss.py` holds the declaration against the pin in both directions. The pairing with the §3.1 descriptor is satisfied by the declaration living in the code, so `--capabilities` can serialise it rather than restate it | closed |
+| Right-hand side on access records (B1-5) | Round 8's one evaluator-side payload ask (Evaluator A): an access-bearing `member-assignment` / `element-assignment` record is an assignment yet carried no `rhs`, `rhs_span`, `rhs_refs`; line co-location is not a join (two statements on one line, a multi-line expression), and the model publishes no statement boundary. Round 9 put it to all three evaluators: adopted 3/3 as the §12.8 rule at a new site, never on `member-invocation`, with the carrier definition *declared* broadened. **Landed at D24** (`model_version` "11"): §12.8's second-site paragraph; fixture on the five adjudicated shapes; pin gate over every one of the 488 assignment-kind access records (400 + 88) by `encoded_source[rhs_span] == rhs` and the two-derivation `rhs_refs` differential | closed (landed, D24) |
+| `hash_alpha` — equality class under declared alpha-renaming | Round 8 rejected near-duplicate *similarity* (a score embeds a threshold; 3/3 reconfirmed at Round 9) and Evaluator A named, without proposing, the one fact-shaped alternative: a body hash with unqualified, non-automatic variables renamed `$v1, $v2, …` in first-occurrence order — an equality partition, no score. Round 9 measured an approximation of it on the pinned basis (0 `hash_body` groups vs 3 alpha-renamed groups / 12 members, one of them a pair an independent consumer later consolidated after finding it by shingle similarity) and put it to all three: two evaluators moved to *propose* it in the `hash_*` family (Evaluator A withdrawing its own Round-8 over-strict reading of the round-6 rule: the class is derivable from *source plus this tool's normaliser*, the same status as `hash_body` itself); the third holds it to the bar below before payload. **Rule (to be stated normatively at landing):** defined on `hash_body`'s own token sequence (same extent, comment/string stripping, whitespace rule), so `hash_body`-equal ⇒ `hash_alpha`-equal is a gate-holdable invariant; renamed = every variable token that is unqualified (no scope/drive qualifier) and not in the §13.5 automatic-variable set, parameters included, `${n}`/`@n` as the same variable in their own syntax; case-insensitive name equality; first-occurrence order; everything else untouched; 16-hex digest. **Landing bar (Evaluator C, adopted):** the rule fixes the automatic set, case/braced spelling, nested-function ownership and the body/parameter boundary exactly; it is implemented, fixture-held, and the pin figure is re-derived by the gate before any prose carries it (the Round-9 3/12 figure is an approximation and is not restated). **Model-moving**, its own `model_version` move, its own arc | proposed (Round 9) |
 | Version-decision enforcement | **RESOLVED (ADR 0036).** The parent commit's build is re-derived and compared; a model that moved without the version advancing is a failure. Measured against real history the check reddens at `44b97d1` (shape moved) and at `bc69c27` (shape identical, values moved) | closed |
 | Enumerated-constant reachability | **the generalisation of the row above.** Every constant this tool enumerates — fact codes, the assignment-operator set, the automatic-variable set, the axis vocabulary — is demonstrably reachable: some input drives it, or it is documented as data-dependent-absent. Enumerating a capability the machinery cannot exercise has now failed twice in the same shape — four fact codes defined and never emitted, and three assignment operators the tokenizer could not produce (§12.2) — and both times every gate stayed green because the check compared *names* rather than *behaviour*. `test_pss.py`'s fixtures cover the operator set; the fact catalogue and the automatic-variable set are not yet covered | **closed — landed at the D18 arc** (§13.5): every module-level enumerated constant is AST-discovered and dispositioned `bearing` / `held-by` / `not-vocabulary`, the table held against the discovery both directions; the seven input-vocabulary sets measured member-by-member in their own consumption bases (tokens from the tool's own tokenizer for the operator and keyword sets, emitted `PSS2005` records for the automatic-variable set) over the pin plus a dedicated bearing fixture; the beyond-corpus register gate-held both directions and **empty at landing** — the fixture bears the 67 members the pin does not, `&&` and `||` among them. Docs+gate only: `model_version` and `pss_version` unmoved, no restamp |
 | Entry-context reachability / extent granularity | Carried since the §3.3 adoption evaluation as a session-slot title only; formalised here so this document is the carrier. What is on file: the evaluation named reachability from a dynamically-resolved entry among the boundaries PSS cannot settle alone (§3.3; declared at §12.8), and the PSS-side neighbours exist — a closures record's `transitive_callers` makes reachability-from-`<script>` a per-record derivation, `PSS4003` states the no-static-caller fact with its `named_by_literal` qualifier, and §5.11 classifies the dynamic-target limitations. What is NOT on file: the evaluating analyser's own EntryContext and extent-granularity definitions — without them the item can neither be designed against nor honestly closed as already-covered. Prerequisite: obtain those definitions at the next adoption-evaluation dialogue | **closed — adjudicated already-covered at Round 7 (D19)**: both evaluating analysers supplied their definitions and independently adjudicated coverage; the round documents are not committed, so this row carries the substance. EntryContext is consumer-owned — an entry-point set E and an edge relation R: E = `<script>` ∪ D, where D (dynamically-resolved entries) exists only where consumer-side runtime/config evidence resolves a name to exactly one function id — `named_by_literal` is a candidate signal, not a resolution, and creates no entry; R = static call edges only (`edges[]`), with data-flow / event / import relations separately typed, never folded in. Extent: reachability adjudication is function-level — id plus `start_line`/`end_line`, which `symbols[]` already carries; byte spans (§5.6, encoded-source offsets) are the exact site address and are never raw-compared against native `IScriptExtent` character offsets (explicit conversion against the same bytes and declared encoding — the D14 mis-addressing class, stated so it is not rebuilt in reverse by a consumer of both models). Coverage: `<script>`-reachability is a per-record derivation (`<script>` ∈ `transitive_callers`); the D candidate signal is `PSS4003` + `named_by_literal`, whose evidence sites join to `PSS3001` records by a single id equality (verified on the pin at Round 7: 26 orphans, 17 named-by-literal, 17/17 joining); membership of D itself is consumer-side evidence — the §5.11 dispositions state that boundary in the record payloads, and the division of labour is agreed on the record: determining D is not this tool's to model (§1.3). No new model element is required; one evaluator expressly recommends against itemising literal sites on the `PSS4003` record (a single-join duplication of records the model already carries) |
