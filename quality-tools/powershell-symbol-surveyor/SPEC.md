@@ -2588,6 +2588,9 @@ Exactly **four** combinations are reachable. `PSS7001` emits one of:
 | same | differs | differs | `string-literal-only` |
 | differs | differs | differs | `code-changed` |
 
+`hash_alpha` (§10.9) is not a rung: it is a fourth value carried beside the
+triple, not compared by the ladder.
+
 A change of line terminator alone moves `hash_raw` and nothing else — the
 whitespace collapse folds `\r` — so it lands on the
 `comment-or-whitespace-only` rung, indistinguishable there from a comment
@@ -2737,6 +2740,52 @@ bodies' reference count — 11 in the reference target, whose single nested
 function is `Add-VRow`.
 
 ---
+
+### 10.9 `hash_alpha` — the shape hash (normative, D25)
+
+**Text hashed**: the same text as `hash_body` (§10.3) — the extent minus the
+`function` keyword and the name, so parameters are inside it.
+
+**Normalisation**: strip comments **and string literal contents** to
+whitespace (the §10.2 string rule, applied to the §10.3 extent), collapse
+whitespace runs to a single space, strip ends; then replace every
+**unqualified, non-automatic** variable token — `$name`, `${name}`, `@name`
+(splat) — by `$vN` / `@vN` in **first-occurrence order**, name equality
+case-insensitive, braces dropped, the `@` sigil kept. A scope- or
+drive-qualified name (anything with `:` — `$script:x`, `$env:PATH`,
+`$global:y`) and every §13.5 automatic variable (`$_`, `$PSScriptRoot`,
+`$true`, …) stay verbatim. A nested function's text is inside the enclosing
+extent and shares its numbering; the nested function's own record hashes
+its own extent. Everything else — command names, operators, keywords,
+member names, numbers — is untouched. `sha256`, truncated to 16 hex.
+
+`hash_alpha` answers: *is this the same code shape with the names and the
+string constants abstracted away?* Two functions in one class may differ in
+every variable name and every string literal; they differ in nothing else.
+That is the shape a consolidation refactoring targets (the §10.3 families —
+five logging wrappers, five path getters, two evidence resolvers — are
+exactly the classes at the pinned basis: **471 distinct / 3 classes / 12
+members** of 480, held by name), and it is stated as an equality class with
+no score and no threshold. It is derivable from the source plus this
+tool's own normaliser and nothing else, which is the same standing
+`hash_body` has (§1.3).
+
+**Two invariants, gate-held.** `hash_body`-equal ⇒ `hash_alpha`-equal
+(retained strings equal ⇒ folded strings equal ⇒ renamed text equal), and
+every pinned class is *invisible* to `hash_body` and `hash_full` — the value
+is new information, never a restatement.
+
+**Why the string rule, stated once.** The Round-9 survey text that named
+this value described it as "defined on `hash_body`'s token sequence" with
+strings "already gone"; measured, that basis yields **0** classes at the
+pin, because `hash_body` retains strings and the families differ in a
+string constant. The recall exists only when strings are folded. The
+normative basis is therefore the one above, and the pin's class set is held
+by name so the basis can never be silent again.
+
+**Not in the §10.5 ladder.** `PSS7001` classifies by the triple; a
+`hash_alpha`-equal, `hash_full`-different pair still classifies
+`code-changed`. A consumer comparing shapes joins on `hash_alpha` itself.
 
 ## 11. The dependency graph model
 
@@ -3671,6 +3720,7 @@ survived green. The figures above are re-measured with the gate's own
 | `/symbols[]/depth` | always |
 | `/symbols[]/end_line` | always |
 | `/symbols[]/facts` | always |
+| `/symbols[]/hash_alpha` | always |
 | `/symbols[]/hash_body` | always |
 | `/symbols[]/hash_full` | always |
 | `/symbols[]/hash_raw` | always |
@@ -3738,8 +3788,8 @@ absent from the declaration is uniform, and the gate holds that claim too.
 | Collection | Variant | When | Carries (beyond common) | Conditional | Observed at the pin |
 |---|---|---|---|---|---:|
 | `edges` | `edge` | `code == PSS2001` | `code` `from` `lines` `sites` `to` | — | 1281 |
-| `symbols` | `top-level` | `depth == 0` | `depth` `facts` `hash_body` `hash_full` `hash_raw` `name` `parameters` | `ordinal` | 479 |
-| `symbols` | `nested` | `depth >= 1` | `depth` `facts` `hash_body` `hash_full` `hash_raw` `name` `parameters` `parent` | `ordinal` | 1 |
+| `symbols` | `top-level` | `depth == 0` | `depth` `facts` `hash_alpha` `hash_body` `hash_full` `hash_raw` `name` `parameters` | `ordinal` | 479 |
+| `symbols` | `nested` | `depth >= 1` | `depth` `facts` `hash_alpha` `hash_body` `hash_full` `hash_raw` `name` `parameters` `parent` | `ordinal` | 1 |
 | `symbols` | `stub` | `record == stub` | `record` | — | slice-only (§5.7); exercised on the pin slice |
 | `closures` | `closure-row` | `record == closure` | `facts` `id` `record` `transitive_callee_count` `transitive_caller_count` | — | 480 |
 | `closures` | `uncalled-fact` | `code == PSS4003` | `code` `id` | `named_by_literal` | 26 |
@@ -4864,8 +4914,8 @@ is, so a bare count is unfalsifiable in the same way.
   "aggregate_records": 465
  },
  "model_shape": {
-  "all-axes": "e93cd5a3f2404bd3",
-  "default": "74e55cd1defc3ddc"
+  "all-axes": "3f01400c5867a6f8",
+  "default": "e3e260fd40e8b230"
  },
  "references_outside_functions": {
   "all-axes": 556,

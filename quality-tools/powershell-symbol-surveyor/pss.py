@@ -38,8 +38,8 @@ import os
 import re
 import sys
 
-__version__ = "0.11.0"
-MODEL_VERSION = "11"
+__version__ = "0.12.0"
+MODEL_VERSION = "12"
 
 MIN_PYTHON = (3, 12)
 
@@ -340,6 +340,41 @@ def body_norm_hash(text):
     clean = _strip_strings_and_comments(text, keep_strings=True)
     normalized = re.sub(r'\s+', ' ', clean).strip()
     return hashlib.sha256(normalized.encode('utf-8')).hexdigest()[:16]
+
+
+_ALPHA_VAR = re.compile(r'\$\{([^}]+)\}|\$([A-Za-z_][\w:]*)|@([A-Za-z_]\w*)')
+
+
+def alpha_norm_hash(text):
+    """hash_alpha contract (SPEC 10.9, D25) - the shape hash.
+
+    Same text as hash_body (the extent minus keyword and name); comments AND
+    string literal contents folded to whitespace (hash_full's string rule);
+    whitespace runs collapsed, ends stripped; then every UNQUALIFIED,
+    NON-AUTOMATIC variable token - `$name`, `${name}`, `@name` (splat) - is
+    replaced by `$vN` / `@vN` in first-occurrence order, name equality
+    case-insensitive, braces dropped. Scope- or drive-qualified names (any
+    ':') and SPEC 13.5's automatic variables stay verbatim. Nested functions
+    share the enclosing extent's numbering. `sha256`, 16 hex.
+    """
+    clean = _strip_strings_and_comments(text, keep_strings=False)
+    normalized = re.sub(r'\s+', ' ', clean).strip()
+    names = {}
+
+    def rename(m):
+        braced, plain, splat = m.groups()
+        raw = braced if braced is not None else (
+            plain if plain is not None else splat)
+        if ':' in raw:
+            return m.group(0)
+        key = raw.lower()
+        if key in AUTOMATIC_VARIABLES:
+            return m.group(0)
+        n = names.setdefault(key, len(names) + 1)
+        return ('@' if splat is not None else '$') + 'v%d' % n
+
+    renamed = _ALPHA_VAR.sub(rename, normalized)
+    return hashlib.sha256(renamed.encode('utf-8')).hexdigest()[:16]
 
 
 def raw_hash(text):
@@ -1402,6 +1437,7 @@ MODEL_SCHEMA = {
     "/symbols[]/depth": "always",
     "/symbols[]/end_line": "always",
     "/symbols[]/facts": "always",
+    "/symbols[]/hash_alpha": "always",
     "/symbols[]/hash_body": "always",
     "/symbols[]/hash_full": "always",
     "/symbols[]/hash_raw": "always",
@@ -1503,8 +1539,8 @@ RECORD_VARIANTS = {
         "common_keys": ("end_line", "id", "kind", "start_line"),
         "variants": (
             {"name": "top-level", "when": {"path": "depth", "equals": 0},
-             "carries": ("depth", "facts", "hash_body", "hash_full",
-                         "hash_raw", "name", "parameters"),
+             "carries": ("depth", "facts", "hash_alpha", "hash_body",
+                         "hash_full", "hash_raw", "name", "parameters"),
              "conditional_keys": {"ordinal": {
                  "presence_means": "the identifier carries a "
                                    "position-dependent ordinal "
@@ -1512,8 +1548,9 @@ RECORD_VARIANTS = {
                  "absence_means": "the name is unique in the file"}},
              "axis_keys": {}},
             {"name": "nested", "when": {"path": "depth", "gte": 1},
-             "carries": ("depth", "facts", "hash_body", "hash_full",
-                         "hash_raw", "name", "parameters", "parent"),
+             "carries": ("depth", "facts", "hash_alpha", "hash_body",
+                         "hash_full", "hash_raw", "name", "parameters",
+                         "parent"),
              "conditional_keys": {"ordinal": {
                  "presence_means": "the identifier carries a "
                                    "position-dependent ordinal "
@@ -3218,6 +3255,7 @@ class Survey:
                 "parameters": self.params_by_func[id(f)],
                 "hash_full": canon_norm_hash(extent),
                 "hash_body": body_norm_hash(body),
+                "hash_alpha": alpha_norm_hash(body),
                 "hash_raw": raw_hash(extent),
                 "facts": facts,
             })

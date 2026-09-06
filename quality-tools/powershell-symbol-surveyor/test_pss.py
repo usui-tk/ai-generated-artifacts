@@ -5638,6 +5638,46 @@ def check_consumption_derivations(model_all):
     eq(sum(1 for v in by_body.values() if len(v) > 1), 0,
        "6.5 P2: exact-duplicate groups reproduce the worked example")
 
+    # 10.9 hash_alpha (D25) - the shape hash: alpha-renamed, strings folded.
+    # The pin's three shape classes are held by NAME (ADR 0036: a derivation,
+    # not a stamp), the invariant hash_body-equal => hash_alpha-equal over
+    # every pair, and the value shape on every function record.
+    by_alpha = collections.defaultdict(list)
+    malformed = [s["id"] for s in symbols
+                 if not (isinstance(s.get("hash_alpha"), str)
+                         and len(s["hash_alpha"]) == 16
+                         and all(c in "0123456789abcdef"
+                                 for c in s["hash_alpha"]))]
+    eq(malformed, [], "10.9 hash_alpha: 16-hex on every function record")
+    for s in symbols:
+        by_alpha[s.get("hash_alpha")].append(s["id"].rsplit("/", 1)[-1])
+    groups = sorted((sorted(v) for v in by_alpha.values() if len(v) > 1),
+                    key=lambda v: (-len(v), v))
+    eq((len(by_alpha), len(groups), sum(len(g) for g in groups)),
+       (471, 3, 12),
+       "10.9 hash_alpha: 471 distinct / 3 shape classes / 12 members at the "
+       "pin (the SPEC 10.3 'name excluded, strings stripped' families, now "
+       "under the declared rename)")
+    eq(groups,
+       [["Get-DotNetCuCachePath", "Get-DotNetCuRawPath",
+         "Get-ReleaseInfoCachePath", "Get-ReleaseInfoRawMetaPath",
+         "Get-ReleaseInfoRawPath"],
+        ["Write-Caution", "Write-Fail", "Write-Ok", "Write-Skip",
+         "Write-Step"],
+        ["Resolve-LcuEvidence_Server2019", "Resolve-LcuEvidence_Server2022"]],
+       "10.9 hash_alpha: the three shape classes by name")
+    for ids in by_body.values():
+        if len(ids) > 1:
+            alphas = {s["hash_alpha"] for s in symbols if s["id"] in ids}
+            eq(len(alphas), 1,
+               "10.9 hash_alpha: hash_body-equal implies hash_alpha-equal")
+    check(all(len({s["hash_body"] for s in symbols
+                   if s["id"].rsplit("/", 1)[-1] in g}) == len(g)
+              for g in groups),
+          "10.9 hash_alpha: every shape class is invisible to hash_body "
+          "(members differ in a string constant) - the class is new "
+          "information, not a restatement")
+
     # P3 - strongly connected components over function-pair edges must
     # reproduce the PSS4004 groups exactly (size>=2 components plus
     # self-loop singletons). Iterative Tarjan: stdlib-only, no recursion
@@ -6041,6 +6081,100 @@ def run_p9_scoping_fixture():
     check(owners <= {s["id"] for s in model["symbols"]} | {"<script>"},
           "P9 scoping: every nested reference is owned by a declared "
           "function or the script, never by a scriptblock")
+
+
+def run_hash_alpha_fixture():
+    """SPEC 10.9 hash_alpha (D25): the shape hash.
+
+    Equal under variable renaming, string-constant change, comment and
+    whitespace change, case and brace spelling, splat spelling; NOT equal
+    under a qualified-name change, an automatic-variable change, a
+    structural change, or a renamed command. Nested functions share the
+    enclosing numbering. hash_body-equal => hash_alpha-equal held on a
+    whitespace-only pair.
+    """
+    def one(src):
+        m = pss.Survey("alpha.ps1", src).run().model()
+        eq(m["scan"]["anomalies"], 0, "hash_alpha fixture: scan-clean")
+        return {s["name"]: s for s in m["symbols"]}
+
+    syms = one(
+        "function A { param($Path, $Name)\n"
+        "  $full = Join-Path $Path $Name\n"
+        "  if (Test-Path $full) { return 'cache' }\n"
+        "  return $null\n"
+        "}\n"
+        "function B { param($Dir, $File)   # renamed variables, new strings\n"
+        "  $target = Join-Path $Dir $File\n"
+        "  if (Test-Path $target) { return 'raw-meta' }\n"
+        "  return $null\n"
+        "}\n"
+        "function C { param(${Dir}, $file)\n"      # brace + case spelling
+        "  $TARGET = Join-Path ${dir} $FILE\n"
+        "  if (Test-Path $target) { return 'x' }\n"
+        "  return $null\n"
+        "}\n"
+        "function D { param($Dir, $File)   # qualified name: different shape\n"
+        "  $target = Join-Path $Dir $File\n"
+        "  if (Test-Path $target) { return 'x' }\n"
+        "  return $Script:Fallback\n"
+        "}\n"
+        "function E { param($Dir, $File)   # automatic variable: different\n"
+        "  $target = Join-Path $Dir $File\n"
+        "  if (Test-Path $target) { return 'x' }\n"
+        "  return $PSScriptRoot\n"
+        "}\n"
+        "function F { param($Dir, $File)   # different command: different\n"
+        "  $target = Join-Path $Dir $File\n"
+        "  if (Test-Path $target) { return 'x' }\n"
+        "  return Get-Item $target\n"
+        "}\n"
+        "function G { param($Dir,   $File)\n"      # whitespace-only vs B
+        "  $target = Join-Path $Dir $File\n"
+        "  if (Test-Path $target)   { return 'raw-meta' }\n"
+        "  return $null\n"
+        "}\n"
+        "function H { param($P) $s = @{ Path = $P }; Get-Item @s }\n"
+        "function I { param($Q) $t = @{ Path = $Q }; Get-Item @t }\n"
+        "function J { param($Q) $t = @{ Path = $Q }; Get-Item @Q }\n"
+        "function K { param($X)\n"
+        "  function Inner { param($Y) $X + $Y }\n"
+        "  Inner 1\n"
+        "}\n"
+        "function L { param($M)\n"
+        "  function Inner { param($N) $M + $N }\n"
+        "  Inner 1\n"
+        "}\n"
+    )
+    a = {k: v.get("hash_alpha") for k, v in syms.items()}
+    check(all(v is not None for v in a.values()),
+          "hash_alpha: every function record carries the key")
+    eq(a["A"], a["B"],
+       "hash_alpha: renamed variables + changed string constants -> equal")
+    eq(a["B"], a["C"],
+       "hash_alpha: brace and case spellings of the same names -> equal")
+    check(a["B"] != a["D"],
+       "hash_alpha: a scope-qualified name is verbatim -> not equal")
+    check(a["B"] != a["E"],
+       "hash_alpha: an automatic variable is verbatim -> not equal")
+    check(a["B"] != a["F"],
+       "hash_alpha: a different command -> not equal (only names and "
+       "strings are abstracted)")
+    eq((syms["B"].get("hash_body"), a["B"]),
+       (syms["G"].get("hash_body"), a["G"]),
+       "hash_alpha: hash_body-equal (whitespace-only pair) => "
+       "hash_alpha-equal")
+    check(syms["A"]["hash_body"] != syms["B"]["hash_body"]
+          and syms["A"]["hash_full"] != syms["B"]["hash_full"],
+          "hash_alpha: the A/B class is invisible to hash_body and hash_full")
+    eq(a["H"], a["I"], "hash_alpha: splat spelling renames with its sigil")
+    check(a["I"] != a["J"],
+          "hash_alpha: splatting a different variable -> not equal")
+    eq(a["K"], a["L"],
+       "hash_alpha: a nested function shares the enclosing numbering")
+    inner = [v for k, v in syms.items() if k == "Inner" or k.endswith("Inner")]
+    check(all(v.get("hash_alpha") not in (None, a["K"]) for v in inner),
+          "hash_alpha: a nested function's own record hashes its own body")
 
 
 def run_access_fixture():
@@ -6474,6 +6608,7 @@ def main():
     run_access_fixture()
     run_member_dynamic_fixture()
     run_access_rhs_fixture()
+    run_hash_alpha_fixture()
     run_consumption_shape_fixture()
     run_p9_scoping_fixture()
 
