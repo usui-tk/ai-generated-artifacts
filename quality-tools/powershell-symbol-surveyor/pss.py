@@ -38,8 +38,8 @@ import os
 import re
 import sys
 
-__version__ = "0.10.2"
-MODEL_VERSION = "10"
+__version__ = "0.11.0"
+MODEL_VERSION = "11"
 
 MIN_PYTHON = (3, 12)
 
@@ -1325,6 +1325,7 @@ MODEL_SCHEMA = {
     "/limitations[]/target": "always",
     "/local_variables": "always",
     "/local_variables[]/access": "axis",
+    "/local_variables[]/member_dynamic": "axis",
     "/local_variables[]/automatic_refs": "always",
     "/local_variables[]/code": "axis",
     "/local_variables[]/id": "axis",
@@ -1354,6 +1355,7 @@ MODEL_SCHEMA = {
     "/pss_version": "always",
     "/script_variables": "always",
     "/script_variables[]/access": "always",
+    "/script_variables[]/member_dynamic": "optional",
     "/script_variables[]/code": "always",
     "/script_variables[]/id": "always",
     "/script_variables[]/in_expandable_string": "optional",
@@ -1571,13 +1573,26 @@ RECORD_VARIANTS = {
                      "absence_means": "no such chain: a plain reference, a "
                                       "plain member read, or one of SPEC "
                                       "12.10's no-claim cases"},
+                 "member_dynamic": {
+                     "presence_means": "access is present and at least one "
+                                       "walked member segment's name is a "
+                                       "$variable token (SPEC 12.10); no "
+                                       "member name is claimed",
+                     "absence_means": "no access, or every walked member "
+                                      "segment's name is a bareword"},
                  "rhs": {
                      "presence_means": "role is write and the declaration has "
-                                       "a supplying expression - carried "
-                                       "verbatim (SPEC 12.8)",
-                     "absence_means": "role is read, or the write has no "
-                                      "supplying expression (SPEC 12.8's "
-                                      "exclusions)"},
+                                       "a supplying expression (SPEC 12.8), "
+                                       "or role is read and access is "
+                                       "member-assignment or "
+                                       "element-assignment - the expression "
+                                       "after the assignment operator, "
+                                       "carried verbatim; never on "
+                                       "member-invocation (D24)",
+                     "absence_means": "a read without an assignment-kind "
+                                      "access, a member-invocation, or a "
+                                      "write with no supplying expression "
+                                      "(SPEC 12.8's exclusions)"},
                  "rhs_span": {
                      "presence_means": "exactly when rhs is present: [start, "
                                        "end) byte offsets with text[start:end]"
@@ -1621,13 +1636,26 @@ RECORD_VARIANTS = {
                      "absence_means": "no such chain: a plain reference, a "
                                       "plain member read, or one of SPEC "
                                       "12.10's no-claim cases"},
+                 "member_dynamic": {
+                     "presence_means": "access is present and at least one "
+                                       "walked member segment's name is a "
+                                       "$variable token (SPEC 12.10); no "
+                                       "member name is claimed",
+                     "absence_means": "no access, or every walked member "
+                                      "segment's name is a bareword"},
                  "rhs": {
                      "presence_means": "role is write and the declaration has "
-                                       "a supplying expression - carried "
-                                       "verbatim (SPEC 12.8)",
-                     "absence_means": "role is read, or the write has no "
-                                      "supplying expression (SPEC 12.8's "
-                                      "exclusions)"},
+                                       "a supplying expression (SPEC 12.8), "
+                                       "or role is read and access is "
+                                       "member-assignment or "
+                                       "element-assignment - the expression "
+                                       "after the assignment operator, "
+                                       "carried verbatim; never on "
+                                       "member-invocation (D24)",
+                     "absence_means": "a read without an assignment-kind "
+                                      "access, a member-invocation, or a "
+                                      "write with no supplying expression "
+                                      "(SPEC 12.8's exclusions)"},
                  "rhs_span": {
                      "presence_means": "exactly when rhs is present: [start, "
                                        "end) byte offsets with text[start:end]"
@@ -2409,6 +2437,13 @@ class Survey:
                 if t.start in self.decl_write_offsets:
                     role = "write"
                 rhs_span = None
+                if access is not None and access[2] is not None:
+                    # an assignment-kind access record carries rhs/rhs_span/
+                    # rhs_refs by the same SPEC 12.8 rule as a declaration
+                    # write; never member-invocation (arguments are the
+                    # call's business, SPEC 12.9)
+                    rhs_span = self._rhs_span_from(access[2],
+                                                   stop_comma=False)
                 if assignment:
                     # SPEC 12.8: the supplying expression begins after the
                     # assignment operator (sig position k + 1). Inside a
@@ -2725,6 +2760,7 @@ class Survey:
         t = toks[sig[k]]
         prev_end = t.end
         last = None
+        dynamic = False      # SPEC 12.10: any walked member segment named by a $variable
         j = k + 1
         while j < len(sig):
             op = toks[sig[j]]
@@ -2732,12 +2768,14 @@ class Survey:
                 break
             if op.text == '.':
                 nm = toks[sig[j + 1]] if j + 1 < len(sig) else None
-                if nm is None or nm.kind != 'word' or nm.start != op.end:
+                if nm is not None and nm.kind == 'var' and nm.start == op.end:
+                    dynamic = True       # the name is dynamic; the name was never the claim
+                elif nm is None or nm.kind != 'word' or nm.start != op.end:
                     return None
                 par = toks[sig[j + 2]] if j + 2 < len(sig) else None
                 if par is not None and par.kind == 'op' \
                         and par.text == '(' and par.start == nm.end:
-                    return "member-invocation"
+                    return ("member-invocation", dynamic, None)
                 last = 'member'
                 prev_end = nm.end
                 j += 2
@@ -2766,8 +2804,10 @@ class Survey:
         if nxt is not None and nxt.kind == 'op' \
                 and (nxt.text == '=' or nxt.text == '??='
                      or nxt.text in _ASSIGN_OPS):
+            # SPEC 12.8 at a new site (D24, Round 9): the assignment kinds
+            # carry the supplying expression after the operator at sig j.
             return ("member-assignment" if last == 'member'
-                    else "element-assignment")
+                    else "element-assignment", dynamic, j)
         return None
 
     def _note_variable(self, offset, vtext, in_string, role, rhs_span=None,
@@ -2814,7 +2854,10 @@ class Survey:
             # SPEC 12.10: the access chain, conditional. Computed only on
             # the non-string walk, so no in-string record ever carries it.
             if s.get("access"):
-                base["access"] = s["access"]
+                kind, dynamic, _op = s["access"]
+                base["access"] = kind
+                if dynamic:
+                    base["member_dynamic"] = True    # SPEC 12.10, omit-when-false
             # SPEC 12.8 (D13): a write carries its supplying expression,
             # verbatim, plus the byte span that IS the verbatim contract -
             # text[a:b] == rhs, held by the gate over every write. Flows
@@ -2822,7 +2865,8 @@ class Survey:
             # (PSS2002, PSS2004-write, PSS2005-write, PSS2006) carries it;
             # reads and writes with no supplying expression (SPEC 12.8's
             # exclusions) carry neither key.
-            if role == "write" and s.get("rhs_span"):
+            if s.get("rhs_span") and (
+                    role == "write" or (s.get("access") and s["access"][2] is not None)):
                 a, b = s["rhs_span"]
                 base["rhs"] = self.text[a:b]
                 ba, bb = self._bspan((a, b))

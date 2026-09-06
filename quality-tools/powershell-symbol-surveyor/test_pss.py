@@ -1019,9 +1019,14 @@ def check_rhs_integrity(text, model_all):
     unpaired = []
     mismatched = []
     n_with = 0
+    n_access = 0
     for coll in ("local_variables", "script_variables"):
         for r in model_all[coll]:
-            if r.get("record") != "reference" or r.get("role") != "write":
+            if r.get("record") != "reference":
+                continue
+            is_access_assign = r.get("access") in ("member-assignment",
+                                                   "element-assignment")
+            if r.get("role") != "write" and not is_access_assign:
                 continue
             if ("rhs" in r) != ("rhs_span" in r):
                 unpaired.append((coll, r["name"], r["line"]))
@@ -1031,6 +1036,8 @@ def check_rhs_integrity(text, model_all):
                 if tb[a:b] != r["rhs"].encode("utf-8"):
                     mismatched.append((coll, r["name"], r["line"]))
                 n_with += 1
+                if is_access_assign:
+                    n_access += 1
     check(not unpaired,
           "rhs integrity: rhs and rhs_span travel together over every pin "
           "write",
@@ -1043,6 +1050,11 @@ def check_rhs_integrity(text, model_all):
     check(n_with > 4000,
           "rhs integrity: the pin's writes overwhelmingly carry rhs",
           "only %d writes carry rhs" % n_with)
+    eq(n_access, 488,
+       "rhs integrity: every assignment-kind access record at the pin "
+       "(400 member- + 88 element-assignment, SPEC 12.10) carries rhs with "
+       "encoded_source[rhs_span] == rhs - the SPEC 12.8 rule at the new "
+       "site (D24)")
 
     bad_sites = []
     n_sites = 0
@@ -6055,7 +6067,7 @@ def run_access_fixture():
         "$n = $local.Count\n"                       # L11 plain read: no key
         "$obj = @{}\n"
         "$name = 'X'\n"
-        "$obj.$name = 5\n"                          # L14 dynamic member: no claim
+        "$obj.$name = 5\n"                          # L14 dynamic member: base claim + flag
     )
     model = pss.Survey("access.ps1", src, axes=ALL_AXES).run().model()
     eq(model["scan"]["anomalies"], 0, "access fixture: scan-clean")
@@ -6088,9 +6100,12 @@ def run_access_fixture():
        "access fixture: an invocation terminates the chain")
     check("access" not in at(11, "local"),
           "access fixture: a plain member read carries no key")
-    check("access" not in at(14, "obj"),
-          "access fixture: a dynamic member name is no claim")
-    check("access" not in at(14, "name"),
+    eq((at(14, "obj").get("access"), at(14, "obj").get("member_dynamic")),
+       ("member-assignment", True),
+       "access fixture: a dynamic member name bears the base claim with "
+       "member_dynamic (SPEC 12.10, D24)")
+    check("access" not in at(14, "name")
+          and "member_dynamic" not in at(14, "name"),
           "access fixture: the member-name variable carries no key")
     bearing = [r for r in refs if "access" in r]
     check(all(r["role"] == "read" for r in bearing),
@@ -6099,6 +6114,170 @@ def run_access_fixture():
                              for r in bearing if r["role"] != "read"][:3])
     eq(sorted({r["access"] for r in bearing}), sorted(pss._ACCESS_KINDS),
        "access fixture: the fixture bears the whole vocabulary")
+
+
+def run_member_dynamic_fixture():
+    """SPEC 12.10 `member_dynamic` (D24): two facts, two keys.
+
+    `access` keeps stating how the chain ends; `member_dynamic: true` states
+    that at least one walked member segment's name is a `$variable` token.
+    Every shape of the Round-9 specimen plus the negatives the adjudication
+    named: an index-expression variable is not a member-name segment; a
+    dynamic segment after the first invocation is never walked; whitespace
+    breaks the chain; a plain read stays unmarked; the member-name variable
+    itself stays an unmarked read.
+    """
+    src = (
+        "function Set-Bag {\n"
+        "    param($Bag, [string]$Name, $Value, [int]$i)\n"
+        "    $Bag.$Name = $Value\n"                  # L3 dynamic member, assignment
+        "    $Bag.Static = 1\n"                      # L4 static (control)
+        "    $Bag.$Name.Inner = 2\n"                 # L5 dynamic segment, static last
+        "    $Bag.$Name[0] = 3\n"                    # L6 dynamic segment, index last
+        "    $Bag.$Name()\n"                         # L7 dynamic member, invocation
+        "    $x = $Bag.$Name\n"                      # L8 plain read through dynamic name
+        "    $Bag. $Name = 6\n"                      # L9 whitespace-broken chain
+        "    $Bag[$i] = 1\n"                         # L10 index EXPRESSION variable: no flag
+        "    $Bag.Get(3).$Name = 7\n"                # L11 dynamic segment after the stop
+        "    $Bag.$Name.Add($Value)\n"               # L12 dynamic segment then invocation
+        "    return $x\n"
+        "}\n"
+        "$Script:State = @{}\n"
+        "$Script:Trace = @{}\n"
+        "function Invoke-Phase { param([string]$Phase, $Result)\n"
+        "    $Script:State.$Phase = $Result\n"       # L18 the mutation-only bag idiom
+        "    $Script:Trace.$Phase.Add($Result)\n"    # L19 dynamic then invocation
+        "}\n"
+    )
+    model = pss.Survey("dynamic.ps1", src, axes=ALL_AXES).run().model()
+    eq(model["scan"]["anomalies"], 0, "member_dynamic fixture: scan-clean")
+    refs = [r for c in ("script_variables", "local_variables")
+            for r in model[c] if r.get("record") == "reference"]
+
+    def at(line, name):
+        rec = [r for r in refs if r["line"] == line
+               and r["name"].lower() == name.lower()]
+        eq(len(rec), 1, "member_dynamic fixture: one reference at L%d $%s"
+           % (line, name))
+        return rec[0] if rec else {}
+
+    def shape(rec):
+        return (rec.get("access"), rec.get("member_dynamic"), rec.get("role"))
+
+    eq(shape(at(3, "Bag")), ("member-assignment", True, "read"),
+       "member_dynamic: dynamic member assignment bears the base claim + flag")
+    eq(shape(at(4, "Bag")), ("member-assignment", None, "read"),
+       "member_dynamic: a static chain carries no flag (omit-when-false)")
+    eq(shape(at(5, "Bag")), ("member-assignment", True, "read"),
+       "member_dynamic: any walked segment - dynamic then static last")
+    eq(shape(at(6, "Bag")), ("element-assignment", True, "read"),
+       "member_dynamic: any walked segment - dynamic then index last; "
+       "access still states the chain end")
+    eq(shape(at(7, "Bag")), ("member-invocation", True, "read"),
+       "member_dynamic: invocation through a dynamic name is in scope")
+    check("access" not in at(8, "Bag") and "member_dynamic" not in at(8, "Bag"),
+          "member_dynamic: a plain read through a dynamic name stays no-claim")
+    check("access" not in at(9, "Bag") and "member_dynamic" not in at(9, "Bag"),
+          "member_dynamic: a whitespace-broken chain stays no-claim")
+    eq(shape(at(10, "Bag")), ("element-assignment", None, "read"),
+       "member_dynamic: an index-expression variable is not a member-name "
+       "segment - no flag")
+    eq(shape(at(11, "Bag")), ("member-invocation", None, "read"),
+       "member_dynamic: a dynamic segment after the first invocation is "
+       "never walked - no flag, the walk-stop holds")
+    eq(shape(at(12, "Bag")), ("member-invocation", True, "read"),
+       "member_dynamic: dynamic segment then invocation")
+    eq(shape(at(18, "State")), ("member-assignment", True, "read"),
+       "member_dynamic: the script-state bag idiom bears the claim")
+    eq(shape(at(19, "Trace")), ("member-invocation", True, "read"),
+       "member_dynamic: the script-state invocation idiom bears the claim")
+    names = [r for r in refs if r["name"].lower() in ("name", "phase")]
+    check(all("access" not in r and "member_dynamic" not in r for r in names),
+          "member_dynamic: the member-name variable is always an unmarked read",
+          "marked: %s" % [(r["line"], r["name"]) for r in names
+                          if "access" in r or "member_dynamic" in r][:3])
+    flagged = [r for r in refs if r.get("member_dynamic")]
+    check(all("access" in r and r["member_dynamic"] is True for r in flagged),
+          "member_dynamic: the flag only ever accompanies access, only as true")
+    # SPEC 6.5 P7: what changes hands - the two script bags are mutation-only
+    by = collections.defaultdict(list)
+    for r in model["script_variables"]:
+        if r.get("record") == "reference":
+            by[r["name"]].append(r)
+    mo = sorted(n for n, rs in by.items()
+                if not any(r["role"] == "read" and "access" not in r for r in rs)
+                and any(r["role"] == "read" for r in rs))
+    eq(mo, ["State", "Trace"],
+       "member_dynamic: 6.5 P7 now classifies both script bags mutation-only")
+
+
+def run_access_rhs_fixture():
+    """SPEC 12.8 at the access site (D24, Round 9 Part B): rhs / rhs_span /
+    rhs_refs on member- and element-assignment access records, never on
+    member-invocation. The five red-first cases the adjudication named:
+    two assignments on one line; a multi-line right-hand side; a variable
+    inside the LHS index; non-ASCII bytes before the span; an invocation
+    negative - plus the LHS member-name variable staying out of rhs_refs.
+    """
+    src = (
+        "$Script:S = @{}\n"
+        "$k = 'a'; $v = 1\n"
+        "$Script:S['x'] = $k; $Script:S.y = $v\n"       # L3 two assignments, one line
+        "$Script:S.z = Get-Value |\n"                    # L4 multi-line rhs
+        "    Where-Object { $_.Ok }\n"
+        "$i = 0\n"
+        "$Script:S[$i] = $v + 1\n"                       # L7 variable in the LHS index
+        "# caf\u00e9 \u00fc \u2014 non-ASCII before the span\n"
+        "$Script:S.w = $k\n"                              # L9 offsets after multibyte bytes
+        "$Script:S.Add($v)\n"                             # L10 invocation: nothing
+        "$n = 'p'\n"
+        "$Script:S.$n = $v\n"                             # L12 dynamic: rhs, $n not in refs
+    )
+    model = pss.Survey("arhs.ps1", src, axes=ALL_AXES).run().model()
+    eq(model["scan"]["anomalies"], 0, "access rhs fixture: scan-clean")
+    tb = src.encode("utf-8")
+    refs = [r for r in model["script_variables"]
+            if r.get("record") == "reference" and r["name"] == "S"
+            and r.get("access")]
+    by = {}
+    for r in refs:
+        by.setdefault(r["line"], []).append(r)
+
+    def one(line, idx=0):
+        rs = sorted(by.get(line, []), key=lambda r: r.get("rhs_span") or [0])
+        return rs[idx] if idx < len(rs) else {}
+
+    eq(len(by.get(3, [])), 2,
+       "access rhs: two assignment-kind access records on one line")
+    eq([r.get("rhs") for r in sorted(by.get(3, []),
+                                     key=lambda r: r.get("rhs_span") or [0])],
+       ["$k", "$v"],
+       "access rhs: each same-line assignment carries its own rhs - the "
+       "statement boundary the line number cannot give")
+    eq(one(4).get("rhs"), "Get-Value |\n    Where-Object { $_.Ok }",
+       "access rhs: a multi-line right-hand side is carried verbatim")
+    eq(one(7).get("rhs"), "$v + 1",
+       "access rhs: the rhs starts after the operator - the LHS index "
+       "variable is not part of it")
+    eq([v["name"] for v in one(7).get("rhs_refs", {}).get("variables", [])],
+       ["v"],
+       "access rhs: the LHS index variable is not in rhs_refs")
+    eq(one(9).get("rhs"), "$k",
+       "access rhs: rhs verbatim after non-ASCII bytes")
+    check(all(tb[r["rhs_span"][0]:r["rhs_span"][1]]
+              == r["rhs"].encode("utf-8") for r in refs if "rhs" in r),
+          "access rhs: encoded_source[rhs_span] == rhs on every record, "
+          "including past the multibyte comment (the D14 byte unit)")
+    check("rhs" not in one(10) and "rhs_refs" not in one(10)
+          and "rhs_span" not in one(10)
+          and one(10).get("access") == "member-invocation",
+          "access rhs: a member-invocation record carries no rhs*")
+    eq(([v["name"] for v in one(12).get("rhs_refs", {}).get("variables", [])],
+        one(12).get("member_dynamic")), (["v"], True),
+       "access rhs: on a dynamic-member assignment the member-name "
+       "variable stays out of rhs_refs")
+    check(all(r["role"] == "read" for r in refs),
+          "access rhs: role stays read - rhs presence no longer implies write")
 
 
 def check_access_population(model_all):
@@ -6128,7 +6307,7 @@ def check_access_population(model_all):
           "access population: no in-string record carries the key")
     tally = collections.Counter(r["access"] for r in bearing)
     eq((tally["member-invocation"], tally["member-assignment"],
-        tally["element-assignment"]), (1174, 398, 88),
+        tally["element-assignment"]), (1174, 400, 88),
        "access population: the SPEC 12.10 figures re-derive at the pin")
     # SPEC 12.10 "what this refines": mutation-only material - aggregated
     # role set {read} with every read bearing access - exactly one name at
@@ -6140,6 +6319,25 @@ def check_access_population(model_all):
         i for i, rr in by_id.items()
         if all(r["role"] == "read" for r in rr)
         and all("access" in r for r in rr))
+    dyn = [r for r in bearing if r.get("member_dynamic")]
+    eq((len(dyn), sorted({r["access"] for r in dyn}),
+        sum(1 for r in model_all["script_variables"]
+            if r.get("member_dynamic"))),
+       (2, ["member-assignment"], 0),
+       "access population: member_dynamic at the pin - two local "
+       "member-assignment sites, none on script state (D24)")
+    check(all("access" in r for r in model_all["local_variables"]
+              + model_all["script_variables"] if r.get("member_dynamic")),
+          "access population: member_dynamic never appears without access")
+    inv = [r for r in bearing if r["access"] == "member-invocation"]
+    asg = [r for r in bearing if r["access"] != "member-invocation"]
+    check(not any("rhs" in r or "rhs_refs" in r or "rhs_span" in r
+                  for r in inv),
+          "access population: no member-invocation record carries rhs* "
+          "(arguments are the call's business, SPEC 12.9)")
+    check(all("rhs" in r and "rhs_span" in r and "rhs_refs" in r for r in asg),
+          "access population: every assignment-kind access record carries "
+          "rhs, rhs_span and rhs_refs together")
     eq(len(mutation_only), 1,
        "access population: SPEC 12.10's mutation-only material count "
        "re-derives at the pin")
@@ -6274,6 +6472,8 @@ def main():
     run_limitation_disposition_fixture()
     run_collection_declaration_fixture()
     run_access_fixture()
+    run_member_dynamic_fixture()
+    run_access_rhs_fixture()
     run_consumption_shape_fixture()
     run_p9_scoping_fixture()
 

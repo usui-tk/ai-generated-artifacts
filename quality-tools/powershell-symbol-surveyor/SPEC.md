@@ -3109,6 +3109,28 @@ round-4 audits that hit this wall were script-variable audits). On
 carry them; on `script_variables` they are present in the default model,
 which therefore moved at this version.
 
+**The same rule at a second site (D24, Round 9 Part B).** A reference
+record whose `access` is `member-assignment` or `element-assignment`
+(§12.10) carries `rhs`, `rhs_span` and `rhs_refs` by exactly this rule,
+applied after the chain's assignment operator: the supplying expression
+verbatim, its `[start, end)` byte span with `text[start:end] == rhs`, and
+the §12.9 itemisation of what the expression references. `role` stays
+`read` — the carrier definition is therefore *declared* broadened at
+`model_version` "11": `rhs` is present when *role is write with a
+supplying expression, or role is read with an assignment-kind `access`*;
+it is never present on `member-invocation`, whose arguments are the
+call's business (§12.9). The left-hand side — the chain, an index
+expression's variable, a dynamic member-name variable — is never part of
+the expression and never appears in that record's `rhs_refs` (it is
+itemised, as before, where it stands). Held by fixture on the five shapes
+the adjudication named (two assignments on one line, a multi-line
+expression, a variable inside the index, non-ASCII bytes ahead of the
+span, an invocation negative) and at the pin over every one of the 488
+assignment-kind access records (400 + 88), by the same
+`encoded_source[rhs_span] == rhs` and two-derivation `rhs_refs` checks
+that hold the declaration writes. What it answers: P7 says whether a
+state is only ever built; `rhs_refs` on those builds says *from what*.
+
 ### 12.9 Writer right-hand references (normative, D15)
 
 Every record carrying `rhs` also carries **`rhs_refs`** — the static
@@ -3158,7 +3180,7 @@ This is itemisation, not binding (§1.2): nothing is evaluated, nothing is
 ranked, and `rhs_refs` states which references appear — never which one
 supplies the value at run time.
 
-### 12.10 The access chain (normative, D21)
+### 12.10 The access chain (normative, D21; `member_dynamic` D24)
 
 The §12.3 role vocabulary is deliberately two-valued, and §12.2 places a
 member or index left-hand side on the *read* side: `$s['k'] = 1` and
@@ -3192,17 +3214,48 @@ operator itself is **not** adjacency-checked, mirroring the §12.3 role
 test; the operator set is the role test's own (`=`, `??=`, the compound
 set).
 
+**The walk, amended (D24, Round 9).** A member segment's *name* may be a
+bareword or a `$variable` token byte-adjacent to the `.`; the walk does
+not distinguish them, because the name was never part of the claim —
+`access` states how the chain **ends**, never which member it touches
+(`$s.A.B = …` carries `member-assignment` without naming `A` or `B`, and
+`$s.$n = …` carries it on the same grounds). This is a *declared*
+broadening of the three values above, moved with `model_version` "11",
+fixture-held, declared in §13.3 and the capability descriptor — not a
+silent one. A variable inside an index expression (`$s[$i] = …`) is an
+index segment, not a member-name segment, and does not engage this
+paragraph.
+
+**`member_dynamic`.** A bearing record additionally carries
+`member_dynamic: true` when **any** walked member segment's name is a
+`$variable` token; the key is omitted when every segment name is a
+bareword (the omit-rather-than-emit convention for negative booleans,
+§13.3). It is orthogonal to the chain end: `$s.$n.Inner = …` is
+`member-assignment` with the flag, `$s.$n[0] = …` is
+`element-assignment` with the flag, `$s.$n.Add(…)` is `member-invocation`
+with the flag. Its absence means *no dynamic segment within an
+access-bearing walked chain*, never "the source contains no dynamic
+member access" — a plain read through a dynamic name is outside the
+contract, as every plain read is. The member-name variable itself
+remains the §12.3 look-behind's unmarked read. No member name is claimed
+by either key. Because the walk stops at the first invocation, a dynamic
+segment *after* that invocation (`$s.Get(3).$n = …`) is never walked and
+never flagged.
+
 **No claim.** The key is omitted — never emitted with a fourth value —
-for: a plain member read (`$n = $s.Count`); a dynamic member name
-(`$obj.$name = …`: the member is not statically known, so which member is
-touched is not a fact); a whitespace-broken chain; an unbalanced index.
-`role` stays `read` on every bearing record, in-string references never
-carry the key (it is computed only on the non-string walk), and the
-member-name variable itself (`$name` above) is the §12.3 look-behind's
-read, unmarked. Measured at the pinned basis: 1,660 bearing records —
-1,174 `member-invocation`, 398 `member-assignment`, 88
-`element-assignment` — every one `role: read`, none in-string
-(re-derived by the gate per run).
+for: a plain member read (`$n = $s.Count`, `$x = $s.$n`); a
+whitespace-broken chain; an unbalanced index. `role` stays `read` on
+every bearing record, in-string references never carry the key (it is
+computed only on the non-string walk). Measured at the pinned basis:
+1,662 bearing records — 1,174 `member-invocation`, 400
+`member-assignment`, 88 `element-assignment` — every one `role: read`,
+none in-string; of these exactly **2** carry `member_dynamic` (both
+function-local `member-assignment` sites; none on script state), so the
+default materialisation is byte-unmoved by D24 at the pin (re-derived by
+the gate per run).
+
+**Right-hand side.** The two assignment kinds carry `rhs` / `rhs_span` /
+`rhs_refs` by the §12.8 rule (D24); `member-invocation` never does.
 
 **What this refines.** §6.5 P7's stated boundary ("a name whose only
 occurrences are such mutations aggregates as read-only") becomes
@@ -3461,6 +3514,7 @@ survived green. The figures above are re-measured with the gate's own
 | `/limitations[]/target` | always |
 | `/local_variables` | always |
 | `/local_variables[]/access` | axis |
+| `/local_variables[]/member_dynamic` | axis |
 | `/local_variables[]/automatic_refs` | always |
 | `/local_variables[]/code` | axis |
 | `/local_variables[]/id` | axis |
@@ -3490,6 +3544,7 @@ survived green. The figures above are re-measured with the gate's own
 | `/scan/outcome` | always |
 | `/script_variables` | always |
 | `/script_variables[]/access` | always |
+| `/script_variables[]/member_dynamic` | optional |
 | `/script_variables[]/code` | always |
 | `/script_variables[]/id` | always |
 | `/script_variables[]/in_expandable_string` | optional |
@@ -3609,9 +3664,9 @@ absent from the declaration is uniform, and the gate holds that claim too.
 | `closures` | `closure-row` | `record == closure` | `facts` `id` `record` `transitive_callee_count` `transitive_caller_count` | — | 480 |
 | `closures` | `uncalled-fact` | `code == PSS4003` | `code` `id` | `named_by_literal` | 26 |
 | `closures` | `cycle-fact` | `code == PSS4004` | `code` `members` | — | 3 |
-| `local_variables` | `reference` | `record == reference` | `code` `id` `line` `name` `owner` `record` `role` | `access` `in_expandable_string` `rhs` `rhs_refs` `rhs_span` | 22427 |
+| `local_variables` | `reference` | `record == reference` | `code` `id` `line` `name` `owner` `record` `role` | `access` `in_expandable_string` `member_dynamic` `rhs` `rhs_refs` `rhs_span` | 22427 |
 | `local_variables` | `aggregate` | `record == aggregate` | `automatic_refs` `local_declared` `local_refs` `owner` `record` `unresolved_refs` | — | 465 |
-| `script_variables` | `reference` | `record == reference` | `code` `id` `line` `name` `owner` `qualifier` `record` `role` | `access` `in_expandable_string` `rhs` `rhs_refs` `rhs_span` | 1879 |
+| `script_variables` | `reference` | `record == reference` | `code` `id` `line` `name` `owner` `qualifier` `record` `role` | `access` `in_expandable_string` `member_dynamic` `rhs` `rhs_refs` `rhs_span` | 1879 |
 | `script_variables` | `usage-map` | `record == usage_map` | `code` `id` `name` `reader_count` `readers` `record` `writer_count` `writers` | — | 156 |
 | `string_interpolation_references` | `reference` | `record == reference` | `code` `id` `in_expandable_string` `line` `name` `owner` `record` `role` | `qualifier` | 118 |
 | `unresolved_named_commands` | `site` | `record == site` | `arguments` `code` `line` `name` `owner` `record` `span` | — | 2798 |
@@ -4729,7 +4784,7 @@ is, so a bare count is unfalsifiable in the same way.
   "aggregate_records": 465
  },
  "model_shape": {
-  "all-axes": "7820d48156f361c4",
+  "all-axes": "e93cd5a3f2404bd3",
   "default": "74e55cd1defc3ddc"
  },
  "references_outside_functions": {
