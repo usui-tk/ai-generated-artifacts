@@ -18,6 +18,40 @@ This file starts at `0.2.0`. Entries before it are reconstructed from the
 commit history and the SPEC's own decision records rather than written at the
 time, and are marked as such.
 
+## [0.12.0] - 2026-09-07 (`model_version` "11" -> "12"; the D25 arc)
+
+Model-moving. Lands `hash_alpha` on the owner's adjudication of its basis
+(2026-09-07). Every "11" cache expired at C1; both corpus entries rebuilt at
+"12" (`baseline_digest 0f42ac89ff0c0c40`). B.8 `model_shape` restamped once
+(default `74e55cd1…` -> `e3e260fd…`, all-axes `e93cd5a3…` -> `3f01400c…`);
+B.7 unmoved.
+
+### Added
+
+- **§10.9 `hash_alpha` — the shape hash.** `hash_body`'s extent, `hash_full`'s
+  string rule (comments *and* string literals folded), then every
+  unqualified, non-automatic `$name` / `${name}` / `@name` renamed `$vN` /
+  `@vN` in first-occurrence order (case-insensitive, braces dropped, sigil
+  kept); qualified names and §13.5 automatics verbatim; nested functions share
+  the enclosing numbering. Emitted on every `symbols[]` record (both
+  variants). Pin: **471 distinct / 3 classes / 12 members**, held by name
+  (the §10.3 families); `hash_body`-equal ⇒ `hash_alpha`-equal and
+  class-invisibility-to-`hash_body`/`hash_full` gate-held. Not a §10.5 rung.
+  The Round-9 text's basis ("on `hash_body`'s token sequence, strings
+  already gone") was measured self-contradictory (0 classes) and is stated
+  as such in §10.9.
+- §13.2 `hash_alpha` row closed (landed, D25). §3.3: no echo-back round
+  follows — the survey instrument collects use cases and does not review
+  this stream's implementation or design; carriage is verified in-stream.
+
+### Gate
+
+- Fixture (14 checks: rename / string / spelling / splat equalities;
+  qualified, automatic, command, splat negatives; nested numbering;
+  `hash_body`-equal invariant) and pin checks (16-hex on every record; the
+  three classes by name; both invariants). Red demonstrated: 6 named FAILs
+  against 0.11.0. Battery **807** (`--pwsh`) / **779** / **435** (no `git`).
+
 ## [0.11.0] - 2026-09-06 (`model_version` "10" -> "11"; the D24 arc)
 
 Model-moving. Lands the Round-9 prototype adjudication (three evaluating
