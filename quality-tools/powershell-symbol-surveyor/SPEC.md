@@ -931,7 +931,7 @@ dropped.
 |---|---|
 | `PSS1001` | A function is defined. Carries name, start and end location, and nesting depth. |
 | `PSS1002` | A function's parameter signature: ordered parameter names, declared types where present, and whether each is mandatory. Both `param()` blocks and the inline `function f($a)` form are recognised (§10.1). |
-| `PSS1003` | A function's hash triple: `hash_full`, `hash_body`, `hash_raw` (§10). |
+| `PSS1003` | A function's hash triple: `hash_full`, `hash_body`, `hash_raw` (§10), with `hash_alpha` (§10.9) carried beside it. |
 | `PSS1004` | A function is defined inside another function's body. Carries the enclosing function's identifier. |
 | `PSS1005` | A function name is defined more than once in the file. Carries every definition's location and ordinal. Emitted alongside `PSS9007`. |
 
@@ -1933,7 +1933,7 @@ collections instead.
 
 | Collection | `authority` | `binding_disposition` | Basis |
 |---|---|---|---|
-| `symbols` | `observed` | — | declarations read directly off the token stream (§10.1); the hash triple is computed over the observed span (§10.2–10.4) |
+| `symbols` | `observed` | — | declarations read directly off the token stream (§10.1); the hash triple is computed over the observed span (§10.2–10.4), and `hash_alpha` (§10.9) over the same body extent |
 | `script_variables` | `observed` | — | sites read directly (§12.2); `rhs`/`rhs_refs` keys are enrichments documented in §12.9 |
 | `local_variables` | `observed` | — | sites read directly (§12.4) |
 | `string_interpolation_references` | `observed` | — | sites read directly inside expandable strings (§12.5) |
@@ -2445,6 +2445,11 @@ the base was invoked through and nothing about the effect; a consumer that
 carries its own limitation taxonomy will file the same site as
 "runtime evidence required" — the two vocabularies coincide, and this
 model carries the site as an access fact rather than a limitation record.
+A consumer that counts only `$Script:`-qualified bases will count fewer
+sites than this model by exactly the root-scope unqualified references
+§12.6 admits (measured on one later generation of the reference target: 3
+invocation sites and 1 index-assignment site — a definitional difference,
+not a defect on either side).
 
 ---
 
@@ -2580,7 +2585,7 @@ detects a comment-only or whitespace-only edit.
 
 ### 10.5 The hash-triple classification (normative)
 
-The three values are not independent. `hash_raw` equality implies equality of
+The three values are not independent (and `hash_alpha`, §10.9, sits beside them: `hash_body` equality implies `hash_alpha` equality). `hash_raw` equality implies equality of
 the other two. For a symbol compared under the same name, `hash_full` differs
 only when non-string code differs, and `hash_body` differs when non-string code
 or string contents differ; therefore `hash_full` changed with `hash_body`
@@ -3519,40 +3524,41 @@ drift (ADR 0036).
 | `axis` | present only when its axis is materialised (§5.6) |
 | `optional` | data-dependent; present when the source populates it |
 
-**The two `optional` paths, with their basis.** Measured over all 230 committed
-generations of both corpus entries at the `all-axes` materialisation:
-`/script_variables[]/in_expandable_string` and
-`/string_interpolation_references[]/qualifier` each appear in **204 of 230**
-generations. They are absent from the smaller early scripts, which is exactly
-the data dependence the fingerprint cannot police, and marking them is
-therefore a recorded measurement rather than a licence to be absent.
+**The `optional` paths, with their basis (restated at D26).** Fifteen paths
+are declared `optional`. Their basis is measured, not assumed: presence over
+all 230 committed generations of both corpus entries at the `all-axes`
+materialisation (the "12" derived caches, D26; the derivation walks each
+declared path over each cached model), and at the pinned blob.
+
+| `optional` path | 230 generations | pin | why data-dependent |
+|---|---:|:-:|---|
+| `/script_variables[]/in_expandable_string` | 204 | yes | absent from the smaller early scripts (no interpolated script-scope read) |
+| `/string_interpolation_references[]/qualifier` | 204 | yes | same generations |
+| `/script_variables[]/rhs`, `rhs_span`, `rhs_refs`, `rhs_refs/commands`, `rhs_refs/variables`, `rhs_refs/variables[]/id`, `rhs_refs/variables[]/name` (7 paths, D13/D15) | 230 each | yes | a script with no script-scope write carrying an expression would lack them; every corpus generation has one |
+| `/local_variables[]/rhs_refs/variables[]/id` (D15) | 230 | yes (`local-sites`) | the one `optional` path that can only materialise under an axis |
+| `/script_variables[]/member_dynamic` (D24) | 0 | no | fires only on a script-state chain with a dynamic member name; none on this corpus (the pin's two sites are function-local, §12.10); held by fixture |
+| `/edges[]/site_records[]/name` (D15) | 0 | no | present only on a site record whose site is named by an alias or literal the itemisation resolves; none on this corpus; held by fixture |
+| `/symbols[]/ordinal` (D12) | 0 | no | emitted only when a definition name is duplicated (§5.2, `PSS9007`) — which is exactly why no pin-anchored check had ever seen it; it surfaced when the variant-demonstration fixture put the first duplicate-name model in front of the presence gate |
+| `/symbols[]/record` (D12) | 0 | no | marks a §5.7 boundary stub; appears only on a `--scope` slice, never on a surveyed model; the presence gate reads it on the pin slice |
+| `/limitations[]/check` (D16) | 0 | no | names which of the six §5.10 checks produced a `PSS9001` record; every corpus generation is scan-clean, so the presence gate reads it on the corrupted scan fixtures retained for this reason |
+
+Marking a path `optional` is therefore a recorded measurement rather than a
+licence to be absent; a path that is present on every generation stays
+`optional` only because a *possible* input lacks it, and the fixture that
+exercises the absent-at-pin paths is the gate's evidence for those.
 `/limitations[]/target` (D12) is `always` on the same per-model reading as
 `/symbols[]/parent`: measured over all 230 generations, `commands_dynamic`
 is never zero on this corpus, so every generation emits the path.
-`/symbols[]/ordinal` (D12) is the third `optional` path: emitted only when a
-definition name is duplicated (§5.2, `PSS9007`), absent at the pin and on
-**all 230** corpus generations — which is exactly why no pin-anchored check
-had ever seen it. It surfaced when the variant-demonstration fixture put the
-first duplicate-name model in front of the presence gate; an emitted key no
-declaration covered was the finding, and declaring it is the close.
-`/symbols[]/record` (D12) is the fourth: it marks a §5.7 boundary stub and
-can therefore appear only on a `--scope` slice — a surveyed model never
-emits it, so it is absent at the pin and on every corpus generation by
-construction, and the presence gate reads it on the pin slice instead.
-`/limitations[]/check` (D16) is the fifth: it names which of the six §5.10
-checks produced a `PSS9001` record, emitted only when a scan anomaly is
-detected — absent at the pin and on every corpus generation (all are clean;
-§5.10), so the presence gate reads it on the corrupted scan fixtures, which
-are retained as test assets for exactly this reason.
 
-Counts at the pinned blob: **191** paths at `all-axes`, **164** at the default
-materialisation. The difference of 27 is the 26 `axis` paths plus one
-data-dependent `optional` path (`/local_variables[]/rhs_refs/variables[]/id`)
-that can only materialise under `local-sites`. *(D16 correction: the previous
-figures — 129/115, "the difference being the ten axis paths" — had gone stale
-across the D13–D15 arcs; no gate reads this sentence, which is how it
-survived green. The figures above are re-measured with the gate's own
-`key_paths` derivation over the pinned blob.)*
+Counts at the pinned blob (the gate's own `key_paths` derivation, now
+gate-held so this sentence cannot go stale silently again): **195** of the
+200 declared paths at `all-axes`, **166** at the default materialisation; the
+difference of 29 is the 28 `axis` paths plus the one `optional` path that
+materialises only under `local-sites`; the 5 declared-but-absent paths at the
+pin are exactly the five zero-presence rows above. *(History: the D16
+correction replaced 129/115 with 191/164 and noted that no gate read the
+sentence — and 191/164 then went stale across D21–D25 in the same way. The
+figures are gate-held from D26.)*
 
 | Key path | Kind |
 |---|---|
@@ -4973,7 +4979,7 @@ a reinterpretation.
 | D1 | `pss.py` is governance-neutral (§1.5). It does not interpret markers, and a change to the governance model requires no change to the tool. |
 | D3 | Accepted extension is `.ps1` only. |
 | D4 | Exit codes are `0` and `2`; the exit code never encodes a verdict (§9). |
-| D5 | Three hashes: `hash_full` (shared contract, verbatim copy), `hash_body` (name excluded, **string contents retained**), `hash_raw` (§10). |
+| D5 | Three hashes: `hash_full` (shared contract, verbatim copy), `hash_body` (name excluded, **string contents retained**), `hash_raw` (§10) — and, beside the triple, `hash_alpha` (§10.9, shape class; not part of the shared contract). |
 | D6 | Nested scope uses asymmetric conventions: hashing includes the nested body, reference attribution does not (§10.8). |
 | D7 | `survey` enumerates impact sites with locations but emits no work list and no instruction. |
 | D8 | Initial `canonical_version` is `0.1.0`, promoted after the tool has been exercised on a real refactoring. |
@@ -5139,7 +5145,7 @@ two (§15.2 carries the detail and the provenance note).
   2,798 — see §13.2's dynamic-sites resolution note for the measured
   sequence.*
 
-**P15 through P19 were resolved on 2026-08-16 by external review** and their
+**Questions P15 through P19 of the 2026-08-16 pack** (that pack's own numbering — not the §6.5 patterns) **were resolved by external review** and their
 markers removed. Six respondents across two model families, all with code
 execution, answered a structured pack; the reading rule agreed before the pack
 was sent was that agreement within one family is weak because the respondents'

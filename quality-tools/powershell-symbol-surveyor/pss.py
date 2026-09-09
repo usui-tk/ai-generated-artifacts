@@ -178,7 +178,7 @@ FACTS = {
     # PSS1xxx - definition inventory
     "PSS1001": "A function is defined.",
     "PSS1002": "A function's parameter signature.",
-    "PSS1003": "A function's hash triple.",
+    "PSS1003": "A function's hash triple, with hash_alpha beside it.",
     "PSS1004": "A function is defined inside another function's body.",
     "PSS1005": "A function name is defined more than once in the file.",
     # PSS2xxx - reference and binding

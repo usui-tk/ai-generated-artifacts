@@ -1184,6 +1184,22 @@ def check_declared_schema(model_def, model_all):
                                               & set(declared.values())),
        "declared schema: every kind is in the declared vocabulary")
 
+    # SPEC 13.3's pinned path counts, gate-held from D26 (the 129/115 and
+    # 191/164 sentences both went stale because no gate read them).
+    eq((len(emitted_all), len(emitted_def), len(declared)), (195, 166, 200),
+       "declared schema: 195 of 200 paths at all-axes, 166 at the default "
+       "materialisation (SPEC 13.3 counts at the pinned blob)")
+    eq(len(emitted_all) - len(emitted_def),
+       len(axis_only) + 1,
+       "declared schema: the all-axes/default difference is the axis paths "
+       "plus the one optional path that materialises only under local-sites")
+    eq(sorted(p for p in declared if p not in emitted_all),
+       ["/edges[]/site_records[]/name", "/limitations[]/check",
+        "/script_variables[]/member_dynamic", "/symbols[]/ordinal",
+        "/symbols[]/record"],
+       "declared schema: the declared-but-absent paths at the pin are exactly "
+       "the five zero-presence optional rows of SPEC 13.3")
+
 
 
 def check_value_nullability(model_def, model_all):
