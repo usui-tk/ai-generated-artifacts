@@ -18,6 +18,35 @@ This file starts at `0.2.0`. Entries before it are reconstructed from the
 commit history and the SPEC's own decision records rather than written at the
 time, and are marked as such.
 
+## [0.12.1] - 2026-09-10 (`model_version` "12" unmoved; the D26 arc)
+
+Docs + gate only. A documentation consistency sweep over the PSS markdown
+set (SPEC, README pair, CHANGELOG, gate-coverage row 13; Tier-P assessment
+uncommitted). No payload change; the "12" caches stay valid; B.7/B.8
+unmoved.
+
+### Changed
+
+- **§13.3 `optional` paths restated**: fifteen paths, each with its basis
+  measured over all 230 cached generations and at the pin (the passage had
+  said "two"); pinned path counts corrected 191/164 -> **195/166 of 200**
+  and now **gate-held** (three checks; the previous two versions of this
+  sentence went stale because no gate read them).
+- **`hash_alpha` named beside the triple** wherever the triple was
+  enumerated as complete: FACTS `PSS1003` (descriptor text only), the §7 D5
+  jurisdiction row, the §12 record-authority row, §10.4.
+- Appendix: the 2026-08-16 pack's "P15–P19" qualified so it cannot be read
+  as the §6.5 P15 pattern.
+- §6.5 closing paragraph: the measured definitional difference between this
+  model's script-state population and a `$Script:`-qualified-only census
+  (3 invocation + 1 index-assignment sites on a later generation; no defect
+  on either side).
+
+### Gate
+
+- Battery **810** (`--pwsh`) / **782** / **435** (no `git`). Tamper-red
+  demonstrated on the pinned path-count check.
+
 ## [0.12.0] - 2026-09-07 (`model_version` "11" -> "12"; the D25 arc)
 
 Model-moving. Lands `hash_alpha` on the owner's adjudication of its basis
