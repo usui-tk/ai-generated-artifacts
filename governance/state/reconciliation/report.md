@@ -1,19 +1,19 @@
 # Reconciliation report (regenerated - do not hand-edit)
 
-- coldloop 1.0.0 / DuckDB 1.5.5 / generated 20260917T183309Z (UTC)
-- observation files: 154 / proposals appended this run: 0 / open: 3
+- coldloop 1.0.0 / DuckDB 1.5.5 / generated 20260918T183101Z (UTC)
+- observation files: 156 / proposals appended this run: 0 / open: 3
 
 ## Totals by drift status
 
-- `drift`: 123
-- `forked-frozen`: 308
-- `match`: 16663
-- `n/a`: 567
+- `drift`: 126
+- `forked-frozen`: 312
+- `match`: 16878
+- `n/a`: 575
 
 ## Drift rows (unit x status, drift only)
 
 | unit_id | count |
 |:--|--:|
-| `pwsh.helper.debugtrace-writejsonlline` | 41 |
-| `pwsh.helper.enable-debugtracefileoutput` | 41 |
-| `pwsh.helper.start-debugtrace` | 41 |
+| `pwsh.helper.debugtrace-writejsonlline` | 42 |
+| `pwsh.helper.enable-debugtracefileoutput` | 42 |
+| `pwsh.helper.start-debugtrace` | 42 |
