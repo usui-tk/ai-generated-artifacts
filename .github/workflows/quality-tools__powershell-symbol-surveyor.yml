@@ -26,6 +26,12 @@
 # Change history for this workflow is recorded in:
 #   quality-tools/powershell-symbol-surveyor/CHANGELOG.md
 #
+# Every run step executes under `shell: bash` (set once in `defaults.run`),
+# which GitHub runs as `bash --noprofile --norc -eo pipefail {0}`. The
+# pipefail is load-bearing: the self-check and battery steps pipe into `tee`,
+# and without it the step's status is tee's (always 0), so a failing gate
+# would pass silently. See /SPEC.md §2.5 [SPEC-CI-005].
+#
 # Do NOT add per-workflow CHANGELOG.md, README.md, or governance docs under
 # .github/workflows/. See /SPEC.md §9 [SPEC-CI-070].
 # ============================================================================
@@ -76,6 +82,9 @@ jobs:
     timeout-minutes: 30  # T1 — Light (see /SPEC.md §4 [SPEC-CI-020])
     defaults:
       run:
+        # bash => -eo pipefail (see the header): a failing gate piped into
+        # tee must fail the step. Do not remove.
+        shell: bash
         working-directory: quality-tools/powershell-symbol-surveyor
     steps:
       - uses: actions/checkout@v7
@@ -137,7 +146,8 @@ jobs:
         # over real temporary git repositories, and the §14.4 cache
         # generator on a bounded run. pwsh is preinstalled on ubuntu-latest
         # (diagnosed above); without it the battery degrades per SPEC 14.3,
-        # so this step passing proves the FULL set ran.
+        # so this step passing proves the FULL set ran - which holds only
+        # because the step is blocking (shell: bash => pipefail through tee).
         run: python3 test_pss.py --pwsh "$(command -v pwsh)" | tee battery.log
 
       - name: '[Summary] Write Step Summary'

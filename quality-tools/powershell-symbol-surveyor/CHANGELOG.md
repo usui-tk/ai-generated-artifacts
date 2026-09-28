@@ -18,6 +18,30 @@ This file starts at `0.2.0`. Entries before it are reconstructed from the
 commit history and the SPEC's own decision records rather than written at the
 time, and are marked as such.
 
+## [Unreleased] (CI only; `pss_version` and `model_version` unmoved)
+
+### Fixed
+
+- **The CI self-check and battery steps were not blocking.** Both piped into
+  `tee` (`pss.py --self-check | tee selfcheck.log`,
+  `test_pss.py --pwsh ... | tee battery.log`) under GitHub's default shell for
+  an unspecified `shell:` (`bash -e`, no `pipefail`), so each step reported
+  `tee`'s exit status (always `0`): a red self-check or a failing battery
+  check would still have left the job green, and the workflow comment's
+  "this step passing proves the FULL set ran" did not hold. Found while
+  fixing the same defect in the psa.py workflow (psa `4.3.1` CHANGELOG);
+  /SPEC.md §2.5 [SPEC-CI-005] requires blocking gates. Fix:
+  `defaults.run.shell: bash`, which GitHub runs as
+  `bash --noprofile --norc -eo pipefail {0}`; the header and step comments
+  now say why the pipefail is load-bearing. Measured before the change,
+  locally on a full-history clone: `pss.py --self-check` exit `0`,
+  `test_pss.py --pwsh` (PowerShell 7.6.6) 810/810 exit `0` - so the gates
+  are green today and only their ability to fail changes. The runner's
+  preinstalled `pwsh` is a different version from the one measured here; a
+  first red run after this change would be a pre-existing deviation made
+  visible, not one introduced. SPEC §13.2's static-analysis row states the
+  blocking contract. Recorded here per /SPEC.md §9 [SPEC-CI-070].
+
 ## [0.12.1] - 2026-09-10 (`model_version` "12" unmoved; the D26 arc)
 
 Docs + gate only. A documentation consistency sweep over the PSS markdown
