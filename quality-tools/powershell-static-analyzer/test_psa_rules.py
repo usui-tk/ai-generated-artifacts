@@ -699,6 +699,122 @@ t('PSA2013 edge: top-level script parameter (auto-populated $Script:)',
 
 
 # ---------------------------------------------------------------------------
+# PSA2013 — script-root unqualified initialisation (refined in 4.3.1)
+# ---------------------------------------------------------------------------
+# In a .ps1, `$Name = ...` at the script's own scope creates the script-scope
+# variable that `$script:Name` reads (about_Scopes). 4.3.1 counts such an
+# assignment as initialisation ONLY where script scope is provable from the
+# text: outside every (...) / [...] and every {...} except the same-scope
+# statement blocks of if/elseif/else/foreach/for/while/do/switch/try/catch/
+# finally. Everything else keeps the finding (conservative). Each case below
+# was executed under PowerShell 7.6.6 (Linux) when the refinement was made:
+# every 0-case really makes $script:N readable, every "neg" 1-case really
+# does not, and the "limit" 1-cases are documented limitations (script scope
+# in PowerShell - or, for a command's script-block argument, the command's
+# own choice - but not provable from the text), pinned so that any widening
+# is a deliberate, test-visible change. (Exception: the Pester-style case,
+# whose outcome is Pester's Describe/BeforeAll scoping; Pester was not
+# installed for the run.) Source origin: the ISO-side BQ-04
+# offline handoff (the four synthetic fixtures are also run byte-exact via
+# the CLI in Section 2d3).
+
+def t13(name, source, expected, suffix='.ps1'):
+    """PSA2013 case with the file extension that main() supplies."""
+    fm = {'suffix': suffix} if suffix is not None else None
+    TESTS.append(('rule', name, 'PSA2013', source, expected, fm))
+
+
+_R = "\nfunction Get-N { return $script:N }\n"
+
+# Accepted: provably script scope (0).
+t13('PSA2013 root: plain $N = at script root', "$N = 1" + _R, 0)
+t13('PSA2013 root: no spaces ($N=1)', "$N=1" + _R, 0)
+t13('PSA2013 root: typed [int]$N =', "[int]$N = 1" + _R, 0)
+t13('PSA2013 root: nested generic cast', "[System.Nullable[int]]$N = 1" + _R, 0)
+t13('PSA2013 root: attribute + cast', "[ValidateNotNull()][string]$N = 'a'" + _R, 0)
+t13('PSA2013 root: after ; on the same line', "$a = 0; $N = 1" + _R, 0)
+t13('PSA2013 root: assignment AFTER the reading function (flow-insensitive)',
+    "function Get-N { return $script:N }\n$N = 1\n", 0)
+t13('PSA2013 root: inside if', "if ($true) { $N = 1 }" + _R, 0)
+t13('PSA2013 root: inside if, Allman brace + CRLF',
+    "if ($true)\r\n{\r\n    $N = 1\r\n}\r\nfunction Get-N { return $script:N }\r\n", 0)
+t13('PSA2013 root: inside else on its own line',
+    "if ($false) {\n}\nelse {\n    $N = 1\n}" + _R, 0)
+t13('PSA2013 root: inside elseif', "if ($false) { } elseif ($true) { $N = 1 }" + _R, 0)
+t13('PSA2013 root: inside foreach', "foreach ($i in 1) { $N = 1 }" + _R, 0)
+t13('PSA2013 root: inside labelled foreach', ":outer foreach ($i in 1) { $N = 1 }" + _R, 0)
+t13('PSA2013 root: inside for', "for ($i = 0; $i -lt 1; $i++) { $N = 1 }" + _R, 0)
+t13('PSA2013 root: inside while', "$k = 0; while ($k -lt 1) { $k++; $N = 1 }" + _R, 0)
+t13('PSA2013 root: inside do/until', "do { $N = 1 } until ($true)" + _R, 0)
+t13('PSA2013 root: inside try', "try { $N = 1 } finally { }" + _R, 0)
+t13('PSA2013 root: inside catch', "try { throw 'x' } catch { $N = 1 }" + _R, 0)
+t13('PSA2013 root: inside typed catch list',
+    "try { throw [System.IO.IOException]::new('x') }\n"
+    "catch [System.IO.IOException], [System.Exception] { $N = 1 }" + _R, 0)
+t13('PSA2013 root: inside finally', "try { } finally { $N = 1 }" + _R, 0)
+t13('PSA2013 root: if nested in foreach', "foreach ($i in 1) { if ($i) { $N = 1 } }" + _R, 0)
+
+# True negatives: not script scope in PowerShell (1).
+t13('PSA2013 root neg: function-local (handoff control)',
+    "function Initialize-Local {\n    $N = 1\n}" + _R, 1)
+t13('PSA2013 root neg: function nested in a root if',
+    "if ($true) { function Init { $N = 1 } }" + _R, 1)
+t13('PSA2013 root neg: filter body', "filter Init { $N = 1 }" + _R, 1)
+t13('PSA2013 root neg: trap block', "trap { $N = 1; continue }" + _R, 1)
+t13('PSA2013 root neg: & { } child scope', "& { $N = 1 }" + _R, 1)
+t13('PSA2013 root neg: Invoke-Command script block',
+    "Invoke-Command -ScriptBlock { $N = 1 }" + _R, 1)
+t13('PSA2013 root neg: uninvoked script-block literal', "$sb = { $N = 1 }" + _R, 1)
+t13('PSA2013 root neg: typo stays visible (handoff control)',
+    "$ReturnRoot = 'fixture'\nfunction Get-Typo {\n    $script:ReturnR00t\n}\n", 1)
+t13('PSA2013 root neg: only in a comment', "# $N = 1" + _R, 1)
+t13('PSA2013 root neg: only in a single-quoted string', "'$N = 1'" + _R, 1)
+t13('PSA2013 root neg: only in a here-string',
+    "$t = @\"\n$N = 1\n\"@" + _R, 1)
+t13('PSA2013 root neg: `==` is not an assignment (guard)', "$N == 1" + _R, 1)
+
+# Conservative limitations: script scope in PowerShell, NOT provable from
+# the text, so the finding is kept (1). Widening any of these is a
+# deliberate change that must flip the pinned expectation here.
+t13('PSA2013 root limit: switch clause block', "switch (1) { 1 { $N = 1 } }" + _R, 1)
+t13('PSA2013 root limit: dot-sourced block', ". { $N = 1 }" + _R, 1)
+t13('PSA2013 root limit: ForEach-Object block (-Parallel is a child scope)',
+    "1 | ForEach-Object { $N = 1 }" + _R, 1)
+t13('PSA2013 root limit: command script-block argument (Pester-style)',
+    "Describe 'x' {\n    BeforeAll {\n        $N = 1\n    }\n}" + _R, 1)
+t13('PSA2013 root limit: subexpression', "$null = $($N = 1)" + _R, 1)
+t13('PSA2013 root limit: parenthesised assignment', "($N = 1) | Out-Null" + _R, 1)
+t13('PSA2013 root limit: assignment in an if condition', "if ($N = 1) { }" + _R, 1)
+t13('PSA2013 root limit: chained assignment (right-hand target)', "$a = $N = 1" + _R, 1)
+t13('PSA2013 root limit: multiple assignment', "$N, $b = 1, 2" + _R, 1)
+t13('PSA2013 root limit: compound assignment', "$N += 1" + _R, 1)
+t13('PSA2013 root limit: foreach loop variable', "foreach ($N in 1) { }" + _R, 1)
+t13('PSA2013 root limit: scope-qualified $global:', "$global:N = 1" + _R, 1)
+t13('PSA2013 root limit: scope-qualified $local:', "$local:N = 1" + _R, 1)
+t13('PSA2013 root limit: script-level begin block',
+    "begin { $N = 1 }\nend {\n    function Get-N { return $script:N }\n    Get-N\n}\n", 1)
+
+# File-type gating: the refinement is .ps1-only.
+t13('PSA2013 root gate: .psm1 keeps the 4.3.0 behaviour', "$N = 1" + _R, 1,
+    suffix='.psm1')
+t13('PSA2013 root gate: unknown file type (file_meta None) keeps 4.3.0 behaviour',
+    "$N = 1" + _R, 1, suffix=None)
+
+# Unchanged contracts under a .ps1 file type.
+t13('PSA2013 root: explicit $script: assignment still recognised (handoff)',
+    "$script:ReturnRoot = 'fixture'\nfunction Get-Root {\n    $script:ReturnRoot\n}\n", 0)
+t13('PSA2013 root: handoff primary example (two names)',
+    "$ReturnRoot = 'fixture'\n$GateInvocationCount = 0\n"
+    "function Get-Root {\n    $script:ReturnRoot\n}\n"
+    "function Get-Count {\n    $script:GateInvocationCount\n}\n", 0)
+t13('PSA2013 root: root init of one name does not cover another',
+    "$A = 1\nfunction Init { $B = 1 }\n"
+    "function Use { $script:A; $script:B }\n", 1)
+t13('PSA2013 root: per-name 5-hit cap unchanged',
+    "function U {\n" + "    $script:Missing\n" * 7 + "}\n", 5)
+
+
+# ---------------------------------------------------------------------------
 # PSA3001 — Start-Process -ArgumentList (warning, default ON)
 # ---------------------------------------------------------------------------
 
@@ -1545,6 +1661,80 @@ def _run_psa2013_2008_known_script_vars_tests():
 
 
 # ---------------------------------------------------------------------------
+# PSA2013 script-root refinement through the CLI (refined in 4.3.1)
+# ---------------------------------------------------------------------------
+# The refinement depends on main() handing the file extension to
+# analyze_text(), which Section 1 cannot see. These cases write the ISO-side
+# handoff's four synthetic fixtures byte-exact (UTF-8 BOM + CRLF) and run
+# them the way that handoff's harness does (explicit empty config,
+# --include PSA2013, --format json), pinning exact (line, col) positions and
+# the process exit code. An upper-case .PS1 name pins the case-insensitive
+# extension match, and a .psm1 copy of the primary example pins the
+# file-type gate end to end.
+
+_PSA2013_CLI_FIXTURES = [
+    # (filename, lines, expected [(line, col)], expected exit code)
+    ('same-file-unqualified.ps1',
+     ["$ReturnRoot = 'fixture'", '$GateInvocationCount = 0',
+      'function Get-Root {', '    $script:ReturnRoot', '}',
+      'function Get-Count {', '    $script:GateInvocationCount', '}'],
+     [], 0),
+    ('explicit-script-assignment.ps1',
+     ["$script:ReturnRoot = 'fixture'", 'function Get-Root {',
+      '    $script:ReturnRoot', '}'],
+     [], 0),
+    ('real-typo.ps1',
+     ["$ReturnRoot = 'fixture'", 'function Get-Typo {',
+      '    $script:ReturnR00t', '}'],
+     [(3, 5)], 2),
+    ('function-local-is-not-script.ps1',
+     ['function Initialize-Local {', '    $Counter = 1', '}',
+      'function Get-Count {', '    $script:Counter', '}'],
+     [(5, 5)], 2),
+    ('upper-case-extension.PS1',
+     ["$ReturnRoot = 'fixture'", 'function Get-Root {',
+      '    $script:ReturnRoot', '}'],
+     [], 0),
+    ('same-file-unqualified.psm1',
+     ["$ReturnRoot = 'fixture'", '$GateInvocationCount = 0',
+      'function Get-Root {', '    $script:ReturnRoot', '}',
+      'function Get-Count {', '    $script:GateInvocationCount', '}'],
+     [(4, 5), (7, 5)], 2),
+]
+
+
+def _run_psa2013_script_root_cli_tests():
+    """Return a list of (name, ok, detail) tuples."""
+    import json as _json
+    out = []
+    with tempfile.TemporaryDirectory(prefix='psa2013_root_') as d:
+        cfg = os.path.join(d, 'empty.psa.config.json')
+        with open(cfg, 'w', encoding='utf-8') as fh:
+            fh.write('{}')
+        for fname, lines, want_pos, want_rc in _PSA2013_CLI_FIXTURES:
+            path = os.path.join(d, fname)
+            with open(path, 'wb') as fh:
+                fh.write(b'\xef\xbb\xbf'
+                         + ('\r\n'.join(lines) + '\r\n').encode('utf-8'))
+            proc = subprocess.run(
+                [sys.executable, str(PSA_PATH), '--config', cfg,
+                 '--include', 'PSA2013', '--format', 'json', path],
+                capture_output=True, text=True, timeout=60)
+            try:
+                issues = _json.loads(proc.stdout)['issues']
+            except (ValueError, KeyError) as exc:
+                out.append((fname, False, f'bad JSON output: {exc}'))
+                continue
+            got_pos = sorted((i['line'], i['col']) for i in issues
+                             if i['code'] == 'PSA2013')
+            ok = got_pos == want_pos and proc.returncode == want_rc
+            out.append((fname, ok,
+                        f'positions {got_pos}/{want_pos}, '
+                        f'exit {proc.returncode}/{want_rc}'))
+    return out
+
+
+# ---------------------------------------------------------------------------
 # File-meta rule: PSA7001 — Missing UTF-8 BOM (warning, default ON)
 # ---------------------------------------------------------------------------
 # PSA7001 fires from analyze_text() ONLY when file_meta carries
@@ -2116,6 +2306,21 @@ def run():
             print(line)
         fail_count += 1
         failures.append(('psa2013_known_script_vars', ksv_failures))
+
+    # --- Section 2d3: PSA2013 script-root refinement via the CLI ---
+    print()
+    print('=' * 72)
+    print(f'Section 2d3: PSA2013 script-root refinement via the CLI '
+          f'({len(_PSA2013_CLI_FIXTURES)} cases, refined in 4.3.1)')
+    print('=' * 72)
+    for name, ok, detail in _run_psa2013_script_root_cli_tests():
+        status = 'PASS' if ok else 'FAIL'
+        print(f'  [{status}] {name}  ({detail})')
+        if ok:
+            pass_count += 1
+        else:
+            fail_count += 1
+            failures.append((f'PSA2013 CLI {name}', [f'    {detail}']))
 
     # --- Section 2e: v4.0.2 strict-mode regression tests ---
     print()

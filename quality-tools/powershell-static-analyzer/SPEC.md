@@ -1006,12 +1006,16 @@ on the call line.
 - **Severity**: Error
 - **Default**: enabled
 - **Added in**: v4.1.0
+- **Refined in**: v4.3.1 (script-root unqualified initialisation, `.ps1` only)
 
 **Detection**: Two-pass analysis on the cleaned text:
 
 1. **Assignment pass.** Collect every ``$Script:Name = ...``
    occurrence in the file (where ``=`` is followed by something
    other than ``=``). Stores names as a case-insensitive set.
+   **For a `.ps1` file (v4.3.1+)** the set also receives every name
+   assigned by an *unqualified* statement that provably runs in the
+   script's own scope — see *Script-root initialisation* below.
 2. **Read pass.** Walk every line. For each ``$Script:Name``
    reference (case-insensitive) where the following token is **not**
    ``=`` (assignment LHS), report unless the name appears in the
@@ -1026,6 +1030,45 @@ on the call line.
 
 To avoid flooding output on a global typo with many call sites, the
 rule emits at most 5 hits per distinct typo'd name.
+
+**Script-root initialisation (v4.3.1+, `.ps1` only).** When a `.ps1` is
+invoked as a script, a statement at the script's own scope runs in
+script scope, so ``$Name = ...`` there creates the variable that a
+function's ``$script:Name`` read resolves to (PowerShell
+`about_Scopes`). Such an assignment is counted as initialisation **only
+where script scope is provable from the cleaned text**:
+
+- *Position.* The assignment is not inside any ``(...)`` or ``[...]``,
+  and every enclosing ``{...}`` is the statement block of a same-scope
+  language keyword: ``if`` / ``elseif`` / ``else`` / ``foreach`` /
+  ``for`` / ``while`` / ``do`` / ``switch`` (the switch *body* only) /
+  ``try`` / ``catch`` (including ``catch [T1], [T2]``) / ``finally``.
+  Any other brace makes its contents *not root*: function / filter /
+  trap / script-level ``begin``/``process``/``end`` bodies, script-block
+  literals (``& { }``, ``. { }``, ``$sb = { }``), script blocks passed
+  to commands, hashtables, and switch clause blocks.
+- *Form.* ``$Name = ...`` or ``[type]$Name = ...`` (attributes and
+  casts allowed, including nested generics) at statement start — the
+  previous non-blank character on the line is a line start, ``;``,
+  ``{`` or ``}``. Scope-qualified targets (``$global:`` / ``$local:`` /
+  …), chained (``$a = $b = …``) and multiple (``$a, $b = …``) targets,
+  compound operators (``+=`` …), loop variables and assignments inside
+  a condition are not recognised.
+- *File type.* The extension is supplied by the CLI (case-insensitive).
+  ``.psm1`` files, and any caller that does not supply a file type, keep
+  the v4.3.0 behaviour (explicit ``$Script:Name = ...`` only).
+
+A root-level assignment inside a conditional block (``if``, loop,
+``try``/``catch``) **is** counted: this matches the explicit rule,
+which has always been file-wide and flow-insensitive (an explicit
+assignment anywhere in the file suffices). Uncertainty always keeps the
+finding: the refinement only removes findings for names that are
+provably initialised at script scope, never adds one. The recognised
+positions and forms, the true-negative controls and the runtime-behaviour
+limitations below were each executed under PowerShell 7.6.6 when the
+refinement was made (the Pester-style case excepted: Pester was not
+installed); the cases are pinned in `test_psa_rules.py` (Section 1
+*script-root* cases and the Section 2d3 CLI fixtures).
 
 **Rationale**: PowerShell silently evaluates an unassigned
 ``$Script:Foo`` to ``$null``. This often hides typo bugs in
@@ -1100,6 +1143,32 @@ includes the offending name to make grep-driven correction easy.
   invoked individually.)
 - Module exports: ``Import-Module`` does not propagate ``$Script:``
   globals to importers, so the file-local model is sound here.
+- Script-root initialisation (v4.3.1+) keeps the finding, although the
+  name *is* initialised at runtime, for: switch clause blocks;
+  ``. { }``; command script-block arguments (``ForEach-Object`` runs its
+  block in the caller's scope but ``-Parallel`` does not — the scope is
+  the command's choice, not provable from text); subexpressions and
+  parenthesised or in-condition assignments; chained, multiple and
+  compound assignments; ``foreach`` loop variables; scope-qualified
+  targets other than ``$Script:``; script-level ``begin``/``process``/
+  ``end`` blocks; and every ``.psm1``. Use an explicit
+  ``$Script:Name = ...`` there.
+- Script-root initialisation assumes the `.ps1` runs as a script (the
+  same assumption as the top-level ``param()`` exemption). A `.ps1` that
+  is dot-sourced from inside a function places its root assignments in
+  that function's scope, where a ``$script:Name`` read does **not** see
+  them (observed under PowerShell 7.6.6); PSA cannot see how a file is
+  invoked, so for such a library file the refinement can hide a real
+  ``$null`` read. Use an explicit ``$Script:Name = ...`` in a file that
+  is meant to be dot-sourced.
+- Flow-insensitivity: a root assignment placed after the first call of
+  the reading function satisfies the rule even though the first read
+  returns ``$null`` (the same limitation as the explicit rule).
+- Windows PowerShell 5.1 was not executed for the v4.3.1 refinement;
+  the positions and forms rely on documented `about_Scopes` semantics
+  (unchanged between 5.1 and 7.x) and on the PowerShell 7.6.6 runs.
+- PSA2008 (§4.9b) does **not** use script-root initialisation: its
+  initialisation pass remains explicit ``$Script:Name = ...`` only.
 
 **Inline suppression**: ``# psa-disable-line PSA2013 -- <reason>``
 on the read line.

@@ -13,19 +13,73 @@ This CHANGELOG covers `psa.py` only. For higher-level repository-wide
 changes (documentation policy, sister scripts, etc.), see the root
 [`README.md`](../../../README.md) of `ai-generated-artifacts`.
 
-## [unreleased CI note] - 2026-07-03
+## [4.3.1] - 2026-09-28 — `psa2013-script-root-initialisation`
 
-### Fixed (CI only; no tool change)
+This patch release refines `PSA2013` (`$Script:Foo` read but never
+assigned). It is **backward-compatible** with `4.3.0`: no rule is added or
+renamed, and the CLI, the JSON/SARIF output schemas and the configuration
+schema are unchanged. The refinement can only **remove** `PSA2013`
+findings (for names that are provably initialised), never add one - the
+same patch-level shape as the `4.0.1` `PSA2009` false-positive defence.
+The release also carries the unreleased CI/docs pool below, including the
+fix that makes the self-quality pillars blocking in CI.
 
-- Workflow self-reference: the `quality-tools__powershell-static-analyzer.yml`
-  path filters still watched the pre-rename filename
-  (`scripts__python__powershell-static-analyzer.yml`) - a dead trigger line
-  left over from the workflow rename. Both filters (push / pull_request) now
-  watch the current filename. Recorded here per /SPEC.md §9 [SPEC-CI-070].
+### Changed - `PSA2013` recognises proven script-root initialisation (`.ps1` only)
 
-## [Unreleased]
+- **Motivation.** An offline developer handoff from the
+  update-windows-server-iso refactoring review (its BQ-04 item) showed
+  `4.3.0` reporting `PSA2013` errors for a `.ps1` that initialises
+  `$ReturnRoot` / `$GateInvocationCount` with **unqualified** assignments at
+  script root and reads them as `$script:ReturnRoot` /
+  `$script:GateInvocationCount` inside functions. In PowerShell such a
+  root statement runs in script scope (`about_Scopes`), so the reads are
+  initialised; `4.3.0` matched its own SPEC (which collected explicit
+  `$Script:Name = ...` only), so this is a specification enhancement, not a
+  defect fix. The handoff asked for a narrow, scope-aware rule that keeps
+  typo detection and function-local controls effective.
+- **What changed.** For a `.ps1` file, `PSA2013`'s assignment pass also
+  counts `$Name = ...` / `[type]$Name = ...` at statement start when the
+  statement provably runs in the script's own scope: outside every
+  `(...)`/`[...]` and every `{...}` except the same-scope statement blocks of
+  `if`/`elseif`/`else`/`foreach`/`for`/`while`/`do`/`switch` (body)/`try`/
+  `catch`/`finally`. Every other brace (function, filter, trap,
+  `begin`/`process`/`end`, script-block literals, command script-block
+  arguments, hashtables, switch clause blocks) keeps the finding.
+  Root-level conditional assignments count, matching the explicit rule's
+  file-wide, flow-insensitive semantics. `.psm1` files and callers that
+  supply no file type keep the `4.3.0` behaviour. `main()` now passes the
+  lower-cased file extension to `analyze_text()` as `file_meta['suffix']`
+  (internal API; SPEC §1.4). Explicit assignments, the top-level `param()`
+  exemption, the auto-variable allow-list, the 5-hits-per-name cap,
+  `psa2013_known_script_vars` and the message wording are unchanged.
+  `PSA2008` is deliberately not changed. See SPEC §4.9g
+  *Script-root initialisation* and its *Limitations*.
+- **Evidence.** (1) Every recognised position/form, true-negative control
+  and runtime-behaviour limitation pinned in the tests was executed under
+  PowerShell 7.6.6 (Linux): each accepted case really makes `$script:N`
+  readable and each negative really does not; the Pester-style case was not
+  executed (Pester absent). Windows PowerShell 5.1 was not executed. (2) The
+  handoff's four byte-exact fixtures (UTF-8 BOM + CRLF) give 0 / 0 / 1 / 1
+  findings with the remaining positions at `3:5` and `5:5`; the handoff's own
+  harness (`--mode candidate`) passes. (3) Full-rule output of `4.3.0` vs
+  `4.3.1` over every `.ps1`/`.psm1` in this repository and in
+  `Deploy-Drivers-For-WindowsServer`, each with its implicit project config
+  and with an empty config: **0 differences** (114 files x 2 modes) - the
+  refinement is count-neutral for every in-repo consumer, and the
+  update-windows-server-iso T55 debt-baseline gate stays 16/16.
+- **Tests.** `test_psa_rules.py` gains 53 Section 1 *script-root* cases
+  (accepted positions and forms, true negatives, pinned conservative
+  limitations, the file-type gate) and a new Section 2d3 that runs the
+  handoff fixtures, an upper-case `.PS1` name and a `.psm1` copy through
+  the CLI, pinning exact positions and exit codes (6 cases). Written
+  red-first: against `4.3.0` exactly the 25 accepting cases failed and
+  every negative/limit case passed. Suite: 281 -> **340** passing.
+- **Docs.** SPEC §4.9g gains *Script-root initialisation* and extended
+  *Limitations*; the `PSA2013` rows of `README.md` / `README.ja.md` are
+  updated in lock-step (the Japanese row's stray English word "sucessfully"
+  is replaced in the same edit).
 
-### Fixed (CI only; no tool change)
+### Fixed (CI only; carried from the unreleased pool)
 
 - **The three self-quality pillars were not blocking in CI.** Every pillar
   step piped into `tee` under GitHub's default shell for an unspecified
@@ -47,8 +101,13 @@ changes (documentation policy, sister scripts, etc.), see the root
   `SPEC.md` §12.6's stale pre-rename workflow filename is updated to the live
   `quality-tools__powershell-static-analyzer.yml`. Recorded here per
   /SPEC.md §9 [SPEC-CI-070].
+- Workflow self-reference (2026-07-03): the
+  `quality-tools__powershell-static-analyzer.yml` path filters still watched the pre-rename filename
+  (`scripts__python__powershell-static-analyzer.yml`) - a dead trigger line
+  left over from the workflow rename. Both filters (push / pull_request) now
+  watch the current filename. Recorded here per /SPEC.md §9 [SPEC-CI-070].
 
-### Changed
+### Changed (CI; carried from the unreleased pool)
 
 - CI: bump `actions/checkout` v5 -> v7 and `actions/upload-artifact` v5 -> v7
   in `quality-tools__powershell-static-analyzer.yml` (workflow-only; no
@@ -61,7 +120,7 @@ changes (documentation policy, sister scripts, etc.), see the root
   `pull_request_target`/`workflow_run` fork checkouts only). The remaining
   pin (setup-python v6) is already current.
 
-### Fixed
+### Fixed (docs; carried from the unreleased pool)
 
 - Docs only (`README.md` / `README.ja.md`; no `psa.py` change, no version
   bump): the "Within this repository" consumer table and the CI example

@@ -271,7 +271,7 @@ Issues : 1 errors, 42 warnings, 31 info
 | **PSA2010** | Error | ✅ 有効 | スキャン対象のいずれのファイルにも定義されていない関数呼び出しを検出 (3.9.0 新規) — `Find-Signtool` (正しくは `Find-KitTool 'signtool.exe'`) のような typo を捕捉。 `.psa.config.json` の `psa2010_known_cmdlets` で組み込み cmdlet 一覧を拡張可能 |
 | **PSA2011** | Error | ✅ 有効 | `Split-Path -LiteralPath ... -Parent` が Windows PowerShell 5.1 ja-JP で `AmbiguousParameterSet` を発生させるパターンを検出 (3.9.0 新規) — `[System.IO.Path]::GetDirectoryName($path)` または `Split-Path -Path $path -Parent` に修正 |
 | **PSA2012** | Error | ✅ 有効 | `[Parameter(Mandatory)]` パラメータが N 個ある関数を、引数 N 個未満で positional 呼び出しした場合に検出 (4.1.0 新規) — PowerShell が対話的に不足値を要求するため、非対話実行 (CI/バッチ) ではスクリプトが stdin 待ちでハングする。名前付き引数 (`-Name value`) の使用を推奨 |
-| **PSA2013** | Error | ✅ 有効 | `$Script:Foo` を読んでいるが、スクリプト全体で `$Script:Foo = ...` の代入が存在しないケースを検出 (4.1.0 新規) — PowerShell は未代入の `$Script:` 変数を sucessfully `$null` として評価するため、typo バグが下流のヌル絡みエラーとして遠方で表面化することが多い。 別ファイル（状態を所有する consumer から切り出した共有ヘルパ等）が所有・初期化する `$Script:` 状態は `.psa.config.json` の `psa2013_known_script_vars` で宣言可能 (4.3.0+)。 リストにない名前は引き続き検出される |
+| **PSA2013** | Error | ✅ 有効 | `$Script:Foo` を読んでいるが、スクリプト全体で `$Script:Foo = ...` の代入が存在しないケースを検出 (4.1.0 新規) — PowerShell は未代入の `$Script:` 変数を黙って `$null` として評価するため、typo バグが下流のヌル絡みエラーとして遠方で表面化することが多い。 別ファイル（状態を所有する consumer から切り出した共有ヘルパ等）が所有・初期化する `$Script:` 状態は `.psa.config.json` の `psa2013_known_script_vars` で宣言可能 (4.3.0+)。 リストにない名前は引き続き検出される。 `.ps1` では (4.3.1+)、スクリプトスコープで実行されることが確実な修飾なしの `$Foo = ...` (スクリプト直下、またはそこでの `if`/ループ/`try`-`catch` ブロック内) も初期化として扱う。関数・スクリプトブロック内と `.psm1` は引き続き検出される |
 
 `PSA3xxx` — コーディングパターン（Warning）
 

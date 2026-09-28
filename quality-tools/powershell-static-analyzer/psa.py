@@ -146,7 +146,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-__version__ = '4.3.0'
+__version__ = '4.3.1'
 
 
 def _verify_version_file_consistency():
@@ -3058,6 +3058,9 @@ def check_positional_mandatory_call(text, clean):
 #     is auto-populated for every script parameter when the .ps1 is
 #     invoked as a script). We detect these from the top-level
 #     ``param(...)`` block.
+#   - (4.3.1+, .ps1 only) Names initialised by an UNQUALIFIED ``$Name =``
+#     that provably sits in the script's own scope. See
+#     ``collect_script_root_assignments`` below.
 #   - Names referenced only inside comment / string literals (the
 #     stripped *clean* text already handles this).
 #   - The names listed in PSA2013_KNOWN_AUTO_SCRIPT_VARS (e.g.
@@ -3091,7 +3094,166 @@ _TOP_LEVEL_PARAM_PATTERN = re.compile(
 )
 
 
-def check_script_var_read_never_assigned(clean, known_script_vars=None):
+# ---------------------------------------------------------------------------
+# PSA2013 script-root initialisation (refined in v4.3.1)
+# ---------------------------------------------------------------------------
+#
+# In a .ps1 invoked as a script, a statement at the script's own scope runs
+# in script scope, so ``$Name = ...`` there creates the variable that a
+# function's ``$script:Name`` read resolves to (about_Scopes). 4.3.1 counts
+# such an assignment as initialisation, but ONLY where script scope is
+# provable from the cleaned text alone:
+#
+#   - the assignment is not inside any ``(...)`` or ``[...]``, and
+#   - every enclosing ``{...}`` is the statement block of a same-scope
+#     language keyword: if / elseif / else / foreach / for / while / do /
+#     switch (the switch BODY only) / try / catch / finally.
+#
+# Every other brace is a scope PSA cannot prove from text and makes its
+# contents "not root": function / filter / trap / begin-process-end bodies,
+# script-block literals (``& {}``, ``. {}``, ``$sb = {}``), script blocks
+# passed to commands (ForEach-Object runs its block in the caller's scope,
+# but ``-Parallel`` does not; Pester's Describe/BeforeAll have their own
+# scoping), hashtables, and switch clause blocks. Uncertainty keeps the
+# finding: this refinement only ever REMOVES PSA2013 findings for names that
+# are provably initialised, never adds one.
+#
+# The recognised statement is ``$Name = ...`` or ``[type]$Name = ...``
+# (attributes/casts allowed, including nested generics) at statement start:
+# the previous non-blank character on the line is a newline, ``;``, ``{``
+# or ``}``. Scope-qualified targets (``$global:``, ``$local:`` ...), chained
+# (``$a = $b = 1``) and multiple (``$a, $b = ...``) targets, compound
+# operators (``+=``) and loop variables are not recognised.
+
+_ROOT_SAME_SCOPE_PAREN_KEYWORDS = frozenset(
+    ['if', 'elseif', 'foreach', 'for', 'while', 'switch'])
+_ROOT_SAME_SCOPE_BARE_KEYWORDS = frozenset(
+    ['else', 'try', 'finally', 'do', 'catch'])
+_ROOT_ASSIGN_PATTERN = re.compile(
+    r'(?:\[(?:[^\[\]\n]|\[[^\[\]\n]*\])*\]\s*)*'   # optional [type] / [attr()]
+    r'\$(?![A-Za-z]+:)([A-Za-z_]\w*)\s*=(?!=)'      # unqualified $Name =
+)
+_ROOT_CLOSERS = {')': '(', ']': '[', '}': '{'}
+
+
+def _prev_nonblank(clean, i, cross_newlines=True):
+    """Index of the last non-blank character before *i* (or -1)."""
+    blank = ' \t\r\n' if cross_newlines else ' \t\r'
+    j = i - 1
+    while j >= 0 and clean[j] in blank:
+        j -= 1
+    return j
+
+
+def _word_ending_at(clean, j):
+    """(word, start) of the identifier-like token ending at index *j*.
+
+    Hyphens are included so that a switch flag (``-Regex``) or a
+    ``Verb-Noun`` name is read as one token.
+    """
+    k = j
+    while k >= 0 and (clean[k].isalnum() or clean[k] in '_-'):
+        k -= 1
+    return clean[k + 1:j + 1], k + 1
+
+
+def _brace_is_same_scope(clean, pos, open_of_close):
+    """True if the ``{`` at *pos* opens a same-scope keyword statement block.
+
+    *open_of_close* maps the index of every already-seen ``)`` / ``]`` to the
+    index of its matching opener.
+    """
+    j = _prev_nonblank(clean, pos)
+    if j < 0:
+        return False
+    ch = clean[j]
+    if ch == ')':
+        # if / elseif / foreach / for / while / switch [-Flag ...] ( ... ) {
+        opener = open_of_close.get(j)
+        if opener is None:
+            return False
+        k = _prev_nonblank(clean, opener)
+        while k >= 0:
+            word, start = _word_ending_at(clean, k)
+            if not word:
+                return False
+            if word.startswith('-'):        # switch -Regex -CaseSensitive (
+                k = _prev_nonblank(clean, start)
+                continue
+            return word.lower() in _ROOT_SAME_SCOPE_PAREN_KEYWORDS
+        return False
+    if ch == ']':
+        # catch [T1], [T2] {
+        k = j
+        while k >= 0 and clean[k] in '],':
+            if clean[k] == ']':
+                opener = open_of_close.get(k)
+                if opener is None:
+                    return False
+                k = _prev_nonblank(clean, opener)
+            else:
+                k = _prev_nonblank(clean, k)
+        word, _start = _word_ending_at(clean, k)
+        return word.lower() == 'catch'
+    word, _start = _word_ending_at(clean, j)
+    return word.lower() in _ROOT_SAME_SCOPE_BARE_KEYWORDS
+
+
+def _script_root_mask(clean):
+    """bytearray: 1 at each index that provably sits in the script's own
+    scope (no enclosing ``(``/``[`` and only same-scope keyword braces)."""
+    n = len(clean)
+    mask = bytearray(n + 1)
+    stack = []              # (opener char, same_scope flag)
+    not_root = 0            # enclosing openers that are not same-scope
+    open_of_close = {}
+    for i, c in enumerate(clean):
+        if not_root == 0:
+            mask[i] = 1
+        if c == '(' or c == '[':
+            stack.append((c, i, False))
+            not_root += 1
+        elif c == '{':
+            same = _brace_is_same_scope(clean, i, open_of_close)
+            stack.append((c, i, same))
+            if not same:
+                not_root += 1
+        elif c in _ROOT_CLOSERS:
+            want = _ROOT_CLOSERS[c]
+            # Pop to the matching opener; an unbalanced file degrades
+            # towards "not root" (conservative), never towards "root".
+            while stack:
+                oc, oi, same = stack.pop()
+                if not same:
+                    not_root -= 1
+                if oc == want:
+                    if c != '}':
+                        open_of_close[i] = oi
+                    break
+    if not_root == 0:
+        mask[n] = 1
+    return mask
+
+
+def collect_script_root_assignments(clean):
+    """Lower-cased names assigned by an unqualified ``$Name = ...`` statement
+    that provably runs in the script's own scope (see the block comment
+    above). Used by PSA2013 for ``.ps1`` files only."""
+    mask = _script_root_mask(clean)
+    names = set()
+    for m in _ROOT_ASSIGN_PATTERN.finditer(clean):
+        start = m.start()
+        if not mask[start]:
+            continue
+        j = _prev_nonblank(clean, start, cross_newlines=False)
+        if j >= 0 and clean[j] not in '\n;{}':
+            continue
+        names.add(m.group(1).lower())
+    return names
+
+
+def check_script_var_read_never_assigned(clean, known_script_vars=None,
+                                        script_root=False):
     """PSA2013: $Script:Foo read with no $Script:Foo = ... in file.
 
     For every distinct $Script:Foo name referenced in the file, verify
@@ -3108,6 +3270,12 @@ def check_script_var_read_never_assigned(clean, known_script_vars=None):
     external-scope dependency"), not a blanket suppression: a name is
     exempt ONLY if the maintainer has listed it. Names NOT on the list
     still fire, so first-party typos remain caught.
+
+    ``script_root`` (4.3.1+) is True when the file is a ``.ps1``. Then an
+    unqualified ``$Name = ...`` that provably runs in the script's own scope
+    (``collect_script_root_assignments``) also counts as initialising
+    ``$script:Name``. It is False for ``.psm1`` and whenever the file type
+    is unknown, which keeps the 4.3.0 behaviour.
     """
     issues = []
     if known_script_vars is None:
@@ -3117,6 +3285,10 @@ def check_script_var_read_never_assigned(clean, known_script_vars=None):
     assigned = set()
     for m in _SCRIPT_ASSIGN_PATTERN.finditer(clean):
         assigned.add(m.group(1).lower())
+    # Pass 1b (4.3.1+, .ps1 only): unqualified assignments that provably
+    # run at script scope initialise the same script-scope variable.
+    if script_root:
+        assigned |= collect_script_root_assignments(clean)
 
     # Pass 2: identify top-level script parameters. PowerShell auto-
     # populates $Script:ParamName for each one. We approximate the
@@ -5377,7 +5549,9 @@ def analyze_text(text, cfg, file_meta=None):
         Optional file-level metadata (e.g., {'has_bom': True}). Used by
         file-format rules (PSA7xxx). When None, file-format rules emit
         nothing -- preserves backward compatibility for callers that pass
-        only ``(text, cfg)``.
+        only ``(text, cfg)``. The optional ``'suffix'`` key (the lower-cased
+        file extension, 4.3.1+) gates PSA2013's script-root initialisation
+        to ``.ps1`` files; absent, PSA2013 keeps its 4.3.0 behaviour.
     """
     clean = strip_strings_and_comments(text)
 
@@ -5421,7 +5595,9 @@ def analyze_text(text, cfg, file_meta=None):
         raw += check_positional_mandatory_call(text, clean)
     if cfg.enabled['PSA2013']:
         raw += check_script_var_read_never_assigned(
-            clean, frozenset(cfg.psa2013_known_script_vars))
+            clean, frozenset(cfg.psa2013_known_script_vars),
+            script_root=bool(file_meta)
+            and file_meta.get('suffix') == '.ps1')
 
     if cfg.enabled['PSA3001']:
         raw += check_argumentlist(clean)
@@ -6051,6 +6227,9 @@ def main(argv=None):
             'has_bom': has_bom,
             'line_ending_stats': line_ending_stats,
             'non_ascii_stats': non_ascii_stats,
+            # File extension, lower-cased (4.3.1+): PSA2013 recognises
+            # script-root initialisation in .ps1 files only.
+            'suffix': path.suffix.lower(),
         }
         issues = analyze_text(text, cfg, file_meta=file_meta)
         per_file.append((path, text, issues))
