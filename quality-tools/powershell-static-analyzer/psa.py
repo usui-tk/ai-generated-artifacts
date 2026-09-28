@@ -146,7 +146,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-__version__ = '4.3.1'
+__version__ = '4.3.2'
 
 
 def _verify_version_file_consistency():
@@ -1010,9 +1010,135 @@ ASSIGN_PATTERNS = [
                re.IGNORECASE),
 ]
 PARAM_VAR = re.compile(r'\$([A-Za-z_][A-Za-z0-9_]*)')
+# Superseded for PSA2001 by ``_function_headers`` in 4.3.2 (its ``[^)]*``
+# ends the list at an attribute's own ``)``); kept for internal callers.
 INLINE_FN_PARAMS = re.compile(
     r'^\s*function\s+[A-Za-z_][A-Za-z0-9_-]*\s*\(([^)]*)\)\s*\{?',
     re.IGNORECASE)
+
+# ---------------------------------------------------------------------------
+# PSA2001 declaration boundaries (refined in v4.3.2)
+# ---------------------------------------------------------------------------
+#
+# Three declaration forms were missed by the line-based patterns above and
+# produced PSA2001 false positives (an offline developer handoff classified
+# 39 of them in a 229-file scan):
+#
+#   1. An inline parameter list is read to its MATCHING ``)``, so an
+#      attribute's own parentheses (``[AllowEmptyString()]``) no longer end
+#      the list, and a list may span several lines.
+#   2. The script-level ``param(...)`` block - the script's first statement
+#      after comments, ``using`` statements and attributes such as
+#      ``[CmdletBinding(...)]`` - declares variables in script scope, which
+#      the script's functions read (dynamic scoping). Only the declared names
+#      count (``_PARAM_DECL_RE``); a default-value expression declares
+#      nothing. A ``param(...)`` anywhere else is not the script's.
+#   3. A nested function declared after ``;``, ``{`` or ``}`` on a line (not
+#      at a line start) is recognised. Its inline parameters are valid only
+#      inside its own ``{...}`` body, so they never cover the outer body.
+#
+# Unchanged (a documented limitation): a nested function whose ``function``
+# keyword starts a line keeps the legacy behaviour - its inline parameters
+# count for the whole enclosing top-level function body.
+
+_FN_HEADER_RE = re.compile(
+    r'\bfunction\s+[A-Za-z_][A-Za-z0-9_-]*\s*\(', re.IGNORECASE)
+_USING_STATEMENT_RE = re.compile(
+    r'using\s+(?:namespace|module|assembly)\b[^\n;]*', re.IGNORECASE)
+_SCRIPT_PARAM_RE = re.compile(r'param\s*\(', re.IGNORECASE)
+
+
+def _match_close(text, open_idx, open_ch, close_ch):
+    """Index of the bracket closing the one at *open_idx*, or -1.
+
+    *text* is comment/string-stripped, so only real brackets remain."""
+    depth = 0
+    for i in range(open_idx, len(text)):
+        c = text[i]
+        if c == open_ch:
+            depth += 1
+        elif c == close_ch:
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def _function_headers(body):
+    """Yield ``(kw_start, param_text, close_paren_idx, at_line_start)`` for
+    every ``function Name (`` header in *body*, with the inline parameter
+    list read to its matching ``)``. ``at_line_start`` is True when only
+    blanks precede ``function`` on its line; otherwise the header counts
+    only when ``;``, ``{`` or ``}`` precedes it (a nested declaration after
+    another statement) and is skipped when anything else does."""
+    for m in _FN_HEADER_RE.finditer(body):
+        k = m.start() - 1
+        while k >= 0 and body[k] in ' \t\r':
+            k -= 1
+        if k < 0 or body[k] == '\n':
+            at_line_start = True
+        elif body[k] in ';{}':
+            at_line_start = False
+        else:
+            continue
+        open_idx = m.end() - 1
+        close_idx = _match_close(body, open_idx, '(', ')')
+        if close_idx < 0:
+            continue
+        yield m.start(), body[open_idx + 1:close_idx], close_idx, at_line_start
+
+
+def _nested_inline_param_spans(body):
+    """``(start, end, names)`` for each nested function declared after
+    ``;``, ``{`` or ``}`` on a line: *names* are its inline parameters,
+    valid for references at offsets start..end (its header and body)."""
+    spans = []
+    for kw_start, params, close_idx, at_line_start in _function_headers(body):
+        if at_line_start:
+            continue
+        j = close_idx + 1
+        while j < len(body) and body[j] in ' \t\r\n':
+            j += 1
+        if j >= len(body) or body[j] != '{':
+            continue
+        end = _match_close(body, j, '{', '}')
+        if end < 0:
+            continue
+        names = {vm.group(1).lower() for vm in PARAM_VAR.finditer(params)}
+        spans.append((kw_start, end, names))
+    return spans
+
+
+def script_param_names(clean):
+    """Lower-cased names declared by the script-level ``param(...)`` block
+    (the first statement after comments, ``using`` statements and
+    attributes), or an empty set when the script has none."""
+    i, n = 0, len(clean)
+    while i < n:
+        c = clean[i]
+        if c in ' \t\r\n;':
+            i += 1
+            continue
+        if c == '[':
+            close = _match_close(clean, i, '[', ']')
+            if close < 0:
+                return set()
+            i = close + 1
+            continue
+        m = _USING_STATEMENT_RE.match(clean, i)
+        if m:
+            i = m.end()
+            continue
+        break
+    m = _SCRIPT_PARAM_RE.match(clean, i)
+    if not m:
+        return set()
+    open_idx = m.end() - 1
+    close = _match_close(clean, open_idx, '(', ')')
+    if close < 0:
+        return set()
+    inner = clean[open_idx + 1:close]
+    return {pm.group(1).lower() for pm in _PARAM_DECL_RE.finditer(inner)}
 REFERENCE_PATTERN = re.compile(
     r'\$(?:(?P<scope>[A-Za-z]+):)?(?P<name>[A-Za-z_][A-Za-z0-9_]*)')
 
@@ -1083,9 +1209,12 @@ def collect_assignments(body):
         for pat in ASSIGN_PATTERNS:
             for m in pat.finditer(line):
                 assigned.add(m.group(1).lower())
-        m = INLINE_FN_PARAMS.match(line)
-        if m:
-            for vm in PARAM_VAR.finditer(m.group(1)):
+    # Inline parameter lists of functions declared at a line start (the
+    # function itself and line-start nested functions), each read to its
+    # matching ')' (4.3.2+; previously the first ')' ended the list).
+    for _kw, params, _close, at_line_start in _function_headers(body):
+        if at_line_start:
+            for vm in PARAM_VAR.finditer(params):
                 assigned.add(vm.group(1).lower())
     for block in find_param_blocks(body):
         for vm in PARAM_VAR.finditer(block):
@@ -1093,10 +1222,11 @@ def collect_assignments(body):
     return assigned
 
 
-def collect_references(body):
+def collect_references(body, with_col=False):
     """Yield (name, relative_line_1based) for each $variable reference
     that is NOT the target of an assignment, and NOT an external scope
-    ($env:..., $using:...)."""
+    ($env:..., $using:...). With *with_col*, each tuple also carries the
+    0-based column of the ``$`` within its line (4.3.2+)."""
     refs = []
     for ln_no, line in enumerate(body.split('\n'), start=1):
         for m in REFERENCE_PATTERN.finditer(line):
@@ -1106,7 +1236,10 @@ def collect_references(body):
             after = line[m.end():m.end() + 4].lstrip()
             if after.startswith('='):
                 continue
-            refs.append((m.group('name').lower(), ln_no))
+            if with_col:
+                refs.append((m.group('name').lower(), ln_no, m.start()))
+            else:
+                refs.append((m.group('name').lower(), ln_no))
     return refs
 
 
@@ -1130,12 +1263,23 @@ def check_undefined_vars(text, clean):
         for pat in ASSIGN_PATTERNS:
             for m in pat.finditer(line):
                 global_assigned.add(m.group(1).lower())
+    # 4.3.2+: variables declared by the script-level param() block.
+    global_assigned |= script_param_names(clean)
 
     seen = set()
     for fname, start, _end, body in blocks:
         local = collect_assignments(body)
-        for name, ln in collect_references(body):
+        # 4.3.2+: nested functions declared mid-line, with the body span in
+        # which each one's inline parameters are valid.
+        spans = _nested_inline_param_spans(body)
+        line_offsets = [0]
+        for piece in body.split('\n')[:-1]:
+            line_offsets.append(line_offsets[-1] + len(piece) + 1)
+        for name, ln, col0 in collect_references(body, with_col=True):
             if name in AUTO_VARS or name in local or name in global_assigned:
+                continue
+            off = line_offsets[ln - 1] + col0
+            if any(a <= off <= b and name in names for a, b, names in spans):
                 continue
             key = (name, fname)
             if key in seen:

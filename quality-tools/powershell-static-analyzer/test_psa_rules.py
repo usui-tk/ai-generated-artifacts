@@ -146,6 +146,97 @@ t('PSA2001 edge: $Script:/$global: scope-qualified is runtime-deferred',
   '}\n',
   0)
 
+# PSA2001 declaration-boundary refinements (4.3.2). Source: an offline
+# developer handoff from the Deploy-Drivers-For-WindowsServer governance
+# stream (GOV-15), which classified 39 PSA2001 errors in a 229-file scan as
+# false positives of three mechanisms. Each mechanism has accepted (0) cases
+# and a guard that keeps a real undefined reference visible. The handoff's
+# own fixtures also run byte-exact through the CLI in Section 2d4.
+
+# (1) Inline parameter lists are read to the MATCHING ')': an attribute's
+#     own parentheses no longer end the list.
+t('PSA2001 inline params: [AllowEmptyString()] does not end the list',
+  'PSA2001',
+  'function Invoke-ReproValue($List,[AllowEmptyString()][string]$Value) '
+  '{ return $Value.Length }\n', 0)
+t('PSA2001 inline params: attribute arguments with nested parens',
+  'PSA2001',
+  "function F([ValidateSet('a','b')][string]$Mode,"
+  "[Parameter(Mandatory=$true)][int]$N) { $Mode; $N }\n", 0)
+t('PSA2001 inline params: list spanning several lines',
+  'PSA2001',
+  'function F(\n    [AllowNull()][object]$A,\n    [string]$B\n) {\n    $A; $B\n}\n', 0)
+t('PSA2001 inline params: plain list (control, unchanged)',
+  'PSA2001',
+  'function F([string]$Path,[string]$Text) { return $Text.Length }\n', 0)
+t('PSA2001 inline params guard: undefined name still reported',
+  'PSA2001',
+  'function F([AllowEmptyString()][string]$Text) { return $UnknownValue }\n', 1)
+
+# (2) The script-level param() block - the script's first statement after
+#     comments, `using` statements and attributes - declares variables that
+#     the script's functions read.
+t('PSA2001 script param: referenced from a function',
+  'PSA2001',
+  'param([Parameter(Mandatory=$true)][string]$ScriptInput)\n'
+  'function Read-ScriptParameter { return $ScriptInput }\n', 0)
+t('PSA2001 script param: after help comment and [CmdletBinding(...)]',
+  'PSA2001',
+  "<#\n.SYNOPSIS\n  x\n#>\n[CmdletBinding(DefaultParameterSetName='A')]\nparam(\n"
+  " [Parameter(ParameterSetName='A',Mandatory=$true)][string]$InPath,\n"
+  " [switch]$Force\n)\nfunction Use-It { $InPath; $Force }\n", 0)
+t('PSA2001 script param: after #requires and a using statement, CRLF',
+  'PSA2001',
+  '#requires -Version 5.1\r\nusing namespace System.IO\r\n'
+  'param([string]$Root)\r\nfunction Use-Root { $Root }\r\n', 0)
+t('PSA2001 script param guard: undefined name next to a param still reported',
+  'PSA2001',
+  'param([string]$Root)\nfunction Use-Root { $Root; $MissingValue }\n', 1)
+t('PSA2001 script param guard: a default-value expression declares nothing',
+  'PSA2001',
+  'param([string]$A = $NotDeclared)\nfunction Use-It { $A; $NotDeclared }\n', 1)
+t('PSA2001 script param guard: param() that is not the first statement',
+  'PSA2001',
+  'Set-StrictMode -Version Latest\nparam([string]$Root)\n'
+  'function Use-Root { $Root }\n', 1)
+t('PSA2001 script param guard: a script block param() is not the script param',
+  'PSA2001',
+  '$sb = { param($Inner) $Inner }\nfunction Use-Inner { $Inner }\n', 1)
+t('PSA2001 script param guard: another function param() does not leak',
+  'PSA2001',
+  'function A { param([string]$Only) $Only }\nfunction B { $Only }\n', 1)
+
+# (3) A nested function declared after `;`, `{` or `}` on a line (not at a
+#     line start) is recognised; its inline parameters are valid only
+#     inside its own body.
+t('PSA2001 nested inline: function after ; on a line',
+  'PSA2001',
+  'function Invoke-Nested {\n'
+  '    $marker = 1;function Read-Inline([string]$InnerValue) '
+  '{ return $InnerValue }\n'
+  "    return Read-Inline 'nested'\n}\n", 0)
+t('PSA2001 nested inline: several parameters, compact style',
+  'PSA2001',
+  'function Test-Orchestration{\n'
+  ' $tests=New-Object X;function T($id,$expected,$observed)'
+  '{$tests.Add($id);$expected;$observed}\n'
+  " T 'a' 1 1\n}\n", 0)
+t('PSA2001 nested inline: function right after the outer {',
+  'PSA2001',
+  'function Outer {function Inner($p) { $p }; Inner 1 }\n', 0)
+t('PSA2001 nested inline: CRLF source',
+  'PSA2001',
+  'function Outer {\r\n    $a = 1;function Inner($p) { $p }\r\n    Inner $a\r\n}\r\n', 0)
+t('PSA2001 nested inline guard: parameter does not leak to the outer body',
+  'PSA2001',
+  'function Outer {\n    $a = 1;function Inner($p) { $p }\n    $p\n}\n', 1)
+t('PSA2001 nested inline guard: undefined name inside the nested body',
+  'PSA2001',
+  'function Outer {\n    $a = 1;function Inner($p) { $p; $MissingValue }\n}\n', 1)
+t('PSA2001 nested (limitation pinned): line-start nested params cover the outer body',
+  'PSA2001',
+  'function Outer {\n    function Inner($p) { $p }\n    $p\n}\n', 0)
+
 
 # ---------------------------------------------------------------------------
 # PSA2002 — Auto-variable shadowing (warning, default ON)
@@ -1661,6 +1752,77 @@ def _run_psa2013_2008_known_script_vars_tests():
 
 
 # ---------------------------------------------------------------------------
+# PSA2001 declaration-boundary refinement through the CLI (refined in 4.3.2)
+# ---------------------------------------------------------------------------
+# The GOV-15 handoff's five minimal fixtures and its scope/nesting control,
+# written byte-exact (UTF-8 BOM + CRLF) and run the way that handoff's
+# retest harness runs them (explicit empty config, --include PSA2001,
+# --format json). Pinned: the PSA2001 variable names reported per file.
+
+_PSA2001_CLI_FIXTURES = [
+    ('01-AttributeValue.ps1',
+     ['function Invoke-ReproValue($List,[AllowEmptyString()][string]$Value) '
+      '{ return $Value.Length }'], []),
+    ('02-AttributeText.ps1',
+     ['function Invoke-ReproText([string]$Path,[AllowEmptyString()][string]$Text) '
+      '{ return $Text.Length }'], []),
+    ('03-PlainInline.ps1',
+     ['function Invoke-ReproPlain([string]$Path,[string]$Text) '
+      '{ return $Text.Length }'], []),
+    ('04-ParamBlock.ps1',
+     ['function Invoke-ReproBlock {',
+      '    param([AllowEmptyString()][string]$Text)',
+      '    return $Text.Length', '}'], []),
+    ('05-TrueUndefined.ps1',
+     ['function Invoke-ReproMissing([string]$Text) { return $UnknownValue }'],
+     ['$unknownvalue']),
+    ('PSA2001-Scope-And-Nested-Control.ps1',
+     ['param([Parameter(Mandatory=$true)][string]$ScriptInput)',
+      'Set-StrictMode -Version Latest',
+      'function Read-ScriptParameter { return $ScriptInput }',
+      'function Invoke-Nested {',
+      '    $marker = 1;function Read-InlineParameter([string]$InnerValue) '
+      '{ return $InnerValue }',
+      "    return Read-InlineParameter 'nested'", '}',
+      'function Unused-TrulyUndefined { return $MissingValue }',
+      'Read-ScriptParameter', 'Invoke-Nested'],
+     ['$missingvalue']),
+]
+
+
+def _run_psa2001_boundary_cli_tests():
+    """Return a list of (name, ok, detail) tuples."""
+    import json as _json
+    out = []
+    with tempfile.TemporaryDirectory(prefix='psa2001_boundary_') as d:
+        cfg = os.path.join(d, 'empty.psa.config.json')
+        with open(cfg, 'w', encoding='utf-8') as fh:
+            fh.write('{}')
+        for fname, lines, want in _PSA2001_CLI_FIXTURES:
+            path = os.path.join(d, fname)
+            with open(path, 'wb') as fh:
+                fh.write(b'\xef\xbb\xbf'
+                         + ('\r\n'.join(lines) + '\r\n').encode('utf-8'))
+            proc = subprocess.run(
+                [sys.executable, str(PSA_PATH), '--config', cfg,
+                 '--include', 'PSA2001', '--format', 'json', path],
+                capture_output=True, text=True, timeout=60)
+            try:
+                issues = _json.loads(proc.stdout)['issues']
+            except (ValueError, KeyError) as exc:
+                out.append((fname, False, f'bad JSON output: {exc}'))
+                continue
+            got = sorted(i['message'].split()[2] for i in issues
+                         if i['code'] == 'PSA2001')
+            want_rc = 2 if want else 0
+            ok = got == sorted(want) and proc.returncode == want_rc
+            out.append((fname, ok,
+                        f'names {got}/{sorted(want)}, '
+                        f'exit {proc.returncode}/{want_rc}'))
+    return out
+
+
+# ---------------------------------------------------------------------------
 # PSA2013 script-root refinement through the CLI (refined in 4.3.1)
 # ---------------------------------------------------------------------------
 # The refinement depends on main() handing the file extension to
@@ -2306,6 +2468,21 @@ def run():
             print(line)
         fail_count += 1
         failures.append(('psa2013_known_script_vars', ksv_failures))
+
+    # --- Section 2d4: PSA2001 declaration-boundary refinement via the CLI ---
+    print()
+    print('=' * 72)
+    print(f'Section 2d4: PSA2001 declaration-boundary refinement via the CLI '
+          f'({len(_PSA2001_CLI_FIXTURES)} cases, refined in 4.3.2)')
+    print('=' * 72)
+    for name, ok, detail in _run_psa2001_boundary_cli_tests():
+        status = 'PASS' if ok else 'FAIL'
+        print(f'  [{status}] {name}  ({detail})')
+        if ok:
+            pass_count += 1
+        else:
+            fail_count += 1
+            failures.append((f'PSA2001 CLI {name}', [f'    {detail}']))
 
     # --- Section 2d3: PSA2013 script-root refinement via the CLI ---
     print()

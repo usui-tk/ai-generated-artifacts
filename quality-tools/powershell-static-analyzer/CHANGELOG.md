@@ -13,6 +13,76 @@ This CHANGELOG covers `psa.py` only. For higher-level repository-wide
 changes (documentation policy, sister scripts, etc.), see the root
 [`README.md`](../../../README.md) of `ai-generated-artifacts`.
 
+## [4.3.2] - 2026-09-29 — `psa2001-declaration-boundaries`
+
+This patch release fixes three classes of `PSA2001` (undefined variable
+reference) false positives. It is **backward-compatible** with `4.3.1`: no
+rule is added or renamed, and the CLI, the JSON/SARIF output schemas, the
+configuration schema, the message wording and the line/col meaning are
+unchanged. The fix only **removes** `PSA2001` findings whose name is
+provably declared, never adds one.
+
+### Fixed - `PSA2001` declaration boundaries
+
+- **Motivation.** An offline developer handoff from the
+  Deploy-Drivers-For-WindowsServer governance stream (its GOV-15 item)
+  classified all 39 `PSA2001` errors of a 229-file scan (`4.3.1`) as false
+  positives of three mechanisms, with PowerShell-AST evidence, minimal
+  fixtures and true-undefined controls.
+- **Attribute parentheses (2 of 39).** The inline-parameter pattern
+  `\(([^)]*)\)` ended the list at the first `)`, i.e. inside
+  `[AllowEmptyString()]`, so the parameter after it was never declared.
+  Inline lists are now read to their matching `)` (and may span lines).
+- **Script-level `param()` (27 of 39).** Functions read the script's
+  parameters through dynamic scoping, but the global set held only
+  assignments, so a mandatory parameter without a default was "undefined".
+  The names declared by the script-level `param(...)` block - the script's
+  first statement after comments, `using` statements and attributes - now
+  join the global set. Only declared names count (a default-value
+  expression declares nothing), and a `param(...)` that is not the first
+  statement (a script block's, another function's) is not the script's.
+- **Mid-line nested functions (10 of 39).** A nested
+  `...;function T($id, ...) { ... }` was invisible to the line-start
+  patterns. It is now recognised after `;`, `{` or `}` on a line, and its
+  inline parameters are valid **only inside its own body**: a read of the
+  same name elsewhere in the enclosing function is still reported.
+- **Unchanged, documented (SPEC §4.4).** A nested function declared at a
+  line start keeps the legacy treatment (its parameters cover the whole
+  enclosing body) - a false negative confirmed under PowerShell 7.6.6
+  StrictMode; a mid-line top-level function is still not analysed; PSA2013
+  keeps its own looser top-level `param()` approximation.
+- **Evidence.** (1) Red-first: 26 new cases (20 analyze_text + 6
+  byte-exact BOM/CRLF CLI fixtures, the handoff's five minimal fixtures and
+  its scope/nesting control) - against `4.3.1` 16 failed: every accepting
+  case, plus the three guards that `4.3.1` over-counted by also reporting
+  the declared name; the remaining guards and the pinned limitation passed.
+  Suite 340 -> **366**. (2) Accepted forms
+  and guards executed under PowerShell 7.6.6 with `Set-StrictMode -Version
+  Latest`: accepted cases run; a mid-line nested parameter read in the outer
+  body, a script-block `param()` name read in a function, and a line-start
+  nested parameter read in the outer body each raise the StrictMode
+  undefined-variable error. Windows PowerShell 5.1 was not executed.
+  (3) The handoff's own retest harness against `4.3.2`
+  (`Retest-PSA-After-Upgrade.py`): verdict `Pass-PSA2001-RegressionOnly` -
+  exactly the 39 indexed findings removed, 0 added, every warning (1,143)
+  and info (1,261) diagnostic unchanged. (4) Full-rule `4.3.1` vs `4.3.2`
+  over every `.ps1`/`.psm1` here and in `Deploy-Drivers-For-WindowsServer`
+  (implicit + empty config, 114 files x 2 modes): the only differences are
+  two removed `PSA2001` errors, both script-level `param()` reads -
+  `Update-WindowsServerIso.ps1` (`$OsVersion`) and the public
+  Deploy-Drivers NPU research tool (`$SkipPublicExport`).
+- **Consumer notice - update-windows-server-iso T55.** That project's
+  `.psa-baseline.json` declares its single `PSA2001` error as exactly this
+  analyzer false positive ("top-level param() declarations are not
+  harvested"), and its T55 gate requires an exact count. With `4.3.2` the
+  measured count is 0, so T55 reports a STALE DECLARATION until that row is
+  lowered to `Error: 0` in the project's own change set (with its CHANGELOG
+  note). The baseline is owned by that project and is deliberately not
+  edited here.
+- **Tests / docs.** `test_psa_rules.py` Section 1 PSA2001 declaration-
+  boundary cases and new Section 2d4; SPEC §4.4 (*Refined in*, detection
+  steps, limitations); gate-coverage row 4 (366).
+
 ## [4.3.1] - 2026-09-28 — `psa2013-script-root-initialisation`
 
 This patch release refines `PSA2013` (`$Script:Foo` read but never

@@ -508,17 +508,34 @@ sparingly.
 
 - **Severity**: Error
 - **Default**: enabled
+- **Refined in**: v4.3.2 (declaration boundaries: attribute parentheses,
+  the script-level `param()` block, nested functions declared mid-line)
 
 **Detection**: Heuristic. For each function block (`function Name { … }`):
 
 1. Collect locally-assigned names from `$x = …`, `foreach ($x in …)`,
    `for ($x = …`, `param(…)` blocks, and inline parameter lists
-2. Collect globally-assigned names (assignments outside any function)
+   (each list read to its **matching** `)`, so an attribute's own
+   parentheses such as `[AllowEmptyString()]` do not end it, and a list
+   may span lines — v4.3.2+)
+2. Collect globally-assigned names (assignments outside any function) and
+   (v4.3.2+) the names declared by the **script-level `param(…)` block** —
+   the script's first statement after comments, `using` statements and
+   attributes such as `[CmdletBinding(…)]`. Its parameters are
+   script-scope variables that the script's functions read through
+   PowerShell's dynamic scoping. Only declared names count: a
+   default-value expression declares nothing, and a `param(…)` that is
+   not the first statement (a script block's, another function's) is not
+   the script's
 3. Walk all `$variable` references within the function body
 4. If a reference is not in the local set, not in the global set, not
-   in `AUTO_VARS` (PowerShell automatic variables), and not in an
-   external scope (`$env:`, `$using:`), report it once per
-   (variable_name, function_name) pair
+   in `AUTO_VARS` (PowerShell automatic variables), not in an
+   external scope (`$env:`, `$using:`), and (v4.3.2+) not an inline
+   parameter of a **nested function declared mid-line** — after `;`,
+   `{` or `}` on a line — whose `{…}` body contains the reference,
+   report it once per (variable_name, function_name) pair. A mid-line
+   nested function's parameters are valid only inside its own body,
+   never in the rest of the enclosing function
 
 **Reported location**: line and col within the function body.
 
@@ -526,6 +543,24 @@ sparingly.
 splatting (`@args`), dynamically-resolved variable names
 (`Get-Variable`), or modules' exported variables. False positives are
 possible; suppress with `# psa-disable-line PSA2001` when intentional.
+
+Further limitations after the v4.3.2 refinement:
+
+- A nested function whose `function` keyword **starts a line** keeps
+  the pre-4.3.2 treatment: its inline parameters (and every `param(…)`
+  block in the enclosing body) count for the whole enclosing top-level
+  function, so a read of such a name in the outer body is a missed
+  undefined reference (a false negative; observed under PowerShell 7.6.6
+  StrictMode). Only mid-line nested declarations are span-scoped.
+- A top-level function declared mid-line (after another statement at
+  script root) is still not analysed as a function block.
+- The script-level `param(…)` block is recognised only as the first
+  statement; a `param(…)` that follows other code is invalid PowerShell
+  and is ignored rather than guessed. PSA2013 (§4.9g) keeps its own,
+  looser top-level `param()` approximation, unchanged in v4.3.2.
+- The accepted forms and the guards were executed under PowerShell
+  7.6.6 (StrictMode) when the refinement was made; Windows PowerShell
+  5.1 was not executed.
 
 ### 4.5 PSA2002 — Auto-variable shadowing
 
