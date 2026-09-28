@@ -2757,8 +2757,14 @@ its sibling `VERSION` file, `test_psa_rules.py`, this `SPEC.md`, or
 `.psa.config.json.template`. The workflow lives at:
 
 ```
-.github/workflows/scripts__python__powershell-static-analyzer.yml
+.github/workflows/quality-tools__powershell-static-analyzer.yml
 ```
+
+Each pillar runs exactly the §12.4 release command (Pillar 1 is
+`python3 test_psa_rules.py`, the suite's own stdlib runner; the suite
+is not pytest-collectable) and is **blocking**: every step runs under
+`shell: bash` (`-eo pipefail`), so a pillar that exits non-zero fails
+the job even though its output is piped into a log file with `tee`.
 
 CI governance — design principles, naming conventions, timeout
 tiers, fork-PR handling, and the rule that CI change history is

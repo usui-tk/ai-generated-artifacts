@@ -3,8 +3,8 @@
 # psa.py self-quality gates (Pillar 1, 2, 3).
 #
 # Pillar definitions are authoritative in psa.py SPEC.md §12 and in the
-# psa.py source comment block around lines 2308-2329:
-#   Pillar 1 (Rule self-tests):       pytest test_psa_rules.py
+# psa.py source comment block headed "Self-quality-gate facilities":
+#   Pillar 1 (Rule self-tests):       python3 test_psa_rules.py
 #   Pillar 2 (Config schema check):   psa.py --config-check <path>
 #   Pillar 3 (SPEC drift detection):  psa.py --self-check
 #
@@ -14,6 +14,12 @@
 #
 # Change history for this workflow is recorded in:
 #   quality-tools/powershell-static-analyzer/CHANGELOG.md
+#
+# Every run step executes under `shell: bash` (set once in `defaults.run`),
+# which GitHub runs as `bash --noprofile --norc -eo pipefail {0}`. The
+# pipefail is load-bearing: each pillar pipes into `tee`, and without it the
+# step's status is tee's (always 0), so a failing pillar would pass silently.
+# See /SPEC.md §2.5 [SPEC-CI-005] (quality gates MUST be blocking).
 #
 # Do NOT add per-workflow CHANGELOG.md, README.md, or governance docs under
 # .github/workflows/. See /SPEC.md §9 [SPEC-CI-070].
@@ -59,6 +65,9 @@ jobs:
     timeout-minutes: 30  # T1 — Light (see /SPEC.md §4 [SPEC-CI-020])
     defaults:
       run:
+        # bash => -eo pipefail (see the header): a failing pillar piped
+        # into tee must fail the step. Do not remove.
+        shell: bash
         working-directory: quality-tools/powershell-static-analyzer
     steps:
       - uses: actions/checkout@v7
@@ -91,21 +100,19 @@ jobs:
           echo "===== Repository top-level layout ====="
           ls -la "$GITHUB_WORKSPACE" | head -10
 
-      - name: '[setup] Install pytest'
-        run: |
-          python3 -m pip install --upgrade pip
-          python3 -m pip install pytest
-
       - name: '[sanity] Python syntax check'
         # Quick fail-fast before running heavier gates. py_compile catches
         # parse-level errors that would otherwise surface as confusing
-        # tracebacks deep in pytest or in the analyzer pipeline.
+        # tracebacks deep in the self-test suite or the analyzer pipeline.
         run: python3 -m py_compile psa.py test_psa_rules.py
 
-      - name: '[Pillar 1] Rule self-tests (pytest test_psa_rules.py)'
-        # Exercises all 36 rules with positive / negative / edge fixtures.
-        # See psa.py SPEC.md §12.1.
-        run: python3 -m pytest test_psa_rules.py -v --tb=short | tee pillar1.log
+      - name: '[Pillar 1] Rule self-tests (python3 test_psa_rules.py)'
+        # Every rule in RULES with positive / negative / edge fixtures.
+        # The suite is stdlib-only and is its own runner (SPEC.md §12.1:
+        # "just python3 test_psa_rules.py"); it exits 1 on any failure.
+        # It is NOT pytest-collectable (0 tests collected), so a pytest
+        # invocation here would run nothing.
+        run: python3 test_psa_rules.py 2>&1 | tee pillar1.log
 
       - name: '[Pillar 2] Config schema validation (psa.py --config-check)'
         # Validates the shipped .psa.config.json.template against the
@@ -125,7 +132,7 @@ jobs:
             echo ""
             echo "Three pillars (per psa.py SPEC.md §12) were exercised on the working tree."
             echo ""
-            echo "### Pillar 1 — Rule self-tests (\`pytest test_psa_rules.py\`)"
+            echo "### Pillar 1 — Rule self-tests (\`python3 test_psa_rules.py\`)"
             if [ -f pillar1.log ]; then
               tail -20 pillar1.log
             fi

@@ -25,6 +25,29 @@ changes (documentation policy, sister scripts, etc.), see the root
 
 ## [Unreleased]
 
+### Fixed (CI only; no tool change)
+
+- **The three self-quality pillars were not blocking in CI.** Every pillar
+  step piped into `tee` under GitHub's default shell for an unspecified
+  `shell:` (`bash -e`, no `pipefail`), so each step reported `tee`'s exit
+  status (always `0`) instead of the pillar's. Pillar 1 additionally ran
+  `python3 -m pytest test_psa_rules.py`, which collects **zero** tests (the
+  suite is its own stdlib runner, SPEC §12.1) and exits `5` - a code that was
+  itself masked. Net effect: the 281-case suite never ran in CI, and a
+  `--self-check` / `--config-check` failure would not have failed the job
+  either (a violation of /SPEC.md §2.5 [SPEC-CI-005]). Measured locally with
+  the workflow's own step commands: with a deliberately failing fixture, a
+  SPEC-heading drift and a malformed template injected into a throwaway copy,
+  the old form returned `0/0/0` and the new form `1/2/2`; on the clean tree
+  both forms return `0`. Fix: `defaults.run.shell: bash` (which GitHub runs as
+  `bash --noprofile --norc -eo pipefail {0}`), Pillar 1 now runs the §12.4
+  release command `python3 test_psa_rules.py`, and the now-unused pytest
+  install step is removed (the suite is stdlib-only). Stale header comments
+  (a source line-range pointer, "all 36 rules") are corrected, and
+  `SPEC.md` §12.6's stale pre-rename workflow filename is updated to the live
+  `quality-tools__powershell-static-analyzer.yml`. Recorded here per
+  /SPEC.md §9 [SPEC-CI-070].
+
 ### Changed
 
 - CI: bump `actions/checkout` v5 -> v7 and `actions/upload-artifact` v5 -> v7
