@@ -607,6 +607,139 @@ t('PSA2011 inline-suppress: # psa-disable-line PSA2011 on the call line',
   '# psa-disable-line PSA2011\n',
   0)
 
+# PSA2011 command boundaries (4.3.3). Source: an offline handoff from the
+# ISO project (rev546 W24, raw error W23-E040): a Split-Path with -Parent only,
+# followed ON THE SAME PHYSICAL LINE by a Test-Path -LiteralPath, was reported
+# because the switch search ran to the end of the line. The switches are now
+# looked up only in the depth-0 argument range of the one Split-Path command
+# (ends at ; | & or an enclosing close bracket; nested (...) {...} [...] are
+# skipped). The handoff's eight fixtures also run byte-exact via the CLI in
+# Section 2d5.
+
+# (1) Statement / pipeline / chain boundaries end the argument range.
+t('PSA2011 boundary: ";" ends the arguments (exact ISO W23-E040 line)',
+  'PSA2011',
+  '$out=[IO.Path]::GetFullPath($OutputPath);$parent=Split-Path -Parent $out;'
+  'if(-not(Test-Path -LiteralPath $parent -PathType Container))'
+  '{[IO.Directory]::CreateDirectory($parent)|Out-Null}\n',
+  0)
+t('PSA2011 boundary: "|" ends the arguments (downstream scriptblock has -LiteralPath)',
+  'PSA2011',
+  'Split-Path -Parent $out | ForEach-Object { Test-Path -LiteralPath $_ }\n',
+  0)
+t('PSA2011 boundary: reversed command order stays negative',
+  'PSA2011',
+  'Test-Path -LiteralPath $parent -PathType Container; '
+  '$parent=Split-Path -Parent $out\n',
+  0)
+t('PSA2011 boundary: "||" chain operator ends the arguments',
+  'PSA2011',
+  'Split-Path -Parent $x || Test-Path -LiteralPath $y\n',
+  0)
+t('PSA2011 boundary: "&&" chain operator ends the arguments',
+  'PSA2011',
+  'Split-Path -Parent $x && Test-Path -LiteralPath $y\n',
+  0)
+t('PSA2011 boundary: ";" after a CRLF-terminated line pair',
+  'PSA2011',
+  '$p = Split-Path -Parent $out; Test-Path -LiteralPath $p\r\n',
+  0)
+t('PSA2011 boundary: downstream Split-Path -Parent after a { -LiteralPath } stage',
+  'PSA2011',
+  'Get-ChildItem | ForEach-Object { Split-Path -LiteralPath $_ } | '
+  'Split-Path -Parent\n',
+  0)
+
+# (2) Enclosures: a nested command's switches belong to the nested command;
+#     a Split-Path that is itself nested ends at its enclosing close bracket.
+t('PSA2011 boundary: nested command inside the arguments does not contribute',
+  'PSA2011',
+  '$d = Split-Path -Parent (Get-Item -LiteralPath $x)\n',
+  0)
+t('PSA2011 boundary: Split-Path nested in if(-not(Test-Path -LiteralPath (...)))',
+  'PSA2011',
+  'if (-not (Test-Path -LiteralPath (Split-Path -Parent $p))) { }\n',
+  0)
+t('PSA2011 boundary: hashtable values are separate enclosures',
+  'PSA2011',
+  '$h = @{ Dir = (Split-Path -Parent $x); Ok = (Test-Path -LiteralPath $x) }\n',
+  0)
+t('PSA2011 boundary: scriptblock body closes before the next statement',
+  'PSA2011',
+  '& { Split-Path -Parent $x }; Test-Path -LiteralPath $y\n',
+  0)
+
+# (3) Masked text (strings, comments, here-strings) never supplies a boundary
+#     or a switch; an escaped ";" is argument text.
+t('PSA2011 boundary: quoted ";" is argument text, the next command stays separate',
+  'PSA2011',
+  "Split-Path -Parent 'a;b'; Test-Path -LiteralPath $y\n",
+  0)
+t('PSA2011 boundary: strings and comments carrying switch-like text (ISO R06)',
+  'PSA2011',
+  "$single = 'Split-Path -LiteralPath $out -Parent; quoted only'\n"
+  '$double = "Split-Path -LiteralPath $out -Parent; quoted only"\n'
+  '<# Split-Path -LiteralPath $out -Parent; block comment only #>\n'
+  'Split-Path -Parent $out # -LiteralPath is only comment text; '
+  'Split-Path -LiteralPath $out -Parent\n',
+  0)
+t('PSA2011 boundary: here-string with "; Test-Path -LiteralPath" then a real -Parent call',
+  'PSA2011',
+  '$s = @"\nSplit-Path -Parent $x; Test-Path -LiteralPath $y\n"@\n'
+  'Split-Path -Parent $x\n',
+  0)
+
+# (4) Positives that the boundary scan must keep (or newly surface).
+t('PSA2011 positive: 2>&1 redirection inside the arguments is not a boundary',
+  'PSA2011',
+  'Split-Path -LiteralPath $x 2>&1 -Parent\n',
+  1)
+t('PSA2011 positive: backtick-escaped ";" is argument text',
+  'PSA2011',
+  'Split-Path -LiteralPath a`;b -Parent\n',
+  1)
+t('PSA2011 positive: CRLF-terminated same command',
+  'PSA2011',
+  'Split-Path -LiteralPath $x -Parent\r\n',
+  1)
+t('PSA2011 positive: CRLF backtick continuation (three physical lines)',
+  'PSA2011',
+  'Split-Path `\r\n  -LiteralPath $x `\r\n  -Parent\r\n',
+  1)
+t('PSA2011 positive: second Split-Path on the line fires, first does not',
+  'PSA2011',
+  '$a = Split-Path -Parent $x; $b = Split-Path -LiteralPath $y -Parent\n',
+  1)
+t('PSA2011 positive: two Split-Path on one line both fire (4.3.2 reported one)',
+  'PSA2011',
+  '$a = Split-Path -LiteralPath $x -Parent; '
+  '$b = Split-Path -Parent -LiteralPath $y\n',
+  2)
+t('PSA2011 positive: nested Split-Path fires inside an outer negative Split-Path',
+  'PSA2011',
+  '$d = Split-Path -Parent (Split-Path -LiteralPath $x -Parent)\n',
+  1)
+t('PSA2011 positive: -Parent:$true colon form',
+  'PSA2011',
+  'Split-Path -LiteralPath $x -Parent:$true\n',
+  1)
+t('PSA2011 positive: arguments continue after a nested paren',
+  'PSA2011',
+  'Split-Path -LiteralPath (Join-Path $a $b) -Parent\n',
+  1)
+t('PSA2011 positive: inline comment after the call (comment text ignored)',
+  'PSA2011',
+  'Split-Path -LiteralPath $x -Parent # ok; Test-Path -LiteralPath $y\n',
+  1)
+t('PSA2011 positive: array index in the argument',
+  'PSA2011',
+  'Split-Path -LiteralPath $arr[0] -Parent\n',
+  1)
+t('PSA2011 positive: whole call nested in if(-not(...))',
+  'PSA2011',
+  'if(-not(Split-Path -LiteralPath $x -Parent)){}\n',
+  1)
+
 
 # ---------------------------------------------------------------------------
 # PSA1004 — Bare (if/switch/...) used as expression (error, default ON, new in 4.1.0)
@@ -1823,6 +1956,101 @@ def _run_psa2001_boundary_cli_tests():
 
 
 # ---------------------------------------------------------------------------
+# PSA2011 command-boundary refinement through the CLI (refined in 4.3.3)
+# ---------------------------------------------------------------------------
+# The ISO project's W24 handoff froze eight text fixtures (LF, no BOM) with a
+# "desired after command-boundary fix" oracle. They are reproduced here
+# byte-exact — the SHA-256 of every written fixture is checked against the
+# handoff's CASE-ROSTER.json pin, so an edit to the fixture text fails the
+# case — and run with an explicit empty config, --include PSA2011 and
+# --format json. Pinned: the PSA2011 (line, col) positions and the exit code.
+# R01 is the exact text of the product tool's line 132 (raw error W23-E040);
+# R08 is the pipeline/nested-command case a semicolon-only split cannot fix.
+
+_PSA2011_CLI_FIXTURES = [
+    # (filename, lines, sha256 of the LF-terminated bytes, expected [(line, col)])
+    ('R01-exact-e040.ps1',
+     ['$out=[IO.Path]::GetFullPath($OutputPath);$parent=Split-Path -Parent $out;'
+      'if(-not(Test-Path -LiteralPath $parent -PathType Container))'
+      '{[IO.Directory]::CreateDirectory($parent)|Out-Null}'],
+     '9db9787340b9d12b8e08d8b6fb87e013bade398ec5c0bb448684414aa832253e',
+     []),
+    ('R02-reversed-command-order.ps1',
+     ['Test-Path -LiteralPath $parent -PathType Container; '
+      '$parent=Split-Path -Parent $out'],
+     '4e6c2affb24b0f6efd97e96eccaf88ae55c7909fb697e68bc35c9642ca0a1666',
+     []),
+    ('R03-same-command-positive.ps1',
+     ['Split-Path -LiteralPath $out -Parent'],
+     '3a429f8043f1d9f8a58071f1011e18d3d076582da41ef6c9552e06957cdeab3f',
+     [(1, 1)]),
+    ('R04-parent-only-negative.ps1',
+     ['Split-Path -Parent $out'],
+     'bb2bdfb0defb37802a43182c9bb85a3e5ec165955ae61e75d842dc406656cc42',
+     []),
+    ('R05-literalpath-only-negative.ps1',
+     ['Split-Path -LiteralPath $out'],
+     'cdbd98489dea853f9848a0e5db1af8ff2fafa89b36c189697faeb20d188b0e2e',
+     []),
+    ('R06-quoted-comment-boundaries.ps1',
+     ["$single = 'Split-Path -LiteralPath $out -Parent; quoted only'",
+      '$double = "Split-Path -LiteralPath $out -Parent; quoted only"',
+      '<# Split-Path -LiteralPath $out -Parent; block comment only #>',
+      'Split-Path -Parent $out # -LiteralPath is only comment text; '
+      'Split-Path -LiteralPath $out -Parent'],
+     'd1c85213e16a00301aa91270b62b71057a28112289b2dcf4689eaedc27c362bf',
+     []),
+    ('R07-backtick-positive.ps1',
+     ['Split-Path `', '    -LiteralPath $out `', '    -Parent'],
+     'ab836c2af4b51d76cea934bd45c4a5df32b9c91730f59b89420d3fa30dafafc0',
+     [(1, 1)]),
+    ('R08-pipeline-nested-negative.ps1',
+     ['Split-Path -Parent $out | ForEach-Object { Test-Path -LiteralPath $_ }'],
+     'efb1388e11938a1cf416cab6518b7130dbf1dbf292ab57aedcf61455ad639d95',
+     []),
+]
+
+
+def _run_psa2011_boundary_cli_tests():
+    """Return a list of (name, ok, detail) tuples."""
+    import hashlib as _hashlib
+    import json as _json
+    out = []
+    with tempfile.TemporaryDirectory(prefix='psa2011_boundary_') as d:
+        cfg = os.path.join(d, 'empty.psa.config.json')
+        with open(cfg, 'w', encoding='utf-8') as fh:
+            fh.write('{}')
+        for fname, lines, want_sha, want_pos in _PSA2011_CLI_FIXTURES:
+            path = os.path.join(d, fname)
+            data = ('\n'.join(lines) + '\n').encode('utf-8')
+            with open(path, 'wb') as fh:
+                fh.write(data)
+            got_sha = _hashlib.sha256(data).hexdigest()
+            if got_sha != want_sha:
+                out.append((fname, False,
+                            f'fixture bytes drifted from the handoff pin: '
+                            f'{got_sha[:12]}.. != {want_sha[:12]}..'))
+                continue
+            proc = subprocess.run(
+                [sys.executable, str(PSA_PATH), '--config', cfg,
+                 '--include', 'PSA2011', '--format', 'json', path],
+                capture_output=True, text=True, timeout=60)
+            try:
+                issues = _json.loads(proc.stdout)['issues']
+            except (ValueError, KeyError) as exc:
+                out.append((fname, False, f'bad JSON output: {exc}'))
+                continue
+            got_pos = sorted((i['line'], i['col']) for i in issues
+                             if i['code'] == 'PSA2011')
+            want_rc = 2 if want_pos else 0
+            ok = got_pos == want_pos and proc.returncode == want_rc
+            out.append((fname, ok,
+                        f'positions {got_pos}/{want_pos}, '
+                        f'exit {proc.returncode}/{want_rc}'))
+    return out
+
+
+# ---------------------------------------------------------------------------
 # PSA2013 script-root refinement through the CLI (refined in 4.3.1)
 # ---------------------------------------------------------------------------
 # The refinement depends on main() handing the file extension to
@@ -2483,6 +2711,21 @@ def run():
         else:
             fail_count += 1
             failures.append((f'PSA2001 CLI {name}', [f'    {detail}']))
+
+    # --- Section 2d5: PSA2011 command-boundary refinement via the CLI ---
+    print()
+    print('=' * 72)
+    print(f'Section 2d5: PSA2011 command-boundary refinement via the CLI '
+          f'({len(_PSA2011_CLI_FIXTURES)} cases, refined in 4.3.3)')
+    print('=' * 72)
+    for name, ok, detail in _run_psa2011_boundary_cli_tests():
+        status = 'PASS' if ok else 'FAIL'
+        print(f'  [{status}] {name}  ({detail})')
+        if ok:
+            pass_count += 1
+        else:
+            fail_count += 1
+            failures.append((f'PSA2011 CLI {name}', [f'    {detail}']))
 
     # --- Section 2d3: PSA2013 script-root refinement via the CLI ---
     print()

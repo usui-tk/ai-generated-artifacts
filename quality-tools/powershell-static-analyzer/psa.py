@@ -146,7 +146,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-__version__ = '4.3.2'
+__version__ = '4.3.3'
 
 
 def _verify_version_file_consistency():
@@ -2745,14 +2745,90 @@ def check_undefined_function_call(clean, defined_funcs_lower, known_cmdlets_lowe
 
 
 # ---------------------------------------------------------------------------
-# PSA2011 — Split-Path -LiteralPath ... -Parent (added in v3.9.0)
+# PSA2011 — Split-Path -LiteralPath ... -Parent (added in v3.9.0,
+# command boundaries refined in v4.3.3)
 # ---------------------------------------------------------------------------
+
+
+def _command_argument_extent(span_text, start):
+    """Return the depth-0 argument text of ONE command on cleaned text.
+
+    *span_text* is a cleaned (strings/comments masked) logical line and
+    *start* is the index just after the command name. The returned
+    string has the same length as the scanned region: characters that
+    belong to the command's own argument list are kept, characters
+    inside an enclosure opened within the arguments — ``(...)``,
+    ``$(...)``, ``@(...)``, ``[...]``, ``{...}`` — are replaced by
+    spaces, because they belong to a nested expression, command or
+    script block (``Split-Path -Parent (Get-Item -LiteralPath $x)``:
+    the ``-LiteralPath`` is Get-Item's, not Split-Path's).
+
+    The argument range ENDS at the first of these at nesting depth 0:
+
+    - ``;`` — statement separator (the next statement is another command);
+    - ``|`` — pipeline (also covers ``||``); the downstream stage is
+      another command even when it carries a script block;
+    - ``&`` — chain operator ``&&`` / background ``&``; a ``>&``
+      redirection target (``2>&1``) is argument text, not a terminator;
+    - a closing ``)``, ``]`` or ``}`` that closes an enclosure opened
+      BEFORE the command (the command itself was nested, as in
+      ``if (-not (Test-Path -LiteralPath (Split-Path -Parent $p)))``);
+    - a line break (``\\r`` / ``\\n``) — a backtick-newline continuation
+      has already been joined into *span_text* by the caller.
+
+    A backtick escapes the following character, so an escaped ``;``
+    or ``|`` is argument text. Quoted strings, comments and here-strings
+    were masked to spaces by ``strip_strings_and_comments`` before this
+    runs, so a ``;`` inside ``'...'`` never reaches this scanner.
+
+    This is a bracket-depth scan, not a PowerShell parser: it does not
+    model keywords, splatting, redirection operands or parameter
+    abbreviations (``-Lit``, ``-Par``), and it treats every ``(`` ``[``
+    ``{`` as an enclosure. These approximations are stated in SPEC §4.9e.
+    """
+    buf = []
+    depth = 0
+    i = start
+    n = len(span_text)
+    while i < n:
+        c = span_text[i]
+        if c == '`':
+            # escape: keep the escaped character as argument text at depth 0
+            # (blank at depth > 0); the pair always yields two characters.
+            buf.append(' ')
+            if depth == 0 and i + 1 < n:
+                buf.append(span_text[i + 1])
+            else:
+                buf.append(' ')
+            i += 2
+            continue
+        if c == '\r' or c == '\n':
+            break
+        if c in '([{':
+            depth += 1
+            buf.append(' ')
+        elif c in ')]}':
+            if depth == 0:
+                break
+            depth -= 1
+            buf.append(' ')
+        elif depth == 0:
+            if c == ';' or c == '|':
+                break
+            if c == '&' and not (i > 0 and span_text[i - 1] == '>'):
+                break
+            buf.append(c)
+        else:
+            buf.append(' ')
+        i += 1
+    return ''.join(buf)
 
 
 def check_split_path_literalpath_parent(clean):
     """PSA2011: Split-Path -LiteralPath ... -Parent on PS 5.1 ja-JP.
 
     New in v3.9.0. PSScriptAnalyzer does not have a direct equivalent.
+    Command boundaries refined in v4.3.3 (see Detection).
 
     Motivation
     ----------
@@ -2775,16 +2851,25 @@ def check_split_path_literalpath_parent(clean):
 
     Detection
     ---------
-    Find every ``Split-Path`` invocation on the cleaned text. Within
-    a command span (one logical statement, possibly continued by a
-    backtick), if BOTH ``-LiteralPath`` and ``-Parent`` switches
-    appear, fire PSA2011 with severity ``error``.
+    Find every ``Split-Path`` invocation in command position on the
+    cleaned text. For each one, take the argument range of THAT
+    command only — ``_command_argument_extent``: from the command name
+    to the first ``;``, ``|``, ``&`` or enclosing close bracket at
+    nesting depth 0, with nested ``(...)`` / ``{...}`` / ``[...]``
+    blanked out — and fire PSA2011 with severity ``error`` if BOTH
+    ``-LiteralPath`` and ``-Parent`` occur in that range, in either
+    order.
 
-    Single-line statements are the common case and are handled by a
-    simple per-line regex. Multi-line statements joined by
-    backtick-newline are joined before scanning. Backtick
-    continuations are detected via the same heuristic used by
-    PSA3002 (line ending in a single backtick).
+    Before v4.3.3 the range ran to the end of the physical line, so
+    ``$p = Split-Path -Parent $o; if (-not (Test-Path -LiteralPath $p))``
+    was reported (the ``-LiteralPath`` belongs to ``Test-Path``), and a
+    second ``Split-Path`` on the same line was swallowed by the first
+    match. Both are fixed by the bounded range.
+
+    Multi-line statements joined by backtick-newline are joined before
+    scanning (one logical line, first physical line reported). Backtick
+    continuations are detected via the same heuristic used by PSA3002
+    (line ending in a single backtick).
 
     Suggested fix
     -------------
@@ -2818,16 +2903,21 @@ def check_split_path_literalpath_parent(clean):
         i += 1
 
     # Pattern that matches a Split-Path invocation in command position.
-    # Capture the rest of the line so we can look for both switches.
+    # The argument range is NOT captured by the regex (4.3.3): it is
+    # delimited by _command_argument_extent() so that a later command on
+    # the same physical line (after ';', '|', '&' or a closing bracket)
+    # and nested commands inside '(...)' / '{...}' do not contribute
+    # their switches — and so that a second Split-Path on the same line
+    # is still found by finditer().
     sp_pat = re.compile(
-        r'(?:(?<=^)|(?<=[\s;|&({=`]))\bSplit-Path\b(?P<args>[^\r\n]*)',
+        r'(?:(?<=^)|(?<=[\s;|&({=`]))\bSplit-Path\b',
         re.IGNORECASE | re.MULTILINE)
     lit_pat = re.compile(r'(?<![\w-])-LiteralPath\b', re.IGNORECASE)
     par_pat = re.compile(r'(?<![\w-])-Parent\b', re.IGNORECASE)
 
     for line_no, span_text in spans:
         for m in sp_pat.finditer(span_text):
-            args = m.group('args')
+            args = _command_argument_extent(span_text, m.end())
             if lit_pat.search(args) and par_pat.search(args):
                 out.append({
                     'code': 'PSA2011',

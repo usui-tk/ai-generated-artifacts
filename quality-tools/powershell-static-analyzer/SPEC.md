@@ -875,12 +875,15 @@ function or extend ``psa2010_known_cmdlets``.
 - **Severity**: Error
 - **Default**: enabled
 - **Added in**: v3.9.0
+- **Refined in**: v4.3.3 (command boundaries: the switch search is
+  confined to the one ``Split-Path`` command's own argument range)
 
-**Detection**: The rule walks the file line by line (with backtick
-continuation joined into a single span) and looks for
-``Split-Path`` invocations that contain BOTH the ``-LiteralPath``
-switch AND the ``-Parent`` switch. Switch order does not matter:
-``Split-Path -LiteralPath $p -Parent`` and
+**Detection**: The rule walks the cleaned text (strings, comments and
+here-strings masked; §10) line by line, with backtick continuation
+joined into a single logical span, and looks for ``Split-Path``
+invocations whose **own argument range** contains BOTH the
+``-LiteralPath`` switch AND the ``-Parent`` switch. Switch order does
+not matter: ``Split-Path -LiteralPath $p -Parent`` and
 ``Split-Path -Parent -LiteralPath $p`` both fire.
 
 The pattern requires the ``Split-Path`` token to be in command
@@ -888,6 +891,52 @@ position (start of statement, after ``|``, ``;``, ``&``, ``(``,
 ``{``, ``=``, or a backtick) to avoid false positives where the
 text appears in a here-string body that the stripper conservatively
 preserved.
+
+**Argument range (v4.3.3+)**: the range starts after the
+``Split-Path`` token and is scanned once with a bracket-depth counter.
+It **ends** at the first of the following at depth 0:
+
+1. ``;`` — statement separator;
+2. ``|`` — pipeline (also ``||``): the downstream stage is another
+   command, even when it carries a script block;
+3. ``&`` — chain operator ``&&`` or background ``&``; a ``>&``
+   redirection target (``2>&1``) is argument text, not a terminator;
+4. a closing ``)``, ``]`` or ``}`` that closes an enclosure opened
+   *before* the command — the ``Split-Path`` was itself nested, as in
+   ``if (-not (Test-Path -LiteralPath (Split-Path -Parent $p)))``;
+5. the end of the logical span (CR / LF).
+
+Inside the range, every enclosure opened within the arguments —
+``(…)``, ``$(…)``, ``@(…)``, ``[…]``, ``{…}`` — is skipped whole: its
+content belongs to a nested expression, command or script block, so
+``Split-Path -Parent (Get-Item -LiteralPath $x)`` does not fire while
+the nested ``Split-Path -LiteralPath $x -Parent`` inside
+``Split-Path -Parent (…)`` does. A backtick escapes the following
+character (an escaped ``;`` is argument text). Because the scan is
+bounded, two ``Split-Path`` commands on one physical line are
+evaluated independently — before v4.3.3 the first match consumed the
+whole line and the second command was never examined, so a second
+positive on the same line was reported as one.
+
+Before v4.3.3 the range ran to the end of the physical line, so a
+``Split-Path -Parent`` followed on the same line by a different
+command carrying ``-LiteralPath`` — the ISO project's
+``$parent=Split-Path -Parent $out;if(-not(Test-Path -LiteralPath
+$parent …))`` (raw error W23-E040) — was a false positive.
+
+**Limitations after the v4.3.3 refinement** (a bracket-depth scan, not
+a PowerShell parser):
+
+- Parameter abbreviations (``-Literal``, ``-Par``), the ``-LP`` alias
+  and splatted arguments are not recognised (unchanged: never detected).
+- A module-qualified name (``Microsoft.PowerShell.Management\Split-Path``)
+  is not in command position for this rule (unchanged).
+- A ``Split-Path`` inside a double-quoted ``"$(…)"`` subexpression is
+  masked with the string and not examined (unchanged).
+- Every ``(`` ``[`` ``{`` is treated as an enclosure; keywords and
+  redirection operands are not modelled. Reported ``line``/``col`` keep
+  the v3.9.0 meaning: the first physical line of the joined span and
+  the column of the ``Split-Path`` token within that span.
 
 **Rationale**: On Windows PowerShell 5.1 ja-JP, the combination of
 ``-LiteralPath`` and ``-Parent`` triggers an

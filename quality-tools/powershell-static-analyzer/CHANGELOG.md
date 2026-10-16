@@ -13,6 +13,77 @@ This CHANGELOG covers `psa.py` only. For higher-level repository-wide
 changes (documentation policy, sister scripts, etc.), see the root
 [`README.md`](../../../README.md) of `ai-generated-artifacts`.
 
+## [4.3.3] - 2026-10-16 — `psa2011-command-boundaries`
+
+This patch release fixes a `PSA2011` (`Split-Path -LiteralPath ... -Parent`)
+false positive. It is **backward-compatible** with `4.3.2`: no rule is added
+or renamed, and the CLI, the JSON/SARIF output schemas, the configuration
+schema, the message wording and the line/col meaning are unchanged. The fix
+**removes** `PSA2011` findings whose two switches belong to different
+commands; the one case where it **adds** a finding is a second positive
+`Split-Path` on the same physical line, which `4.3.2` never examined.
+
+### Fixed - `PSA2011` command boundaries
+
+- **Motivation.** An offline handoff from the ISO project (rev546, W24,
+  raw error `W23-E040`) adjudicated a `PSA2011` error on its comparator
+  tool's line 132 as a false positive: `$parent=Split-Path -Parent $out;`
+  `if(-not(Test-Path -LiteralPath $parent -PathType Container)){...}` has a
+  `Split-Path` with `-Parent` only - the `-LiteralPath` belongs to the
+  later `Test-Path` on the same physical line. The handoff froze eight text
+  fixtures with a "desired after command-boundary fix" oracle (R01/R08 -> 0,
+  R03/R07 -> 1, four negatives -> 0) and asked for the switch search to be
+  confined to the one `Split-Path` command without crossing `;`, pipeline,
+  nested-command or script-block boundaries, keeping quotes, comments,
+  escapes and backtick continuation intact, with no new dependency.
+- **Root cause.** The matcher captured `(?P<args>[^\r\n]*)` - everything
+  from `Split-Path` to the end of the (backtick-joined) line - and searched
+  that suffix for both switches. It saw no statement, pipeline or bracket
+  boundary at all. The same greedy capture also consumed any second
+  `Split-Path` on the line, so `finditer` never visited it.
+- **Fix.** The argument range is now delimited by a one-pass bracket-depth
+  scan (`_command_argument_extent`): it ends at the first `;`, `|`
+  (incl. `||`) or `&` (`&&` / background; a `>&` redirection target is
+  argument text) at depth 0, at a closing `)` `]` `}` of an enclosure
+  opened before the command, or at the end of the span; nested `(...)`,
+  `$(...)`, `@(...)`, `[...]`, `{...}` opened inside the arguments are
+  blanked out (their switches belong to the nested command); a backtick
+  escapes the next character. Masking of strings, comments and
+  here-strings (§10) and the backtick-newline join are unchanged, so R06
+  and R07 behave as before. Single file, Python 3.8+, standard library
+  only - no parser or PowerShell dependency.
+- **Unchanged, documented (SPEC §4.9e).** Parameter abbreviations
+  (`-Literal`, `-Par`), the `-LP` alias, splatting, module-qualified
+  `...\Split-Path`, and a `Split-Path` inside a double-quoted `"$(...)"`
+  subexpression are still not detected; every `(` `[` `{` is treated as an
+  enclosure; `line`/`col` keep the v3.9.0 meaning (first physical line of
+  the joined span, column of the `Split-Path` token).
+- **Evidence.** (1) Red-first: 34 new cases (26 analyze_text + the
+  handoff's 8 fixtures byte-exact via the CLI, LF / no BOM, each file's
+  SHA-256 checked against the handoff's `CASE-ROSTER.json` pin). Against
+  `4.3.2` 13 failed - the eleven boundary negatives plus the two-on-one-line
+  positive (1 reported, 2 expected) in Section 1, and R01/R08 in Section
+  2d5 - exactly the cases the fix addresses; every pre-existing PSA2011
+  case passed. Suite 366 -> **400**. (2) The eight handoff fixtures run as
+  the handoff's own harness runs them (one child, empty config, all
+  rules): `4.3.2` reproduces the handoff's current expectation 8/8 (4
+  errors, issue set identical to its attempt-01 raw stdout); `4.3.3`
+  matches the desired oracle 8/8 (2 errors: R03 and R07 at line 1 col 1,
+  other diagnostics unchanged). The handoff's product tool text goes from
+  one `PSA2011` at line 132 col 50 to none, every other diagnostic
+  unchanged. (3) Full-rule `4.3.2` vs `4.3.3` over every `.ps1`/`.psm1`/
+  `.psd1` here (77 files, empty config; 67 canon files with the canon
+  config) and in `Deploy-Drivers-For-WindowsServer` (41 files, empty and
+  the repo's own config): this repository is byte-identical in output;
+  the satellite loses exactly five `PSA2011` errors in three research
+  tools, each a `Split-Path -Parent $x;` followed on the same minified
+  line by another command's `-LiteralPath`, and gains nothing. No
+  PowerShell runtime was executed; the ja-JP binder behaviour the rule
+  guards against is unchanged and was not re-verified.
+- **Tests / docs.** `test_psa_rules.py` Section 1 PSA2011 command-boundary
+  cases and new Section 2d5; SPEC §4.9e (*Refined in*, argument range,
+  limitations); gate-coverage row 4 (400).
+
 ## [4.3.2] - 2026-09-29 — `psa2001-declaration-boundaries`
 
 This patch release fixes three classes of `PSA2001` (undefined variable
